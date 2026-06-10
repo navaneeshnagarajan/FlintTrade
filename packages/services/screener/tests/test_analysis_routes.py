@@ -271,6 +271,28 @@ class TestOIProfileEndpoint:
         _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
         assert len(body["data"]["strikes"]) > 0
 
+    def test_oiprofile_honours_strike_count(self, client):
+        """strike_count windows the strikes ATM-centred; absent it returns all."""
+        _, full = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
+        full_n = len(full["data"]["strikes"])
+        # Only meaningful when the full chain has more strikes than the window.
+        if full_n <= 4:
+            pytest.skip("sample chain too small to window")
+
+        _, windowed = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY", "strike_count": 4})
+        data = windowed["data"]
+        assert len(data["strikes"]) == 4
+        # parallel per-strike arrays stay aligned with the windowed strikes
+        assert len(data["oi_butterfly"]) == 4
+        assert len(data["oi_change"]) == 4
+        # the kept strikes are the 4 nearest the ATM, returned in strike order
+        atm = data["atm_strike"]
+        kept = [s["strike"] for s in data["strikes"]]
+        assert kept == sorted(kept)
+        all_strikes = [s["strike"] for s in full["data"]["strikes"]]
+        nearest4 = sorted(sorted(all_strikes, key=lambda s: abs(s - atm))[:4])
+        assert kept == nearest4
+
 
 # ---------------------------------------------------------------------------
 # Max Pain endpoint

@@ -110,8 +110,11 @@ export const gatewayApi = {
       client_id: clientId,
     }),
 
-  verifyOtp: (accountId: string, otp: string) =>
+  verifyOtp: (broker: string, accountId: string, otp: string) =>
     post<{ account: BrokerAccount }>("/auth/otp/verify", {
+      // The route requires broker (400s without it) — thread it from the same
+      // broker passed to requestOtp.
+      broker,
       account_id: accountId,
       otp,
     }),

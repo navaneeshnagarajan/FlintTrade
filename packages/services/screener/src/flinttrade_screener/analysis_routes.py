@@ -652,6 +652,7 @@ def oi_profile_endpoint() -> Any:
         symbol (str): Underlying symbol.
         exchange (str): Exchange code.
         expiry (str): Expiry label.
+        strike_count (int): Max strikes to return, ATM-centred (default 0 = all).
         interval (str): Futures candle interval.
 
     Returns:
@@ -661,6 +662,7 @@ def oi_profile_endpoint() -> Any:
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
     expiry = _body_expiry(body, "26MAR26")
+    strike_count = int(body.get("strike_count", 0))
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
     futures_candles: list[dict[str, Any]] = []
@@ -689,22 +691,40 @@ def oi_profile_endpoint() -> Any:
     data = _dataclass_to_dict(result)
     total_ce_oi = sum(result.ce_oi)
     total_pe_oi = sum(result.pe_oi)
+    strikes = [
+        {
+            "strike": ps.strike_price,
+            "ce_oi": ps.ce_oi,
+            "pe_oi": ps.pe_oi,
+            "ce_oi_change": ps.ce_oi_change,
+            "pe_oi_change": ps.pe_oi_change,
+        }
+        for ps in result.profile_strikes
+    ]
+    # Honour the caller's strike-count window (ATM-centred), mirroring volsurface.
+    # 0 / absent keeps the full set. Every per-strike array is windowed by the
+    # SAME indices so the parallel arrays (oi_butterfly/oi_change/…) stay aligned
+    # with strikes; the chain-wide totals/PCR below are reported over the whole
+    # chain regardless of how many strikes are displayed.
+    n_strikes = len(result.profile_strikes)
+    if strike_count > 0 and n_strikes > strike_count:
+        atm = snapshot.atm_strike
+        keep = sorted(
+            sorted(range(n_strikes), key=lambda i: abs(strikes[i]["strike"] - atm))[:strike_count]
+        )
+        strikes = [strikes[i] for i in keep]
+        for key in ("ce_oi", "pe_oi", "oi_butterfly", "oi_change",
+                    "ce_oi_change", "pe_oi_change", "profile_strikes"):
+            seq = data.get(key)
+            if isinstance(seq, list) and len(seq) == n_strikes:
+                data[key] = [seq[i] for i in keep]
     data.update({
         "underlying": symbol,
         "expiry": expiry,
         "spot_price": spot,
         "atm_strike": snapshot.atm_strike,
         "max_pain_strike": OIAnalysis.max_pain(snapshot).max_pain_strike,
-        "strikes": [
-            {
-                "strike": ps.strike_price,
-                "ce_oi": ps.ce_oi,
-                "pe_oi": ps.pe_oi,
-                "ce_oi_change": ps.ce_oi_change,
-                "pe_oi_change": ps.pe_oi_change,
-            }
-            for ps in result.profile_strikes
-        ],
+        "strikes": strikes,
         "total_ce_oi": total_ce_oi,
         "total_pe_oi": total_pe_oi,
         "pcr": (total_pe_oi / total_ce_oi) if total_ce_oi else 0.0,
