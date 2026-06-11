@@ -437,6 +437,24 @@ export const optimisePortfolio = (
     ...(config ? { config } : {}),
   });
 
+/**
+ * Compute the efficient frontier for a basket's daily-return series.
+ *
+ * Returns ``n_points`` portfolios ordered low → high expected return, each a
+ * full {@link PortfolioResult}. Same bare ``/v1/portfolio`` family and
+ * equal-length ``returns`` contract as {@link optimisePortfolio}.
+ */
+export const getPortfolioFrontier = (
+  returns: Record<string, number[]>,
+  nPoints?: number,
+  config?: PortfolioOptimiseConfig,
+) =>
+  postV1<PortfolioResult[]>("portfolio/frontier", {
+    returns,
+    ...(nPoints !== undefined ? { n_points: nPoints } : {}),
+    ...(config ? { config } : {}),
+  });
+
 export const getEtfScreener = () =>
   get<EtfScreenerResponse>("etf/screener");
 

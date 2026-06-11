@@ -8,16 +8,22 @@
  * it suggests target weights, it does not place any order.
  */
 
-import { useState, memo } from "react";
+import { useState, useMemo, memo } from "react";
 import { PieChart, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { FlintScatterChart, type FlintScatterPoint } from "@flinttrade/design-system";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
-import { optimisePortfolio, type OptimisationMethod, type PortfolioResult } from "@/services/ftApi";
-import { SAMPLE_BASKET, SAMPLE_RESULT } from "./sampleData";
+import {
+  getPortfolioFrontier,
+  optimisePortfolio,
+  type OptimisationMethod,
+  type PortfolioResult,
+} from "@/services/ftApi";
+import { SAMPLE_BASKET, SAMPLE_FRONTIER, SAMPLE_RESULT } from "./sampleData";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -40,8 +46,8 @@ const METHODS: { value: OptimisationMethod; label: string }[] = [
 // Data
 // ---------------------------------------------------------------------------
 
-/** Fetch the basket's daily history, align returns, and optimise. */
-async function optimiseBasket(method: OptimisationMethod): Promise<PortfolioResult> {
+/** Fetch the basket's daily history and build length-aligned return series. */
+async function fetchBasketReturns(): Promise<Record<string, number[]>> {
   const today = new Date();
   const end = today.toISOString().slice(0, 10);
   const start = new Date(today.getTime() - 400 * 24 * 60 * 60 * 1000)
@@ -73,7 +79,7 @@ async function optimiseBasket(method: OptimisationMethod): Promise<PortfolioResu
     const window = closes.slice(closes.length - minLen);
     returns[sym] = window.slice(1).map((c, i) => (c - window[i]) / window[i]);
   }
-  return optimisePortfolio(returns, { method });
+  return returns;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,17 +94,67 @@ function PortfolioOptimiserWidget() {
   const isConnected = useBrokerConnected();
   const [method, setMethod] = useState<OptimisationMethod>("markowitz");
 
+  // Basket returns are fetched ONCE and shared by the optimise + frontier
+  // queries (the frontier is method-independent — the chosen portfolio moves,
+  // the curve does not).
+  const returnsQuery = useQuery({
+    queryKey: ["portfolioBasketReturns"],
+    queryFn: fetchBasketReturns,
+    enabled: isConnected,
+  });
+  const returns = returnsQuery.data;
+
   const query = useQuery({
     queryKey: ["portfolioOptimise", method],
-    queryFn: () => optimiseBasket(method),
-    enabled: isConnected,
+    queryFn: () => optimisePortfolio(returns as Record<string, number[]>, { method }),
+    enabled: isConnected && !!returns,
+  });
+  const frontierQuery = useQuery({
+    queryKey: ["portfolioFrontier"],
+    queryFn: () => getPortfolioFrontier(returns as Record<string, number[]>, 25),
+    enabled: isConnected && !!returns,
   });
 
   const isLive = isConnected && !!query.data;
   const result: PortfolioResult = isLive && query.data ? query.data : SAMPLE_RESULT;
+  const frontier: PortfolioResult[] =
+    isLive && frontierQuery.data?.length ? frontierQuery.data : SAMPLE_FRONTIER;
 
   const weightRows = Object.entries(result.weights).sort((a, b) => b[1] - a[1]);
   const maxWeight = Math.max(...weightRows.map(([, w]) => w), 0.0001);
+
+  const frontierChart = useMemo(() => {
+    const points: FlintScatterPoint[] = frontier.map((p, i) => ({
+      id: `frontier-${i}`,
+      label: `vol ${(p.expected_volatility * 100).toFixed(1)}% → ret ${(p.expected_return * 100).toFixed(1)}%`,
+      x: p.expected_volatility * 100,
+      y: p.expected_return * 100,
+      radius: 2.5,
+      color: "rgba(99,102,241,0.55)",
+    }));
+    points.push({
+      id: "selected",
+      label: `Selected: vol ${(result.expected_volatility * 100).toFixed(1)}% → ret ${(result.expected_return * 100).toFixed(1)}%`,
+      x: result.expected_volatility * 100,
+      y: result.expected_return * 100,
+      radius: 5,
+      color: "#22c55e",
+      strokeColor: "#16a34a",
+    });
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const xMin = Math.min(...xs);
+    const xMax = Math.max(...xs);
+    const yMin = Math.min(...ys);
+    const yMax = Math.max(...ys);
+    const xPad = Math.max((xMax - xMin) * 0.1, 0.5);
+    const yPad = Math.max((yMax - yMin) * 0.1, 0.5);
+    return {
+      points,
+      xDomain: [xMin - xPad, xMax + xPad] as const,
+      yDomain: [yMin - yPad, yMax + yPad] as const,
+    };
+  }, [frontier, result]);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
@@ -126,7 +182,9 @@ function PortfolioOptimiserWidget() {
             Sample data
           </span>
         )}
-        {query.isFetching && <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Optimising" />}
+        {(returnsQuery.isFetching || query.isFetching || frontierQuery.isFetching) && (
+          <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Optimising" />
+        )}
         <div className="flex-1" />
         <Select value={method} onValueChange={(v) => setMethod(v as OptimisationMethod)}>
           <SelectTrigger className="h-7 w-32 text-xs bg-surface-hover border-border-default text-text-primary" aria-label="Optimisation method">
@@ -153,6 +211,26 @@ function PortfolioOptimiserWidget() {
             <div className={`text-sm font-mono font-semibold tabular-nums ${m.cls}`}>{m.value}</div>
           </div>
         ))}
+      </div>
+
+      {/* Efficient frontier */}
+      <div className="flex-none px-3 pt-2">
+        <div className="text-xxs uppercase tracking-wide text-text-muted mb-1">
+          Efficient frontier
+          <span className="normal-case tracking-normal"> · green dot = selected portfolio</span>
+        </div>
+        <FlintScatterChart
+          ariaLabel="Efficient frontier: expected volatility versus expected return"
+          points={frontierChart.points}
+          xDomain={frontierChart.xDomain}
+          yDomain={frontierChart.yDomain}
+          xFormatter={(v) => `${v.toFixed(0)}%`}
+          yFormatter={(v) => `${v.toFixed(0)}%`}
+          xAxisLabel="Volatility"
+          yAxisLabel="Return"
+          width={520}
+          height={170}
+        />
       </div>
 
       {/* Weights */}

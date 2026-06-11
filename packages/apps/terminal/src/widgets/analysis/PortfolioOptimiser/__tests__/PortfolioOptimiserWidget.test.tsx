@@ -15,11 +15,13 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 
 const mockGetHistory = vi.fn();
 const mockOptimise = vi.fn();
+const mockFrontier = vi.fn();
 vi.mock("@/services/api", () => ({
   getHistory: (...a: unknown[]) => mockGetHistory(...a),
 }));
 vi.mock("@/services/ftApi", () => ({
   optimisePortfolio: (...a: unknown[]) => mockOptimise(...a),
+  getPortfolioFrontier: (...a: unknown[]) => mockFrontier(...a),
 }));
 
 import PortfolioOptimiserWidget from "../PortfolioOptimiserWidget";
@@ -34,10 +36,20 @@ function wrapper() {
 const bars = (base: number) =>
   Array.from({ length: 120 }, (_, i) => ({ close: base + i, high: 0, low: 0, open: 0, volume: 0, timestamp: "" }));
 
+const FRONTIER_ROWS = Array.from({ length: 5 }, (_, i) => ({
+  weights: {},
+  expected_return: 0.08 + i * 0.03,
+  expected_volatility: 0.12 + i * 0.04,
+  sharpe_ratio: 0.3 + i * 0.05,
+  diversification_ratio: 1.3,
+}));
+
 beforeEach(() => {
   state.connected = false;
   mockGetHistory.mockReset();
   mockOptimise.mockReset();
+  mockFrontier.mockReset();
+  mockFrontier.mockResolvedValue(FRONTIER_ROWS);
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -57,6 +69,11 @@ describe("PortfolioOptimiserWidget", () => {
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     expect(mockGetHistory).not.toHaveBeenCalled();
     expect(mockOptimise).not.toHaveBeenCalled();
+    expect(mockFrontier).not.toHaveBeenCalled();
+    // the frontier chart renders with the sample curve
+    expect(
+      screen.getByRole("img", { name: /efficient frontier/i }),
+    ).toBeInTheDocument();
   });
 
   it("optimises the basket from real history when connected", async () => {
@@ -79,6 +96,13 @@ describe("PortfolioOptimiserWidget", () => {
     const lengths = Object.values(returnsArg).map((r) => r.length);
     expect(new Set(lengths).size).toBe(1); // all aligned to one length
     expect(lengths[0]).toBe(119);
+
+    // the frontier is requested with the SAME aligned return series
+    await waitFor(() => expect(mockFrontier).toHaveBeenCalledTimes(1));
+    expect(mockFrontier.mock.calls[0][0]).toEqual(returnsArg);
+    expect(
+      screen.getByRole("img", { name: /efficient frontier/i }),
+    ).toBeInTheDocument();
   });
 
   it("falls back to sample when too few symbols return history", async () => {
