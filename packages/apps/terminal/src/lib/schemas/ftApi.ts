@@ -204,12 +204,18 @@ export const BreadthDataSchema = z
     advances: z.number(),
     declines: z.number(),
     unchanged: z.number(),
-    new_highs: z.number().optional().default(0),
-    new_lows: z.number().optional().default(0),
-    ad_ratio: z.number().optional().default(1),
-    ad_line: z.number().optional().default(0),
-    mcclellan_oscillator: z.number().optional().default(0),
-    breadth_thrust: z.number().optional().default(0),
+    // The LIVE backend reports the derived multi-day / 52-week indicators as
+    // explicit NULLs (a single live snapshot cannot compute them — the
+    // honesty fix in breadth_routes). The previous `.optional().default(0)`
+    // rejected those nulls, so the real live payload failed parsing and the
+    // widget silently kept stale sample data with the Sample badge stuck on.
+    // Nullable now; consumers default with `?? 0`.
+    new_highs: z.number().nullable().optional(),
+    new_lows: z.number().nullable().optional(),
+    ad_ratio: z.number().nullable().optional(),
+    ad_line: z.number().nullable().optional(),
+    mcclellan_oscillator: z.number().nullable().optional(),
+    breadth_thrust: z.number().nullable().optional(),
   })
   .passthrough();
 
@@ -219,6 +225,15 @@ export const BreadthResponseSchema = z.object({
   data: BreadthDataSchema,
 });
 export type BreadthData = z.infer<typeof BreadthDataSchema>;
+
+/** GET /ft-api/v1/breadth/history — sample series, or REAL accumulated live
+ * points once the backend has computed breadth while a broker was connected. */
+export const BreadthHistoryResponseSchema = z.object({
+  status: z.string(),
+  is_sample_data: z.boolean().optional(),
+  count: z.number().optional(),
+  data: z.array(BreadthDataSchema),
+});
 
 // ---------------------------------------------------------------------------
 // GET /ft-api/v1/admin/system

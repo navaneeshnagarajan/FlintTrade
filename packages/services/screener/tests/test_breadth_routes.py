@@ -14,6 +14,14 @@ import flinttrade_screener.breadth_routes as mod
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _clear_live_history():
+    """The live-history accumulator is module state — isolate every test."""
+    mod._LIVE_HISTORY.clear()
+    yield
+    mod._LIVE_HISTORY.clear()
+
+
 @pytest.fixture()
 def app():
     flask_app = Flask(__name__)
@@ -134,6 +142,41 @@ def test_breadth_history_default_days(client):
     """200 with default days parameter."""
     resp = client.get("/v1/breadth/history")
     assert resp.status_code == 200
+
+
+def test_breadth_history_sample_when_no_live_points(client):
+    """Without any live computation, history stays honestly sample-flagged."""
+    resp = client.get("/v1/breadth/history?days=10")
+    assert resp.get_json()["is_sample_data"] is True
+
+
+def test_breadth_history_serves_accumulated_live_points(app):
+    """Live /breadth/current computations accumulate and /breadth/history then
+    serves the REAL points (is_sample_data False) — never padded with synthetic
+    history; the series spans only the days actually computed."""
+    app.config["REGISTRY"] = _ConnectedRegistry()
+    app.config["OPENALGO_CLIENT"] = _FakeBridgeClient()
+    with app.test_client() as c:
+        # two polls on the same day — the day's latest computation wins
+        assert c.get("/v1/breadth/current").get_json()["is_sample_data"] is False
+        assert c.get("/v1/breadth/current").get_json()["is_sample_data"] is False
+
+        resp = c.get("/v1/breadth/history?days=30")
+    body = resp.get_json()
+    assert body["is_sample_data"] is False
+    assert body["count"] == 1  # one day accumulated, not a padded series
+    point = body["data"][0]
+    assert point["advances"] == 30
+    assert point["declines"] == 18
+    # derived multi-day indicators stay null on accumulated live points too
+    assert point["ad_line"] is None
+
+
+def test_breadth_history_live_accumulator_is_bounded(client):
+    """The accumulator evicts the oldest day beyond its one-year bound."""
+    for i in range(mod._LIVE_HISTORY_MAX_DAYS + 5):
+        mod._record_live_breadth({"date": f"2026-{(i // 28) % 12 + 1:02d}-{i % 28 + 1:02d}-{i:04d}", "advances": i})
+    assert len(mod._LIVE_HISTORY) == mod._LIVE_HISTORY_MAX_DAYS
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ available, so the terminal works in Explore mode without a broker connection.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date
 from typing import Any
 
@@ -31,6 +32,24 @@ breadth_bp = Blueprint("breadth", __name__, url_prefix="/v1")
 # For production multi-process deployments this would be replaced by a
 # process-local store or a persistent cache (DuckDB/Redis).
 _calculator: MarketBreadthCalculator | None = None
+
+# Live-history accumulation: every live breadth computation from
+# /breadth/current lands here keyed by ISO date (the day's latest computation
+# wins), so /breadth/history can serve REAL accumulated points instead of the
+# sample series once a broker has been connected. Process-local, like the
+# smart-route job store (single-process Waitress is the supported deployment);
+# bounded to a year of days.
+_LIVE_HISTORY: dict[str, dict[str, Any]] = {}
+_LIVE_HISTORY_LOCK = threading.Lock()
+_LIVE_HISTORY_MAX_DAYS = 365
+
+
+def _record_live_breadth(point: dict[str, Any]) -> None:
+    """Record a live breadth computation into the in-process history."""
+    with _LIVE_HISTORY_LOCK:
+        _LIVE_HISTORY[str(point.get("date"))] = point
+        while len(_LIVE_HISTORY) > _LIVE_HISTORY_MAX_DAYS:
+            del _LIVE_HISTORY[min(_LIVE_HISTORY)]
 
 
 def _get_calculator() -> MarketBreadthCalculator:
@@ -169,21 +188,25 @@ def breadth_current() -> Any:
             # (and 52w data) the live snapshot does not have — report them as
             # null rather than as live 0s (a single-day advances-declines is
             # NOT the cumulative ad_line the schema documents).
+            live_point = {
+                "date": date.today().isoformat(),
+                "advances": advances,
+                "declines": declines,
+                "unchanged": raw["unchanged"],
+                "ad_ratio": round(float(advances) / float(declines), 4) if declines > 0 else 1.0,
+                "new_highs": None,
+                "new_lows": None,
+                "ad_line": None,
+                "mcclellan_oscillator": None,
+                "breadth_thrust": None,
+            }
+            # Accumulate so /breadth/history can serve REAL points (the day's
+            # latest computation wins).
+            _record_live_breadth(live_point)
             return jsonify({
                 "status": "success",
                 "is_sample_data": False,
-                "data": {
-                    "date": date.today().isoformat(),
-                    "advances": advances,
-                    "declines": declines,
-                    "unchanged": raw["unchanged"],
-                    "ad_ratio": round(float(advances) / float(declines), 4) if declines > 0 else 1.0,
-                    "new_highs": None,
-                    "new_lows": None,
-                    "ad_line": None,
-                    "mcclellan_oscillator": None,
-                    "breadth_thrust": None,
-                },
+                "data": live_point,
             })
 
     history = _get_calculator().get_history(days=1)
@@ -218,13 +241,28 @@ def breadth_history() -> Any:
     """
     days = max(1, min(365, int(request.args.get("days", 30))))
 
+    # Serve REAL accumulated points when live breadth has been computed (every
+    # /breadth/current poll while connected records its result). The series
+    # only spans days the backend was actually polling — honest, never padded
+    # with synthetic history.
+    with _LIVE_HISTORY_LOCK:
+        live_points = [_LIVE_HISTORY[k] for k in sorted(_LIVE_HISTORY)[-days:]]
+    if live_points:
+        return jsonify({
+            "status": "success",
+            "days": days,
+            "is_sample_data": False,
+            "count": len(live_points),
+            "data": live_points,
+        })
+
     calc = _get_calculator()
     history = calc.get_history(days=days)
 
     return jsonify({
         "status": "success",
         "days": days,
-        "is_sample_data": True,  # Will be False once live feed is wired
+        "is_sample_data": True,  # no live points accumulated yet
         "count": len(history),
         "data": [_breadth_to_dict(d) for d in history],
     })

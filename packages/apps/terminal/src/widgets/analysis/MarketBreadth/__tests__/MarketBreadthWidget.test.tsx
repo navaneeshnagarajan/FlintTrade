@@ -49,23 +49,69 @@ describe("MarketBreadthWidget", () => {
   });
 
   it("hides the sample badge once the backend returns real (non-sample) data", async () => {
+    // The EXACT live payload breadth_routes emits: the derived multi-day /
+    // 52-week indicators are explicit NULLs (a single live snapshot cannot
+    // compute them). The schema previously rejected these nulls, so the real
+    // live payload failed parsing and the badge stuck on Sample — this test
+    // used to feed a null-free payload that masked the bug.
     const realResponse = {
       status: "success",
       is_sample_data: false,
       data: {
         date: "2026-06-05",
-        advances: 1200, declines: 800, unchanged: 50,
-        new_highs: 40, new_lows: 12,
-        mcclellan_oscillator: 35, breadth_thrust: 0.62,
+        advances: 30, declines: 18, unchanged: 2,
+        ad_ratio: 1.6667,
+        new_highs: null, new_lows: null,
+        ad_line: null, mcclellan_oscillator: null, breadth_thrust: null,
       },
     };
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(realResponse),
-    });
+    global.fetch = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            String(url).includes("/history")
+              ? { status: "success", is_sample_data: true, count: 0, data: [] }
+              : realResponse,
+          ),
+      }),
+    );
     mockUseBrokerConnected.mockReturnValue(true);
     render(<MarketBreadthWidget />);
     await vi.waitFor(() => expect(screen.queryByText("Sample")).toBeNull());
+    // live advances rendered (parse really succeeded, not stale sample data)
+    expect(screen.getByText("30")).toBeTruthy();
+    // history is still sample → the series is captioned sample, with the
+    // accumulation note (live current + sample history disclosed)
+    expect(screen.getByText(/A\/D Line \(sample series\)/)).toBeTruthy();
+    expect(screen.getByText(/live history accumulates while connected/)).toBeTruthy();
+  });
+
+  it("charts REAL accumulated history when /breadth/history reports live points", async () => {
+    const livePoint = (d: string, adv: number) => ({
+      date: d, advances: adv, declines: 50 - adv - 2, unchanged: 2,
+      ad_ratio: 1.0, new_highs: null, new_lows: null,
+      ad_line: null, mcclellan_oscillator: null, breadth_thrust: null,
+    });
+    global.fetch = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            String(url).includes("/history")
+              ? {
+                  status: "success", is_sample_data: false, count: 3,
+                  data: [livePoint("2026-06-09", 28), livePoint("2026-06-10", 31), livePoint("2026-06-11", 26)],
+                }
+              : { status: "success", is_sample_data: false, data: livePoint("2026-06-12", 30) },
+          ),
+      }),
+    );
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<MarketBreadthWidget />);
+    await vi.waitFor(() =>
+      expect(screen.getByText(/A\/D Line \(accumulated live days\)/)).toBeTruthy(),
+    );
   });
 
   it("keeps the sample badge when the backend reports its own sample fallback", async () => {

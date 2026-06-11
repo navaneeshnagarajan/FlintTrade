@@ -15,7 +15,7 @@ import { BarChart4, RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-re
 import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { BreadthResponseSchema } from "@/lib/schemas/ftApi";
+import { BreadthHistoryResponseSchema, BreadthResponseSchema } from "@/lib/schemas/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,6 +161,38 @@ function MarketBreadthWidget() {
   const [lastUpdated, setLastUpdated] = useState<string>("--");
   // The backend tells us whether the snapshot is real or its own sample fallback.
   const [isSample, setIsSample] = useState(true);
+  // REAL accumulated daily breadth from /breadth/history — null until the
+  // backend has at least two live computations to chart. NEVER a fake series.
+  const [liveSeries, setLiveSeries] = useState<BreadthPoint[] | null>(null);
+
+  const fetchHistory = useMemo(
+    () => async () => {
+      try {
+        const res = await fetch("/ft-api/v1/breadth/history?days=30");
+        if (!res.ok) return;
+        const parsed = BreadthHistoryResponseSchema.safeParse(await res.json());
+        if (!parsed.success) {
+          console.error("[MarketBreadthWidget] /breadth/history shape mismatch:", parsed.error.issues);
+          return;
+        }
+        // Adopt the series ONLY when the backend says it is real accumulated
+        // data; a sample history is never charted next to a live current value.
+        if (parsed.data.is_sample_data === false && parsed.data.data.length >= 2) {
+          setLiveSeries(
+            parsed.data.data.map((p) => ({
+              time: p.date,
+              advances: p.advances,
+              declines: p.declines,
+              unchanged: p.unchanged,
+            })),
+          );
+        }
+      } catch {
+        // keep whatever series state we had
+      }
+    },
+    [],
+  );
 
   const fetchLive = useMemo(
     () => async () => {
@@ -204,21 +236,29 @@ function MarketBreadthWidget() {
   useEffect(() => {
     if (!isConnected) {
       setData(SAMPLE_DATA);
+      setLiveSeries(null);
       return;
     }
     void fetchLive();
-    const id = setInterval(() => void fetchLive(), 60_000);
+    void fetchHistory();
+    const id = setInterval(() => {
+      void fetchLive();
+      void fetchHistory();
+    }, 60_000);
     return () => clearInterval(id);
-  }, [isConnected, fetchLive]);
+  }, [isConnected, fetchLive, fetchHistory]);
 
   const ratio = adRatio(data.totalAdvances, data.totalDeclines);
   const ratioColour =
     ratio >= 2 ? "text-profit" : ratio >= 1 ? "text-warning" : "text-loss";
   const RatioIcon = ratio >= 1.5 ? TrendingUp : ratio >= 0.8 ? Minus : TrendingDown;
 
-  const advanceSeries = data.series.map((p) => p.advances);
-  const declineSeries = data.series.map((p) => p.declines);
-  const netSeries = data.series.map((p) => p.advances - p.declines);
+  // Chart REAL accumulated daily breadth when available; else the sample
+  // intraday series (explicitly captioned sample below).
+  const series = liveSeries ?? data.series;
+  const advanceSeries = series.map((p) => p.advances);
+  const declineSeries = series.map((p) => p.declines);
+  const netSeries = series.map((p) => p.advances - p.declines);
 
   const mccColour =
     data.mcclellanOscillator > 0 ? "text-profit" : "text-loss";
@@ -278,7 +318,18 @@ function MarketBreadthWidget() {
         {/* Advance/Decline sparklines */}
         <div className="bg-surface-card border border-border-default rounded p-2">
           <div className="text-xxs text-text-muted uppercase tracking-wide mb-2">
-            A/D Line (intraday)
+            {liveSeries ? (
+              <>A/D Line (accumulated live days)</>
+            ) : (
+              <>
+                A/D Line (sample series)
+                {isConnected && !isSample && (
+                  <span className="normal-case tracking-normal text-warning">
+                    {" "}— live history accumulates while connected
+                  </span>
+                )}
+              </>
+            )}
           </div>
           <div className="flex gap-3 items-end" aria-label="Advance/Decline line chart">
             <div className="flex-1 space-y-1">
