@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -106,22 +107,115 @@ def _sample_data_fetcher(
     return _make_sample_ohlcv(symbol, n=260, base_price=base)
 
 
+def _extract_candle_list(response: Any) -> list[Any]:
+    """Pull the raw candle list out of a broker history response.
+
+    Brokers wrap candles differently: a bare list, ``{"candles": [...]}``,
+    ``{"data": [...]}``, or ``{"data": {"candles": [...]}}``.
+
+    Args:
+        response: Whatever the registry's ``get_history`` returned.
+
+    Returns:
+        The innermost candle list, or ``[]`` when no recognisable list exists.
+    """
+    if isinstance(response, list):
+        return response
+    if isinstance(response, dict):
+        for key in ("candles", "data"):
+            inner = response.get(key)
+            if isinstance(inner, list):
+                return inner
+            if isinstance(inner, dict) and isinstance(inner.get("candles"), list):
+                return inner["candles"]
+    return []
+
+
+def _normalise_candles(response: Any) -> list[dict[str, Any]]:
+    """Normalise a broker history response to the scanner's bar shape.
+
+    The scanner consumes ``{"open", "high", "low", "close", "volume"}`` dicts
+    (oldest first). Brokers return either dict bars (possibly with extra keys
+    like ``timestamp``) or positional arrays ``[ts, o, h, l, c, v]`` /
+    ``[o, h, l, c, v]``. Malformed entries are skipped rather than failing the
+    whole symbol.
+
+    Args:
+        response: Whatever the registry's ``get_history`` returned.
+
+    Returns:
+        List of scanner-shaped OHLCV bar dicts (possibly empty).
+    """
+    bars: list[dict[str, Any]] = []
+    for raw in _extract_candle_list(response):
+        if isinstance(raw, dict):
+            try:
+                bars.append({
+                    "open": float(raw["open"]),
+                    "high": float(raw["high"]),
+                    "low": float(raw["low"]),
+                    "close": float(raw["close"]),
+                    "volume": int(float(raw.get("volume", 0))),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        elif isinstance(raw, (list, tuple)) and len(raw) >= 5:
+            # [timestamp, open, high, low, close, volume] or [o, h, l, c, v]
+            vals = list(raw) if len(raw) == 5 else list(raw[1:6])
+            try:
+                bars.append({
+                    "open": float(vals[0]),
+                    "high": float(vals[1]),
+                    "low": float(vals[2]),
+                    "close": float(vals[3]),
+                    "volume": int(float(vals[4])),
+                })
+            except (TypeError, ValueError):
+                continue
+    return bars
+
+
 def _registry_data_fetcher(
     registry: Any,
 ) -> Any:
     """Return a data fetcher that pulls live OHLCV from the broker registry.
+
+    The registry's read contract is ``get_history(account_id, params)`` (the
+    params dict carries symbol/exchange/interval and ISO start/end dates —
+    see ``flinttrade_gateway.registry.BrokerRegistry.get_history`` and the
+    adapter protocol it forwards to). A keyword call like
+    ``get_history(symbol=..., days=...)`` raises TypeError, which the scanner
+    swallows per symbol — so the live path silently matched nothing.
+
+    The primary account id is resolved once, at build time: when no usable
+    account exists this raises so the route falls back to sample data instead
+    of running a scan that errors on every symbol.
 
     Args:
         registry: BrokerRegistry instance from the Flask app config.
 
     Returns:
         A callable with signature (symbol, exchange, timeframe) → list[dict].
+
+    Raises:
+        ValueError: If the registry has no usable account id.
     """
+    account_id = registry.get_primary_account_id()
+    if not account_id:
+        raise ValueError("Broker registry is connected but has no usable account id")
+
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=365)
+
     def _fetch(symbol: str, exchange: str, timeframe: str) -> list[dict[str, Any]]:
-        hist = registry.get_history(
-            symbol=symbol, exchange=exchange, interval=timeframe, days=365
-        )
-        return hist.get("candles", [])
+        hist = registry.get_history(account_id, {
+            "symbol": symbol,
+            "exchange": exchange,
+            "interval": timeframe,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        })
+        return _normalise_candles(hist)
     return _fetch
 
 

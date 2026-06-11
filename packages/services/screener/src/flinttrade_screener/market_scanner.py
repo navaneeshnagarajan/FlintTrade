@@ -617,7 +617,10 @@ class MarketScanner:
             try:
                 ohlcv = data_fetcher(symbol, self._exchange, config.timeframe)
             except Exception as exc:
-                logger.debug("data_fetcher error for %s: %s", symbol, exc)
+                # warning, not debug: a debug-level swallow here hid a fetcher
+                # whose signature was wrong for EVERY symbol — the live scanner
+                # silently matched nothing with no operator-visible signal.
+                logger.warning("data_fetcher error for %s: %s", symbol, exc)
                 continue
 
             if not ohlcv:

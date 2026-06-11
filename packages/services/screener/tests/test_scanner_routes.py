@@ -197,6 +197,145 @@ class TestScannerRun:
 
 
 # ---------------------------------------------------------------------------
+# POST /ft-api/v1/scanner/run — live registry path
+# ---------------------------------------------------------------------------
+
+
+def _rising_dict_bars(n: int = 60) -> list[dict]:
+    """Steadily rising daily bars → RSI ≈ 100, so 'rsi above 50' always matches."""
+    bars = []
+    for i in range(n):
+        close = 100.0 + i
+        bars.append({
+            "open": close - 1.0,
+            "high": close + 1.0,
+            "low": close - 2.0,
+            "close": close,
+            "volume": 1_000 + i,
+            "timestamp": f"2026-01-{(i % 28) + 1:02d}",  # extra key must be tolerated
+        })
+    return bars
+
+
+def _rising_array_bars(n: int = 60) -> list[list]:
+    """The same rising series in [ts, o, h, l, c, v] positional form."""
+    return [
+        [1_700_000_000 + i * 86_400, 99.0 + i, 101.0 + i, 98.0 + i, 100.0 + i, 1_000 + i]
+        for i in range(n)
+    ]
+
+
+class _FakeRegistry:
+    """Connected BrokerRegistry double that records get_history calls."""
+
+    def __init__(self, candles, account_id: str | None = "acc-primary") -> None:
+        self._candles = candles
+        self._account_id = account_id
+        self.calls: list[tuple[str, dict]] = []
+
+    def is_connected(self) -> bool:
+        return True
+
+    def get_primary_account_id(self) -> str | None:
+        return self._account_id
+
+    def get_history(self, account_id: str, params: dict) -> dict:
+        self.calls.append((account_id, params))
+        return {"candles": self._candles}
+
+
+_LIVE_CONFIG = {
+    "name": "live_path_scan",
+    "conditions": [{"indicator": "rsi", "operator": "above", "value": 50}],
+    "universe": "custom",
+    "custom_symbols": ["RELIANCE", "TCS"],
+    "timeframe": "1d",
+}
+
+
+class TestScannerRunLiveRegistry:
+    """The live (broker-connected) path through the REAL scanner.
+
+    Regression for the registry-call signature bug: _registry_data_fetcher used
+    to call registry.get_history(symbol=..., days=...) but the registry's
+    contract is get_history(account_id, params) — the TypeError was swallowed
+    per symbol, so a connected scanner silently returned zero candles for every
+    symbol and could never match anything.
+    """
+
+    def test_live_scan_matches_with_dict_candles(self, app, client) -> None:
+        registry = _FakeRegistry(_rising_dict_bars())
+        app.config["REGISTRY"] = registry
+
+        resp = client.post("/v1/scanner/run", json={"config": _LIVE_CONFIG})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["is_sample_data"] is False
+        # rising closes → RSI ≈ 100 → both symbols match with non-empty results
+        assert data["matched_count"] == 2
+        assert {r["symbol"] for r in data["results"]} == {"RELIANCE", "TCS"}
+        assert all(r["ltp"] > 0 for r in data["results"])
+
+    def test_live_scan_calls_registry_with_correct_signature(self, app, client) -> None:
+        registry = _FakeRegistry(_rising_dict_bars())
+        app.config["REGISTRY"] = registry
+
+        client.post("/v1/scanner/run", json={"config": _LIVE_CONFIG})
+
+        # one positional (account_id, params) call per scanned symbol
+        assert len(registry.calls) == 2
+        for account_id, params in registry.calls:
+            assert account_id == "acc-primary"
+            assert set(params) == {"symbol", "exchange", "interval", "start", "end"}
+            assert params["interval"] == "1d"
+            # ISO dates spanning ~a year, oldest first
+            assert params["start"] < params["end"]
+        assert {params["symbol"] for _, params in registry.calls} == {"RELIANCE", "TCS"}
+
+    def test_live_scan_normalises_array_candles(self, app, client) -> None:
+        registry = _FakeRegistry(_rising_array_bars())
+        app.config["REGISTRY"] = registry
+
+        resp = client.post("/v1/scanner/run", json={"config": _LIVE_CONFIG})
+
+        data = resp.get_json()
+        assert data["is_sample_data"] is False
+        assert data["matched_count"] == 2
+
+    def test_no_usable_account_falls_back_to_sample(self, app, client) -> None:
+        registry = _FakeRegistry(_rising_dict_bars(), account_id=None)
+        app.config["REGISTRY"] = registry
+
+        resp = client.post("/v1/scanner/run", json={"config": _LIVE_CONFIG})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        # connected but no account id → honest sample fallback, not a broken scan
+        assert data["is_sample_data"] is True
+        assert registry.calls == []
+
+    def test_per_symbol_history_errors_skip_symbol(self, app, client) -> None:
+        class _ErroringRegistry(_FakeRegistry):
+            def get_history(self, account_id: str, params: dict) -> dict:
+                super().get_history(account_id, params)
+                raise RuntimeError("broker hiccup")
+
+        registry = _ErroringRegistry(_rising_dict_bars())
+        app.config["REGISTRY"] = registry
+
+        resp = client.post("/v1/scanner/run", json={"config": _LIVE_CONFIG})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        # the fetcher was built (live mode) but every symbol's fetch failed →
+        # zero matches, never a 500
+        assert data["is_sample_data"] is False
+        assert data["matched_count"] == 0
+
+
+# ---------------------------------------------------------------------------
 # GET /ft-api/v1/scanner/prebuilt
 # ---------------------------------------------------------------------------
 
