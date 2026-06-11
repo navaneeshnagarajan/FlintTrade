@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ICON_MAP } from "@/chrome/WidgetPicker";
 import { widgetCatalog, widgetComponents } from "../widgetFactory";
 
 describe("widgetFactory catalogue wiring", () => {
@@ -17,11 +18,20 @@ describe("widgetFactory catalogue wiring", () => {
       return acc;
     }, {});
 
-    expect(widgetCatalog).toHaveLength(90);
+    expect(widgetCatalog).toHaveLength(91);
     expect(counts).toEqual({
-      Analysis: 42,
+      Analysis: 43,
       Trading: 23,
       Utility: 25,
     });
+  });
+
+  it("resolves every catalogue icon in the WidgetPicker ICON_MAP", () => {
+    // A name missing from ICON_MAP silently renders the generic Box icon in
+    // the picker — at one point 38 of 64 catalogue icons were missing.
+    const missing = widgetCatalog
+      .map((w) => w.icon)
+      .filter((icon) => !(icon in ICON_MAP));
+    expect(missing).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import { get, isDemoAuthSession } from "./ftApi.helpers";
+import { get, getV1, isDemoAuthSession, postV1 } from "./ftApi.helpers";
 
 export interface FiiDiiSnapshot {
   trade_date: string;
@@ -189,6 +189,57 @@ export const getSectorConstituents = (
     "screener/sector-constituents?" + params.toString(),
   );
 };
+
+// ─── Market scanner (bare /v1/scanner family) ────────────────────────────────
+
+export interface PrebuiltScanCondition {
+  label: string;
+  indicator: string;
+  operator: string;
+  value: number;
+}
+
+export interface PrebuiltScan {
+  key: string;
+  name: string;
+  universe: string;
+  timeframe: string;
+  condition_count: number;
+  conditions: PrebuiltScanCondition[];
+}
+
+export interface ScannerResultRow {
+  symbol: string;
+  exchange: string;
+  ltp: number;
+  change_pct: number;
+  matched_conditions: string[];
+  scan_time: string;
+  score: number;
+}
+
+/** Full /v1/scanner/run body — no `data` wrapper, so the flag survives unwrap. */
+export interface ScannerRunResponse {
+  status: string;
+  is_sample_data: boolean;
+  scan_name: string;
+  matched_count: number;
+  total_universe: number;
+  results: ScannerResultRow[];
+}
+
+/** List the prebuilt declarative scans (RSI oversold, volume spikes, …). */
+export const getPrebuiltScans = () =>
+  getV1<{ scans: PrebuiltScan[] }>("scanner/prebuilt");
+
+/**
+ * Run a prebuilt scan. The response carries ``is_sample_data`` itself —
+ * live OHLCV via the broker registry when connected, deterministic synthetic
+ * bars otherwise — so the caller badges from the response, not connection
+ * guesswork. Registered at the bare ``/v1`` family → {@link postV1}.
+ */
+export const runPrebuiltScan = (key: string) =>
+  postV1<ScannerRunResponse>("scanner/run", { prebuilt: key });
 
 // ─── Lot Size ────────────────────────────────────────────────────────────────
 

@@ -69,6 +69,9 @@ const lazyWidgets = {
   // Portfolio Optimiser (mean-variance weights)
   portfoliooptimiser: lazy(() => import("@/widgets/analysis/PortfolioOptimiser/PortfolioOptimiserWidget")),
 
+  // Condition Scanner (declarative prebuilt scans over /v1/scanner)
+  conditionscanner: lazy(() => import("@/widgets/analysis/ConditionScanner/ConditionScannerWidget")),
+
   // Trade Copier (Ditto route)
   tradecopier: lazy(() => import("@/widgets/trading/TradeCopier/TradeCopierWidget")),
 
@@ -200,6 +203,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis", description: "Heat map of open interest changes across strikes and expiries" },
   { id: "oisignals", name: "OI Signals", icon: "Activity", category: "Analysis", description: "Per-strike OI-action signals (long build-up / short covering / unwinding) plus unusual-OI outliers" },
   { id: "portfoliooptimiser", name: "Portfolio Optimiser", icon: "PieChart", category: "Analysis", description: "Mean-variance (Markowitz) optimal weights for a basket, with expected return / volatility / Sharpe" },
+  { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run prebuilt indicator condition scans (RSI, volume spikes, EMA crosses) across a symbol universe" },
   { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis", description: "3-D surface plot of option Greeks across strikes and days to expiry" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
   { id: "orderbookreplay", name: "Order Book Replay", icon: "BarChart3", category: "Analysis", description: "Historical replay of the order book for post-session microstructure analysis" },
