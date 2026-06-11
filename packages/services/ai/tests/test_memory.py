@@ -340,6 +340,99 @@ class TestDifferentLayers:
             assert result.items[0].layer == layer
 
 
+class _WedgedCollection:
+    """Simulates a ChromaDB 1.5.x collection whose vector index is wedged.
+
+    Real behaviour reproduced on chromadb 1.5.9: ``query`` (and any plan
+    touching embeddings) permanently raises InternalError "Error finding id",
+    while metadata reads (``count``/``get``) and ``update`` keep working.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def count(self) -> int:
+        return self._inner.count()
+
+    def query(self, **_kwargs):
+        raise RuntimeError("Error executing plan: Internal error: Error finding id")
+
+    def get(self, **kwargs):
+        kwargs.pop("limit", None)  # the real client accepts limit; inner pass-through
+        return self._inner.get(**kwargs)
+
+    def update(self, **kwargs):
+        return self._inner.update(**kwargs)
+
+
+class TestVectorIndexWedgeFallback:
+    """get_memories must survive a wedged vector index via the metadata path.
+
+    Regression for the test_all_four_layers_independent flake: chromadb 1.5.9
+    intermittently loses an add()'s embedding write (~4% under rapid collection
+    churn), after which every vector query on that collection raises forever
+    while plain get() still serves the row. get_memories must degrade to
+    metadata retrieval (similarity-neutral ranking), not return nothing.
+    """
+
+    def test_wedged_vector_index_falls_back_to_metadata(self, memory: TradedMemory) -> None:
+        # Arrange — store two memories, then wedge the collection's vector index
+        id_low = memory.add_memory("NIFTY", "low importance wedged memory", MemoryLayer.SHORT)
+        id_high = memory.add_memory("NIFTY", "high importance wedged memory", MemoryLayer.SHORT)
+        real = memory._get_collection(MemoryLayer.SHORT)
+        low_meta = real.get(ids=[id_low])["metadatas"][0]
+        high_meta = real.get(ids=[id_high])["metadatas"][0]
+        real.update(ids=[id_low], metadatas=[{**low_meta, "importance": 40.0}])
+        real.update(ids=[id_high], metadatas=[{**high_meta, "importance": 95.0}])
+        memory._collections[MemoryLayer.SHORT] = _WedgedCollection(real)
+
+        # Act
+        result = memory.get_memories("NIFTY", "wedged memory", MemoryLayer.SHORT, n=2)
+
+        # Assert — both memories still retrieved via the metadata path, and the
+        # similarity-neutral rerank puts the high-importance one first
+        assert len(result.items) == 2
+        assert result.items[0].id == id_high
+        assert {item.id for item in result.items} == {id_low, id_high}
+
+    def test_wedged_vector_index_filters_by_symbol(self, memory: TradedMemory) -> None:
+        # Arrange — two symbols in the layer, then wedge it
+        memory.add_memory("NIFTY", "NIFTY wedged-path memory", MemoryLayer.MID)
+        memory.add_memory("RELIANCE", "RELIANCE wedged-path memory", MemoryLayer.MID)
+        real = memory._get_collection(MemoryLayer.MID)
+        memory._collections[MemoryLayer.MID] = _WedgedCollection(real)
+
+        # Act
+        result = memory.get_memories("NIFTY", "wedged-path", MemoryLayer.MID, n=5)
+
+        # Assert — the metadata fallback still honours the symbol filter
+        assert len(result.items) == 1
+        assert result.items[0].symbol == "NIFTY"
+
+    def test_metadata_path_also_failing_returns_empty(self, memory: TradedMemory) -> None:
+        # Arrange — a collection where BOTH paths raise
+        class _FullyBroken:
+            @staticmethod
+            def count() -> int:
+                return 1
+
+            @staticmethod
+            def query(**_kwargs):
+                raise RuntimeError("Error executing plan: Internal error: Error finding id")
+
+            @staticmethod
+            def get(**_kwargs):
+                raise RuntimeError("Error executing plan: Internal error: Error finding id")
+
+        memory._collections[MemoryLayer.LONG] = _FullyBroken()
+
+        # Act — must not raise
+        result = memory.get_memories("NIFTY", "anything", MemoryLayer.LONG, n=3)
+
+        # Assert — degrades to empty only when even metadata is unreadable
+        assert result.items == []
+
+
 class TestUpdateOnOutcome:
     """Tests for TradedMemory.update_on_outcome."""
 

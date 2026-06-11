@@ -69,6 +69,14 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- AI memory retrieval survives a wedged ChromaDB vector index — chromadb 1.5.9's Rust
+  core can permanently lose an `add()`'s embedding write under rapid collection churn
+  (upstream chroma-core/chroma#7032: every later vector query raises "Error finding id"
+  while the row's metadata stays readable; ~4% of adds in tight loops, unrecoverable by
+  retry or a fresh handle). `get_memories` now degrades to metadata retrieval (symbol
+  filter + recency/importance ranking with neutral similarity, logged loudly) instead of
+  silently returning no memories, so the agent loop never goes blind. Root cause of the
+  intermittent `test_all_four_layers_independent` failure.
 - Home market-breadth card showed sample data even with a broker connected — the live
   branch called a registry method that does not exist. It now computes real NIFTY 50
   advance/decline from a live quote sweep (and stays honestly "sample" when the sweep

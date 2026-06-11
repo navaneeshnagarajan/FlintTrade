@@ -390,6 +390,13 @@ class TradedMemory:
         by vector similarity, then Python-side reranks using
         ``compound_score(similarity, recency_delta, importance)``.
 
+        Degraded mode: if the vector query raises (ChromaDB 1.5.x can wedge a
+        collection's vector index permanently while its metadata stays
+        readable), candidates are fetched by the symbol filter alone and
+        reranked with neutral similarity — recency and importance only. The
+        degradation is logged loudly; only if the metadata path also fails
+        does this return no memories.
+
         Args:
             symbol: Filter results to this instrument symbol.
             query: Natural-language query used for vector search.
@@ -416,21 +423,45 @@ class TradedMemory:
                 n_results=fetch_n,
                 where={"symbol": symbol},
             )
+            ids: list[str] = results.get("ids", [[]])[0]
+            documents: list[str] = results.get("documents", [[]])[0]
+            metadatas: list[dict[str, Any]] = results.get("metadatas", [[]])[0]
+            distances: list[float] = results.get("distances", [[]])[0]
+            # ChromaDB returns L2/cosine distance; convert to similarity
+            similarities: list[float] = [1.0 - dist for dist in distances]
         except Exception:
-            # Degrade to "no memories" rather than break the agent loop — but
-            # never silently: an unlogged swallow here masked an intermittent
-            # Chroma query failure as an empty result (a test flake whose cause
-            # was unobservable until this log line existed).
+            # ChromaDB 1.5.9's Rust core can PERMANENTLY wedge a collection's
+            # vector index (upstream chroma-core/chroma#7032, open): under
+            # rapid collection churn ~4% of add()s lose the embedding write
+            # (metadata lands; every later vector-touching plan — query, or
+            # get with embeddings — raises InternalError "Error finding id",
+            # unrecoverable by retry or a fresh handle), while plain metadata
+            # get() still serves the row. Reproduced 326 wedges in 8000 adds
+            # on 1.5.9 (the latest release; no upstream fix to upgrade to).
+            # Rather than blind the agent, degrade to metadata retrieval:
+            # filter by symbol and rerank on recency + importance with
+            # NEUTRAL similarity (no vector ranking in this mode).
             logger.warning(
-                "Memory query failed for %s/%s in %s — returning no memories",
+                "Memory vector query failed for %s/%s in %s — falling back to "
+                "metadata retrieval (similarity-neutral ranking)",
                 symbol, query, layer.value, exc_info=True,
             )
-            return MemoryQueryResult(items=[], query=query, layer=layer)
-
-        documents: list[str] = results.get("documents", [[]])[0]
-        metadatas: list[dict[str, Any]] = results.get("metadatas", [[]])[0]
-        distances: list[float] = results.get("distances", [[]])[0]
-        ids: list[str] = results.get("ids", [[]])[0]
+            try:
+                # Default include (documents+metadatas) only — requesting
+                # embeddings on a wedged collection raises the same error.
+                results = collection.get(where={"symbol": symbol}, limit=fetch_n)
+            except Exception:
+                logger.warning(
+                    "Memory metadata fallback also failed for %s in %s — "
+                    "returning no memories",
+                    symbol, layer.value, exc_info=True,
+                )
+                return MemoryQueryResult(items=[], query=query, layer=layer)
+            # collection.get returns FLAT lists (query returns nested ones)
+            ids = results.get("ids") or []
+            documents = results.get("documents") or []
+            metadatas = results.get("metadatas") or []
+            similarities = [0.0] * len(ids)
 
         if not documents:
             return MemoryQueryResult(items=[], query=query, layer=layer)
@@ -438,8 +469,7 @@ class TradedMemory:
         # Build scored candidates
         scored: list[tuple[float, MemoryItem]] = []
 
-        for doc_id, text, meta, dist in zip(ids, documents, metadatas, distances):
-            similarity = 1.0 - dist  # ChromaDB returns L2/cosine distance
+        for doc_id, text, meta, similarity in zip(ids, documents, metadatas, similarities):
             item = self._item_from_meta(doc_id, text, meta)
             score = compound_score(similarity, item.recency_delta, item.importance)
             scored.append((score, item))
