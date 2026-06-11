@@ -13,7 +13,9 @@ import { BacktestConfigPanel } from "./BacktestConfigPanel";
 import { BacktestResultDisplay } from "./BacktestResultDisplay";
 
 export interface BacktestSectionProps {
-  onResult: (result: BacktestResult) => void;
+  /** Called with the result AND the strategy it ran, so the parent can keep a
+   * per-strategy session history for the Results tab's comparison. */
+  onResult: (result: BacktestResult, strategy: string) => void;
   lastResult: BacktestResult | null;
 }
 
@@ -34,8 +36,10 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
 
   const backtestMutation = useMutation<BacktestResult, Error, BacktestConfig>({
     mutationFn: runBacktest,
-    onSuccess: (data) => {
-      onResult(data);
+    // variables (the submitted config) names the strategy that actually ran —
+    // robust even if the selector changes while the run is in flight.
+    onSuccess: (data, variables) => {
+      onResult(data, variables.strategy);
     },
   });
 

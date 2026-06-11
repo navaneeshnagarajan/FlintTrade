@@ -476,6 +476,46 @@ class TestBacktestCompareEndpoint:
         assert "metrics" in data
         assert "optimal_blend" in data
 
+    def test_accepts_the_terminal_client_payload(self, client):
+        """The exact shape the terminal's compareBacktests client sends.
+
+        The frontend flattens BacktestMetrics to top level: ``sharpe_ratio`` /
+        ``sortino_ratio`` keys (the extractor's fallback names), ``total_return``
+        renamed to ``total_return_pct``, ``max_drawdown`` as a plain number, and
+        the equity curve as ``[{timestamp, equity}]`` point dicts.
+        """
+        def _terminal_run(sharpe: float, base: float) -> dict:
+            return {
+                "equity_curve": [
+                    {"timestamp": f"2026-01-{i + 1:02d}", "equity": base + i * 100.0}
+                    for i in range(10)
+                ],
+                "total_return_pct": 6.0,
+                "cagr": 12.0,
+                "sharpe_ratio": sharpe,
+                "sortino_ratio": 1.5,
+                "max_drawdown": -4.2,
+                "win_rate": 60.0,
+                "profit_factor": 1.8,
+                "total_trades": 12,
+            }
+
+        payload = {
+            "results": {
+                "sma_cross": _terminal_run(1.1, 100_000.0),
+                "rsi_revert": _terminal_run(1.9, 101_000.0),
+            }
+        }
+        resp = client.post("/v1/backtest/compare", json=payload)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        # sharpe was read from the client's sharpe_ratio key, not dropped to 0
+        assert data["metrics"]["rsi_revert"]["sharpe"] == pytest.approx(1.9)
+        assert data["metrics"]["sma_cross"]["max_drawdown"] == pytest.approx(-4.2)
+        assert set(data["optimal_blend"]) == {"sma_cross", "rsi_revert"}
+        # equity point dicts were accepted for the correlation/blend maths
+        assert len(data["equity_curves"]["sma_cross"]) == 10
+
     def test_custom_weights_accepted(self, client):
         payload = {
             "results": {

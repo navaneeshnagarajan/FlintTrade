@@ -26,6 +26,8 @@ export interface BacktestTrade {
 
 export interface BacktestMetrics {
   total_return: number;
+  /** Annualised growth rate — emitted by the backend; absent in older demo data. */
+  cagr?: number;
   sharpe_ratio: number;
   sortino_ratio: number;
   max_drawdown: number;
@@ -246,6 +248,52 @@ export const runBacktest = (config: BacktestConfig) =>
 
 export const runPortfolioBacktest = (config: PortfolioBacktestConfig) =>
   post<PortfolioBacktestResult>("backtest/portfolio", config);
+
+// --- Multi-run strategy comparison ------------------------------------------
+
+/** Serialised StrategyComparisonResult (+ the route's optimal_blend). */
+export interface StrategyComparison {
+  strategies: string[];
+  metrics: Record<string, Record<string, number>>;
+  rankings: Record<string, string[]>;
+  best_overall: string;
+  equity_curves: Record<string, number[]>;
+  correlation_matrix: number[][];
+  optimal_blend: Record<string, number>;
+}
+
+/**
+ * Compare completed backtest runs side-by-side via ``/backtest/compare``.
+ *
+ * Takes the session's ``{strategy_name: BacktestResult}`` map and builds the
+ * comparator's payload: the equity curve passes through as-is (the backend
+ * accepts ``[{equity}]`` point dicts), and the metrics flatten to top level —
+ * the backend reads ``sharpe_ratio``/``sortino_ratio`` directly, but
+ * ``total_return`` must be renamed to its ``total_return_pct`` key.
+ */
+export const compareBacktests = (
+  runs: Record<string, BacktestResult>,
+  metricWeights?: Record<string, number>,
+) => {
+  const results: Record<string, object> = {};
+  for (const [name, r] of Object.entries(runs)) {
+    results[name] = {
+      equity_curve: r.equity_curve,
+      total_return_pct: r.metrics.total_return,
+      cagr: r.metrics.cagr ?? 0,
+      sharpe_ratio: r.metrics.sharpe_ratio,
+      sortino_ratio: r.metrics.sortino_ratio,
+      max_drawdown: r.metrics.max_drawdown,
+      win_rate: r.metrics.win_rate,
+      profit_factor: r.metrics.profit_factor,
+      total_trades: r.metrics.total_trades,
+    };
+  }
+  return post<StrategyComparison>("backtest/compare", {
+    results,
+    ...(metricWeights ? { metric_weights: metricWeights } : {}),
+  });
+};
 
 // Backtest built-in strategy catalogue lives under /backtest/strategies* so
 // it doesn't collide with the engine's strategy_bp (which owns

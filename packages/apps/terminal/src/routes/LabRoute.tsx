@@ -28,7 +28,15 @@ export default function LabRoute() {
     hasPendingTemplate() ? "options-builder" : "backtest",
   );
   const [lastResult, setLastResult] = useState<BacktestResult | null>(null);
+  // Every completed run this session, keyed by strategy name — feeds the
+  // Results tab's multi-run comparison (/backtest/compare).
+  const [sessionRuns, setSessionRuns] = useState<Record<string, BacktestResult>>({});
   const level = useSkillLevel("lab");
+
+  function handleBacktestResult(result: BacktestResult, strategy: string) {
+    setLastResult(result);
+    setSessionRuns((prev) => ({ ...prev, [strategy]: result }));
+  }
 
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["backtest", "results", "options-builder", "pine-editor"];
@@ -42,7 +50,7 @@ export default function LabRoute() {
     switch (id) {
       case "backtest":
         return (
-          <BacktestSection onResult={setLastResult} lastResult={lastResult} />
+          <BacktestSection onResult={handleBacktestResult} lastResult={lastResult} />
         );
       case "portfolio":
         return <PortfolioBacktestSection />;
@@ -51,7 +59,7 @@ export default function LabRoute() {
       case "optimize":
         return <OptimizeSection />;
       case "results":
-        return <ResultsSection lastResult={lastResult} />;
+        return <ResultsSection lastResult={lastResult} sessionRuns={sessionRuns} />;
       case "options-builder":
         return <StrategyBuilderTool onClose={() => setActiveTab("backtest")} />;
       case "pine-editor":
