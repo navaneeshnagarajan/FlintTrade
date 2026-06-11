@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { getLatestOptimiserReport } from "@/services/ftApi.ai";
+import { BaselineWalkForwardCard } from "./BaselineWalkForwardCard";
 
 export function OptimizeSection() {
   const { data, isLoading, isError } = useQuery({
@@ -48,6 +49,9 @@ export function OptimizeSection() {
           </div>
         </div>
       </GlassCard>
+
+      {/* Live baseline walk-forward — honest framing (buy-and-hold only) */}
+      <BaselineWalkForwardCard />
 
       {/* Overnight optimisation report — the nightly "reports + improvement
           suggestions" the AI optimiser produces (02:00 IST), surfaced here. */}

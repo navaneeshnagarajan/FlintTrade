@@ -249,6 +249,51 @@ export const runBacktest = (config: BacktestConfig) =>
 export const runPortfolioBacktest = (config: PortfolioBacktestConfig) =>
   post<PortfolioBacktestResult>("backtest/portfolio", config);
 
+// --- Baseline walk-forward (bare /v1 family) ---------------------------------
+
+export interface WalkForwardSplit {
+  split_index: number;
+  train_start: number;
+  train_end: number;
+  test_start: number;
+  test_end: number;
+  n_train_bars: number;
+  n_test_bars: number;
+  train_metric: number;
+  test_metric: number;
+  degradation_pct: number;
+}
+
+export interface WalkForwardResult {
+  splits: WalkForwardSplit[];
+  avg_train_metric: number;
+  avg_test_metric: number;
+  degradation_pct: number;
+  is_robust: boolean;
+  n_splits_run: number;
+}
+
+/**
+ * Run walk-forward analysis of a BUY-AND-HOLD BASELINE over a bar series.
+ *
+ * The ``/v1/backtest/walkforward`` route only walk-forwards its built-in
+ * buy-and-hold strategy (custom strategies are programmatic-only), so this is
+ * a regime-stability check on the INSTRUMENT's data — how consistent the
+ * baseline metric is between in-sample and out-of-sample windows — NOT a test
+ * of the user's strategy. Any UI consuming this must say so plainly.
+ * Registered at the bare ``/v1`` family → {@link postV1}.
+ */
+export const runBaselineWalkForward = (
+  bars: object[],
+  metric: string = "sharpe_ratio",
+  config?: { n_splits?: number; train_ratio?: number; anchored?: boolean },
+) =>
+  postV1<WalkForwardResult>("backtest/walkforward", {
+    bars,
+    metric,
+    ...(config ? { config } : {}),
+  });
+
 // --- Multi-run strategy comparison ------------------------------------------
 
 /** Serialised StrategyComparisonResult (+ the route's optimal_blend). */
