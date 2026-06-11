@@ -8,6 +8,7 @@
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { CalendarClock, ChevronDown, ChevronUp } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Select,
   SelectContent,
@@ -17,12 +18,33 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { getEconomicCalendar, type BackendEconomicEvent } from "@/services/ftApi";
 import {
   SAMPLE_EVENTS,
   COUNTRY_FLAGS,
   COUNTRY_LABELS,
 } from "./sampleData";
 import type { EconomicEvent, Impact, Country } from "./sampleData";
+
+/** Country codes the widget can render (flag + label maps). */
+const KNOWN_COUNTRIES = new Set<string>(Object.keys(COUNTRY_FLAGS));
+
+/** Map the backend's macro-event rows to the widget's event shape. */
+function mapBackendEvents(rows: BackendEconomicEvent[]): EconomicEvent[] {
+  return rows
+    .filter((r) => KNOWN_COUNTRIES.has(r.country))
+    .map((r, i) => ({
+      id: `${r.date}-${i}-${r.event}`,
+      date: r.date,
+      timeIst: r.time,
+      name: r.event,
+      country: r.country as Country,
+      impact: r.impact,
+      previous: r.previous ?? undefined,
+      forecast: r.forecast ?? undefined,
+      actual: r.actual ?? undefined,
+    }));
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -212,8 +234,20 @@ function EconomicCalendarWidget() {
     track("trade", "widget_view_economic_calendar");
   }, [track]);
 
+  // Backend is the source of truth (its provider generates a deterministic
+  // sample schedule today — see getEconomicCalendar); the bundled
+  // SAMPLE_EVENTS are only the offline fallback.
+  const calendarQuery = useQuery({
+    queryKey: ["economicCalendar"],
+    queryFn: () => getEconomicCalendar(30),
+  });
+  const events = useMemo<EconomicEvent[]>(() => {
+    const mapped = calendarQuery.data ? mapBackendEvents(calendarQuery.data.events) : [];
+    return mapped.length > 0 ? mapped : SAMPLE_EVENTS;
+  }, [calendarQuery.data]);
+
   const filtered = useMemo(() => {
-    return SAMPLE_EVENTS.filter((ev) => {
+    return events.filter((ev) => {
       if (countryFilter !== "all" && ev.country !== countryFilter) return false;
       if (impactFilter !== "all" && ev.impact !== impactFilter) return false;
       return true;
@@ -221,7 +255,7 @@ function EconomicCalendarWidget() {
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       return a.timeIst.localeCompare(b.timeIst);
     });
-  }, [countryFilter, impactFilter]);
+  }, [events, countryFilter, impactFilter]);
 
   const byDate = useMemo(() => {
     const map = new Map<string, EconomicEvent[]>();
@@ -242,13 +276,15 @@ function EconomicCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarClock size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Economic Calendar</span>
-        {/* Honest disclosure — events are SAMPLE_EVENTS unconditionally (no
-            economic-calendar backend is wired). Permanent badge. */}
+        {/* Honest disclosure — the backend calendar provider generates a
+            deterministic sample schedule (no live macro feed is integrated),
+            and the bundled events are the offline fallback. The badge stays
+            until the provider gains a real data source. */}
         <span
           className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 ml-1"
           role="status"
-          aria-label="Showing sample data; no live economic-calendar source is wired yet"
-          title="No live data wired yet — showing sample economic events so the widget is usable in explore mode."
+          aria-label="Showing sample data; the calendar provider has no live macro feed yet"
+          title="Sample economic schedule — served by the backend's calendar provider, which has no live macro feed integrated yet."
         >
           Sample data
         </span>

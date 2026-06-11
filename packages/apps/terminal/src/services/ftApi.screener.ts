@@ -241,6 +241,40 @@ export const getPrebuiltScans = () =>
 export const runPrebuiltScan = (key: string) =>
   postV1<ScannerRunResponse>("scanner/run", { prebuilt: key });
 
+// ─── Economic calendar (bare /v1/economic family) ────────────────────────────
+
+/** Backend macro-event row (economic_calendar.EconomicEvent.to_dict). */
+export interface BackendEconomicEvent {
+  date: string;
+  time: string;
+  event: string;
+  country: string;
+  impact: "high" | "medium" | "low";
+  previous: string | null;
+  forecast: string | null;
+  actual: string | null;
+  category: string;
+}
+
+export interface EconomicCalendarData {
+  days: number;
+  events: BackendEconomicEvent[];
+}
+
+/**
+ * Fetch the macro economic calendar from the backend.
+ *
+ * The provider currently generates a deterministic sample schedule (no live
+ * macro feed is integrated), so consumers must keep their sample badging; the
+ * value of wiring is single-source-of-truth — when the provider gains a live
+ * source, every consumer lights up without a frontend change. Registered at
+ * the bare ``/v1`` family → {@link getV1}.
+ */
+export const getEconomicCalendar = (days?: number) =>
+  getV1<EconomicCalendarData>(
+    "economic/calendar" + (days !== undefined ? `?days=${days}` : ""),
+  );
+
 // ─── Lot Size ────────────────────────────────────────────────────────────────
 
 export const getLotSize = (
