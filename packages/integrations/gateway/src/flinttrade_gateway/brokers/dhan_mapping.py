@@ -238,11 +238,17 @@ def to_slice_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
 
 
 def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
-    """Translate a ``gtt`` ``Order`` into ``dhanhq.place_forever`` kwargs (SINGLE).
+    """Translate a ``gtt`` ``Order`` into ``dhanhq.place_forever`` kwargs.
 
     A Dhan forever (GTT / good-till-triggered) order rests until its
     ``trigger_Price`` is hit, then fires at ``price``. Raises if no trigger price
     is supplied (a GTT without a trigger is meaningless).
+
+    When the OCO leg trio (``price1`` / ``trigger_price1`` / ``quantity1``) is
+    set on the order, the forever order is placed as ``OCO`` — the second leg
+    cancels the first when it triggers (forever.md "Create Forever Order"). The
+    trio is all-or-nothing: a partial OCO leg raises rather than silently
+    placing a SINGLE order without the protective leg.
     """
     core = _validated_core(order, security_id)
     trigger = _num(getattr(order, "trigger_price", 0))
@@ -259,6 +265,20 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
         "trigger_Price": trigger,
         "order_flag": "SINGLE",
     }
+    price1 = _num(getattr(order, "price1", None) or 0)
+    trigger1 = _num(getattr(order, "trigger_price1", None) or 0)
+    qty1 = int(_num(getattr(order, "quantity1", None) or 0, 0))
+    if price1 > 0 or trigger1 > 0 or qty1 > 0:
+        if not (price1 > 0 and trigger1 > 0 and qty1 > 0):
+            raise DhanMappingError(
+                "An OCO forever order needs ALL of price1, trigger_price1 and quantity1"
+            )
+        kwargs.update({
+            "order_flag": "OCO",
+            "price1": price1,
+            "trigger_Price1": trigger1,
+            "quantity1": qty1,
+        })
     if tag:
         kwargs["tag"] = tag
     return kwargs

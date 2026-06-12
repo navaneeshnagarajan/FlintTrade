@@ -101,6 +101,28 @@ class TestOrderValidation:
             order = self._make_order(exchange=exch)
             assert layer.validate(order).passed, f"{exch} should pass"
 
+    @pytest.mark.unit
+    def test_validity_none_passes(self):
+        from flinttrade_engine.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=False)
+        assert layer.validate(self._make_order()).passed  # validity defaults to None
+
+    @pytest.mark.unit
+    def test_known_validities_pass(self):
+        from flinttrade_engine.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=False)
+        for validity in ["DAY", "IOC", "GTC", "GTD", "EOS", "ioc"]:
+            order = self._make_order(validity=validity)
+            assert layer.validate(order).passed, f"validity {validity} should pass"
+
+    @pytest.mark.unit
+    def test_unknown_validity_fails(self):
+        from flinttrade_engine.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=False)
+        result = layer.validate(self._make_order(validity="FOREVER"))
+        assert not result.passed
+        assert "validity" in result.reason.lower()
+
 
 # ======================================================================
 # Layer 1 — Market Hours
@@ -212,6 +234,7 @@ class TestMarketHours:
         order.pricetype = MagicMock()
         order.pricetype.value = "MARKET"
         order.price = "0"
+        order.validity = None  # MagicMock would otherwise auto-mint a non-None attr
         # Any time — should pass (24/7)
         night = datetime(2026, 3, 16, 3, 0, 0, tzinfo=IST)
         result = layer.validate(order, at=night)

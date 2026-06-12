@@ -52,6 +52,30 @@ def test_place_order_regular_defaults_amo_no():
 
 
 # ---------------------------------------------------------------------------
+# Place: validity pass-through (Order.validity)
+# ---------------------------------------------------------------------------
+
+def test_place_order_validity_defaults_to_day_when_unset():
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="10", price="9.4")
+    assert to_place_order_params(order, "IDEA-EQ")["validity"] == "DAY"
+
+
+def test_place_order_validity_passes_through_when_set():
+    order = Order(symbol="GOLDPETAL25JUNFUT", action="BUY", exchange="MCX",
+                  pricetype="LIMIT", product="NRML", quantity="1", price="7000",
+                  validity="GTC")
+    assert to_place_order_params(order, "GOLDPETAL25JUNFUT")["validity"] == "GTC"
+
+
+def test_place_order_validity_invalid_raises():
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="10", price="9.4", validity="FOREVER")
+    with pytest.raises(KotakNeoMappingError, match="validity"):
+        to_place_order_params(order, "IDEA-EQ")
+
+
+# ---------------------------------------------------------------------------
 # Modify: full documented param surface
 # ---------------------------------------------------------------------------
 

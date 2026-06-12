@@ -231,6 +231,38 @@ async def test_gtt_order_dispatches_to_place_forever():
 
 
 @pytest.mark.asyncio
+async def test_gtt_oco_order_dispatches_to_place_forever_with_second_leg():
+    """The OCO leg trio on a gtt Order flips the forever order to OCO and maps
+    the forever.md price1/triggerPrice1/quantity1 fields — same gated method."""
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC",
+                  quantity="5", price="2900", trigger_price="2890", variety="gtt",
+                  price1="2800", trigger_price1="2805", quantity1="5")
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "GTT1"
+    kind, kw = mock.calls[0]
+    assert kind == "forever" and kw["order_flag"] == "OCO"
+    assert kw["price1"] == 2800.0 and kw["trigger_Price1"] == 2805.0 and kw["quantity1"] == 5
+
+
+@pytest.mark.asyncio
+async def test_gtt_partial_oco_leg_fails_closed():
+    from flinttrade_gateway.brokers.dhan_mapping import DhanMappingError
+
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC",
+                  quantity="5", price="2900", trigger_price="2890", variety="gtt",
+                  price1="2800")  # trigger_price1 + quantity1 missing
+    with pytest.raises(DhanMappingError, match="OCO"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []  # never reached the broker
+
+
+@pytest.mark.asyncio
 async def test_gtt_without_trigger_fails_closed():
     from flinttrade_gateway.brokers.dhan_mapping import DhanMappingError
 

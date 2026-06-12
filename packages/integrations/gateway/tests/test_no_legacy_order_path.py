@@ -58,7 +58,41 @@ _WRITE_METHODS = (
     "cancel_all_orders",
     "close_position",
     "place_options_order",
+    # Extended gated verbs (BrokerRouter.execute_gated) — must never leak onto
+    # the registry/session surfaces either.
+    "modify_forever",
+    "cancel_forever",
+    "modify_super_order",
+    "cancel_super_order",
+    "place_conditional_trigger",
+    "modify_conditional_trigger",
+    "cancel_conditional_trigger",
+    "convert_position",
+    "exit_all_positions",
+    "place_multi_order",
+    "cancel_smart_order",
 )
+
+# Extended adapter write verbs (contract §8.1) and the raw-call tripwire for
+# them. Any `.modify_forever(` etc. outside the BrokerRouter is a bypass —
+# routes/services must go through gate_broker_write -> BrokerRouter.execute_gated
+# (whose call sites carry the verb only as a STRING argument, so they never
+# match this attribute-call regex).
+_EXTENDED_VERB_WRITE_RE = re.compile(
+    r"\.(modify_forever|cancel_forever|modify_super_order|cancel_super_order"
+    r"|place_conditional_trigger|modify_conditional_trigger|cancel_conditional_trigger"
+    r"|convert_position|exit_all_positions|place_multi_order|cancel_all_orders"
+    r"|cancel_smart_order)\s*\("
+)
+
+# Modules that legitimately contain a raw extended-verb call. BOTH are the L5
+# emergency-close path calling OpenAlgoClient.cancel_all_orders (never a broker
+# adapter): gating an emergency flatten could deadlock the very safety action
+# it protects. Same shrinking-allowlist rule as _RAW_ORDER_ALLOWLIST.
+_RAW_EXTENDED_VERB_ALLOWLIST = {
+    "packages/services/engine/src/flinttrade_engine/safety.py",
+    "packages/services/automation/src/flinttrade_automation/telegram_bot.py",
+}
 
 
 def test_registry_exposes_no_write_methods():
@@ -118,27 +152,59 @@ def test_openalgo_writes_all_require_router_token():
     )
 
 
+# Per-adapter expected gated write surface (the trio + every extended verb the
+# adapter implements). Dropping any of these methods — or its router-token
+# guard — must fail HERE, not only in a per-adapter unit test that could be
+# removed alongside the method.
+_NATIVE_ADAPTER_WRITE_METHODS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "dhan.py": (
+        "DhanAdapter",
+        (
+            "place_order", "modify_order", "cancel_order",
+            "modify_forever", "cancel_forever",
+            "modify_super_order", "cancel_super_order",
+            "place_conditional_trigger", "modify_conditional_trigger",
+            "cancel_conditional_trigger",
+            "convert_position", "exit_all_positions",
+        ),
+    ),
+    "upstox.py": (
+        "UpstoxAdapter",
+        (
+            "place_order", "modify_order", "cancel_order",
+            "place_multi_order", "cancel_all_orders",
+            "exit_all_positions", "convert_position",
+        ),
+    ),
+    "kotakneo.py": (
+        "KotakNeoAdapter",
+        ("place_order", "modify_order", "cancel_order"),
+    ),
+    "indmoney.py": (
+        "IndMoneyAdapter",
+        ("place_order", "modify_order", "cancel_order", "cancel_smart_order"),
+    ),
+}
+
+
 def test_native_adapter_writes_all_require_router_token():
     """Every write method of every direct broker adapter must call
     ``_require_router_token`` in its body (§8) — the same source-level pin as
-    OpenAlgo, extended to the native SDK adapters (Dhan / Upstox / Kotak Neo).
+    OpenAlgo, extended to the native SDK adapters (Dhan / Upstox / Kotak Neo /
+    IndMoney) and to EVERY extended gated verb, not just the trio.
 
-    These are real write surfaces (dispatched by BrokerRouter with the shared
-    per-process token), so a refactor that silently drops the guard from any of
-    their place/modify/cancel methods must fail here, not only in a unit test
-    that could be removed.
+    Two assertions per adapter:
+      * the pinned expected write surface exists (a silently dropped gated verb
+        fails here), and
+      * EVERY method that takes a ``_router_token`` parameter calls
+        ``_require_router_token`` in its body — so a brand-new gated verb cannot
+        ship with the parameter but without the guard.
     """
     import ast
 
-    adapters = {
-        "dhan.py": "DhanAdapter",
-        "upstox.py": "UpstoxAdapter",
-        "kotakneo.py": "KotakNeoAdapter",
-    }
-    write_methods = ("place_order", "modify_order", "cancel_order")
     ungated: list[str] = []
     missing: list[str] = []
-    for fname, clsname in adapters.items():
+    for fname, (clsname, write_methods) in _NATIVE_ADAPTER_WRITE_METHODS.items():
         src = (_GATEWAY_SRC / "brokers" / fname).read_text(encoding="utf-8")
         tree = ast.parse(src)
         cls = next(
@@ -146,21 +212,49 @@ def test_native_adapter_writes_all_require_router_token():
             None,
         )
         assert cls is not None, f"{fname}: class {clsname} not found"
-        bodies = {
-            node.name: ast.get_source_segment(src, node)
+        methods = {
+            node.name: node
             for node in cls.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in write_methods
         }
-        missing += [f"{clsname}.{m}" for m in write_methods if m not in bodies]
-        ungated += [
-            f"{clsname}.{m}" for m, body in bodies.items()
-            if "_require_router_token" not in (body or "")
-        ]
-    assert not missing, f"native adapters missing write methods: {missing}"
+        missing += [f"{clsname}.{m}" for m in write_methods if m not in methods]
+        for name, node in methods.items():
+            arg_names = {a.arg for a in node.args.args} | {a.arg for a in node.args.kwonlyargs}
+            takes_token = "_router_token" in arg_names
+            if name in write_methods or takes_token:
+                body = ast.get_source_segment(src, node) or ""
+                if "_require_router_token" not in body:
+                    ungated.append(f"{clsname}.{name}")
+    assert not missing, f"native adapters missing gated write methods: {missing}"
     assert not ungated, (
         "native adapter write methods must call _require_router_token (§8); "
-        f"unguarded: {ungated}"
+        f"unguarded: {sorted(set(ungated))}"
+    )
+
+
+def test_native_adapter_write_surface_matches_router_verb_table():
+    """Every extended adapter verb pinned above must be dispatchable through
+    ``BrokerRouter.execute_gated`` — i.e. present in the router's verb table and
+    the engine's ``GATED_WRITE_VERBS`` registry. An adapter write method that is
+    NOT in the table would be unreachable except by bypassing the router, so the
+    surface and the table must stay in lock-step (contract §8.1)."""
+    from flinttrade_engine.safety import GATED_WRITE_VERBS
+    from flinttrade_gateway.router import _GATED_VERB_DISPATCH
+
+    trio = {"place_order", "modify_order", "cancel_order"}
+    extended_adapter_verbs = {
+        m
+        for _cls, methods in _NATIVE_ADAPTER_WRITE_METHODS.values()
+        for m in methods
+        if m not in trio
+    }
+    not_dispatchable = sorted(extended_adapter_verbs - set(_GATED_VERB_DISPATCH))
+    assert not not_dispatchable, (
+        "extended adapter write verbs missing from BrokerRouter._GATED_VERB_DISPATCH "
+        f"(unreachable without a bypass): {not_dispatchable}"
+    )
+    assert set(_GATED_VERB_DISPATCH) == GATED_WRITE_VERBS, (
+        "router verb table and engine GATED_WRITE_VERBS registry drifted apart"
     )
 
 
@@ -215,6 +309,72 @@ def test_no_new_ungated_order_paths_in_services_and_webhooks():
         "(contract §8.1). Route it through gate_order/BrokerRouter, or — if it is a "
         "deliberate dormant/emergency path — add the module to _RAW_ORDER_ALLOWLIST "
         "with a justification:\n" + "\n".join(offenders)
+    )
+
+
+def test_no_raw_extended_verb_calls_in_services_and_webhooks():
+    """§8.1 tripwire for the EXTENDED gated verbs (forever/super/trigger/convert/
+    exit-all/multi/cancel-all/smart-cancel).
+
+    These adapter write methods are reachable ONLY through
+    ``gate_broker_write -> BrokerRouter.execute_gated`` (whose call sites carry
+    the verb as a string argument, never as an attribute call, so they cannot
+    match here). Any raw ``.modify_forever(`` / ``.exit_all_positions(`` /…
+    attribute call in ``packages/services/*``, ``packages/integrations/webhooks``
+    or ``packages/core`` is a bypass of the single gated path — unless the
+    module is on the explicit shrinking allowlist (the L5 emergency close via
+    OpenAlgoClient, never a broker adapter).
+    """
+    scan_dirs = [
+        _REPO_ROOT / "packages" / "services",
+        _REPO_ROOT / "packages" / "integrations" / "webhooks",
+        _REPO_ROOT / "packages" / "core",
+    ]
+    offenders: list[str] = []
+    for root in scan_dirs:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            parts = path.parts
+            if "tests" in parts or path.name.startswith("test_"):
+                continue
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if rel in _RAW_EXTENDED_VERB_ALLOWLIST:
+                continue  # L5 emergency close (OpenAlgoClient, not an adapter)
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#") or "def " in stripped:
+                    continue
+                if _EXTENDED_VERB_WRITE_RE.search(line):
+                    offenders.append(f"{rel}:{n}: {stripped}")
+    assert not offenders, (
+        "Raw extended-verb broker write outside the gate_broker_write -> "
+        "BrokerRouter.execute_gated chain (contract §8.1). Route it through the "
+        "router, or — if it is a deliberate emergency path — add the module to "
+        "_RAW_EXTENDED_VERB_ALLOWLIST with a justification:\n" + "\n".join(offenders)
+    )
+
+
+def test_raw_extended_verb_allowlist_has_no_stale_entries():
+    """The extended-verb allowlist must shrink, never rot (same rule as
+    ``_RAW_ORDER_ALLOWLIST``): every entry must still exist and still contain a
+    raw extended-verb call."""
+    stale: list[str] = []
+    for rel in sorted(_RAW_EXTENDED_VERB_ALLOWLIST):
+        path = _REPO_ROOT / rel
+        if not path.exists():
+            stale.append(f"{rel} (file gone)")
+            continue
+        has_raw = any(
+            _EXTENDED_VERB_WRITE_RE.search(line)
+            and "def " not in line and not line.strip().startswith("#")
+            for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        if not has_raw:
+            stale.append(f"{rel} (no raw extended-verb call left — remove from allowlist)")
+    assert not stale, (
+        "Stale _RAW_EXTENDED_VERB_ALLOWLIST entries (the allowlist must shrink):\n"
+        + "\n".join(stale)
     )
 
 

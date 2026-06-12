@@ -418,6 +418,109 @@ def gate_order(
 
 
 # ---------------------------------------------------------------------------
+# Extended gated write verbs (contract §8.1 — ONE gated path for EVERY write)
+# ---------------------------------------------------------------------------
+
+GATED_WRITE_VERBS: frozenset[str] = frozenset({
+    # Dhan forever (GTT) management
+    "modify_forever",
+    "cancel_forever",
+    # Dhan super-order (bracket/cover leg) management
+    "modify_super_order",
+    "cancel_super_order",
+    # Dhan conditional triggers (v2.5 alerts/orders)
+    "place_conditional_trigger",
+    "modify_conditional_trigger",
+    "cancel_conditional_trigger",
+    # Portfolio writes (Dhan + Upstox)
+    "convert_position",
+    "exit_all_positions",
+    # Upstox batch writes
+    "place_multi_order",
+    "cancel_all_orders",
+    # IndMoney smart-order family
+    "cancel_smart_order",
+})
+"""Adapter write verbs beyond the place/modify/cancel trio that are dispatchable
+ONLY through :meth:`BrokerRouter.execute_gated`. The router's verb table must
+stay in lock-step with this registry (it fails at import time if it drifts), and
+``gate_broker_write`` refuses to mint a context for any verb not listed here."""
+
+
+def gate_broker_write(
+    verb: str,
+    payload: Mapping[str, object],
+    request_ctx: RequestContext,
+    adapter_id: str,
+    *,
+    account_id: str = "default",
+    actor_type: Literal["human", "agent", "external_intent"] | None = None,
+    intent_source: str | None = None,
+    external_nonce: str | None = None,
+    failover_allowed_adapters: tuple[str, ...] = (),
+    ttl_seconds: int = 10,
+) -> SafetyContext:
+    """Mint the one-shot :class:`SafetyContext` for an extended broker write verb.
+
+    Sibling of :func:`gate_order` (and delegates to it, so ``gate_order`` remains
+    the SOLE :class:`SafetyContext` producer — contract §8.1). ``payload`` is the
+    verb's complete canonical fingerprint: a mapping whose ``"_op"`` field MUST
+    equal ``verb`` and which carries EVERY field the adapter will receive. The
+    canonical hash therefore covers the verb discriminator and the whole payload,
+    so a context minted for one verb/payload can never be replayed against
+    another, and no unhashed mutable field can reach the broker —
+    :meth:`BrokerRouter.execute_gated` extracts the dispatch arguments from this
+    same verified mapping.
+
+    Args:
+        verb: One of :data:`GATED_WRITE_VERBS`.
+        payload: The canonical fingerprint mapping (``payload["_op"] == verb``).
+        request_ctx: The authoritative identity bundle minted at the verified
+            request boundary.
+        adapter_id: The broker adapter the write will be routed to.
+        account_id: The resolved account within ``adapter_id`` (selector-bound
+            principal, identity X7).
+        actor_type: Optional explicit actor metadata; must agree with
+            ``request_ctx`` (Identity-Trust H11).
+        intent_source: Optional explicit intent source; must agree with
+            ``request_ctx``.
+        external_nonce: Optional per-payload nonce for external-intent callers.
+        failover_allowed_adapters: Operator-pre-authorised failover allowlist.
+        ttl_seconds: Context time-to-live (default 10 s).
+
+    Returns:
+        A freshly-minted one-shot ``SafetyContext`` bound to the verb payload.
+
+    Raises:
+        SafetyBypassError: For an unknown verb, a non-mapping payload, or a
+            payload whose ``_op`` does not match ``verb``.
+    """
+    if verb not in GATED_WRITE_VERBS:
+        raise SafetyBypassError(f"gate_broker_write: unknown gated write verb {verb!r}")
+    if not isinstance(payload, Mapping):
+        raise SafetyBypassError(
+            "gate_broker_write: payload must be a Mapping — it is the signed "
+            "canonical fingerprint the router re-verifies and dispatches from"
+        )
+    if payload.get("_op") != verb:
+        raise SafetyBypassError(
+            f"gate_broker_write: payload _op {payload.get('_op')!r} does not match verb {verb!r} — "
+            "the verb discriminator must be inside the signed payload"
+        )
+    return gate_order(
+        payload,
+        request_ctx,
+        adapter_id,
+        account_id=account_id,
+        actor_type=actor_type,
+        intent_source=intent_source,
+        external_nonce=external_nonce,
+        failover_allowed_adapters=failover_allowed_adapters,
+        ttl_seconds=ttl_seconds,
+    )
+
+
+# ---------------------------------------------------------------------------
 # SafetyGate — the one-shot gate_id consumer (contract §8.0a)
 # ---------------------------------------------------------------------------
 
@@ -578,6 +681,11 @@ _TRADEABLE_EXCHANGES = {
     "NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "NCO", "DELTA",
 }
 
+# Order validities accepted on the pass-through field (Order.validity). DAY/IOC
+# everywhere it is supported; GTC/GTD (MCX) and EOS (BSE/MCX) are broker-side
+# constraints enforced by the adapter mappings — L1 only rejects unknown codes.
+_ALLOWED_VALIDITIES = frozenset({"DAY", "IOC", "GTC", "GTD", "EOS"})
+
 # Per-exchange max single-order quantity defaults (can be overridden)
 _DEFAULT_QTY_LIMITS: dict[str, int] = {
     "NSE": 50_000,
@@ -650,6 +758,16 @@ class OrderValidation:
             return SafetyResult(
                 SafetyVerdict.FAIL, "L1_ORDER",
                 f"Quantity {qty} exceeds {exchange} limit of {max_qty}",
+            )
+
+        # Validity pass-through check (optional field; None = adapter default).
+        # The field is part of the SafetyContext-hashed order, so it is also
+        # validated here before any gate is minted for it.
+        validity = getattr(order, "validity", None)
+        if validity is not None and str(validity).upper() not in _ALLOWED_VALIDITIES:
+            return SafetyResult(
+                SafetyVerdict.FAIL, "L1_ORDER",
+                f"Validity {validity!r} is not one of {sorted(_ALLOWED_VALIDITIES)}",
             )
 
         # Price check for LIMIT / SL orders

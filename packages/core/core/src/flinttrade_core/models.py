@@ -111,6 +111,24 @@ class Order(BaseModel):
     supported by Zerodha and selected brokers.  None means use the
     broker's default behaviour.
     """
+    validity: str | None = None
+    """Order validity pass-through (``DAY``/``IOC``/``GTC``/``GTD``/``EOS``).
+
+    ``None`` (default) keeps each adapter's default (``DAY``). GTC/GTD are
+    MCX-only and EOS is BSE/MCX-only on Kotak Neo — broker-side constraints are
+    enforced by the adapter mappings. Because the field lives on the Order it is
+    covered by the SafetyContext HMAC: changing it after the gate is minted
+    invalidates the gate."""
+    price1: str | None = None
+    """OCO second-leg limit price (Dhan forever ``price1``). ``None`` = no OCO.
+
+    When the OCO trio (``price1``/``trigger_price1``/``quantity1``) is set on a
+    ``gtt`` order, the Dhan adapter places an OCO forever order instead of a
+    SINGLE one. Hashed by the SafetyContext like every other order field."""
+    trigger_price1: str | None = None
+    """OCO second-leg trigger price (Dhan forever ``triggerPrice1``)."""
+    quantity1: str | None = None
+    """OCO second-leg quantity (Dhan forever ``quantity1``)."""
 
 
 class SmartOrder(Order):

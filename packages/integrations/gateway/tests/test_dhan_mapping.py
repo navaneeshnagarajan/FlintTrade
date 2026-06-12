@@ -132,6 +132,43 @@ def test_forever_without_trigger_raises():
         to_forever_kwargs(order, "1")
 
 
+def test_forever_oco_kwargs_carries_second_leg():
+    """The OCO leg trio on the Order flips order_flag to OCO and maps to the
+    forever.md ``price1`` / ``triggerPrice1`` / ``quantity1`` fields."""
+    order = Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+        product="CNC", quantity="5", price="2900", trigger_price="2890", variety="gtt",
+        price1="2800", trigger_price1="2805", quantity1="5",
+    )
+    kw = to_forever_kwargs(order, "11536")
+    assert kw["order_flag"] == "OCO"
+    assert kw["price1"] == 2800.0
+    assert kw["trigger_Price1"] == 2805.0
+    assert kw["quantity1"] == 5
+    # The first leg is unchanged.
+    assert kw["price"] == 2900.0 and kw["trigger_Price"] == 2890.0
+
+
+def test_forever_partial_oco_leg_raises():
+    """A partial OCO leg must fail closed — never place SINGLE silently when the
+    operator asked for a protective second leg."""
+    order = Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+        product="CNC", quantity="5", price="2900", trigger_price="2890", variety="gtt",
+        price1="2800",  # trigger_price1 + quantity1 missing
+    )
+    with pytest.raises(DhanMappingError, match="OCO"):
+        to_forever_kwargs(order, "11536")
+
+
+def test_forever_without_oco_fields_stays_single():
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="5", price="2900", trigger_price="2890", variety="gtt")
+    kw = to_forever_kwargs(order, "11536")
+    assert kw["order_flag"] == "SINGLE"
+    assert "price1" not in kw and "trigger_Price1" not in kw and "quantity1" not in kw
+
+
 def test_margin_kwargs_and_parse():
     order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="10", price="2900")

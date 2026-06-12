@@ -149,6 +149,11 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
     exchange = _norm(order.exchange)
     if exchange not in EXCHANGE_TO_KOTAK:
         raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
+    # Validity pass-through: None keeps the NEO default (DAY). The field is part
+    # of the SafetyContext-hashed Order, so it cannot be mutated after gating.
+    validity = _norm(getattr(order, "validity", None) or "DAY")
+    if validity not in VALIDITY_ALLOWED:
+        raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
 
     params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
@@ -156,7 +161,7 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
         "price": str(_num(getattr(order, "price", 0))),
         "order_type": ORDER_TYPE_TO_KOTAK[ptype],
         "quantity": str(int(_num(order.quantity, 0))),
-        "validity": "DAY",
+        "validity": validity,
         "trading_symbol": str(trading_symbol),
         "transaction_type": SIDE_TO_KOTAK[side],
         "trigger_price": str(_num(getattr(order, "trigger_price", 0))),
