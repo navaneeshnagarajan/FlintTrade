@@ -114,9 +114,10 @@ def test_registry_register_overwrites_existing() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_default_registry_contains_11_brokers() -> None:
-    """The default REGISTRY contains exactly 11 seeded brokers."""
-    assert len(REGISTRY.all()) == 11
+def test_default_registry_contains_13_brokers() -> None:
+    """The default REGISTRY contains exactly 13 seeded brokers (the original
+    11 plus the kotakneo + indmoney native-wave entries)."""
+    assert len(REGISTRY.all()) == 13
 
 
 def test_default_registry_zerodha_websocket() -> None:
@@ -183,6 +184,7 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
     broker present in BOTH systems disagrees again.
     """
     from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+    from flinttrade_gateway.brokers.indmoney import INDMONEY_CAPABILITIES
     from flinttrade_gateway.brokers.kotakneo import KOTAKNEO_CAPABILITIES
     from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
 
@@ -190,13 +192,13 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
         "dhan": DHAN_CAPABILITIES,
         "upstox": UPSTOX_CAPABILITIES,
         "kotakneo": KOTAKNEO_CAPABILITIES,
+        "indmoney": INDMONEY_CAPABILITIES,
     }
     checked = 0
     for name, adapter_caps in natives.items():
         reg_caps = REGISTRY.get(name)
-        if reg_caps is None:
-            continue  # not every native is seeded into the registry (e.g. kotakneo)
+        assert reg_caps is not None, f"{name} missing from the seeded registry"
         checked += 1
         assert reg_caps.supports_bracket_orders == adapter_caps.bracket_order_native, name
         assert reg_caps.supports_cover_orders == adapter_caps.cover_order_native, name
-    assert checked >= 2  # dhan + upstox are both seeded; guard the loop ran
+    assert checked == 4  # all four natives are seeded; guard the loop ran

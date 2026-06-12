@@ -6,6 +6,7 @@ import pytest
 
 from flinttrade_gateway.brokers._base import BrokerAdapter
 from flinttrade_gateway.brokers.dhan import DhanAdapter
+from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
 from flinttrade_gateway.brokers.native_factory import (
     NATIVE_ADAPTER_CLASSES,
@@ -17,15 +18,24 @@ from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
 pytestmark = pytest.mark.unit
 
-_ALL_OK = {"dhan", "upstox", "kotakneo"}
+_ALL_OK = {"dhan", "upstox", "kotakneo", "indmoney"}
 
 
-def test_catalog_covers_three_natives():
+def test_catalog_covers_four_natives():
     assert set(NATIVE_ADAPTER_CLASSES) == _ALL_OK
     assert set(SDK_PIN_BY_BROKER) == _ALL_OK
     assert NATIVE_ADAPTER_CLASSES["dhan"] is DhanAdapter
     assert NATIVE_ADAPTER_CLASSES["upstox"] is UpstoxAdapter
     assert NATIVE_ADAPTER_CLASSES["kotakneo"] is KotakNeoAdapter
+    assert NATIVE_ADAPTER_CLASSES["indmoney"] is IndMoneyAdapter
+
+
+def test_rest_only_native_declares_no_sdk_pin():
+    """IndMoney is REST-only (no third-party SDK): its pin is ``None``, which
+    ``attest_ok`` treats as trivially attested — credentials remain the only
+    activation gate."""
+    assert SDK_PIN_BY_BROKER["indmoney"] is None
+    assert SDK_PIN_BY_BROKER["dhan"] == "dhanhq"
 
 
 def test_is_native_broker():

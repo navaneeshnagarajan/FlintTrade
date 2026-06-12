@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from ._base import BrokerAdapter
 from .dhan import DhanAdapter
+from .indmoney import IndMoneyAdapter
 from .kotakneo import KotakNeoAdapter
 from .upstox import UpstoxAdapter
 
@@ -32,14 +33,18 @@ NATIVE_ADAPTER_CLASSES: dict[str, type[BrokerAdapter]] = {
     "dhan": DhanAdapter,
     "upstox": UpstoxAdapter,
     "kotakneo": KotakNeoAdapter,
+    "indmoney": IndMoneyAdapter,
 }
 
 # broker_id -> the ``brokers.lock`` SDK pin name that gates its activation. Lets
 # the router map an attestation result (keyed by SDK package) back to a broker.
-SDK_PIN_BY_BROKER: dict[str, str] = {
+# ``None`` marks a REST-only native with NO third-party SDK (IndMoney): there is
+# nothing to attest, so its activation is gated by stored credentials alone.
+SDK_PIN_BY_BROKER: dict[str, str | None] = {
     "dhan": "dhanhq",
     "upstox": "upstox-python-sdk",
     "kotakneo": "neo-api-client",
+    "indmoney": None,
 }
 
 

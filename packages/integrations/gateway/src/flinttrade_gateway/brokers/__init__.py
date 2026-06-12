@@ -2,6 +2,7 @@
 
 from ._base import BrokerAdapter, Session
 from .dhan import DhanAdapter
+from .indmoney import IndMoneyAdapter
 from .kotakneo import KotakNeoAdapter
 from .native_factory import (
     NATIVE_ADAPTER_CLASSES,
@@ -16,6 +17,7 @@ __all__ = [
     "SDK_PIN_BY_BROKER",
     "BrokerAdapter",
     "DhanAdapter",
+    "IndMoneyAdapter",
     "KotakNeoAdapter",
     "Session",
     "UpstoxAdapter",

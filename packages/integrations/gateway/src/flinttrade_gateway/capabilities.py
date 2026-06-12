@@ -248,12 +248,12 @@ class CapabilityRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Pre-seeded registry — 11 Indian brokers
+# Pre-seeded registry — 13 Indian brokers
 # ---------------------------------------------------------------------------
 
 
 def _build_default_registry() -> CapabilityRegistry:
-    """Build and return the default capability registry seeded with 11 brokers.
+    """Build and return the default capability registry seeded with 13 brokers.
 
     Returns:
         :class:`CapabilityRegistry` pre-populated with known Indian brokers.
@@ -513,6 +513,61 @@ def _build_default_registry() -> CapabilityRegistry:
         supports_multi_option_greeks=False,
         order_rate_limit_per_sec=10,
         quote_rate_limit_per_sec=50,
+    ))
+
+    # -- Kotak Neo ----------------------------------------------------------
+    reg.register(BrokerCapabilities(
+        broker_name="kotakneo",
+        supports_market_orders=True,
+        supports_limit_orders=True,
+        supports_sl_orders=True,
+        supports_sl_m_orders=True,
+        # Native bracket + cover varieties (leg-wise cancel via bo/co exit) —
+        # mirrors the authoritative KOTAKNEO_CAPABILITIES in brokers/kotakneo.py
+        # (the registry↔adapter tripwire in test_capabilities.py guards this).
+        supports_bracket_orders=True,
+        supports_cover_orders=True,
+        supports_basket_orders=False,
+        supports_options=True,
+        supports_futures=True,
+        supports_commodities=True,
+        supports_currency=True,
+        supports_equity=True,
+        supports_mis=True,
+        supports_cnc=True,
+        supports_nrml=True,
+        supports_websocket=True,
+        supports_multi_quote=True,
+        supports_multi_option_greeks=False,
+        order_rate_limit_per_sec=10,
+        quote_rate_limit_per_sec=50,
+    ))
+
+    # -- INDmoney (INDstocks) ----------------------------------------------
+    reg.register(BrokerCapabilities(
+        broker_name="indmoney",
+        supports_market_orders=True,
+        supports_limit_orders=True,
+        # INDstocks has no standalone stop orders — protective stops travel as
+        # smart (GTT) orders; the adapter fails closed on SL/SL-M varieties.
+        supports_sl_orders=False,
+        supports_sl_m_orders=False,
+        supports_bracket_orders=False,
+        supports_cover_orders=False,
+        supports_basket_orders=False,
+        supports_options=True,
+        supports_futures=True,
+        supports_commodities=False,
+        supports_currency=False,
+        supports_equity=True,
+        supports_mis=True,
+        supports_cnc=True,
+        supports_nrml=True,
+        supports_websocket=True,
+        supports_multi_quote=True,
+        supports_multi_option_greeks=False,
+        order_rate_limit_per_sec=10,
+        quote_rate_limit_per_sec=5,
     ))
 
     # -- Tradejini --------------------------------------------------------

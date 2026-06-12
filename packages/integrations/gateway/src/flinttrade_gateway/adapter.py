@@ -423,6 +423,10 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
     "kotak": BrokerInfo(
         name="kotak",
         display_name="Kotak Securities",
+        # Catalogue id "kotak" is the OpenAlgo bridge plugin; the NATIVE
+        # FlintTrade adapter for the same broker registers as "kotakneo"
+        # (brokers/native_factory.py) — alias the two when surfacing natives
+        # in the catalogue UI.
         auth_flow=AuthFlowType.totp_form,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
@@ -505,6 +509,10 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
     "indmoney": BrokerInfo(
         name="indmoney",
         display_name="INDmoney",
+        # ``api_key_direct`` is shorthand for the INDstocks dashboard access
+        # token; unlike a persistent API key it expires daily (24 h), so the
+        # native adapter (brokers/indmoney.py) treats it as a renewable
+        # session credential.
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),

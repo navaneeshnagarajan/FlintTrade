@@ -97,10 +97,11 @@ SOP.md
 REPOS.md
 
 # === Design-system scratch (AI-generated mockup specs, not consumer-facing) ===
-# The actual living design system lives inside packages/terminal/ — Tailwind v4
-# CSS variables, shadcn/ui components, the three cinematic themes, and Glass
-# Adaptive utilities. The standalone /design-system/ folder is a scratchpad
-# for AI-generated design-rule outputs and should not ship with the public repo.
+# The actual living design system is the shared package at
+# packages/core/design-system/ (tokens, brand primitives, React UI kit),
+# consumed by apps/terminal and apps/site. The standalone /design-system/
+# folder is a scratchpad for AI-generated design-rule outputs and should
+# not ship with the public repo.
 /design-system/
 
 # === Agent context is TRACKED (public repo, open for contributions) ===

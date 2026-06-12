@@ -589,8 +589,14 @@ def _native_activation_checks(
         attest_status = {}
 
     def attest_ok(broker_id: str) -> bool:
-        pin = SDK_PIN_BY_BROKER.get(broker_id)
-        return pin is not None and attest_status.get(pin) == STATUS_OK
+        if broker_id not in SDK_PIN_BY_BROKER:
+            return False
+        pin = SDK_PIN_BY_BROKER[broker_id]
+        if pin is None:
+            # REST-only native (no third-party SDK, e.g. IndMoney): nothing to
+            # attest — activation is gated by stored credentials alone.
+            return True
+        return attest_status.get(pin) == STATUS_OK
 
     credentialled: set[str] = set()
     if credential_store is not None:
