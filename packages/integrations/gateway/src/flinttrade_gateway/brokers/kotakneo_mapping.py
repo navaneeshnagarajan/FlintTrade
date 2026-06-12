@@ -11,10 +11,18 @@ NEO is an OMS-style API: order/position records use terse abbreviated keys
 reported as cumulative buy/sell quantities + amounts rather than a single net
 line, so the net quantity, average price and realised P&L are derived here
 (``Positions.md``); the unrealised leg is left to merge from a live quote.
+
+Streaming: the HSM market feed and HSI order feed deliver JSON frames whose
+key vocabulary is the SDK's ``stock_key_mapping`` / ``index_key_mapping``
+(``settings.py``) — the decoders here (``decode_kotak_feed`` /
+``decode_kotak_order_feed``) normalise those frames so the adapter's
+``stream()`` / ``order_stream()`` stay SDK-free and unit-testable against
+synthetic frames.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 # Exchange -> NEO exchange-segment code (from settings.exchange_segment).
@@ -49,6 +57,62 @@ KOTAK_TO_ORDER_TYPE = {"MKT": "MARKET", "L": "LIMIT", "SL": "SL", "SL-M": "SL-M"
 # NEO transaction type is single-letter.
 SIDE_TO_KOTAK = {"BUY": "B", "SELL": "S"}
 KOTAK_TO_SIDE = {"B": "BUY", "S": "SELL"}
+
+# Order validity codes (Place_Order.md): DAY everywhere, IOC (not for CO),
+# GTC/GTD (MCX only), EOS (BSE + MCX only).
+VALIDITY_ALLOWED = frozenset({"DAY", "IOC", "GTC", "EOS", "GTD"})
+
+# limits() filter enums (settings.segment_limits / exchange_limits / product_limits).
+LIMITS_SEGMENTS = frozenset({"CASH", "CUR", "FO", "ALL"})
+LIMITS_EXCHANGES = frozenset({"NSE", "BSE", "ALL"})
+LIMITS_PRODUCTS = frozenset({"CNC", "MIS", "NRML", "ALL"})
+
+# REST quotes quote_type values (Quotes.md).
+QUOTE_TYPES = frozenset({"all", "depth", "ohlc", "ltp", "oi", "52w", "circuit_limits", "scrip_details"})
+
+# HSM live-feed terse keys -> long names (settings.stock_key_mapping).
+STOCK_FEED_KEYS = {
+    "ltt": "last_traded_time",
+    "v": "volume",
+    "ltp": "last_traded_price",
+    "ltq": "last_traded_quantity",
+    "tbq": "total_buy_quantity",
+    "tsq": "total_sell_quantity",
+    "bp": "buy_price",
+    "sp": "sell_price",
+    "bq": "buy_quantity",
+    "bs": "sell_quantity",
+    "ap": "average_price",
+    "oi": "open_interest",
+    "lo": "low",
+    "h": "high",
+    "lcl": "lower_circuit_limit",
+    "ucl": "upper_circuit_limit",
+    "yh": "52week_high",
+    "yl": "52week_low",
+    "op": "open",
+    "c": "close",
+    "cng": "change",
+    "nc": "net_change_percentage",
+    "to": "total_traded_value",
+    "tk": "instrument_token",
+    "e": "exchange_segment",
+    "ts": "trading_symbol",
+}
+
+# HSM index-feed terse keys -> long names (settings.index_key_mapping).
+INDEX_FEED_KEYS = {
+    "iv": "last_traded_price",
+    "ic": "prev_day_close",
+    "tvalue": "timestamp",
+    "highPrice": "high",
+    "lowPrice": "low",
+    "openingPrice": "open",
+    "cng": "change",
+    "nc": "net_change_percentage",
+    "tk": "instrument_token",
+    "e": "exchange_segment",
+}
 
 
 class KotakNeoMappingError(ValueError):
@@ -102,30 +166,14 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
 
     # Advanced varieties: NEO places bracket (BO) and cover (CO) orders through
     # the SAME place_order call, overriding the product code and attaching the
-    # target / stop-loss / trailing legs. NEO has no iceberg/slice endpoint (only
+    # target / stop-loss / trailing legs; an AMO is a regular order with the
+    # ``amo`` flag set. NEO has no iceberg/slice endpoint (only
     # disclosed_quantity), so that variety is refused.
     variety = str(getattr(order, "variety", "regular")).lower()
-    if variety in ("bracket", "cover"):
-        target = _num(getattr(order, "target_price", 0))
-        stop_loss = _num(getattr(order, "stop_loss_price", 0))
-        if variety == "cover":
-            target = 0.0  # a cover order has only a stop-loss leg
-        if target <= 0 and stop_loss <= 0:
-            raise KotakNeoMappingError("A bracket/cover order needs a target_price or stop_loss_price")
-        # NEO leg-type / flag enums are forwarded verbatim to the OMS (slt/sot/tlt),
-        # so they MUST match the documented values: square_off_type/stop_loss_type
-        # ∈ {"Absolute","Ticks"} and trailing_stop_loss ∈ {"Y","N"} (Place_Order.md).
-        # Sending "abs"/"YES" silently drops the protective legs on a live order.
-        params["product"] = "BO" if variety == "bracket" else "CO"
-        params["stop_loss_value"] = str(stop_loss)
-        params["stop_loss_type"] = "Absolute"
-        if target > 0:
-            params["square_off_value"] = str(target)
-            params["square_off_type"] = "Absolute"
-        trailing = _num(getattr(order, "trailing_jump", 0))
-        if trailing > 0:
-            params["trailing_stop_loss"] = "Y"
-            params["trailing_sl_value"] = str(trailing)
+    if variety == "amo":
+        params["amo"] = "YES"
+    elif variety in ("bracket", "cover"):
+        _apply_variety_legs(order, variety, params)
     elif variety not in ("regular", ""):
         raise KotakNeoMappingError(f"Kotak Neo does not support order variety {variety!r}")
 
@@ -134,18 +182,96 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
     return params
 
 
+def _apply_variety_legs(order: Any, variety: str, params: dict[str, Any]) -> None:
+    """Attach bracket/cover legs onto ``params`` (shared by place + margin).
+
+    NEO leg-type / flag enums are forwarded verbatim to the OMS (slt/sot/tlt),
+    so they MUST match the documented values: square_off_type/stop_loss_type
+    ∈ {"Absolute","Ticks"} and trailing_stop_loss ∈ {"Y","N"} (Place_Order.md).
+    Sending "abs"/"YES" silently drops the protective legs on a live order.
+    """
+    target = _num(getattr(order, "target_price", 0))
+    stop_loss = _num(getattr(order, "stop_loss_price", 0))
+    if variety == "cover":
+        target = 0.0  # a cover order has only a stop-loss leg
+    if target <= 0 and stop_loss <= 0:
+        raise KotakNeoMappingError("A bracket/cover order needs a target_price or stop_loss_price")
+    params["product"] = "BO" if variety == "bracket" else "CO"
+    params["stop_loss_value"] = str(stop_loss)
+    params["stop_loss_type"] = "Absolute"
+    if target > 0:
+        params["square_off_value"] = str(target)
+        params["square_off_type"] = "Absolute"
+    trailing = _num(getattr(order, "trailing_jump", 0))
+    if trailing > 0:
+        params["trailing_stop_loss"] = "Y"
+        params["trailing_sl_value"] = str(trailing)
+
+
 def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
-    """Translate modify ``changes`` into ``NeoAPI.modify_order`` kwargs."""
+    """Translate modify ``changes`` into ``NeoAPI.modify_order`` kwargs.
+
+    The base surface (order-id method, ``Modify_Order.md`` "Method 2") is always
+    emitted; the quick-method extras (``instrument_token`` / ``exchange_segment``
+    / ``product`` / ``trading_symbol`` / ``transaction_type``) plus the ``amo`` /
+    ``market_protection`` / ``filled_quantity`` / ``dd`` flags are forwarded only
+    when present in ``changes``, so the SDK picks the right modification path.
+    """
     ptype = _norm(changes.get("pricetype", changes.get("order_type", "LIMIT")))
-    return {
+    validity = str(changes.get("validity", "DAY")).upper()
+    if validity not in VALIDITY_ALLOWED:
+        raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
+    params: dict[str, Any] = {
         "order_id": str(order_id),
         "order_type": ORDER_TYPE_TO_KOTAK.get(ptype, str(changes.get("order_type", "L"))),
         "price": str(_num(changes.get("price", 0))),
         "quantity": str(int(_num(changes.get("quantity", 0), 0))),
-        "validity": str(changes.get("validity", "DAY")).upper(),
+        "validity": validity,
         "trigger_price": str(_num(changes.get("trigger_price", 0))),
         "disclosed_quantity": str(int(_num(changes.get("disclosed_quantity", 0), 0))),
     }
+    if changes.get("amo") is not None:
+        amo = changes["amo"]
+        params["amo"] = ("YES" if amo else "NO") if isinstance(amo, bool) else _norm(amo)
+    if changes.get("instrument_token"):
+        params["instrument_token"] = str(changes["instrument_token"])
+    if changes.get("exchange_segment"):
+        seg = _norm(changes["exchange_segment"])
+        params["exchange_segment"] = EXCHANGE_TO_KOTAK.get(seg, str(changes["exchange_segment"]))
+    if changes.get("product"):
+        prod = _norm(changes["product"])
+        params["product"] = PRODUCT_TO_KOTAK.get(prod, prod)
+    if changes.get("trading_symbol"):
+        params["trading_symbol"] = str(changes["trading_symbol"])
+    if changes.get("transaction_type") or changes.get("action"):
+        side = _norm(changes.get("transaction_type", changes.get("action")))
+        params["transaction_type"] = SIDE_TO_KOTAK.get(side, side)
+    if changes.get("filled_quantity") is not None:
+        params["filled_quantity"] = str(int(_num(changes["filled_quantity"], 0)))
+    if changes.get("market_protection") is not None:
+        params["market_protection"] = str(changes["market_protection"])
+    if changes.get("dd"):
+        params["dd"] = str(changes["dd"])
+    return params
+
+
+def ensure_ok(resp: Any) -> Any:
+    """Raise ``KotakNeoMappingError`` if ``resp`` is a NEO error envelope.
+
+    The neo-api-client returns errors as data, never raises: ``{"Error": ...}``
+    (SDK exception wrapper), ``{"Error Message": ...}`` (2FA not complete),
+    ``{"error": [...]}`` (validation) and ``{"stat": "Not_Ok", "errMsg": ...}``
+    (OMS reject). Writes MUST surface those instead of silently succeeding.
+    """
+    if isinstance(resp, dict):
+        for key in ("Error", "Error Message", "error"):
+            if resp.get(key):
+                raise KotakNeoMappingError(f"Kotak Neo error: {resp[key]!r}")
+        if str(resp.get("stat", "Ok")).lower() not in ("ok", ""):
+            raise KotakNeoMappingError(
+                f"Kotak Neo rejected the request: {resp.get('errMsg', resp)!r}"
+            )
+    return resp
 
 
 def extract_order_id(resp: dict[str, Any]) -> str:
@@ -172,7 +298,12 @@ def _exchange_of(d: dict[str, Any]) -> str:
 
 
 def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
-    """Normalise a NEO order-report record."""
+    """Normalise a NEO order-report / order-history record.
+
+    Both surfaces share the terse OMS vocabulary (``Order_report.md`` /
+    ``Order_history.md``); history rows carry ``exchTmstp``+``dclQty`` where the
+    report uses ``ordDtTm``+``dscQty``, so each field falls back across both.
+    """
     return {
         "orderid": str(d.get("nOrdNo", "")),
         "status": d.get("ordSt", d.get("stat", "")),
@@ -186,7 +317,29 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "trigger_price": str(d.get("trgPrc", 0)),
         "filled_quantity": str(d.get("fldQty", 0)),
         "average_price": str(d.get("avgPrc", 0)),
+        "timestamp": str(d.get("ordDtTm", d.get("exchTmstp", d.get("flDtTm", "")))),
+        "validity": str(d.get("vldt", d.get("ordDur", ""))),
+        "disclosed_quantity": str(d.get("dscQty", d.get("dclQty", 0))),
+        "rejection_reason": "" if str(d.get("rejRsn", "")) in ("--", "NA") else str(d.get("rejRsn", "")),
+        "exchange_order_id": "" if str(d.get("exOrdId", d.get("exchOrdId", ""))) == "NA"
+        else str(d.get("exOrdId", d.get("exchOrdId", ""))),
+        "tag": str(d.get("GuiOrdId", "") or ""),
     }
+
+
+def order_history_rows(resp: Any) -> list[dict[str, Any]]:
+    """Unwrap the doubly-nested ``order_history`` envelope into raw OMS rows.
+
+    The SDK returns ``{"data": {"stat": "Ok", "stCode": 200, "data": [rows]}}``
+    (``Order_history.md``); some gateway builds skip the outer wrapper. Rows are
+    the order's state transitions, OMS-newest-first.
+    """
+    if not isinstance(resp, dict):
+        return []
+    inner = resp.get("data", resp)
+    if isinstance(inner, dict):
+        inner = inner.get("data", [])
+    return [r for r in inner if isinstance(r, dict)] if isinstance(inner, list) else []
 
 
 def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:
@@ -320,7 +473,13 @@ def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
-    """Build ``NeoAPI.margin_required`` kwargs from an ``Order`` (pre-trade)."""
+    """Build ``NeoAPI.margin_required`` kwargs from an ``Order`` (pre-trade).
+
+    Mirrors the place-order translation: a bracket/cover variety overrides the
+    product to BO/CO and carries its stop-loss / target / trailing legs so the
+    estimate covers the whole order, and a stop order forwards its
+    ``trigger_price`` (``Margin_Required.md``).
+    """
     side = _norm(order.action)
     if side not in SIDE_TO_KOTAK:
         raise KotakNeoMappingError(f"Unsupported action {side!r}")
@@ -333,7 +492,7 @@ def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
     exchange = _norm(order.exchange)
     if exchange not in EXCHANGE_TO_KOTAK:
         raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
-    return {
+    params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
         "price": str(_num(getattr(order, "price", 0))),
         "order_type": ORDER_TYPE_TO_KOTAK[ptype],
@@ -342,6 +501,25 @@ def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
         "instrument_token": str(trading_symbol),
         "transaction_type": SIDE_TO_KOTAK[side],
     }
+    trigger = _num(getattr(order, "trigger_price", 0))
+    if trigger > 0:
+        params["trigger_price"] = str(trigger)
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety in ("bracket", "cover"):
+        _apply_variety_legs(order, variety, params)
+    return params
+
+
+def to_limits_params(segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict[str, str]:
+    """Validate + build the ``NeoAPI.limits`` filter kwargs (``Limits.md``)."""
+    seg, exch, prod = _norm(segment, "ALL"), _norm(exchange, "ALL"), _norm(product, "ALL")
+    if seg not in LIMITS_SEGMENTS:
+        raise KotakNeoMappingError(f"Unsupported limits segment {segment!r}")
+    if exch not in LIMITS_EXCHANGES:
+        raise KotakNeoMappingError(f"Unsupported limits exchange {exchange!r}")
+    if prod not in LIMITS_PRODUCTS:
+        raise KotakNeoMappingError(f"Unsupported limits product {product!r}")
+    return {"segment": seg, "exchange": exch, "product": prod}
 
 
 def from_kotak_margin(resp: dict[str, Any]) -> dict[str, Any]:
@@ -403,6 +581,205 @@ def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
         "prev_close": _num(g("close", "c")),
         "oi": int(_num(g("open_interest", "oi"))),
     }
+
+
+def from_kotak_scrip_master(resp: Any) -> dict[str, Any]:
+    """Normalise a NEO ``scrip_master`` response (``Scrip_Master.md``).
+
+    The unfiltered call returns ``{"filesPaths": [...], "baseFolder": "..."}``;
+    a segment-filtered call returns the single CSV URL as a bare string.
+    """
+    if isinstance(resp, str):
+        return {"base_folder": "", "files": [resp]}
+    if isinstance(resp, dict):
+        files = resp.get("filesPaths", [])
+        return {
+            "base_folder": str(resp.get("baseFolder", "")),
+            "files": [str(f) for f in files] if isinstance(files, list) else [],
+        }
+    return {"base_folder": "", "files": []}
+
+
+def _depth_levels(rec: dict[str, Any], price_keys: list[str], qty_keys: list[str], ord_keys: list[str]) -> list[dict]:
+    return [
+        {
+            "price": _num(rec.get(p, 0)),
+            "quantity": int(_num(rec.get(q, 0))),
+            "orders": int(_num(rec.get(o, 0))),
+        }
+        for p, q, o in zip(price_keys, qty_keys, ord_keys)
+    ]
+
+
+def from_kotak_depth(rec: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one NEO market-depth record into FlintTrade ``Depth`` fields.
+
+    Handles BOTH shapes: the SDK's pre-shaped ``{"depth": {"buy": [...],
+    "sell": [...]}}`` (``NeoWebSocket.depth_resp_mapping``) and the raw terse
+    frame (``bp..bp4`` / ``sp..sp4`` / ``bq..bq4`` / ``bs..bs4`` /
+    ``bno1..5`` / ``sno1..5`` — ``webSocket.md`` "For Depth").
+    """
+    seg = str(rec.get("exchange_segment", rec.get("e", "")) or "")
+    out: dict[str, Any] = {
+        "symbol": str(rec.get("trading_symbol", rec.get("ts", "")) or ""),
+        "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
+        "token": str(rec.get("instrument_token", rec.get("tk", "")) or ""),
+    }
+    depth = rec.get("depth")
+    if isinstance(depth, dict):
+        out["bids"] = [b for b in depth.get("buy", []) if isinstance(b, dict)]
+        out["asks"] = [a for a in depth.get("sell", []) if isinstance(a, dict)]
+        return out
+    out["bids"] = _depth_levels(
+        rec,
+        ["bp", "bp1", "bp2", "bp3", "bp4"],
+        ["bq", "bq1", "bq2", "bq3", "bq4"],
+        ["bno1", "bno2", "bno3", "bno4", "bno5"],
+    )
+    out["asks"] = _depth_levels(
+        rec,
+        ["sp", "sp1", "sp2", "sp3", "sp4"],
+        ["bs", "bs1", "bs2", "bs3", "bs4"],
+        ["sno1", "sno2", "sno3", "sno4", "sno5"],
+    )
+    return out
+
+
+def subscription_flags(mode: str) -> tuple[bool, bool]:
+    """Map a FlintTrade subscription mode to NEO's ``(isIndex, isDepth)`` pair.
+
+    HSM subscription types (``settings.ReqTypeValues``): scrip feed ``mws``
+    (LTP/QUOTE), depth feed ``dps`` (DEPTH/FULL) and index feed ``ifs`` (INDEX).
+    """
+    m = _norm(mode, "FULL")
+    if m in ("LTP", "QUOTE"):
+        return False, False
+    if m in ("FULL", "DEPTH"):
+        return False, True
+    if m == "INDEX":
+        return True, False
+    raise KotakNeoMappingError(f"Unsupported subscription mode {mode!r}")
+
+
+def _feed_records(frame: Any) -> list[dict[str, Any]]:
+    """Extract the record list from one HSM feed delivery (tolerant)."""
+    if isinstance(frame, str):
+        try:
+            frame = json.loads(frame)
+        except ValueError:
+            return []
+    if isinstance(frame, dict):
+        if frame.get("type") in ("stock_feed", "quotes"):
+            frame = frame.get("data", [])
+        elif "tk" in frame or "iv" in frame:
+            frame = [frame]
+        else:
+            return []  # connection ack / unsub ack / heartbeat
+    if not isinstance(frame, list):
+        return []
+    return [r for r in frame if isinstance(r, dict)]
+
+
+def _fv(rec: dict[str, Any], terse: str, key_map: dict[str, str], default: Any = 0) -> Any:
+    """Read a feed field by its terse key, falling back to the mapped long name.
+
+    Raw HSM frames carry the terse keys; SDK-formatted deliveries
+    (``quote_resp_mapper``) carry the long names from the same tables.
+    """
+    if terse in rec:
+        return rec[terse]
+    return rec.get(key_map.get(terse, terse), default)
+
+
+def decode_kotak_feed(frame: Any) -> list[dict[str, Any]]:
+    """Decode one HSM market-feed delivery into normalised tick dicts.
+
+    Accepts what ``NeoWebSocket`` hands to ``on_message`` (``{"type":
+    "stock_feed"|"quotes", "data": [...]}``), a bare record list, or a JSON
+    string; connection/unsubscribe acks decode to ``[]``. Each tick dict
+    carries ``kind`` (``"quote"`` / ``"index"`` / ``"depth"``); depth ticks
+    embed the ``from_kotak_depth`` book under ``"depth"``.
+    """
+    ticks: list[dict[str, Any]] = []
+    for rec in _feed_records(frame):
+        if rec.get("request_type") == "cn" or rec.get("type") == "cn":
+            continue
+        seg = str(rec.get("e", rec.get("exchange_segment", "")) or "")
+        base = {
+            "symbol": str(rec.get("ts", rec.get("trading_symbol", "")) or ""),
+            "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
+            "token": str(rec.get("tk", rec.get("instrument_token", "")) or ""),
+        }
+        if "iv" in rec or rec.get("name") == "if":
+            ticks.append({
+                **base,
+                "kind": "index",
+                "ltp": _num(_fv(rec, "iv", INDEX_FEED_KEYS)),
+                "prev_close": _num(_fv(rec, "ic", INDEX_FEED_KEYS)),
+                "open": _num(_fv(rec, "openingPrice", INDEX_FEED_KEYS)),
+                "high": _num(_fv(rec, "highPrice", INDEX_FEED_KEYS)),
+                "low": _num(_fv(rec, "lowPrice", INDEX_FEED_KEYS)),
+                "volume": 0,
+                "bid": 0.0,
+                "ask": 0.0,
+                "oi": 0,
+                "timestamp": str(_fv(rec, "tvalue", INDEX_FEED_KEYS, "") or ""),
+            })
+        elif rec.get("name") == "dp" or ("bp1" in rec and "ltp" not in rec):
+            book = from_kotak_depth(rec)
+            bids, asks = book.get("bids", []), book.get("asks", [])
+            ticks.append({
+                **base,
+                "kind": "depth",
+                "ltp": 0.0,
+                "volume": 0,
+                "bid": _num(bids[0]["price"]) if bids else 0.0,
+                "ask": _num(asks[0]["price"]) if asks else 0.0,
+                "oi": 0,
+                "timestamp": "",
+                "depth": book,
+            })
+        else:
+            ticks.append({
+                **base,
+                "kind": "quote",
+                "ltp": _num(_fv(rec, "ltp", STOCK_FEED_KEYS)),
+                "volume": int(_num(_fv(rec, "v", STOCK_FEED_KEYS))),
+                "bid": _num(_fv(rec, "bp", STOCK_FEED_KEYS)),
+                "ask": _num(_fv(rec, "sp", STOCK_FEED_KEYS)),
+                "oi": int(_num(_fv(rec, "oi", STOCK_FEED_KEYS))),
+                "timestamp": str(_fv(rec, "ltt", STOCK_FEED_KEYS, "") or ""),
+            })
+    return ticks
+
+
+def decode_kotak_order_feed(frame: Any) -> dict[str, Any] | None:
+    """Decode one HSI order-feed delivery into a normalised order update.
+
+    Accepts ``{"type": "order_feed", "data": <payload>}`` (what ``NeoWebSocket``
+    hands to ``on_message``), a bare payload dict, or a JSON string. Connection
+    acks (``{"type": "cn"|"CONNECTION"}``) and undecodable frames return
+    ``None``. An order payload is normalised via ``from_kotak_order`` with the
+    raw record preserved under ``"raw"``.
+    """
+    payload = frame
+    if isinstance(payload, dict) and payload.get("type") == "order_feed":
+        payload = payload.get("data")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("type", "")).lower() in ("cn", "connection", "hb"):
+        return None
+    record = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(record, dict) or not (record.get("nOrdNo") or record.get("ordSt")):
+        return None
+    update = from_kotak_order(record)
+    update["raw"] = record
+    return update
 
 
 def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:
