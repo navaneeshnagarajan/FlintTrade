@@ -9,7 +9,7 @@ and instrument resolution; keep them in lock-step with ``DHAN_CAPABILITIES``.
 from __future__ import annotations
 
 import struct
-from typing import Any
+from typing import Any, Callable
 
 # Canonical order type -> Dhan order_type.
 ORDER_TYPE_MAP = {
@@ -335,6 +335,406 @@ def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# Forever (GTT) order management — /forever/orders (forever.md)
+# ---------------------------------------------------------------------------
+
+# A forever order has an entry leg; an OCO forever order adds a target leg.
+FOREVER_ORDER_FLAGS = ("SINGLE", "OCO")
+
+
+def to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Translate modify ``changes`` into ``dhanhq.modify_forever`` keyword args.
+
+    Dhan's ``PUT /forever/orders/{order-id}`` allows changing price, quantity,
+    order type, disclosed quantity, trigger price and validity per leg
+    (forever.md "Modify Forever Order").
+    """
+    flag = str(changes.get("order_flag", "SINGLE")).upper()
+    if flag not in FOREVER_ORDER_FLAGS:
+        raise DhanMappingError(f"Forever order_flag must be SINGLE or OCO, got {flag!r}")
+    ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    return {
+        "order_id": str(order_id),
+        "order_flag": flag,
+        "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
+        "leg_name": str(changes.get("leg_name", "ENTRY_LEG")),
+        "quantity": int(_num(changes.get("quantity", 0), 0)),
+        "price": _num(changes.get("price", 0)),
+        "trigger_price": _num(changes.get("trigger_price", 0)),
+        "disclosed_quantity": int(_num(changes.get("disclosed_quantity", 0), 0)),
+        "validity": VALIDITY_MAP.get(str(changes.get("validity", "DAY")).upper(), "DAY"),
+    }
+
+
+def from_dhan_forever_order(d: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one record of the ``GET /forever/orders`` list response."""
+    seg = d.get("exchangeSegment", "")
+    return {
+        "orderid": str(d.get("orderId", "")),
+        "status": d.get("orderStatus", ""),
+        "order_flag": d.get("orderFlag", ""),
+        "symbol": d.get("tradingSymbol", ""),
+        "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
+        "action": d.get("transactionType", ""),
+        "pricetype": DHAN_TO_ORDER_TYPE.get(d.get("orderType", ""), d.get("orderType", "")),
+        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
+        "quantity": str(d.get("quantity", 0)),
+        "price": str(d.get("price", 0)),
+        "trigger_price": str(d.get("triggerPrice", 0)),
+        "leg_name": d.get("legName", ""),
+        "created_at": str(d.get("createTime", "")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Super order management — /super/orders (super-order.md)
+# ---------------------------------------------------------------------------
+
+SUPER_ORDER_LEGS = ("ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG")
+
+
+def to_modify_super_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Translate modify ``changes`` into ``dhanhq.modify_super_order`` kwargs (leg-aware).
+
+    The leg name selects which fields Dhan accepts: ENTRY_LEG takes all of them,
+    TARGET_LEG takes only ``targetPrice``, STOP_LOSS_LEG takes ``stopLossPrice``
+    + ``trailingJump`` — the SDK builds the per-leg payload from these kwargs.
+    """
+    leg = str(changes.get("leg_name", "ENTRY_LEG")).upper()
+    if leg not in SUPER_ORDER_LEGS:
+        raise DhanMappingError(f"Super order leg_name must be one of {SUPER_ORDER_LEGS}, got {leg!r}")
+    ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    return {
+        "order_id": str(order_id),
+        "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
+        "leg_name": leg,
+        "quantity": int(_num(changes.get("quantity", 0), 0)),
+        "price": _num(changes.get("price", 0)),
+        "targetPrice": _num(changes.get("target_price", changes.get("targetPrice", 0))),
+        "stopLossPrice": _num(changes.get("stop_loss_price", changes.get("stopLossPrice", 0))),
+        "trailingJump": _num(changes.get("trailing_jump", changes.get("trailingJump", 0))),
+    }
+
+
+def from_dhan_super_order(d: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one record of the ``GET /super/orders`` list response.
+
+    Target / stop-loss legs are nested under the entry order as ``legDetails``
+    (super-order.md "Super Order List"); they are surfaced as ``legs``.
+    """
+    seg = d.get("exchangeSegment", "")
+    legs = d.get("legDetails") or []
+    return {
+        "orderid": str(d.get("orderId", "")),
+        "status": d.get("orderStatus", ""),
+        "symbol": d.get("tradingSymbol", ""),
+        "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
+        "action": d.get("transactionType", ""),
+        "pricetype": DHAN_TO_ORDER_TYPE.get(d.get("orderType", ""), d.get("orderType", "")),
+        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
+        "quantity": str(d.get("quantity", 0)),
+        "price": str(d.get("price", 0)),
+        "target_price": str(d.get("targetPrice", 0)),
+        "stop_loss_price": str(d.get("stopLossPrice", 0)),
+        "trailing_jump": str(d.get("trailingJump", 0)),
+        "filled_quantity": str(d.get("filledQty", 0)),
+        "average_price": str(d.get("averageTradedPrice", 0)),
+        "legs": [leg for leg in legs if isinstance(leg, dict)],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Position conversion — POST /positions/convert (portfolio.md)
+# ---------------------------------------------------------------------------
+
+POSITION_TYPES = ("LONG", "SHORT", "CLOSED")
+
+
+def _to_dhan_product(value: Any) -> str:
+    """Map a canonical (or already-Dhan) product name to Dhan's productType."""
+    raw = str(value).upper()
+    if raw in PRODUCT_MAP:
+        return PRODUCT_MAP[raw]
+    if raw in PRODUCT_MAP.values():
+        return raw
+    raise DhanMappingError(f"Unsupported product {raw!r}")
+
+
+def to_convert_position_kwargs(req: dict[str, Any], security_id: str) -> dict[str, Any]:
+    """Translate a convert-position request into ``dhanhq.convert_position`` kwargs.
+
+    ``req`` carries ``from_product`` / ``to_product`` (canonical MIS/CNC/NRML or
+    Dhan INTRADAY/CNC/MARGIN), ``position_type`` (LONG/SHORT/CLOSED),
+    ``exchange`` and ``quantity`` (portfolio.md "Convert Position").
+    """
+    position_type = str(req.get("position_type", "LONG")).upper()
+    if position_type not in POSITION_TYPES:
+        raise DhanMappingError(f"position_type must be one of {POSITION_TYPES}, got {position_type!r}")
+    qty = int(_num(req.get("quantity", req.get("convert_qty", 0)), 0))
+    if qty <= 0:
+        raise DhanMappingError("convert_position needs a positive quantity")
+    try:
+        segment = to_dhan_segment(str(req.get("exchange", "NSE")))
+    except KeyError as exc:
+        raise DhanMappingError(f"No Dhan segment for exchange {req.get('exchange')!r}") from exc
+    return {
+        "from_product_type": _to_dhan_product(req.get("from_product", req.get("from_product_type", ""))),
+        "exchange_segment": segment,
+        "position_type": position_type,
+        "security_id": str(security_id),
+        "convert_qty": qty,
+        "to_product_type": _to_dhan_product(req.get("to_product", req.get("to_product_type", ""))),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Conditional Trigger Orders (v2.5) — /alerts/orders (conditional-trigger.md)
+# ---------------------------------------------------------------------------
+
+CONDITIONAL_TRIGGER_ENDPOINT = "/alerts/orders"
+# Hard-required condition keys per conditional-trigger.md "Place Conditional
+# Trigger" parameters (indicatorName/comparingValue are conditionally required
+# depending on comparisonType, so the broker validates those).
+_CONDITION_REQUIRED_KEYS = ("comparisonType", "exchangeSegment", "securityId", "operator")
+
+
+def to_conditional_order_leg(order: Any, security_id: str) -> dict[str, Any]:
+    """Translate one order leg of a conditional trigger into Dhan's wire shape.
+
+    Field names follow conditional-trigger.md exactly (note ``discQuantity``,
+    not ``disclosedQuantity``, and string-typed price fields).
+    """
+    core = _validated_core(order, security_id)
+    return {
+        "transactionType": core["transaction_type"],
+        "exchangeSegment": core["exchange_segment"],
+        "productType": core["product_type"],
+        "orderType": core["order_type"],
+        "securityId": core["security_id"],
+        "quantity": core["quantity"],
+        "validity": str(getattr(order, "validity", "DAY") or "DAY").upper(),
+        "price": str(core["price"]),
+        "discQuantity": str(int(_num(getattr(order, "disclosed_quantity", 0), 0))),
+        "triggerPrice": str(_num(getattr(order, "trigger_price", 0))),
+    }
+
+
+def to_conditional_trigger_payload(condition: dict[str, Any], order_legs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build the ``POST/PUT /alerts/orders`` request body (condition + orders).
+
+    Raises :class:`DhanMappingError` when a hard-required condition key is
+    missing or no order legs are supplied — a trigger with nothing to fire is
+    meaningless and must fail closed before reaching the broker.
+    """
+    if not isinstance(condition, dict):
+        raise DhanMappingError("A conditional trigger needs a condition dict")
+    missing = [k for k in _CONDITION_REQUIRED_KEYS if not condition.get(k)]
+    if missing:
+        raise DhanMappingError(f"Conditional trigger condition missing required keys: {missing}")
+    if not order_legs:
+        raise DhanMappingError("A conditional trigger needs at least one order leg")
+    return {"condition": dict(condition), "orders": list(order_legs)}
+
+
+def extract_alert_id(resp: Any) -> str:
+    """Pull the alert id out of a conditional-trigger place/modify/cancel response."""
+    data = unwrap(resp)
+    if isinstance(data, dict):
+        alert_id = data.get("alertId") or data.get("alert_id")
+        if alert_id:
+            return str(alert_id)
+    raise DhanMappingError(f"No alert id in Dhan response: {resp}")
+
+
+def from_dhan_conditional_trigger(d: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one conditional-trigger record (get by id / list responses)."""
+    return {
+        "alert_id": str(d.get("alertId", "")),
+        "status": d.get("alertStatus", ""),
+        "created_at": str(d.get("createdTime", "")),
+        "triggered_at": str(d.get("triggeredTime") or ""),
+        "last_price": str(d.get("lastPrice", "")),
+        "condition": d.get("condition") if isinstance(d.get("condition"), dict) else {},
+        "orders": [o for o in (d.get("orders") or []) if isinstance(o, dict)],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Trader's Control (v2.5) — /pnlExit + Exit All (traders-control.md, portfolio.md)
+# ---------------------------------------------------------------------------
+
+PNL_EXIT_ENDPOINT = "/pnlExit"
+EXIT_ALL_ENDPOINT = "/positions"  # DELETE /positions = Exit All (portfolio.md)
+PNL_EXIT_PRODUCT_TYPES = ("INTRADAY", "DELIVERY")
+
+
+def to_pnl_exit_payload(
+    profit_value: float,
+    loss_value: float,
+    product_types: list[str] | None = None,
+    enable_kill_switch: bool = False,
+) -> dict[str, Any]:
+    """Build the ``POST /pnlExit`` request body (traders-control.md "P&L Based Exit").
+
+    ``productType`` accepts INTRADAY / DELIVERY (canonical MIS / CNC are
+    translated). At least one of profit/loss must be positive — a P&L exit with
+    no thresholds would configure nothing.
+    """
+    profit = _num(profit_value)
+    loss = _num(loss_value)
+    if profit <= 0 and loss <= 0:
+        raise DhanMappingError("A P&L based exit needs a positive profit_value or loss_value")
+    products: list[str] = []
+    for p in product_types or ["INTRADAY"]:
+        raw = str(p).upper()
+        mapped = {"MIS": "INTRADAY", "CNC": "DELIVERY"}.get(raw, raw)
+        if mapped not in PNL_EXIT_PRODUCT_TYPES:
+            raise DhanMappingError(f"P&L exit productType must be one of {PNL_EXIT_PRODUCT_TYPES}, got {raw!r}")
+        products.append(mapped)
+    return {
+        "profitValue": str(profit),
+        "lossValue": str(loss),
+        "productType": products,
+        "enableKillSwitch": bool(enable_kill_switch),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Expired (rolling) options data — POST /charts/rollingoption
+# ---------------------------------------------------------------------------
+
+EXPIRED_OPTIONS_INTERVALS = (1, 5, 15, 25, 60)
+EXPIRED_OPTIONS_EXPIRY_FLAGS = ("WEEK", "MONTH")
+EXPIRED_OPTIONS_OPTION_TYPES = ("CALL", "PUT")
+EXPIRED_OPTIONS_FIELDS = ("open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot")
+
+
+def to_expired_options_kwargs(req: dict[str, Any], security_id: str) -> dict[str, Any]:
+    """Translate a rolling-options request into ``dhanhq.expired_options_data`` kwargs.
+
+    Validates the documented enums (expired-options-data.md) and fails closed
+    via :class:`DhanMappingError` instead of the SDK's dict-shaped error.
+    """
+    interval = int(_num(req.get("interval", 1), 1))
+    if interval not in EXPIRED_OPTIONS_INTERVALS:
+        raise DhanMappingError(f"Expired-options interval must be one of {EXPIRED_OPTIONS_INTERVALS}, got {interval}")
+    expiry_flag = str(req.get("expiry_flag", "WEEK")).upper()
+    if expiry_flag not in EXPIRED_OPTIONS_EXPIRY_FLAGS:
+        raise DhanMappingError(f"expiry_flag must be WEEK or MONTH, got {expiry_flag!r}")
+    option_type = str(req.get("option_type", req.get("drv_option_type", "CALL"))).upper()
+    if option_type not in EXPIRED_OPTIONS_OPTION_TYPES:
+        raise DhanMappingError(f"option_type must be CALL or PUT, got {option_type!r}")
+    required = [str(f).lower() for f in (req.get("required_data") or list(EXPIRED_OPTIONS_FIELDS))]
+    bad = [f for f in required if f not in EXPIRED_OPTIONS_FIELDS]
+    if bad:
+        raise DhanMappingError(f"required_data fields not in {EXPIRED_OPTIONS_FIELDS}: {bad}")
+    try:
+        segment = to_dhan_segment(str(req.get("exchange", "NFO")))
+    except KeyError as exc:
+        raise DhanMappingError(f"No Dhan segment for exchange {req.get('exchange')!r}") from exc
+    return {
+        "security_id": str(security_id),
+        "exchange_segment": segment,
+        "instrument_type": str(req.get("instrument_type", req.get("instrument", "OPTIDX"))),
+        "expiry_flag": expiry_flag,
+        "expiry_code": int(_num(req.get("expiry_code", 0), 0)),
+        "strike": str(req.get("strike", "ATM")),
+        "drv_option_type": option_type,
+        "required_data": required,
+        "from_date": str(req.get("from_date", req.get("start", ""))),
+        "to_date": str(req.get("to_date", req.get("end", ""))),
+        "interval": interval,
+    }
+
+
+def from_dhan_expired_options(resp: Any) -> dict[str, Any]:
+    """Normalise a ``/charts/rollingoption`` response to ``{"ce": ..., "pe": ...}``.
+
+    Each present leg keeps Dhan's parallel arrays (open/high/low/close/iv/oi/
+    volume/strike/spot/timestamp); an absent leg is None — the caller decides
+    how to frame the series.
+    """
+    data = unwrap(resp)
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        data = data["data"]  # the endpoint nests its payload under a second "data"
+    if not isinstance(data, dict):
+        return {"ce": None, "pe": None}
+    ce = data.get("ce")
+    pe = data.get("pe")
+    return {
+        "ce": ce if isinstance(ce, dict) else None,
+        "pe": pe if isinstance(pe, dict) else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Order-update WebSocket (order-update.md)
+# ---------------------------------------------------------------------------
+
+ORDER_UPDATE_WSS = "wss://api-order-update.dhan.co"
+
+# Order-update Product letter -> canonical product (order-update.md "Product").
+ORDER_UPDATE_PRODUCT = {
+    "C": "CNC",
+    "I": "MIS",
+    "M": "NRML",
+    "F": "MTF",
+    "V": "MIS",  # CO normalises to intraday, matching DHAN_TO_PRODUCT
+    "B": "MIS",  # BO likewise
+}
+ORDER_UPDATE_SIDE = {"B": "BUY", "S": "SELL"}
+ORDER_UPDATE_ORDER_TYPE = {"LMT": "LIMIT", "MKT": "MARKET", "SL": "SL", "SLM": "SL-M"}
+
+
+def order_update_login_payload(client_id: str, access_token: str) -> dict[str, Any]:
+    """Build the order-update WebSocket authorisation message (MsgCode 42)."""
+    return {
+        "LoginReq": {"MsgCode": 42, "ClientId": str(client_id), "Token": str(access_token)},
+        "UserType": "SELF",
+    }
+
+
+def decode_order_update(message: Any) -> dict[str, Any] | None:
+    """Decode one order-update WebSocket frame into a normalised dict.
+
+    Accepts the parsed dict or the raw JSON text. Returns None for frames that
+    are not ``order_alert`` messages (connection acks, unknown types, junk).
+    """
+    if isinstance(message, (str, bytes)):
+        import json  # noqa: PLC0415
+
+        try:
+            message = json.loads(message)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(message, dict) or message.get("Type") != "order_alert":
+        return None
+    d = message.get("Data")
+    if not isinstance(d, dict):
+        return None
+    return {
+        "orderid": str(d.get("OrderNo", "")),
+        "exchange_order_id": str(d.get("ExchOrderNo", "")),
+        "status": str(d.get("Status", "")),
+        "symbol": d.get("Symbol", ""),
+        "exchange": d.get("Exchange", ""),
+        "security_id": str(d.get("SecurityId", "")),
+        "action": ORDER_UPDATE_SIDE.get(str(d.get("TxnType", "")).upper(), str(d.get("TxnType", ""))),
+        "pricetype": ORDER_UPDATE_ORDER_TYPE.get(str(d.get("OrderType", "")).upper(), str(d.get("OrderType", ""))),
+        "product": ORDER_UPDATE_PRODUCT.get(str(d.get("Product", "")).upper(), str(d.get("Product", ""))),
+        "quantity": str(d.get("Quantity", 0)),
+        "filled_quantity": str(d.get("TradedQty", 0)),
+        "remaining_quantity": str(d.get("RemainingQuantity", 0)),
+        "price": str(d.get("Price", 0)),
+        "trigger_price": str(d.get("TriggerPrice", 0)),
+        "average_price": str(d.get("AvgTradedPrice", 0)),
+        "correlation_id": str(d.get("CorrelationId", "")),
+        "updated_at": str(d.get("LastUpdatedTime", "")),
+        "raw": d,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Response parsing (Dhan -> normalised FlintTrade-shaped dicts)
 # ---------------------------------------------------------------------------
 
@@ -541,9 +941,51 @@ def _leg(leg: dict[str, Any], side: str) -> dict[str, Any]:
 # Binary market feed (live tick stream)
 # ---------------------------------------------------------------------------
 
-# Dhan v2 binary feed response codes (first byte of each packet).
+# Dhan v2 binary feed response codes (first byte of each packet). 15/17 are the
+# subscription REQUEST codes which some feed builds echo back; the documented
+# RESPONSE codes (annexure.md "Feed Response Code") are 2 Ticker / 4 Quote /
+# 8 Full — both spellings are decoded.
 DHAN_FEED_TICKER = 15
 DHAN_FEED_QUOTE = 17
+DHAN_FEED_TICKER_RESP = 2
+DHAN_FEED_QUOTE_RESP = 4
+DHAN_FEED_FULL_RESP = 8
+
+# Subscribe-mode -> live-feed RequestCode (marketfeed.py constants: Ticker=15,
+# Quote=17, Full=21; v2 feed accepts exactly these three).
+SUBSCRIBE_MODE_TO_REQUEST_CODE = {
+    "TICKER": 15,
+    "LTP": 15,
+    "QUOTE": 17,
+    "FULL": 21,
+}
+
+# Market-depth feeds (full-market-depth.md): subscribe RequestCode 23 on
+# wss://depth-api-feed.dhan.co/twentydepth (20-level, <=50 instruments/conn) and
+# wss://full-depth-api.dhan.co/twohundreddepth (200-level, 1 instrument/conn).
+DHAN_DEPTH_REQUEST_CODE = 23
+DHAN_DEPTH_BID = 41
+DHAN_DEPTH_ASK = 51
+DHAN_DEPTH_DISCONNECT = 50
+DHAN_DEPTH_LEVELS = (20, 200)
+# Depth header: int16 msg length, byte response code, byte segment, int32
+# security id, uint32 (sequence for 20-level; row count for 200-level).
+_DEPTH_HEADER = struct.Struct("<hBBiI")
+_DEPTH_ROW = struct.Struct("<dII")  # float64 price, uint32 quantity, uint32 orders
+
+
+def subscribe_mode_to_request_code(mode: str) -> int:
+    """Map a canonical subscribe mode (TICKER/QUOTE/FULL) to the feed RequestCode.
+
+    Raises:
+        DhanMappingError: If *mode* is not a Dhan v2 feed mode.
+    """
+    code = SUBSCRIBE_MODE_TO_REQUEST_CODE.get(str(mode).upper())
+    if code is None:
+        raise DhanMappingError(
+            f"Unsupported Dhan feed mode {mode!r} — expected one of {sorted(set(SUBSCRIBE_MODE_TO_REQUEST_CODE))}"
+        )
+    return code
 
 # Feed exchange-segment byte → canonical exchange.
 FEED_SEGMENT_TO_EXCHANGE = {
@@ -558,18 +1000,38 @@ FEED_SEGMENT_TO_EXCHANGE = {
 }
 
 
+def _decode_5_level_depth(blob: bytes) -> list[dict[str, Any]]:
+    """Decode the 100-byte 5-level depth block of a Full packet (<IIHHff x5)."""
+    packet = struct.Struct("<IIHHff")
+    depth: list[dict[str, Any]] = []
+    for i in range(5):
+        bid_qty, ask_qty, bid_orders, ask_orders, bid_price, ask_price = packet.unpack_from(blob, i * packet.size)
+        depth.append(
+            {
+                "bid_quantity": int(bid_qty),
+                "ask_quantity": int(ask_qty),
+                "bid_orders": int(bid_orders),
+                "ask_orders": int(ask_orders),
+                "bid_price": round(bid_price, 2),
+                "ask_price": round(ask_price, 2),
+            }
+        )
+    return depth
+
+
 def decode_dhan_tick(data: bytes) -> dict[str, Any] | None:
     """Decode one Dhan binary market-feed packet into a normalised tick dict.
 
-    Dhan streams a packed binary frame whose first byte is a response code
-    (15 = Ticker, 17 = Quote). The header is ``<BHBIf`` =
-    code, message-length, exchange-segment, security-id, LTP. Returns None for
-    short or unrecognised packets.
+    Dhan streams a packed binary frame whose first byte is a response code.
+    The documented response codes (annexure.md) are 2 = Ticker, 4 = Quote,
+    8 = Full; the subscription request-code spellings 15/17 are accepted too.
+    The header is ``<BHBIf`` = code, message-length, exchange-segment,
+    security-id, LTP. Returns None for short or unrecognised packets.
     """
     if data is None or len(data) < 16:
         return None
     code = struct.unpack_from("<B", data, 0)[0]
-    if code == DHAN_FEED_TICKER:
+    if code in (DHAN_FEED_TICKER, DHAN_FEED_TICKER_RESP):
         _, _, seg, security_id, ltp, _ltt = struct.unpack_from("<BHBIfI", data, 0)
         return {
             "code": code,
@@ -577,7 +1039,7 @@ def decode_dhan_tick(data: bytes) -> dict[str, Any] | None:
             "exchange": FEED_SEGMENT_TO_EXCHANGE.get(seg, ""),
             "ltp": round(ltp, 2),
         }
-    if code == DHAN_FEED_QUOTE and len(data) >= 50:
+    if code in (DHAN_FEED_QUOTE, DHAN_FEED_QUOTE_RESP) and len(data) >= 50:
         fields = struct.unpack_from("<BHBIfHIfIIIffff", data, 0)
         # 0 code, 1 msglen, 2 seg, 3 security_id, 4 ltp, 5 ltq, 6 ltt, 7 atp,
         # 8 volume, 9 total_sell_qty, 10 total_buy_qty, 11 open, 12 close, 13 high, 14 low
@@ -592,7 +1054,138 @@ def decode_dhan_tick(data: bytes) -> dict[str, Any] | None:
             "high": round(fields[13], 2),
             "low": round(fields[14], 2),
         }
+    if code == DHAN_FEED_FULL_RESP and len(data) >= 162:
+        f = struct.unpack_from("<BHBIfHIfIIIIIIffff100s", data, 0)
+        # 0 code, 1 msglen, 2 seg, 3 security_id, 4 ltp, 5 ltq, 6 ltt, 7 atp,
+        # 8 volume, 9 sell_qty, 10 buy_qty, 11 oi, 12 oi_high, 13 oi_low,
+        # 14 open, 15 close, 16 high, 17 low, 18 depth-blob (5 levels)
+        return {
+            "code": code,
+            "security_id": str(f[3]),
+            "exchange": FEED_SEGMENT_TO_EXCHANGE.get(f[2], ""),
+            "ltp": round(f[4], 2),
+            "volume": int(f[8]),
+            "oi": int(f[11]),
+            "open": round(f[14], 2),
+            "close": round(f[15], 2),
+            "high": round(f[16], 2),
+            "low": round(f[17], 2),
+            "depth": _decode_5_level_depth(f[18]),
+        }
     return None
+
+
+def iter_dhan_depth_messages(data: bytes) -> list[dict[str, Any]]:
+    """Decode a 20/200-level depth WebSocket frame into per-side messages.
+
+    A frame may concatenate several messages; each starts with the 12-byte
+    header ``<hBBiI`` (message length, response code 41 = Bid / 51 = Ask,
+    exchange segment, security id, sequence/row count) followed by
+    ``<dII`` rows (price float64, quantity uint32, orders uint32) — the layout
+    decoded by the pinned SDK's ``fulldepth.py``. Unknown codes and truncated
+    trailers are skipped, never raised.
+    """
+    out: list[dict[str, Any]] = []
+    if not data:
+        return out
+    offset = 0
+    while offset + _DEPTH_HEADER.size <= len(data):
+        msg_length, msg_code, seg, security_id, n_rows = _DEPTH_HEADER.unpack_from(data, offset)
+        if msg_length <= 0 or offset + msg_length > len(data):
+            break
+        if msg_code in (DHAN_DEPTH_BID, DHAN_DEPTH_ASK):
+            body = data[offset + _DEPTH_HEADER.size : offset + msg_length]
+            max_rows = min(len(body) // _DEPTH_ROW.size, 200)
+            levels = [
+                {
+                    "price": _DEPTH_ROW.unpack_from(body, i * _DEPTH_ROW.size)[0],
+                    "quantity": int(_DEPTH_ROW.unpack_from(body, i * _DEPTH_ROW.size)[1]),
+                    "orders": int(_DEPTH_ROW.unpack_from(body, i * _DEPTH_ROW.size)[2]),
+                }
+                for i in range(max_rows)
+            ]
+            out.append(
+                {
+                    "code": int(msg_code),
+                    "side": "bid" if msg_code == DHAN_DEPTH_BID else "ask",
+                    "security_id": str(security_id),
+                    "exchange": FEED_SEGMENT_TO_EXCHANGE.get(seg, ""),
+                    "rows": int(n_rows),
+                    "depth": levels,
+                }
+            )
+        offset += msg_length
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Scrip master (instruments.md) — security-resolver source
+# ---------------------------------------------------------------------------
+
+SCRIP_MASTER_URLS = {
+    "compact": "https://images.dhan.co/api-data/api-scrip-master.csv",
+    "detailed": "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+}
+
+# (EXCH_ID, SEGMENT letter) -> canonical exchange. Segment letters per
+# instruments.md: C currency, D derivatives, E equity, M commodity, I index.
+_SCRIP_EXCHANGE = {
+    ("NSE", "E"): "NSE",
+    ("NSE", "D"): "NFO",
+    ("NSE", "C"): "CDS",
+    ("NSE", "I"): "NSE_INDEX",
+    ("BSE", "E"): "BSE",
+    ("BSE", "D"): "BFO",
+    ("BSE", "C"): "BCD",
+    ("BSE", "I"): "BSE_INDEX",
+    ("MCX", "M"): "MCX",
+}
+
+
+def _scrip_field(row: dict[str, Any], *names: str) -> str:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], str]:
+    """Build a ``(symbol, exchange) -> security_id`` resolver from scrip-master rows.
+
+    Accepts both compact (``SEM_*``) and detailed column tags. Symbols are
+    indexed by trading symbol AND display/symbol name, upper-cased, per
+    canonical exchange. The returned callable raises :class:`DhanMappingError`
+    for unknown instruments so the adapter fails closed.
+    """
+    index: dict[tuple[str, str], str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sec_id = _scrip_field(row, "SEM_SMST_SECURITY_ID", "SECURITY_ID")
+        if not sec_id:
+            continue
+        exch = _scrip_field(row, "SEM_EXM_EXCH_ID", "EXCH_ID").upper()
+        seg = _scrip_field(row, "SEM_SEGMENT", "SEGMENT").upper()[:1]
+        exchange = _SCRIP_EXCHANGE.get((exch, seg))
+        if exchange is None:
+            continue
+        for symbol in {
+            _scrip_field(row, "SEM_TRADING_SYMBOL", "TRADING_SYMBOL").upper(),
+            _scrip_field(row, "SEM_CUSTOM_SYMBOL", "DISPLAY_NAME").upper(),
+            _scrip_field(row, "SM_SYMBOL_NAME", "SYMBOL_NAME").upper(),
+        }:
+            if symbol:
+                index.setdefault((symbol, exchange), sec_id)
+
+    def resolve(symbol: str, exchange: str) -> str:
+        key = (str(symbol).upper().strip(), str(exchange).upper().strip())
+        try:
+            return index[key]
+        except KeyError as exc:
+            raise DhanMappingError(f"Scrip master has no security_id for {symbol}/{exchange}") from exc
+
+    return resolve
 
 
 def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str, Any]:
