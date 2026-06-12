@@ -240,13 +240,22 @@ def _forward_to_openalgo(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]
     return jsonify(data), response.status_code
 
 
-def _body_to_order(body: dict[str, Any]) -> Any:
+def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
     """Build a typed :class:`Order` from a decoded request body for the SafetySystem.
 
     The legacy path forwarded the raw dict; the 5-layer ``SafetySystem.check_order``
     needs the typed model to validate symbol, quantity, price, exchange, and market
     hours. Enum coercion (action/exchange/product/pricetype) raises ``ValueError`` on
     a bad value, which the caller maps to HTTP 400 rather than letting it 500.
+
+    Args:
+        body: Decoded JSON request body.
+        variety: When set (e.g. ``"gtt"`` for the forever route), the built order
+            carries this variety plus the variety-specific pass-throughs from the
+            body (``validity`` and the OCO second-leg trio ``price1`` /
+            ``trigger_price1`` / ``quantity1``). ``None`` (the default) keeps the
+            legacy regular-order shape so the existing ``/place`` behaviour is
+            byte-identical.
     """
     from flinttrade_core.models import (  # noqa: PLC0415
         Action,
@@ -266,6 +275,16 @@ def _body_to_order(body: dict[str, Any]) -> Any:
     except (TypeError, ValueError) as exc:
         raise ValueError(f"quantity must be a whole number of units, got {quantity!r}") from exc
 
+    extra: dict[str, Any] = {}
+    if variety is not None:
+        extra["variety"] = variety
+        # Variety-specific pass-throughs (Dhan forever OCO + validity). They live
+        # on the Order model, so the SafetyContext canonical hash covers them.
+        for key in ("validity", "price1", "trigger_price1", "quantity1"):
+            value = body.get(key)
+            if value is not None:
+                extra[key] = str(value)
+
     return Order(
         symbol=str(body.get("symbol") or ""),
         action=Action(str(body.get("action", "BUY")).upper()),
@@ -280,6 +299,7 @@ def _body_to_order(body: dict[str, Any]) -> Any:
         disclosed_quantity=str(body.get("disclosed_quantity", "0")),
         strategy=str(body.get("strategy") or "Flint"),
         market_protection=body.get("market_protection"),
+        **extra,
     )
 
 
@@ -357,6 +377,7 @@ def _dispatch_live_order(
     payload: dict[str, Any],
     *,
     adapter_id: str = "openalgo",
+    variety: str | None = None,
 ) -> tuple[Any, int]:
     """The single enforced execution channel for a live order placement (C1).
 
@@ -421,7 +442,7 @@ def _dispatch_live_order(
     if safety is None:
         safety = SafetySystem(SafetyConfig())
     try:
-        typed_order = _body_to_order(body)
+        typed_order = _body_to_order(body, variety=variety)
         # check_order coerces quantity via int(...); a non-integer quantity must
         # surface as a clean 400, not an uncaught ValueError -> 500.
         safety_results = safety.check_order(
@@ -784,6 +805,12 @@ def _dispatch_live_cancel(
     Cancel reduces exposure, so it is intentionally NOT blocked by the kill
     switch — a halted account must still be able to cancel a working order. It is
     gated by the one-shot SafetyContext + per-account ACL.
+
+    Optional ``variety`` / ``amo`` body fields (Kotak Neo bracket/cover leg
+    exits) are forwarded as adapter-level cancel extras. They are written into
+    the canonical cancel fingerprint BEFORE the gate is minted, so the router's
+    field-by-field extras check passes only because the gate signed them — an
+    unhashed extra can never reach the broker.
     """
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
@@ -792,7 +819,13 @@ def _dispatch_live_cancel(
     if not order_id:
         return jsonify({"status": "error", "message": "Cancel requires an 'orderid'"}), 400
 
-    canonical = {"_op": "cancel", "order_id": order_id}
+    extras: dict[str, Any] = {}
+    if body.get("variety") is not None:
+        extras["variety"] = str(body["variety"])
+    if body.get("amo") is not None:
+        extras["amo"] = bool(body["amo"])
+
+    canonical = {"_op": "cancel", "order_id": order_id, **extras}
     hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
     return _gated_write_dispatch(
         "cancel",
@@ -802,7 +835,8 @@ def _dispatch_live_cancel(
         account_id=account_id,
         order_id=order_id,
         dispatch=lambda router, ctx, sctx: router.cancel_order(
-            ctx, order=canonical, order_id=order_id, safety_ctx=sctx, hint=hint
+            ctx, order=canonical, order_id=order_id, safety_ctx=sctx, hint=hint,
+            extras=extras or None,
         ),
         audit_event="ORDER_CANCELLED",
         fail_message="Order cancel failed",
@@ -914,11 +948,14 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     #
     # ``place`` runs the full SafetySystem (L1-L5) + one-shot HMAC gate +
     # per-account ACL via the BrokerRouter; ``modify`` and ``cancel`` run the same
-    # one-shot gate + ACL (modify also behind the L5 kill switch). The remaining
-    # live actions (smart/options/gtt/cancel-all/close/open) have no BrokerRouter
-    # dispatch method yet, so they stay on the direct forward — still gated behind
-    # the L5 kill switch so a halted account cannot push ANY live order. Gating
-    # those is a scoped follow-up (needs BrokerRouter.place_smart_order, etc.).
+    # one-shot gate + ACL (modify also behind the L5 kill switch), and
+    # ``cancel-all`` for an explicitly-named native broker routes through the
+    # gated ``cancel_all_orders`` verb. The remaining live actions
+    # (smart/options/gtt/close/open + the OpenAlgo cancel-all) have no
+    # BrokerRouter dispatch method yet, so they stay on the direct forward —
+    # still gated behind the L5 kill switch so a halted account cannot push ANY
+    # live order. Gating those is a scoped follow-up (needs
+    # BrokerRouter.place_smart_order, etc.).
     # ------------------------------------------------------------------
     if not _is_live_mode_unlocked():
         logger.warning(
@@ -944,6 +981,18 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return _dispatch_live_modify(body, live_payload, adapter_id="openalgo")
     if ft_action == "cancel":
         return _dispatch_live_cancel(body, live_payload, adapter_id="openalgo")
+    if ft_action == "cancel-all" and str(body.get("broker") or "").strip().lower() not in ("", "openalgo"):
+        # Native adapters sweep through the gated cancel_all_orders verb
+        # (one-shot SafetyContext + ACL). The OpenAlgo bridge keeps the direct
+        # cancelallorder forward below — its adapter does not expose the verb
+        # yet, so gating it would 501 a flow that works today.
+        adapter_id, account_id = _gated_target(body)
+        fields = {k: str(body[k]) for k in ("tag", "segment") if body.get(k) is not None}
+        return _gated_verb_write(
+            "cancel_all_orders", fields, live_payload,
+            adapter_id=adapter_id, account_id=account_id,
+            audit_event="ORDERS_CANCELLED_ALL", fail_message="Cancel-all failed",
+        )
 
     # Remaining live action (smart/options/gtt/cancel-all/close/open): no
     # BrokerRouter dispatch yet, so forward directly — gated behind the kill switch.
@@ -1338,3 +1387,639 @@ def gtt_modify_order() -> tuple[Any, int]:
 def gtt_cancel_order() -> tuple[Any, int]:
     """Cancel an active GTT by ``trigger_id`` — maps to ``cancelgttorder``."""
     return _dispatch_order("gtt-cancel")
+
+
+# ---------------------------------------------------------------------------
+# Extended gated broker verbs (contract §8.1) — forever (GTT), super orders,
+# conditional triggers, multi/batch orders, smart-order cancel.
+#
+# Every write here is LIVE-ONLY and traverses the single gated channel:
+# route → validate body → live-mode guard → gate_broker_write (one-shot HMAC
+# SafetyContext over the canonical payload, ``_op`` inside the signed hash)
+# → BrokerRouter.execute_gated (re-verify + ACL + one-shot consume + verb
+# table). Reads (the listings) traverse the same ACL-enforcing session
+# provider but mint no SafetyContext — nothing is written.
+# ---------------------------------------------------------------------------
+
+# Dhan super-order legs (mirror flinttrade_gateway.brokers.dhan_mapping
+# SUPER_ORDER_LEGS) — validated at the route so a typo'd leg is a clean 400,
+# not a broker error mid-dispatch.
+_SUPER_ORDER_LEGS = frozenset({"ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"})
+
+
+def _gated_target(params: Any) -> tuple[str, str]:
+    """Resolve the ``(adapter_id, account_id)`` target from a body or query mapping.
+
+    Args:
+        params: A mapping-like object (decoded JSON body or ``request.args``)
+            carrying optional ``broker`` and ``account_id`` fields.
+
+    Returns:
+        ``(adapter_id, account_id)`` — defaults ``("openalgo", "default")``.
+    """
+    adapter_id = str(params.get("broker") or "openalgo").strip().lower()
+    account_id = str(params.get("account_id") or "default").strip() or "default"
+    return adapter_id, account_id
+
+
+def _require_live_payload(*, require_unlock: bool) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Decode the request JWT and enforce the live-mode guard for gated-verb routes.
+
+    Mirrors the routed ``/<broker>/place`` guard sequence: 401 without a valid
+    JWT; 403 for any non-live mode (forever/GTT, super orders, conditional
+    triggers, position writes, and batch cancels are live-broker constructs the
+    sandbox does not simulate); 403 when ``require_unlock`` is set and the JWT
+    lacks the ``live_mode_unlocked`` claim (PIN re-verification mints it).
+
+    Args:
+        require_unlock: ``True`` for broker WRITES (the PIN gate applies);
+            ``False`` for reads, which expose account state but write nothing.
+
+    Returns:
+        ``(payload, None)`` when the guard passes, else ``(None, (response,
+        status))`` ready to be returned from the route handler.
+    """
+    payload = _decode_request_payload()
+    if not payload:
+        return None, (jsonify({
+            "status": "error",
+            "message": "Authentication required — provide a valid JWT",
+        }), 401)
+
+    if payload.get("mode") != _MODE_LIVE:
+        return None, (jsonify({
+            "status": "error",
+            "message": (
+                "This endpoint serves live mode only — forever (GTT), super orders, "
+                "conditional triggers, and position writes are live-broker constructs. "
+                "Switch to Live mode first."
+            ),
+        }), 403)
+
+    if require_unlock and not _is_live_mode_unlocked():
+        return None, (jsonify({
+            "status": "error",
+            "message": "Live mode not unlocked — verify PIN first",
+        }), 403)
+
+    return payload, None
+
+
+def _gated_verb_write(
+    verb: str,
+    fields: dict[str, Any],
+    jwt_payload: dict[str, Any],
+    *,
+    adapter_id: str,
+    account_id: str,
+    audit_event: str,
+    fail_message: str,
+    ref: str = "",
+    kill_switch_gated: bool = False,
+) -> tuple[Any, int]:
+    """Mint + dispatch one extended gated broker write (contract §8.1).
+
+    Builds the canonical payload ``{"_op": verb, **fields}`` — the SAME mapping
+    is signed by ``gate_broker_write`` and re-verified + dispatched by
+    :meth:`BrokerRouter.execute_gated`, so no unhashed mutable field can reach
+    the broker. Mirrors :func:`_gated_write_dispatch`'s fail-closed status
+    matrix: 503 (router unavailable / broker not connected), 403 (gate or ACL
+    refusal, kill switch), 501 (adapter lacks the verb), 500 (dispatch fault).
+
+    Args:
+        verb: One of ``flinttrade_engine.safety.GATED_WRITE_VERBS``.
+        fields: Verb payload fields (everything except the ``_op`` discriminator).
+        jwt_payload: Decoded JWT of the calling operator.
+        adapter_id: Target broker adapter id.
+        account_id: Target account within the adapter.
+        audit_event: Audit-log event type stamped on success (best-effort).
+        fail_message: Operator-facing message for an unexpected dispatch fault.
+        ref: Order/alert id echoed back as ``orderid`` (and logged) when set.
+        kill_switch_gated: ``True`` for risk-increasing writes (modify/place
+            shapes) — blocked while the L5 kill switch is latched. Exposure-
+            reducing writes (cancels, exit-all) keep ``False`` so a halted
+            account can still flatten itself.
+
+    Returns:
+        A ``(flask.Response, http_status_code)`` tuple.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
+    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
+    from flinttrade_engine.safety import gate_broker_write  # noqa: PLC0415
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
+    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
+
+    if kill_switch_gated:
+        blocked = _live_kill_switch_block()
+        if blocked is not None:
+            logger.warning("Live %s blocked by kill switch | ref=%s: %s", verb, ref, blocked.reason)
+            return jsonify({
+                "status": "error",
+                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+            }), 403
+
+    router = current_app.config.get("BROKER_ROUTER")
+    if router is None:
+        logger.error("Live %s rejected — BROKER_ROUTER unavailable | adapter=%s", verb, adapter_id)
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Order routing unavailable — workspace.json brokers configuration is "
+                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+            ),
+        }), 503
+
+    request_ctx = RequestContext(
+        jti=str(jwt_payload.get("jti") or ""),
+        actor_type="human",
+        actor_id=str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "unknown"),
+        mode=_MODE_LIVE,
+        selector=f"{adapter_id}:{account_id}",
+    )
+
+    canonical: dict[str, Any] = {"_op": verb, **fields}
+    try:
+        safety_ctx = gate_broker_write(verb, canonical, request_ctx, adapter_id, account_id=account_id)
+        result = asyncio.run(
+            router.execute_gated(
+                request_ctx,
+                verb=verb,
+                payload=canonical,
+                safety_ctx=safety_ctx,
+                hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
+            )
+        )
+    except SafetyBypassError as exc:
+        logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, ref, exc)
+        return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 403
+    except (BrokerNotFoundError, KeyError) as exc:
+        logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", verb, adapter_id, account_id, exc)
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+            ),
+        }), 503
+    except (NotImplementedError, UnsupportedCapabilityError) as exc:
+        # An adapter without the verb refuses cleanly — an honest "not yet
+        # available" for this broker, not a server fault.
+        logger.warning(
+            "Live %s — adapter capability not available | adapter=%s account=%s: %s",
+            verb, adapter_id, account_id, exc,
+        )
+        return jsonify({
+            "status": "error",
+            "message": str(exc) or f"This operation is not yet available for broker '{adapter_id}'.",
+        }), 501
+    except Exception:
+        logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, ref, adapter_id)
+        return jsonify({"status": "error", "message": fail_message}), 500
+
+    _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, ref)
+    logger.info("Live %s dispatched | ref=%s adapter=%s account=%s", verb, ref, adapter_id, account_id)
+    response: dict[str, Any] = {"status": "success", "data": result}
+    if ref:
+        response["orderid"] = ref
+    return jsonify(response), 200
+
+
+def _gated_broker_read(
+    read_verb: str,
+    jwt_payload: dict[str, Any],
+    *,
+    adapter_id: str,
+    account_id: str,
+) -> tuple[Any, int]:
+    """Run an adapter read (forever/super/trigger listings) through the ACL'd session path.
+
+    The BrokerRouter exposes no public read-dispatch for these listings yet
+    (only ``quotes``), so this mirrors its resolve → session → adapter read
+    sequence directly — INCLUDING the ``AuthenticatingSessionProvider``, which
+    is the single per-(actor, account) ACL gate for reads and writes alike.
+    Reads mint no SafetyContext (nothing is written), exactly like the router's
+    own read path. Promoting this into a public ``BrokerRouter`` read verb is a
+    gateway-owned follow-up (router.py is out of scope here).
+
+    Args:
+        read_verb: Adapter read method name (``forever_orders`` /
+            ``super_orders`` / ``conditional_triggers``).
+        jwt_payload: Decoded JWT of the calling operator.
+        adapter_id: Target broker adapter id.
+        account_id: Target account within the adapter.
+
+    Returns:
+        A ``(flask.Response, http_status_code)`` tuple; 200 carries
+        ``{"status": "success", "data": [...]}``.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
+    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
+
+    router = current_app.config.get("BROKER_ROUTER")
+    if router is None:
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Order routing unavailable — workspace.json brokers configuration is "
+                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+            ),
+        }), 503
+
+    request_ctx = RequestContext(
+        jti=str(jwt_payload.get("jti") or ""),
+        actor_type="human",
+        actor_id=str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "unknown"),
+        mode=_MODE_LIVE,
+        selector=f"{adapter_id}:{account_id}",
+    )
+
+    try:
+        # Private access mirrors BrokerRouter.quotes — the session provider IS
+        # the read-path ACL gate, so it must not be bypassed with a raw
+        # registry lookup.
+        session = router._session_provider(request_ctx, adapter_id, account_id)  # noqa: SLF001
+        adapter = router._adapters.get(adapter_id)  # noqa: SLF001
+        if adapter is None:
+            raise BrokerNotFoundError(f"no adapter registered for {adapter_id!r}")
+        method = getattr(adapter, read_verb, None)
+        if not callable(method):
+            raise UnsupportedCapabilityError(
+                f"broker adapter {adapter_id!r} does not support the {read_verb!r} listing"
+            )
+        rows = asyncio.run(method(session))
+    except SafetyBypassError as exc:
+        logger.warning("Broker read %s refused | adapter=%s account=%s: %s", read_verb, adapter_id, account_id, exc)
+        return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 403
+    except (BrokerNotFoundError, KeyError) as exc:
+        logger.warning("Broker read %s — not connected | adapter=%s account=%s: %s", read_verb, adapter_id, account_id, exc)
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+            ),
+        }), 503
+    except (NotImplementedError, UnsupportedCapabilityError) as exc:
+        return jsonify({
+            "status": "error",
+            "message": str(exc) or f"This listing is not yet available for broker '{adapter_id}'.",
+        }), 501
+    except Exception:
+        logger.exception("Broker read %s failed | adapter=%s account=%s", read_verb, adapter_id, account_id)
+        return jsonify({"status": "error", "message": f"Failed to fetch {read_verb}"}), 500
+
+    return jsonify({"status": "success", "data": rows}), 200
+
+
+def _changes_from_body(body: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the required non-empty ``changes`` dict from a modify body, or ``None``."""
+    changes = body.get("changes")
+    if not isinstance(changes, dict) or not changes:
+        return None
+    return changes
+
+
+def _trigger_legs_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    """Validate + build ``(condition, typed order legs)`` for a conditional trigger.
+
+    Raises:
+        ValueError: When ``condition`` is not a non-empty dict, ``orders`` is
+            not a non-empty list of objects, or any leg fails typed-Order
+            coercion (bad enum value, non-integer quantity, …).
+    """
+    condition = body.get("condition")
+    if not isinstance(condition, dict) or not condition:
+        raise ValueError("'condition' must be a non-empty object")
+    raw_orders = body.get("orders")
+    if not isinstance(raw_orders, list) or not raw_orders:
+        raise ValueError("'orders' must be a non-empty list of order objects")
+    legs: list[Any] = []
+    for index, leg in enumerate(raw_orders):
+        if not isinstance(leg, dict):
+            raise ValueError(f"orders[{index}] must be an object")
+        legs.append(_body_to_order(leg))
+    return condition, legs
+
+
+# --- Forever (GTT) orders — Dhan-native; placed via the gated trio path ----
+
+
+@orders_bp.route("/forever", methods=["POST"])
+def forever_place() -> tuple[Any, int]:
+    """Place a forever (GTT) order through the gated place path (live only).
+
+    Builds a typed ``Order`` with ``variety="gtt"`` — including the optional
+    OCO second-leg trio (``price1`` / ``trigger_price1`` / ``quantity1``) and
+    ``validity`` — and dispatches it through the SAME channel as a regular
+    placement: SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter.place_order``.
+    The variety and leg fields live on the Order, so the SafetyContext HMAC
+    covers them.
+
+    Request JSON: standard order fields plus ``trigger_price`` (required by the
+    broker), optional OCO trio, optional ``broker`` (default ``"openalgo"``)
+    and ``account_id`` (default ``"default"``).
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    adapter_id, _account_id = _gated_target(body)  # account_id rides in the body
+    return _dispatch_live_order("forever-place", body, payload, adapter_id=adapter_id, variety="gtt")
+
+
+@orders_bp.route("/forever/<order_id>", methods=["PUT"])
+def forever_modify(order_id: str) -> tuple[Any, int]:
+    """Modify a resting forever (GTT) order — gated ``modify_forever`` verb.
+
+    Request JSON: ``changes`` (non-empty object, e.g. ``{"price": "2900"}``),
+    optional ``broker`` / ``account_id``. A modify can increase risk, so it is
+    blocked while the L5 kill switch is latched.
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    changes = _changes_from_body(body)
+    if changes is None:
+        return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
+    adapter_id, account_id = _gated_target(body)
+    return _gated_verb_write(
+        "modify_forever", {"order_id": order_id, "changes": changes}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="FOREVER_MODIFIED", fail_message="Forever order modify failed",
+        ref=order_id, kill_switch_gated=True,
+    )
+
+
+@orders_bp.route("/forever/<order_id>", methods=["DELETE"])
+def forever_cancel(order_id: str) -> tuple[Any, int]:
+    """Cancel a resting forever (GTT) order — gated ``cancel_forever`` verb.
+
+    Target via ``?broker=`` / ``?account_id=`` query parameters (a JSON body
+    with the same fields also works). Cancels reduce exposure, so the kill
+    switch does not block them.
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    adapter_id, account_id = _gated_target(params)
+    return _gated_verb_write(
+        "cancel_forever", {"order_id": order_id}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="FOREVER_CANCELLED", fail_message="Forever order cancel failed",
+        ref=order_id,
+    )
+
+
+@orders_bp.route("/forever", methods=["GET"])
+def forever_list() -> tuple[Any, int]:
+    """List resting forever (GTT) orders — adapter ``forever_orders`` read.
+
+    Target via ``?broker=`` / ``?account_id=`` query parameters. 501 for
+    brokers whose adapter does not expose the listing.
+    """
+    payload, err = _require_live_payload(require_unlock=False)
+    if err is not None:
+        return err
+    adapter_id, account_id = _gated_target(request.args)
+    return _gated_broker_read("forever_orders", payload, adapter_id=adapter_id, account_id=account_id)
+
+
+# --- Super orders (Dhan bracket/cover legs) --------------------------------
+
+
+@orders_bp.route("/super", methods=["GET"])
+def super_order_list() -> tuple[Any, int]:
+    """List super orders with leg details — adapter ``super_orders`` read."""
+    payload, err = _require_live_payload(require_unlock=False)
+    if err is not None:
+        return err
+    adapter_id, account_id = _gated_target(request.args)
+    return _gated_broker_read("super_orders", payload, adapter_id=adapter_id, account_id=account_id)
+
+
+@orders_bp.route("/super/<order_id>", methods=["PUT"])
+def super_order_modify(order_id: str) -> tuple[Any, int]:
+    """Modify one leg of a pending super order — gated ``modify_super_order`` verb.
+
+    Request JSON: ``changes`` (non-empty object; ``changes.leg_name`` selects
+    ENTRY_LEG / TARGET_LEG / STOP_LOSS_LEG), optional ``broker`` /
+    ``account_id``. Kill-switch gated (a leg modify can widen risk).
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    changes = _changes_from_body(body)
+    if changes is None:
+        return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
+    adapter_id, account_id = _gated_target(body)
+    return _gated_verb_write(
+        "modify_super_order", {"order_id": order_id, "changes": changes}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="SUPER_ORDER_MODIFIED", fail_message="Super order modify failed",
+        ref=order_id, kill_switch_gated=True,
+    )
+
+
+@orders_bp.route("/super/<order_id>", methods=["DELETE"])
+def super_order_cancel(order_id: str) -> tuple[Any, int]:
+    """Cancel a super order or one leg — gated ``cancel_super_order`` verb.
+
+    Optional ``?leg=`` selects ENTRY_LEG (default; cancels every leg),
+    TARGET_LEG, or STOP_LOSS_LEG. The leg travels inside the signed payload.
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    fields: dict[str, Any] = {"order_id": order_id}
+    leg = params.get("leg")
+    if leg is not None:
+        leg = str(leg).strip().upper()
+        if leg not in _SUPER_ORDER_LEGS:
+            return jsonify({
+                "status": "error",
+                "message": f"'leg' must be one of {sorted(_SUPER_ORDER_LEGS)}, got {leg!r}",
+            }), 400
+        fields["leg"] = leg
+    adapter_id, account_id = _gated_target(params)
+    return _gated_verb_write(
+        "cancel_super_order", fields, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="SUPER_ORDER_CANCELLED", fail_message="Super order cancel failed",
+        ref=order_id,
+    )
+
+
+# --- Conditional triggers (Dhan v2.5 alerts/orders) -------------------------
+
+
+@orders_bp.route("/triggers", methods=["POST"])
+def trigger_place() -> tuple[Any, int]:
+    """Place a conditional trigger — gated ``place_conditional_trigger`` verb.
+
+    Request JSON: ``condition`` (non-empty object) + ``orders`` (non-empty list
+    of order objects; each is coerced to a typed ``Order`` so the signed
+    payload covers every leg field), optional ``broker`` / ``account_id``.
+    Trade-affecting placement → kill-switch gated.
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    try:
+        condition, legs = _trigger_legs_from_body(body)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": f"Trigger validation failed: {exc}"}), 400
+    adapter_id, account_id = _gated_target(body)
+    return _gated_verb_write(
+        "place_conditional_trigger", {"condition": condition, "orders": legs}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="TRIGGER_PLACED", fail_message="Conditional trigger placement failed",
+        kill_switch_gated=True,
+    )
+
+
+@orders_bp.route("/triggers", methods=["GET"])
+def trigger_list() -> tuple[Any, int]:
+    """List conditional triggers — adapter ``conditional_triggers`` read."""
+    payload, err = _require_live_payload(require_unlock=False)
+    if err is not None:
+        return err
+    adapter_id, account_id = _gated_target(request.args)
+    return _gated_broker_read("conditional_triggers", payload, adapter_id=adapter_id, account_id=account_id)
+
+
+@orders_bp.route("/triggers/<alert_id>", methods=["PUT"])
+def trigger_modify(alert_id: str) -> tuple[Any, int]:
+    """Modify a conditional trigger — gated ``modify_conditional_trigger`` verb.
+
+    Request JSON: full replacement ``condition`` + ``orders`` (same shape as
+    placement), optional ``broker`` / ``account_id``. Kill-switch gated.
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    try:
+        condition, legs = _trigger_legs_from_body(body)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": f"Trigger validation failed: {exc}"}), 400
+    adapter_id, account_id = _gated_target(body)
+    return _gated_verb_write(
+        "modify_conditional_trigger",
+        {"alert_id": alert_id, "condition": condition, "orders": legs},
+        payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="TRIGGER_MODIFIED", fail_message="Conditional trigger modify failed",
+        ref=alert_id, kill_switch_gated=True,
+    )
+
+
+@orders_bp.route("/triggers/<alert_id>", methods=["DELETE"])
+def trigger_cancel(alert_id: str) -> tuple[Any, int]:
+    """Cancel a conditional trigger — gated ``cancel_conditional_trigger`` verb."""
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    adapter_id, account_id = _gated_target(params)
+    return _gated_verb_write(
+        "cancel_conditional_trigger", {"alert_id": alert_id}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="TRIGGER_CANCELLED", fail_message="Conditional trigger cancel failed",
+        ref=alert_id,
+    )
+
+
+# --- Batch + smart-order verbs ----------------------------------------------
+
+
+@orders_bp.route("/multi", methods=["POST"])
+def multi_order_place() -> tuple[Any, int]:
+    """Place a batch of orders — gated ``place_multi_order`` verb (Upstox-native).
+
+    Request JSON: ``orders`` (non-empty list of order objects), optional
+    ``broker`` / ``account_id``. EVERY leg is coerced to a typed ``Order`` and
+    run through the full SafetySystem (L1–L5) before the batch is gated — a
+    placement path must never skip the risk layers. The signed payload carries
+    the typed legs, so post-mint tampering with any leg invalidates the gate.
+    """
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
+
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    raw_orders = body.get("orders")
+    if not isinstance(raw_orders, list) or not raw_orders:
+        return jsonify({"status": "error", "message": "'orders' must be a non-empty list of order objects"}), 400
+    adapter_id, account_id = _gated_target(body)
+
+    safety = current_app.config.get("SAFETY")
+    if safety is None:
+        safety = SafetySystem(SafetyConfig())
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id)
+    legs: list[Any] = []
+    try:
+        for index, leg in enumerate(raw_orders):
+            if not isinstance(leg, dict):
+                raise ValueError(f"orders[{index}] must be an object")
+            typed = _body_to_order(leg)
+            results = safety.check_order(
+                typed,
+                positions=l2_positions,
+                used_margin=l2_used_margin,
+                total_balance=l2_total_balance,
+            )
+            blocked = next((r for r in results if not r.passed), None)
+            if blocked is not None:
+                logger.warning(
+                    "Multi-order leg blocked by safety layer %s | symbol=%s: %s",
+                    blocked.layer, typed.symbol, blocked.reason,
+                )
+                return jsonify({
+                    "status": "error",
+                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                }), 403
+            legs.append(typed)
+    except (ValueError, ValidationError) as exc:
+        return jsonify({"status": "error", "message": f"Order validation failed: {exc}"}), 400
+
+    return _gated_verb_write(
+        "place_multi_order", {"orders": legs}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="MULTI_ORDER_PLACED", fail_message="Multi-order placement failed",
+    )
+
+
+@orders_bp.route("/smart/<order_id>", methods=["DELETE"])
+def smart_order_cancel(order_id: str) -> tuple[Any, int]:
+    """Cancel a smart order — gated ``cancel_smart_order`` verb (IndMoney-native).
+
+    Optional ``?segment=`` narrows the cancel (e.g. ``DERIVATIVE``); it travels
+    inside the signed payload. Cancels reduce exposure → not kill-switch gated.
+    """
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    params = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    fields: dict[str, Any] = {"order_id": order_id}
+    if params.get("segment") is not None:
+        fields["segment"] = str(params["segment"])
+    adapter_id, account_id = _gated_target(params)
+    return _gated_verb_write(
+        "cancel_smart_order", fields, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="SMART_ORDER_CANCELLED", fail_message="Smart order cancel failed",
+        ref=order_id,
+    )

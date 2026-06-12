@@ -177,4 +177,14 @@ _BACKEND_ONLY_LEAVES: set[str] = {
     # postOrder(...) family, not the ftApi helper modules. The end-to-end
     # contract is covered by `test_smart_order_routes.py` + the widget test.
     "smart-route",
+    # `forever`, `super`, `triggers`, `multi` — the extended gated broker
+    # verbs (Dhan forever/GTT + super orders + conditional triggers, Upstox
+    # multi-order) shipped backend-first in the §8.1 execute_gated wave. The
+    # terminal will consume them via ftApi helpers (not postOrder), so the
+    # api.ts scanner will never see them; covered end-to-end by
+    # `test_gated_verb_routes.py`.
+    "forever",
+    "super",
+    "triggers",
+    "multi",
 }

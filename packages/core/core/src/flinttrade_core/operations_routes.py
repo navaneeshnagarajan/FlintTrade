@@ -1305,3 +1305,106 @@ def get_recent_logs() -> tuple[Any, int]:
             except json.JSONDecodeError:
                 entries.append({"message": line, "level": "info"})
     return jsonify({"status": "success", "data": entries}), 200
+
+
+# ------------------------------------------------------------------
+# Position writes — gated broker verbs (contract §8.1)
+#
+# These live here (not in order_routes.py) ONLY because the orders
+# blueprint is prefixed /api/v1/orders, while position writes belong at
+# /api/v1/positions/* — and operations_bp is the existing /api/v1
+# blueprint. The dispatch machinery is order_routes' single gated
+# channel: live-mode guard → gate_broker_write → BrokerRouter.execute_gated.
+# ------------------------------------------------------------------
+
+
+@operations_bp.route("/positions/convert", methods=["POST"])
+def positions_convert() -> tuple[Any, int]:
+    """Convert an open position between products — gated ``convert_position`` verb.
+
+    Request JSON: either a ``req`` object, or the conversion fields inline
+    (e.g. ``symbol``, ``exchange``, ``from_product``, ``to_product``,
+    ``position_type``, ``quantity`` — broker-specific), plus optional
+    ``broker`` (default ``"openalgo"``) and ``account_id`` (default
+    ``"default"``). Live mode + PIN unlock required. A conversion changes the
+    margin profile of the book, so it is blocked while the L5 kill switch is
+    latched. 501 for brokers whose adapter lacks the verb.
+
+    Returns:
+        JSON with ``status`` and the broker result in ``data``.
+    """
+    from .order_routes import (  # noqa: PLC0415
+        _gated_target,
+        _gated_verb_write,
+        _require_live_payload,
+    )
+
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    req = body.get("req")
+    if not isinstance(req, dict):
+        req = {k: v for k, v in body.items() if k not in ("broker", "account_id")}
+    if not req:
+        return jsonify({
+            "status": "error",
+            "message": "Position conversion requires the conversion fields (or a 'req' object) in the body",
+        }), 400
+    adapter_id, account_id = _gated_target(body)
+    return _gated_verb_write(
+        "convert_position", {"req": req}, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="POSITION_CONVERTED", fail_message="Position conversion failed",
+        kill_switch_gated=True,
+    )
+
+
+@operations_bp.route("/positions/exit-all", methods=["POST"])
+def positions_exit_all() -> tuple[Any, int]:
+    """Square off EVERY open position — gated ``exit_all_positions`` verb.
+
+    SAFETY: this is the highest-blast-radius write in the platform — one
+    request flattens an entire live account at market. The body MUST therefore
+    carry an explicit ``{"confirm": true}`` minted by a deliberate operator
+    action in the UI; a stray click, a replayed request, or an agent calling
+    the endpoint speculatively is refused with 400 before any gate is minted.
+    It is deliberately NOT blocked by the L5 kill switch: exiting everything
+    REDUCES exposure and is precisely what a halted account may need to do.
+
+    Request JSON: ``confirm`` (must be boolean ``true``), optional ``tag`` /
+    ``segment`` narrowing (signed into the payload; brokers without those
+    kwargs simply never receive them), optional ``broker`` / ``account_id``.
+
+    Returns:
+        JSON with ``status`` and the broker summary in ``data``.
+    """
+    from .order_routes import (  # noqa: PLC0415
+        _gated_target,
+        _gated_verb_write,
+        _require_live_payload,
+    )
+
+    payload, err = _require_live_payload(require_unlock=True)
+    if err is not None:
+        return err
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") is not True:
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Exit-all requires explicit operator confirmation — send {\"confirm\": true}. "
+                "This squares off EVERY open position at market."
+            ),
+        }), 400
+    fields: dict[str, Any] = {}
+    if body.get("tag") is not None:
+        fields["tag"] = str(body["tag"])
+    if body.get("segment") is not None:
+        fields["segment"] = str(body["segment"])
+    adapter_id, account_id = _gated_target(body)
+    return _gated_verb_write(
+        "exit_all_positions", fields, payload,
+        adapter_id=adapter_id, account_id=account_id,
+        audit_event="POSITIONS_EXITED_ALL", fail_message="Exit-all positions failed",
+    )
