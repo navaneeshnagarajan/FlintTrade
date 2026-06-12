@@ -93,12 +93,16 @@ def test_dhan_tops_streaming_and_advanced_orders() -> None:
     assert best_broker_for(BrokerUseCase.ADVANCED_ORDERS).broker_id == "dhan"
 
 
-def test_upstox_tops_historical_data() -> None:
-    # The mission names Upstox as the historical-data edge: its v2/v3 history API
-    # serves 30-minute intraday for the last 1 year (~365 days), the deepest
-    # intraday lookback of the three natives (Dhan caps at 90). The engine must
-    # rank Upstox first for HISTORICAL_DATA, not Dhan.
-    assert best_broker_for(BrokerUseCase.HISTORICAL_DATA).broker_id == "upstox"
+def test_dhan_tops_historical_data() -> None:
+    # 2026-06-12 correctness pass: an earlier comment credited Upstox with the
+    # deepest intraday lookback ("Dhan caps at 90"), but the broker docs say the
+    # opposite — Dhan's v2 history API serves 1/5/15/25/60-minute intraday for
+    # the last ~5 years (90 days is its per-REQUEST range, not the lookback;
+    # historical-data.md), whereas Upstox's 1-minute candles reach only ~1 month
+    # (HistoryApi.md; the 1-year figure was 30-minute-only). With both adapters'
+    # capability metadata now honest, the engine correctly ranks Dhan first for
+    # intraday HISTORICAL_DATA.
+    assert best_broker_for(BrokerUseCase.HISTORICAL_DATA).broker_id == "dhan"
 
 
 def test_options_analytics_excludes_brokers_without_a_chain() -> None:

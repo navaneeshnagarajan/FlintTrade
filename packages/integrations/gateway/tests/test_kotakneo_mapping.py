@@ -71,10 +71,13 @@ def test_place_order_cover_drops_target_uses_co():
         quantity="10", price="9.4", variety="cover", target_price="9.8", stop_loss_price="9.1",
     )
     p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "CO" and p["stop_loss_value"] == "9.1"
-    assert p["stop_loss_type"] == "Absolute"
-    assert "square_off_value" not in p  # cover orders have no target leg
-    assert "trailing_stop_loss" not in p  # no trailing supplied
+    assert p["product"] == "CO"
+    # A cover order carries its stop level in trigger_price (Place_Order.md: required
+    # for stop-loss and cover order), NOT the bracket-only stop_loss_* leg fields.
+    assert p["trigger_price"] == "9.1"
+    for field in ("stop_loss_value", "stop_loss_type", "square_off_value",
+                  "square_off_type", "trailing_stop_loss", "trailing_sl_value"):
+        assert field not in p  # bracket-only fields excluded from a cover order
 
 
 def test_place_order_bracket_without_legs_raises():

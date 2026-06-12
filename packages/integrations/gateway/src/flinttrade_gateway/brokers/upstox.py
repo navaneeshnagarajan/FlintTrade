@@ -30,6 +30,7 @@ PLACEHOLDER, so it is ``skipped`` and never activates today).
 from __future__ import annotations
 
 import asyncio
+import functools
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
@@ -68,10 +69,13 @@ UPSTOX_CAPABILITIES = Capabilities(
         Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO
         | Segments.CDS | Segments.BCD | Segments.MCX | Segments.MF
     ),
+    # No OrderTypes.CO/BO: Upstox retired cover & bracket orders, the mapping
+    # refuses variety "cover"/"bracket", and cover_order_native is False below.
+    # Advertising CO here would contradict that (routers key off this flag set).
     order_types=(
         OrderTypes.MARKET | OrderTypes.LIMIT | OrderTypes.SL | OrderTypes.SLM
         | OrderTypes.MIS | OrderTypes.CNC | OrderTypes.NRML | OrderTypes.AMO
-        | OrderTypes.GTT | OrderTypes.ICEBERG | OrderTypes.CO
+        | OrderTypes.GTT | OrderTypes.ICEBERG
     ),
     depth_levels=DepthLevels.L5,
     tick_protocol=TickProtocol.UPSTOX_JSON,
@@ -86,13 +90,14 @@ UPSTOX_CAPABILITIES = Capabilities(
     algo_tag_required=False,
     cost_paid=False,
     historical_intraday_intervals_minutes=[1, 3, 5, 15, 30],
-    # Upstox's documented historical-data edge: the v2/v3 history API serves
-    # 30-minute intraday candles for the last 1 year (≈365 days) — the deepest
-    # intraday lookback of the three natives (Dhan caps at 90) — and returns large
-    # date-range batches per request. Populating these lets the broker-recommendation
-    # engine credit Upstox's historical strength (HistoryApi.md interval/duration table).
-    historical_max_lookback_days_intraday=365,
-    historical_max_candles_per_request=2000,
+    # Upstox intraday lookback is interval-dependent (HistoryApi.md duration
+    # table): 1-minute candles reach only the last ~1 month, while 30-minute
+    # candles reach the last 1 year. We advertise the SMALLEST documented window
+    # (~31 days, the 1-minute bound) so the broker-recommendation engine never
+    # over-credits Upstox for a depth that only the coarsest interval provides.
+    # Upstox does not document a per-request candle cap, so it is left at 0.
+    historical_max_lookback_days_intraday=31,
+    historical_max_candles_per_request=0,
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     streaming_supported=True,
@@ -108,12 +113,59 @@ UPSTOX_CAPABILITIES = Capabilities(
 )
 
 
+def _translate_api_errors(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a facade method so any SDK ``ApiException`` is mapped + re-raised.
+
+    The OpenAPI-generated SDK raises ``upstox_client.rest.ApiException`` on any
+    non-2xx response. Per broker-adapter-contract §7 a broker-native error MUST
+    be mapped to the FlintTrade exception taxonomy and never escape the adapter,
+    so this catches the SDK exception, translates it via
+    :func:`upstox_mapping.map_upstox_error` (preserving the broker message/code)
+    and re-raises the mapped ``BrokerError`` ``from`` the original.
+    """
+
+    @functools.wraps(fn)
+    def _wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except BrokerError:
+            raise  # already in-taxonomy — propagate untouched
+        except Exception as exc:  # noqa: BLE001 - re-raised as a mapped BrokerError
+            if M.is_api_exception(exc):
+                raise M.map_upstox_error(exc) from exc
+            raise
+
+    return _wrapped
+
+
+def _facade_with_error_translation(cls: type) -> type:
+    """Class decorator: wrap every public facade method with error translation.
+
+    Applies :func:`_translate_api_errors` to each public callable (instance and
+    static methods) so the mapping is applied uniformly to the WHOLE facade
+    surface — no method can forget to translate its SDK errors.
+    """
+    for name, attr in list(vars(cls).items()):
+        if name.startswith("_"):
+            continue
+        if isinstance(attr, staticmethod):
+            setattr(cls, name, staticmethod(_translate_api_errors(attr.__func__)))
+        elif callable(attr):
+            setattr(cls, name, _translate_api_errors(attr))
+    return cls
+
+
+@_facade_with_error_translation
 class UpstoxClient:
     """Dict-based facade over the upstox-python OpenAPI SDK (lazy import).
 
     Owns the SDK request/response models so the adapter stays SDK-free. Built by
     ``UpstoxAdapter.login`` for live use; tests inject a mock with the same
     method surface instead.
+
+    Every public method is wrapped by :func:`_facade_with_error_translation` so a
+    raw SDK ``ApiException`` is mapped to the FlintTrade exception taxonomy
+    (contract §7) before it can escape.
     """
 
     _V = "v2"

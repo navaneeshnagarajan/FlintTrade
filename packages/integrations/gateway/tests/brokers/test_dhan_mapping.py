@@ -120,6 +120,22 @@ def test_modify_forever_invalid_flag_raises() -> None:
         m.to_modify_forever_kwargs("GTT1", {"order_flag": "TRIPLE"})
 
 
+def test_modify_forever_defaults_to_target_leg() -> None:
+    """Regression: forever orders have no ENTRY_LEG (forever.md) — the default
+    leg must be TARGET_LEG, else the broker rejects with DH-905."""
+    kw = m.to_modify_forever_kwargs("GTT1", {"quantity": 5, "price": 100})
+    assert kw["leg_name"] == "TARGET_LEG"
+
+
+def test_modify_forever_rejects_entry_leg() -> None:
+    # ENTRY_LEG is a super-order concept, not a forever leg — fail closed.
+    with pytest.raises(m.DhanMappingError, match="leg_name"):
+        m.to_modify_forever_kwargs("GTT1", {"leg_name": "ENTRY_LEG", "quantity": 5})
+    # STOP_LOSS_LEG (the second OCO leg) is accepted.
+    sl = m.to_modify_forever_kwargs("GTT1", {"leg_name": "stop_loss_leg", "quantity": 5})
+    assert sl["leg_name"] == "STOP_LOSS_LEG"
+
+
 def test_from_dhan_forever_order() -> None:
     rec = m.from_dhan_forever_order({
         "orderId": "5132208051112", "orderStatus": "PENDING", "orderFlag": "SINGLE",
@@ -228,6 +244,7 @@ _CONDITION = {
     "timeFrame": "DAY",
     "operator": "CROSSING_UP",
     "comparingValue": 250,
+    "expDate": "2026-12-31",
     "frequency": "ONCE",
 }
 
@@ -263,6 +280,21 @@ def test_conditional_trigger_payload_fails_closed() -> None:
         m.to_conditional_trigger_payload(_CONDITION, [])
     with pytest.raises(m.DhanMappingError, match="condition dict"):
         m.to_conditional_trigger_payload("not-a-dict", legs)  # type: ignore[arg-type]
+
+
+def test_conditional_trigger_requires_timeframe_expdate_frequency() -> None:
+    """Regression: timeFrame / expDate / frequency are *required* per
+    conditional-trigger.md — omitting any must fail closed, as the docstring
+    claims, rather than reaching the broker with an incomplete condition."""
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="10", price="250")
+    legs = [m.to_conditional_order_leg(order, "11536")]
+    for missing_key in ("timeFrame", "expDate", "frequency"):
+        partial = {k: v for k, v in _CONDITION.items() if k != missing_key}
+        with pytest.raises(m.DhanMappingError, match="missing required keys"):
+            m.to_conditional_trigger_payload(partial, legs)
+    # The full condition (with all three) still builds.
+    assert m.to_conditional_trigger_payload(_CONDITION, legs)["orders"] == legs
 
 
 def test_extract_alert_id_and_normalise() -> None:

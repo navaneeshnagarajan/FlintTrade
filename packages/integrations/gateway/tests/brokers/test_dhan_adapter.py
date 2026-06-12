@@ -196,6 +196,9 @@ _CONDITION = {
     "securityId": "11536",
     "operator": "CROSSING_UP",
     "comparingValue": 250,
+    "timeFrame": "DAY",
+    "expDate": "2026-12-31",
+    "frequency": "ONCE",
 }
 
 

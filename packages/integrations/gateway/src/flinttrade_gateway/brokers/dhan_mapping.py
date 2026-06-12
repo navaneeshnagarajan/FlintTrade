@@ -131,6 +131,56 @@ def _norm_pricetype(pricetype: str) -> str:
     return str(pricetype).upper().replace("-", "")
 
 
+# Order validity accepted by Dhan's place/slice endpoints (orders.md): DAY or
+# IOC only. ``None`` keeps the broker default (DAY); the forever family maps GTT
+# through ``VALIDITY_MAP`` separately.
+PLACE_ORDER_VALIDITIES = ("DAY", "IOC")
+
+
+def _norm_place_validity(validity: Any) -> str:
+    """Validate an order validity for the Dhan place/slice surface.
+
+    Args:
+        validity: The canonical ``Order.validity`` (``None`` → ``DAY``).
+
+    Returns:
+        ``"DAY"`` or ``"IOC"``.
+
+    Raises:
+        DhanMappingError: If *validity* is neither ``DAY`` nor ``IOC``.
+    """
+    if validity is None:
+        return "DAY"
+    norm = str(validity).upper()
+    if norm not in PLACE_ORDER_VALIDITIES:
+        raise DhanMappingError(f"Dhan order validity must be DAY or IOC, got {validity!r}")
+    return norm
+
+
+# After-market-order timing (annexure.md "amoTime"): when an AMO is pumped.
+AMO_TIMES = ("PRE_OPEN", "OPEN", "OPEN_30", "OPEN_60")
+
+
+def _norm_amo_time(amo_time: Any) -> str:
+    """Validate an after-market-order ``amoTime`` (annexure.md).
+
+    Args:
+        amo_time: The requested AMO time (``None`` → ``OPEN``).
+
+    Returns:
+        One of ``PRE_OPEN`` / ``OPEN`` / ``OPEN_30`` / ``OPEN_60``.
+
+    Raises:
+        DhanMappingError: If *amo_time* is not a documented AMO time.
+    """
+    if amo_time is None or str(amo_time) == "":
+        return "OPEN"
+    norm = str(amo_time).upper()
+    if norm not in AMO_TIMES:
+        raise DhanMappingError(f"Dhan amo_time must be one of {AMO_TIMES}, got {amo_time!r}")
+    return norm
+
+
 # ---------------------------------------------------------------------------
 # Request building: FlintTrade Order -> dhanhq.place_order / modify_order kwargs
 # ---------------------------------------------------------------------------
@@ -167,9 +217,26 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
         "price": _num(getattr(order, "price", 0)),
         "trigger_price": _num(getattr(order, "trigger_price", 0)),
         "disclosed_quantity": int(_num(getattr(order, "disclosed_quantity", 0), 0)),
+        # The SDK defaults validity='DAY', so an IOC order would silently rest as
+        # DAY unless we pass it through (orders.md "validity" param).
+        "validity": _norm_place_validity(getattr(order, "validity", None)),
     }
     if tag:
         kwargs["tag"] = tag
+    return kwargs
+
+
+def to_amo_order_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate an ``amo`` ``Order`` into after-market ``dhanhq.place_order`` kwargs.
+
+    An after-market order is a regular order placed outside market hours: it
+    carries ``after_market_order=True`` plus an ``amoTime`` pump window
+    (``order.amo_time``, default ``OPEN`` — annexure.md). Every other field
+    matches a regular order, so this builds on :func:`to_place_order_kwargs`.
+    """
+    kwargs = to_place_order_kwargs(order, security_id, tag=tag)
+    kwargs["after_market_order"] = True
+    kwargs["amo_time"] = _norm_amo_time(getattr(order, "amo_time", None))
     return kwargs
 
 
@@ -199,18 +266,32 @@ def _validated_core(order: Any, security_id: str) -> dict[str, Any]:
     }
 
 
+# Super orders accept only LIMIT / MARKET entry legs (super-order.md "Order
+# Type"); SL / SL-M are not valid super-order entry types.
+SUPER_ORDER_TYPES = ("LIMIT", "MARKET")
+
+
 def to_super_order_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
     """Translate a ``bracket``/``cover`` ``Order`` into ``dhanhq.place_super_order`` kwargs.
 
     A Dhan super order carries entry + target + stop-loss legs. ``cover`` orders
     set only the stop-loss leg; ``bracket`` orders set target (and optionally a
-    trailing jump) too. Raises if neither a target nor a stop-loss is present.
+    trailing jump) too. The entry leg must be LIMIT or MARKET (super-order.md);
+    SL / SL-M entries and brackets that breach the directional rules (BUY needs
+    targetPrice > price > stopLossPrice; SELL the inverse — mirrors the SDK's
+    ``_super_order.py`` validation) fail closed as a mapped
+    :class:`DhanMappingError` rather than a raw ``ValueError`` from the SDK.
     """
     kwargs = _validated_core(order, security_id)
+    if kwargs["order_type"] not in SUPER_ORDER_TYPES:
+        raise DhanMappingError(
+            f"A Dhan super (bracket/cover) order must be LIMIT or MARKET, got {kwargs['order_type']!r}"
+        )
     # Dhan's place_super_order rejects price <= 0, so a MARKET super order is
     # structurally impossible — require an entry (limit) price.
     if kwargs["price"] <= 0:
         raise DhanMappingError("A Dhan super (bracket/cover) order needs a limit entry price (MARKET is unsupported)")
+    price = kwargs["price"]
     target = _num(getattr(order, "target_price", 0))
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     variety = str(getattr(order, "variety", "regular")).lower()
@@ -218,6 +299,19 @@ def to_super_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
         target = 0.0  # a cover order has no target leg
     if target <= 0 and stop_loss <= 0:
         raise DhanMappingError("A super (bracket/cover) order needs a target_price or stop_loss_price")
+    # Directional bracket sanity (mirrors _super_order.py:150) so a malformed
+    # bracket fails here as a mapped error, not a raw ValueError 500 from the SDK.
+    side = kwargs["transaction_type"]
+    if side == "BUY":
+        if target > 0 and not target > price:
+            raise DhanMappingError("For a BUY super order, target_price must be above the entry price")
+        if stop_loss > 0 and not stop_loss < price:
+            raise DhanMappingError("For a BUY super order, stop_loss_price must be below the entry price")
+    elif side == "SELL":
+        if target > 0 and not target < price:
+            raise DhanMappingError("For a SELL super order, target_price must be below the entry price")
+        if stop_loss > 0 and not stop_loss > price:
+            raise DhanMappingError("For a SELL super order, stop_loss_price must be above the entry price")
     kwargs.update({
         "targetPrice": target,
         "stopLossPrice": stop_loss,
@@ -361,23 +455,34 @@ def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, 
 # A forever order has an entry leg; an OCO forever order adds a target leg.
 FOREVER_ORDER_FLAGS = ("SINGLE", "OCO")
 
+# Forever-order legs (forever.md "Modify Forever Order"): TARGET_LEG is the
+# SINGLE leg and the first OCO leg; STOP_LOSS_LEG is the second OCO leg. Unlike
+# super orders, a forever order has NO ENTRY_LEG — passing one yields a DH-905
+# reject — so the default and the allowed set are the forever pair only.
+FOREVER_ORDER_LEGS = ("TARGET_LEG", "STOP_LOSS_LEG")
+
 
 def to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``dhanhq.modify_forever`` keyword args.
 
     Dhan's ``PUT /forever/orders/{order-id}`` allows changing price, quantity,
     order type, disclosed quantity, trigger price and validity per leg
-    (forever.md "Modify Forever Order").
+    (forever.md "Modify Forever Order"). ``leg_name`` must be ``TARGET_LEG``
+    (SINGLE / first OCO leg) or ``STOP_LOSS_LEG`` (second OCO leg) — ENTRY_LEG is
+    a super-order concept and is rejected by the broker (DH-905).
     """
     flag = str(changes.get("order_flag", "SINGLE")).upper()
     if flag not in FOREVER_ORDER_FLAGS:
         raise DhanMappingError(f"Forever order_flag must be SINGLE or OCO, got {flag!r}")
+    leg = str(changes.get("leg_name", "TARGET_LEG")).upper()
+    if leg not in FOREVER_ORDER_LEGS:
+        raise DhanMappingError(f"Forever leg_name must be one of {FOREVER_ORDER_LEGS}, got {leg!r}")
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
     return {
         "order_id": str(order_id),
         "order_flag": flag,
         "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
-        "leg_name": str(changes.get("leg_name", "ENTRY_LEG")),
+        "leg_name": leg,
         "quantity": int(_num(changes.get("quantity", 0), 0)),
         "price": _num(changes.get("price", 0)),
         "trigger_price": _num(changes.get("trigger_price", 0)),
@@ -513,9 +618,20 @@ def to_convert_position_kwargs(req: dict[str, Any], security_id: str) -> dict[st
 
 CONDITIONAL_TRIGGER_ENDPOINT = "/alerts/orders"
 # Hard-required condition keys per conditional-trigger.md "Place Conditional
-# Trigger" parameters (indicatorName/comparingValue are conditionally required
-# depending on comparisonType, so the broker validates those).
-_CONDITION_REQUIRED_KEYS = ("comparisonType", "exchangeSegment", "securityId", "operator")
+# Trigger" parameters. comparisonType / exchangeSegment / securityId / operator /
+# timeFrame / expDate / frequency are all marked *required*; indicatorName and
+# comparingValue are only *conditionally* required (they depend on
+# comparisonType), so the broker validates those. Failing closed on the hard set
+# is what the docstring promises.
+_CONDITION_REQUIRED_KEYS = (
+    "comparisonType",
+    "exchangeSegment",
+    "securityId",
+    "operator",
+    "timeFrame",
+    "expDate",
+    "frequency",
+)
 
 
 def to_conditional_order_leg(order: Any, security_id: str) -> dict[str, Any]:
@@ -928,9 +1044,17 @@ def from_dhan_quote(symbol: str, exchange: str, q: dict[str, Any]) -> dict[str, 
 def quote_from_feed(segment: str, security_id: str, feed: Any) -> dict[str, Any] | None:
     """Pull one security's quote dict out of the nested marketfeed/quote payload.
 
-    The payload is ``{segment: {security_id: {...}}}`` after :func:`unwrap`.
+    The live SDK transport (``dhan_http._parse_response``) puts the whole REST
+    body under ``data``, and ``/marketfeed/quote`` itself nests its payload under
+    a second ``data`` (market-quote.md) — so the live shape is
+    ``data.data.<SEGMENT>.<securityId>``. After :func:`unwrap` peels the outer
+    ``data``, this peels the inner one when present (matching how
+    :func:`from_dhan_expiry_list` / :func:`from_dhan_expired_options` already
+    handle the double-nest) before reading ``{segment: {security_id: {...}}}``.
     """
     data = unwrap(feed)
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        data = data["data"]  # peel the endpoint's second "data" nest
     if not isinstance(data, dict):
         return None
     by_seg = data.get(segment)
@@ -1211,9 +1335,15 @@ def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], 
 def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str, Any]:
     """Map a Dhan option-chain response to an OptionChain-shaped dict.
 
-    Dhan returns ``data.oc`` keyed by strike string → ``{ce:{...}, pe:{...}}``.
+    Dhan returns ``data.{last_price, oc}`` keyed by strike string →
+    ``{ce:{...}, pe:{...}}`` (option-chain.md). As with quotes, the live SDK
+    transport double-wraps the body (``data.data.{oc}``), so this peels the inner
+    ``data`` when present before reading ``oc`` — mirroring the expiry-list and
+    expired-options handling.
     """
     data = unwrap(resp) or {}
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        data = data["data"]  # peel the endpoint's second "data" nest
     oc = data.get("oc", {}) or {}
     strikes: list[dict[str, Any]] = []
     for strike_str, legs in sorted(oc.items(), key=lambda kv: _num(kv[0])):

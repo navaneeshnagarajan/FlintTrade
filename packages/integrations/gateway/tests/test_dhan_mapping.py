@@ -22,6 +22,7 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     from_dhan_expiry_list,
     from_dhan_margin,
     from_dhan_statement_list,
+    to_amo_order_kwargs,
     to_margin_kwargs,
     to_forever_kwargs,
     to_modify_order_kwargs,
@@ -64,6 +65,48 @@ def test_place_order_unmapped_exchange_raises():
     order = Order(symbol="X", action="BUY", exchange="NCDEX", pricetype="MARKET", product="MIS")
     with pytest.raises(DhanMappingError, match="segment"):
         to_place_order_kwargs(order, "1")
+
+
+def test_place_order_maps_ioc_validity():
+    """Regression: order.validity must reach the place_order kwargs, otherwise an
+    IOC order silently rests as the SDK default DAY."""
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="2900", validity="IOC")
+    kw = to_place_order_kwargs(order, "11536")
+    assert kw["validity"] == "IOC"
+
+
+def test_place_order_validity_defaults_to_day_and_rejects_unknown():
+    # None keeps the broker default (DAY).
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="MARKET",
+                  product="MIS", quantity="10")
+    assert to_place_order_kwargs(order, "11536")["validity"] == "DAY"
+    # GTC/GTD are not valid on the Dhan place surface (DAY/IOC only) — fail closed.
+    bad = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="MARKET",
+                product="MIS", quantity="10", validity="GTC")
+    with pytest.raises(DhanMappingError, match="DAY or IOC"):
+        to_place_order_kwargs(bad, "11536")
+
+
+def test_amo_order_kwargs_sets_after_market_and_time():
+    """An ``amo`` order carries after_market_order=True + an amoTime window
+    (annexure.md); every other field mirrors a regular order."""
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="10", price="2900", variety="amo")
+    kw = to_amo_order_kwargs(order, "11536", tag="A1")
+    assert kw["after_market_order"] is True
+    assert kw["amo_time"] == "OPEN"  # default pump window
+    assert kw["order_type"] == "LIMIT" and kw["product_type"] == "CNC" and kw["tag"] == "A1"
+
+
+def test_amo_order_kwargs_honours_explicit_time_and_rejects_bad():
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="10", price="2900", variety="amo")
+    object.__setattr__(order, "amo_time", "OPEN_30")
+    assert to_amo_order_kwargs(order, "11536")["amo_time"] == "OPEN_30"
+    object.__setattr__(order, "amo_time", "MIDNIGHT")
+    with pytest.raises(DhanMappingError, match="amo_time"):
+        to_amo_order_kwargs(order, "11536")
 
 
 def test_super_order_bracket_carries_both_legs():
@@ -109,6 +152,44 @@ def test_super_order_cover_with_only_target_raises():
                   quantity="5", price="2900", variety="cover", target_price="2950")
     with pytest.raises(DhanMappingError, match="target_price or stop_loss_price"):
         to_super_order_kwargs(order, "1")
+
+
+def test_super_order_rejects_sl_order_type():
+    """Super orders are LIMIT/MARKET only (super-order.md); an SL entry fails
+    closed as a mapped error, not a broker DH reject."""
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="SL", product="MIS",
+                  quantity="5", price="2900", variety="bracket", trigger_price="2890",
+                  target_price="2950", stop_loss_price="2870")
+    with pytest.raises(DhanMappingError, match="LIMIT or MARKET"):
+        to_super_order_kwargs(order, "1")
+
+
+def test_super_order_buy_bad_bracket_fails_as_mapped_error():
+    """A BUY bracket whose target sits below the entry must fail as a mapped
+    DhanMappingError (mirrors the SDK directional rule) — not a raw ValueError."""
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="5", price="2900", variety="bracket", target_price="2800",
+                  stop_loss_price="2870")
+    with pytest.raises(DhanMappingError, match="target_price must be above"):
+        to_super_order_kwargs(order, "1")
+
+
+def test_super_order_sell_bad_bracket_fails_as_mapped_error():
+    """A SELL bracket whose stop-loss sits below the entry must fail closed."""
+    order = Order(symbol="X", action="SELL", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="5", price="2900", variety="bracket", target_price="2850",
+                  stop_loss_price="2870")
+    with pytest.raises(DhanMappingError, match="stop_loss_price must be above"):
+        to_super_order_kwargs(order, "1")
+
+
+def test_super_order_valid_sell_bracket_passes():
+    # SELL: target < price < stop_loss is the correct directional shape.
+    order = Order(symbol="X", action="SELL", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="5", price="2900", variety="bracket", target_price="2850",
+                  stop_loss_price="2950")
+    kw = to_super_order_kwargs(order, "1")
+    assert kw["targetPrice"] == 2850.0 and kw["stopLossPrice"] == 2950.0
 
 
 def test_slice_order_mirrors_place_order():
@@ -268,6 +349,20 @@ def test_quote_mapping():
     assert q["ltp"] == 2901.5 and q["open"] == 2890.0 and q["volume"] == 1_200_000
 
 
+def test_quote_from_feed_peels_double_nested_data():
+    """Regression: the live SDK transport double-wraps the body and
+    /marketfeed/quote nests under a second ``data`` (market-quote.md), so the
+    real shape is data.data.<SEGMENT>. quote_from_feed must peel the inner data."""
+    # doc-exact /marketfeed/quote body after dhan_http wraps it under `data`.
+    feed = {"status": "success", "data": {"data": {"NSE_FNO": {"49081": {
+        "last_price": 368.15,
+        "ohlc": {"open": 0, "close": 368.15, "high": 0, "low": 0},
+        "oi": 0, "volume": 0,
+    }}}, "status": "success"}}
+    rec = quote_from_feed("NSE_FNO", "49081", feed)
+    assert rec is not None and rec["last_price"] == 368.15
+
+
 def test_to_option_chain_dict():
     resp = {"status": "success", "data": {"last_price": 24000, "oc": {
         "24100.000000": {"ce": {"last_price": 100}, "pe": {"last_price": 180}},
@@ -285,6 +380,24 @@ def test_to_option_chain_dict():
     assert oc["strikes"][1]["strike_price"] == 24100.0
     s0 = oc["strikes"][0]
     assert s0["ce_ltp"] == 150.0 and s0["ce_delta"] == 0.5 and s0["pe_oi"] == 12000
+
+
+def test_to_option_chain_dict_peels_double_nested_data():
+    """Regression: the live /optionchain body is data.{last_price, oc} and the
+    SDK transport wraps it under another ``data`` (option-chain.md). The mapper
+    must peel the inner data before reading ``oc`` or strikes come back empty."""
+    resp = {"status": "success", "data": {"data": {"last_price": 25642.8, "oc": {
+        "25650.000000": {
+            "ce": {"last_price": 134, "oi": 3786445, "implied_volatility": 9.78,
+                   "greeks": {"delta": 0.53871, "gamma": 0.00132, "theta": -15.15, "vega": 12.18},
+                   "top_bid_price": 133.55, "top_ask_price": 134},
+            "pe": {"last_price": 132.8, "oi": 3096145, "greeks": {"delta": -0.46732}},
+        },
+    }}, "status": "success"}}
+    oc = to_option_chain_dict("NIFTY", "NSE_INDEX", resp)
+    assert len(oc["strikes"]) == 1
+    assert oc["strikes"][0]["strike_price"] == 25650.0
+    assert oc["strikes"][0]["ce_ltp"] == 134.0 and oc["strikes"][0]["pe_oi"] == 3096145
 
 
 def test_decode_dhan_ticker_packet():

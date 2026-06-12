@@ -372,16 +372,30 @@ def to_smart_order_payload(order: Any, security_id: str, *, algo_id: str | None 
           positive ``price`` becomes ``trigger_limit_price`` (trigger-limit).
         * ``"gtt"`` / ``"oco"`` — a LIMIT/MARKET parent with stop-loss and/or
           target GTT legs. ``stop_loss_price`` maps to ``sl_trigger_price`` and
-          ``target_price`` to ``tgt_trigger_price``; the broker requires a limit
-          price alongside each leg, so ``sl_limit_price``/``tgt_limit_price``
-          default to the trigger values when not separately supplied.
+          ``target_price`` to ``tgt_trigger_price``. Each present leg MUST carry
+          its own explicit limit price (``sl_limit_price`` / ``tgt_limit_price``)
+          satisfying the documented inequalities — SL limit strictly below the SL
+          trigger, target limit strictly above the target trigger
+          (smart-orders.md validations ``MaxSlLimitPrice`` / ``MinTgtLimitPrice``).
+          The limit price is NEVER defaulted to the trigger: equal values violate
+          the strict inequalities and the broker rejects them, and an absent leg
+          limit price is itself a documented rejection — so the mapping fails
+          closed in both cases.
 
     Raises:
         IndMoneyMappingError: Missing trigger price on a TRIGGER order, no legs
-            on a GTT/OCO order, or any unmappable enum value.
+            on a GTT/OCO order, a leg present without its (positive) limit price,
+            a leg limit price that breaks the documented inequality, or any
+            unmappable enum value.
     """
     payload = _validated_core(order)
     variety = str(getattr(order, "variety", "")).lower()
+    # LIVE-VERIFY: smart-orders.md:97 lists the exchange Enum as "NSE" only, yet the
+    # algo_id row (smart-orders.md:104) documents a distinct BSE algo id
+    # ("9999999999999999"), implying BSE/BFO smart orders ARE accepted. The docs are
+    # internally inconsistent. We keep the permissive BSE/BFO behaviour (consistent
+    # with the algo-id row and with normal orders) until a live BSE smart order
+    # confirms or refutes it; revisit if the broker rejects the BSE exchange enum.
     payload.update(
         {
             "validity": "DAY",  # smart orders are DAY-only (smart-orders doc)
@@ -416,12 +430,37 @@ def to_smart_order_payload(order: Any, security_id: str, *, algo_id: str | None 
     if sl_trigger <= 0 and tgt_trigger <= 0:
         raise IndMoneyMappingError("A GTT/OCO smart order needs a stop_loss_price and/or a target_price leg")
     if sl_trigger > 0:
+        # The broker rejects a stop-loss leg without its limit price, and the
+        # limit must sit strictly below the trigger (MaxSlLimitPrice). Never
+        # default it to the trigger — equal values violate the inequality.
+        sl_limit = _num(getattr(order, "sl_limit_price", 0))
+        if sl_limit <= 0:
+            raise IndMoneyMappingError(
+                "A stop-loss leg needs an explicit sl_limit_price greater than zero "
+                "(the broker rejects an SL leg without its limit price)"
+            )
+        if sl_limit >= sl_trigger:
+            raise IndMoneyMappingError(
+                "sl_limit_price must be strictly less than sl_trigger_price "
+                f"({sl_limit} >= {sl_trigger}) — see MaxSlLimitPrice"
+            )
         payload["sl_trigger_price"] = sl_trigger
-        # The broker rejects a stop-loss leg without its limit price.
-        payload["sl_limit_price"] = _num(getattr(order, "sl_limit_price", 0)) or sl_trigger
+        payload["sl_limit_price"] = sl_limit
     if tgt_trigger > 0:
+        # The target limit must sit strictly above its trigger (MinTgtLimitPrice).
+        tgt_limit = _num(getattr(order, "tgt_limit_price", 0))
+        if tgt_limit <= 0:
+            raise IndMoneyMappingError(
+                "A target leg needs an explicit tgt_limit_price greater than zero "
+                "(the broker rejects a target leg without its limit price)"
+            )
+        if tgt_limit <= tgt_trigger:
+            raise IndMoneyMappingError(
+                "tgt_limit_price must be strictly greater than tgt_trigger_price "
+                f"({tgt_limit} <= {tgt_trigger}) — see MinTgtLimitPrice"
+            )
         payload["tgt_trigger_price"] = tgt_trigger
-        payload["tgt_limit_price"] = _num(getattr(order, "tgt_limit_price", 0)) or tgt_trigger
+        payload["tgt_limit_price"] = tgt_limit
     return payload
 
 

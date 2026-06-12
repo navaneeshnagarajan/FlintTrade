@@ -266,6 +266,18 @@ async def test_modify_forwards_full_surface_and_checks_envelope():
     assert params["transaction_type"] == "B" and params["amo"] == "YES"
 
 
+@pytest.mark.asyncio
+async def test_modify_bare_call_is_token_gated():
+    # Finding #7 — a bare adapter.modify_order without the router token must fail
+    # closed BEFORE the SDK is touched (parity with place/cancel gating).
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    with pytest.raises(SafetyBypassError):
+        await adapter.modify_order(session, "OID9", {"quantity": 1})
+    assert mock.calls == []
+
+
 class _RejectingNeo(MockNeoFull):
     def modify_order(self, params):
         return {"stat": "Not_Ok", "errMsg": "Order is not open"}
@@ -388,13 +400,16 @@ async def test_search_scrip_minimal_uses_two_arg_call():
 
 @pytest.mark.asyncio
 async def test_quote_details_typed_request():
+    # A scrip resolves to its numeric token before the quotes call (the quotes
+    # endpoint keys by pSymbol, not the trading symbol).
     mock = MockNeoFull()
-    adapter = _adapter(mock)
+    adapter = _adapter(mock, token_resolver=lambda s, e: "14366")
     session = await _session(adapter)
     rows = await adapter.quote_details(session, ["NSE:IDEA"], quote_type="ltp")
     assert rows == [{"trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "ltp": 9.4}]
-    (_, (tokens, qtype)) = mock.calls[0]
-    assert qtype == "ltp" and tokens[0]["exchange_segment"] == "nse_cm"
+    (_, (tokens, qtype)) = [c for c in mock.calls if c[0] == "quotes"][0]
+    assert qtype == "ltp"
+    assert tokens[0] == {"instrument_token": "14366", "exchange_segment": "nse_cm"}
 
 
 @pytest.mark.asyncio

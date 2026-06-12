@@ -320,6 +320,25 @@ class KotakNeoAdapter(BrokerAdapter):
             "configure a symbol resolver"
         )
 
+    async def _resolve_token(self, session: Session, name: str, exchange: str) -> str:
+        """Resolve a scrip ``name`` to its numeric NEO instrument token (``pSymbol``).
+
+        The quote, margin and feed surfaces all key the scrip by its numeric
+        ``pSymbol`` (``Quotes.md`` / ``Margin_Required.md`` / ``webSocket.md``),
+        NOT the trading symbol. Uses the injected ``token_resolver`` when present,
+        otherwise a live ``search_scrip`` lookup. Index names are the caller's
+        responsibility (they pass through by name); this always resolves a token.
+        """
+        if self._token_resolver is not None:
+            return str(self._token_resolver(name, exchange))
+        scrips = await self.search_scrip(session, name, exchange)
+        if not scrips or not scrips[0].get("token"):
+            raise BrokerError(
+                f"Cannot resolve Kotak Neo instrument token for {name}/{exchange} — "
+                "configure a token resolver or check the symbol"
+            )
+        return str(scrips[0]["token"])
+
     @staticmethod
     async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         return await asyncio.to_thread(fn, *args, **kwargs)
@@ -508,13 +527,22 @@ class KotakNeoAdapter(BrokerAdapter):
     # ---------- market data ----------
 
     async def _fetch_quote_rows(self, session: Session, symbols: list[str], quote_type: str) -> list[dict]:
-        """Resolve ``symbols`` and fetch raw NEO quote rows for ``quote_type``."""
+        """Resolve ``symbols`` to numeric tokens and fetch raw NEO quote rows.
+
+        The quotes endpoint keys each scrip by its numeric ``pSymbol``/``wToken``
+        (``webSocket.md`` lines 44–47 / ``Quotes.md``), NOT the trading symbol;
+        only indexes are passed by NAME (``Quotes.md`` "Nifty 50" example). Each
+        non-index symbol is resolved via the shared ``_resolve_token`` path.
+        """
         if quote_type not in M.QUOTE_TYPES:
             raise BrokerError(f"Kotak Neo quote_type must be one of {sorted(M.QUOTE_TYPES)}, got {quote_type!r}")
         resolved: list[tuple[str, str]] = []
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            resolved.append((self._resolve_symbol(name, exchange), exchange))
+            if M.is_index_name(name):
+                resolved.append((name, exchange))  # indexes key by name
+            else:
+                resolved.append((await self._resolve_token(session, name, exchange), exchange))
         tokens = M.to_quote_tokens(resolved)
         client = self._client(session)
         if quote_type == "all":
@@ -555,10 +583,20 @@ class KotakNeoAdapter(BrokerAdapter):
     async def margin_calculator(self, session: Session, order: Order) -> dict:
         """Pre-trade margin estimate for ``order`` (NEO ``margin_required``).
 
-        Read-only — places nothing, so it needs no gate.
+        Read-only — places nothing, so it needs no gate. NEO keys the scrip by
+        its numeric ``pSymbol`` (``Margin_Required.md`` line 35), so the token is
+        resolved via the shared ``_resolve_token`` path and the trading symbol
+        rides its own ``trading_symbol`` field. If the numeric token is not
+        resolvable the trading symbol is used as a best-effort fallback.
         """
         trading_symbol = self._resolve_symbol(order.symbol, order.exchange)
-        params = M.to_margin_params(order, trading_symbol)
+        try:
+            instrument_token: str | None = await self._resolve_token(session, order.symbol, order.exchange)
+        except BrokerError:
+            # No token resolver and search_scrip could not resolve it — fall back
+            # to keying margin by trading symbol (handled in to_margin_params).
+            instrument_token = None
+        params = M.to_margin_params(order, trading_symbol, instrument_token=instrument_token)
         resp = await self._call(self._client(session).margin, params)
         return M.from_kotak_margin(resp)
 
@@ -629,18 +667,7 @@ class KotakNeoAdapter(BrokerAdapter):
         for raw in symbols:
             exchange, name = _split_symbol(raw)
             seg = M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower())
-            if is_index:
-                token = name
-            elif self._token_resolver is not None:
-                token = str(self._token_resolver(name, exchange))
-            else:
-                scrips = await self.search_scrip(session, name, exchange)
-                if not scrips or not scrips[0].get("token"):
-                    raise BrokerError(
-                        f"Cannot resolve Kotak Neo instrument token for {name}/{exchange} — "
-                        "configure a token resolver or check the symbol"
-                    )
-                token = str(scrips[0]["token"])
+            token = name if is_index else await self._resolve_token(session, name, exchange)
             tokens.append({"instrument_token": token, "exchange_segment": seg})
         return tokens
 

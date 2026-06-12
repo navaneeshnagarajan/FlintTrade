@@ -290,6 +290,83 @@ async def test_advanced_order_still_requires_router_token():
 
 
 @pytest.mark.asyncio
+async def test_amo_order_dispatches_to_place_order_after_market():
+    """An ``amo`` variety routes to place_order with after_market_order=True +
+    amoTime, instead of falling through to the unsupported-variety error."""
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="5", price="2900", variety="amo")
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "OID1"
+    kind, kw = mock.calls[0]
+    assert kind == "place"  # the regular place_order endpoint
+    assert kw["after_market_order"] is True and kw["amo_time"] == "OPEN"
+
+
+@pytest.mark.asyncio
+async def test_amo_order_is_advertised_in_capabilities():
+    # AMO is advertised in order_types, so dispatch must support it (regression:
+    # it previously fell through to the unsupported-variety BrokerError).
+    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+    from flinttrade_gateway.capabilities import OrderTypes
+
+    assert DHAN_CAPABILITIES.order_types & OrderTypes.AMO
+
+
+@pytest.mark.asyncio
+async def test_capabilities_historical_metadata_is_honest():
+    """Regression: the 5000 candles-per-request cap was fabricated and 90 days is
+    the per-request range, not the lookback (historical-data.md)."""
+    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+
+    assert DHAN_CAPABILITIES.historical_max_candles_per_request == 0  # unknown, not 5000
+    # ~5 years of intraday history; 90 is the per-request range cap, not lookback.
+    assert DHAN_CAPABILITIES.historical_max_lookback_days_intraday == 1825
+
+
+@pytest.mark.asyncio
+async def test_quotes_handle_double_nested_live_payload():
+    """Regression: live quotes are double-wrapped (data.data.<SEGMENT>); the
+    adapter must still surface a Quote (market-quote.md doc-exact envelope)."""
+    class _DoubleWrapped(MockDhan):
+        def quote_data(self, securities):
+            return {"status": "success", "data": {"data": {"NSE_EQ": {"11536": {
+                "last_price": 4525.55,
+                "ohlc": {"open": 4521.45, "close": 4507.85, "high": 4530, "low": 4500},
+                "oi": 0, "volume": 0,
+            }}}, "status": "success"}}
+
+    adapter = _adapter(_DoubleWrapped())
+    session = await _session(adapter)
+    quotes = await adapter.quotes(session, ["NSE:RELIANCE"])
+    assert len(quotes) == 1
+    assert quotes[0].ltp == 4525.55 and quotes[0].open == 4521.45
+
+
+@pytest.mark.asyncio
+async def test_option_chain_handles_double_nested_live_payload():
+    """Regression: live option chain is data.data.{oc} (option-chain.md); the
+    adapter must return non-empty strikes through the double-nest."""
+    class _DoubleWrapped(MockDhan):
+        def option_chain(self, under_security_id, under_exchange_segment, expiry):
+            return {"status": "success", "data": {"data": {"last_price": 25642.8, "oc": {
+                "25650.000000": {
+                    "ce": {"last_price": 134, "oi": 3786445, "greeks": {"delta": 0.53871}},
+                    "pe": {"last_price": 132.8, "oi": 3096145, "greeks": {"delta": -0.46732}},
+                },
+            }}, "status": "success"}}
+
+    adapter = DhanAdapter(client_factory=lambda _s: _DoubleWrapped())  # NIFTY index fast path
+    session = await _session(adapter)
+    oc = await adapter.option_chain(session, {"symbol": "NIFTY", "exchange": "NSE_INDEX",
+                                              "expiry": "2026-06-25"})
+    assert len(oc.strikes) == 1
+    assert oc.strikes[0].strike_price == 25650.0 and oc.strikes[0].ce_ltp == 134.0
+
+
+@pytest.mark.asyncio
 async def test_unsupported_variety_raises():
     from flinttrade_core.exceptions import BrokerError
 

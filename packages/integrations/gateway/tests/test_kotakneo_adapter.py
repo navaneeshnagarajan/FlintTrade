@@ -256,6 +256,68 @@ async def test_margin_calculator_reads_estimate():
 
 
 @pytest.mark.asyncio
+async def test_margin_calculator_sends_numeric_instrument_token():
+    # Finding #1 — margin must key the scrip by the numeric pSymbol, with the
+    # trading symbol in its own field (Margin_Required.md:35), not the trading
+    # symbol packed into instrument_token.
+    mock = MockNeo()
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _s: mock,
+        symbol_resolver=lambda s, e: "IDEA-EQ",
+        token_resolver=lambda s, e: "14366",
+    )
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="9.4")
+    await adapter.margin_calculator(session, order)
+    _, params = [c for c in mock.calls if c[0] == "margin"][0]
+    assert params["instrument_token"] == "14366"
+    assert params["trading_symbol"] == "IDEA-EQ"
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_resolves_token_via_search_scrip():
+    # No token resolver → the adapter resolves the numeric token via search_scrip.
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="YESBANK", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="9.4")
+    await adapter.margin_calculator(session, order)
+    _, params = [c for c in mock.calls if c[0] == "margin"][0]
+    assert params["instrument_token"] == "11915"   # pSymbol from search_scrip
+
+
+@pytest.mark.asyncio
+async def test_quotes_use_numeric_token_for_scrip():
+    # Finding #2 — a scrip is keyed by its resolved numeric token on the quotes
+    # request, NOT the trading symbol.
+    mock = MockNeo()
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _s: mock,
+        symbol_resolver=lambda s, e: "IDEA-EQ",
+        token_resolver=lambda s, e: "14366",
+    )
+    session = await _session(adapter)
+    await adapter.quotes(session, ["NSE:IDEA"])
+    _, tokens = [c for c in mock.calls if c[0] == "quotes"][0]
+    assert tokens[0] == {"instrument_token": "14366", "exchange_segment": "nse_cm"}
+
+
+@pytest.mark.asyncio
+async def test_quotes_pass_index_by_name():
+    # An index keys by its NAME on the quotes request (webSocket.md "For Indexes"
+    # / Quotes.md), with no token resolution attempted.
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    await adapter.quotes(session, ["NSE:Nifty 50"])
+    _, tokens = [c for c in mock.calls if c[0] == "quotes"][0]
+    assert tokens[0] == {"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"}
+    assert not [c for c in mock.calls if c[0] == "search"]  # index never hits search_scrip
+
+
+@pytest.mark.asyncio
 async def test_search_scrip_resolves_symbol():
     adapter = _adapter(MockNeo())
     session = await _session(adapter)

@@ -84,9 +84,13 @@ DHAN_CAPABILITIES = Capabilities(
     rate_limit_non_trading_per_sec=20,
     order_modifications_per_order=25,
     algo_tag_required=True,
-    historical_max_lookback_days_intraday=90,
+    # Intraday history reaches ~5 years back (historical-data.md "for last 5
+    # years"); the documented 90-day cap is the per-REQUEST date range, not the
+    # lookback, so it is noted here, not encoded as the lookback. Dhan documents
+    # no max-candles-per-request limit (it caps by date range), so 0 = unknown.
+    historical_max_lookback_days_intraday=1825,  # ~5 years (90 days = per-request range cap)
     historical_max_lookback_days_daily=None,
-    historical_max_candles_per_request=5000,
+    historical_max_candles_per_request=0,
     historical_intraday_intervals_minutes=[1, 5, 15, 25, 60],
     option_chain_supported=True,
     option_chain_greeks_supported=True,
@@ -288,6 +292,10 @@ class DhanAdapter(BrokerAdapter):
         client = self._client(session)
         if variety in ("regular", ""):
             resp = await self._call(client.place_order, **M.to_place_order_kwargs(order, security_id, tag=tag))
+        elif variety == "amo":
+            # After-market order: the SAME place_order endpoint with
+            # after_market_order=True + an amoTime pump window (annexure.md).
+            resp = await self._call(client.place_order, **M.to_amo_order_kwargs(order, security_id, tag=tag))
         elif variety in ("bracket", "cover"):
             resp = await self._call(client.place_super_order, **M.to_super_order_kwargs(order, security_id, tag=tag))
         elif variety == "iceberg":

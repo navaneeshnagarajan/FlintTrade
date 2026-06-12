@@ -96,6 +96,30 @@ def test_capabilities_advertise_wired_varieties():
     assert UPSTOX_CAPABILITIES.iceberg_native is True
 
 
+def test_capabilities_do_not_advertise_cover_or_bracket_order_type():
+    # cover_order_native is False and the mapping refuses variety "cover", so the
+    # order_types flag set must NOT advertise CO/BO (routers key off this set —
+    # advertising it would contradict the refusal).
+    from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
+    from flinttrade_gateway.capabilities import OrderTypes
+
+    assert not (UPSTOX_CAPABILITIES.order_types & OrderTypes.CO)
+    assert not (UPSTOX_CAPABILITIES.order_types & OrderTypes.BO)
+    # The wired varieties stay advertised.
+    assert UPSTOX_CAPABILITIES.order_types & OrderTypes.GTT
+    assert UPSTOX_CAPABILITIES.order_types & OrderTypes.ICEBERG
+
+
+def test_capabilities_intraday_history_metadata_is_honest():
+    # Upstox 1-minute intraday history reaches only ~1 month (HistoryApi.md); the
+    # 365-day figure was the 30-minute-only bound. The per-request candle cap was
+    # fabricated, so it is 0 (unknown), not 2000.
+    from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
+
+    assert UPSTOX_CAPABILITIES.historical_max_lookback_days_intraday == 31
+    assert UPSTOX_CAPABILITIES.historical_max_candles_per_request == 0
+
+
 def test_modify_order_params():
     p = to_modify_order_params("OID1", {"pricetype": "LIMIT", "quantity": 50, "price": 101.25})
     assert p["order_id"] == "OID1" and p["order_type"] == "LIMIT" and p["quantity"] == 50

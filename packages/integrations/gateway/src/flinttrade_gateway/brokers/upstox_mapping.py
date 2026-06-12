@@ -11,8 +11,19 @@ MarketQuoteV3Api / TradeProfitAndLossApi query parameters).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import urlencode
+
+from flinttrade_core.exceptions import (
+    BrokerError,
+    InsufficientFunds,
+    InvalidPrice,
+    InvalidQuantity,
+    OrderRejectedByBroker,
+    RateLimitError,
+    SessionExpired,
+)
 
 # Exchange → Upstox segment code (instrument-token prefix / quote segment).
 EXCHANGE_TO_UPSTOX = {
@@ -38,9 +49,36 @@ UPSTOX_TO_ORDER_TYPE = {v: k for k, v in ORDER_TYPE_TO_UPSTOX.items()}
 
 SIDE_TO_UPSTOX = {"BUY": "BUY", "SELL": "SELL"}
 
+# Upstox order validity (PlaceOrderRequest.validity): DAY (default) or IOC.
+# Anything else (GTC/GTD/EOS) is not accepted by the place/modify endpoints.
+UPSTOX_VALIDITIES = frozenset({"DAY", "IOC"})
+
 
 class UpstoxMappingError(ValueError):
     """Raised when an order cannot be translated to / from the Upstox API."""
+
+
+def _validated_validity(validity: Any) -> str:
+    """Validate an order's validity against the Upstox-accepted set.
+
+    Args:
+        validity: The FlintTrade ``Order.validity`` (``None`` keeps the Upstox
+            default of ``DAY``); ``DAY``/``IOC`` pass through.
+
+    Returns:
+        The Upstox validity code (``"DAY"`` or ``"IOC"``).
+
+    Raises:
+        UpstoxMappingError: If ``validity`` is set to an unsupported value.
+    """
+    if validity is None or str(validity).strip() == "":
+        return "DAY"
+    code = str(validity).strip().upper()
+    if code not in UPSTOX_VALIDITIES:
+        raise UpstoxMappingError(
+            f"Upstox supports only DAY/IOC validity, got {validity!r}"
+        )
+    return code
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -69,7 +107,7 @@ def _validated_core(order: Any, instrument_token: str) -> dict[str, Any]:
         "instrument_token": str(instrument_token),
         "quantity": int(_num(order.quantity, 0)),
         "product": PRODUCT_TO_UPSTOX[product],
-        "validity": "DAY",
+        "validity": _validated_validity(getattr(order, "validity", None)),
         "price": _num(getattr(order, "price", 0)),
         "order_type": ORDER_TYPE_TO_UPSTOX[ptype],
         "transaction_type": SIDE_TO_UPSTOX[side],
@@ -186,13 +224,49 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
         "price": _num(changes.get("price", 0)),
         "trigger_price": _num(changes.get("trigger_price", 0)),
         "disclosed_quantity": int(_num(changes.get("disclosed_quantity", 0), 0)),
-        "validity": str(changes.get("validity", "DAY")).upper(),
+        "validity": _validated_validity(changes.get("validity")),
     }
 
 
 def _exchange_of_token(instrument_token: str) -> str:
     seg = str(instrument_token).split("|", 1)[0]
     return UPSTOX_TO_EXCHANGE.get(seg, seg)
+
+
+# FlintTrade exchanges whose ``D`` product is carry-forward F&O (NRML), not
+# delivery (CNC). Both NRML and CNC map to Upstox ``D`` on the way out, so the
+# read side disambiguates ``D`` by the instrument's segment.
+_DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "CDS", "BCD", "MCX"})
+
+
+def _product_from_upstox(code: str, exchange: str, segment: str = "") -> str:
+    """Map an Upstox product code back to a FlintTrade product.
+
+    ``I``/``MTF``/``CO``/``OCO`` are unambiguous, but Upstox collapses both
+    carry-forward F&O (``NRML``) and equity delivery (``CNC``) into ``D``. The
+    forward map therefore cannot be inverted blindly: an F&O ``D`` position read
+    back as ``CNC`` would feed reconciliation the wrong product. Disambiguate
+    ``D`` by the instrument's segment — a derivative segment means ``NRML``,
+    everything else means ``CNC``.
+
+    Args:
+        code: The Upstox product code from the order/position record.
+        exchange: The FlintTrade exchange (resolved from the instrument token).
+        segment: The Upstox segment code (e.g. ``"NSE_FO"``), used as a fallback
+            when the exchange alone is ambiguous.
+
+    Returns:
+        The FlintTrade product name (``MIS``/``CNC``/``NRML``).
+    """
+    upstox_code = str(code).upper()
+    if upstox_code != "D":
+        return UPSTOX_TO_PRODUCT.get(upstox_code, upstox_code)
+    exch = str(exchange).upper()
+    seg = str(segment).upper()
+    is_derivative = exch in _DERIVATIVE_EXCHANGES or any(
+        marker in seg for marker in ("_FO", "_CD", "_COM")
+    )
+    return "NRML" if is_derivative else "CNC"
 
 
 def extract_order_id(resp: dict[str, Any]) -> str:
@@ -216,14 +290,15 @@ def extract_order_id(resp: dict[str, Any]) -> str:
 
 def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox order-book record."""
+    exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
     return {
         "orderid": str(d.get("order_id", "")),
         "status": d.get("status", ""),
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+        "exchange": exchange,
         "action": d.get("transaction_type", ""),
         "pricetype": UPSTOX_TO_ORDER_TYPE.get(d.get("order_type", ""), d.get("order_type", "")),
-        "product": UPSTOX_TO_PRODUCT.get(d.get("product", ""), d.get("product", "")),
+        "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
         "quantity": str(d.get("quantity", 0)),
         "price": str(d.get("price", 0)),
         "trigger_price": str(d.get("trigger_price", 0)),
@@ -234,10 +309,11 @@ def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
 
 def from_upstox_position(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox position record."""
+    exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
     return {
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
-        "product": UPSTOX_TO_PRODUCT.get(d.get("product", ""), d.get("product", "")),
+        "exchange": exchange,
+        "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
         "quantity": str(d.get("quantity", 0)),
         "average_price": str(d.get("average_price", d.get("buy_price", 0))),
         "ltp": str(d.get("last_price", 0)),
@@ -441,11 +517,58 @@ def extract_access_token(resp: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _gtt_rules(order: Any) -> tuple[str, list[dict[str, Any]]]:
+# GttRule.trigger_type enum (SDK model): ABOVE / BELOW / IMMEDIATE. The ENTRY
+# leg fires as soon as its trigger price is touched (IMMEDIATE); the protective
+# STOPLOSS/TARGET legs fire directionally relative to the entry side.
+_GTT_TRIGGER_TYPES = frozenset({"ABOVE", "BELOW", "IMMEDIATE"})
+
+
+def _protective_trigger_type(side: str, strategy: str) -> str:
+    """Derive a protective GTT leg's ``trigger_type`` (ABOVE/BELOW) from the side.
+
+    A long (BUY entry) book exits its STOPLOSS when price falls (``BELOW``) and
+    its TARGET when price rises (``ABOVE``); a short (SELL entry) book is the
+    mirror. Callers may override this by supplying an explicit ``trigger_type``.
+
+    Args:
+        side: The entry transaction side (``BUY``/``SELL``).
+        strategy: The leg strategy (``STOPLOSS``/``TARGET``).
+
+    Returns:
+        ``"ABOVE"`` or ``"BELOW"``.
+    """
+    is_buy = str(side).upper() == "BUY"
+    if str(strategy).upper() == "STOPLOSS":
+        return "BELOW" if is_buy else "ABOVE"
+    return "ABOVE" if is_buy else "BELOW"
+
+
+def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]]:
     """Build the GTT rule list from an ``Order``'s trigger/leg prices.
 
     ``trigger_price`` is the ENTRY rule (mandatory); ``stop_loss_price`` and
     ``target_price`` add STOPLOSS / TARGET rules, upgrading the GTT to MULTIPLE.
+
+    The ENTRY leg uses ``IMMEDIATE`` (it activates the moment its price is
+    touched). The protective STOPLOSS/TARGET legs use ``ABOVE``/``BELOW`` derived
+    from ``side`` (see :func:`_protective_trigger_type`) rather than ``IMMEDIATE``
+    — a protective leg that fires immediately would defeat its purpose. An
+    explicit per-leg override may be supplied via ``stop_loss_trigger_type`` /
+    ``target_trigger_type`` on the order/changes object.
+
+    LIVE-VERIFY: the exact trigger_type Upstox expects for protective GTT legs is
+    not pinned down in the captured docs (see ``.local/audits/broker-parity/
+    upstox.md`` §3) — confirm against a live GTT placement before trusting the
+    derived direction.
+
+    Args:
+        order: The order (or changes shim) carrying the leg prices and any
+            explicit ``*_trigger_type`` overrides.
+        side: The entry transaction side (``BUY``/``SELL``), driving the
+            protective-leg direction.
+
+    Returns:
+        ``(gtt_type, rules)`` where ``gtt_type`` is ``SINGLE`` or ``MULTIPLE``.
     """
     entry = _num(getattr(order, "trigger_price", 0))
     if entry <= 0:
@@ -456,10 +579,35 @@ def _gtt_rules(order: Any) -> tuple[str, list[dict[str, Any]]]:
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     target = _num(getattr(order, "target_price", 0))
     if stop_loss > 0:
-        rules.append({"strategy": "STOPLOSS", "trigger_type": "IMMEDIATE", "trigger_price": stop_loss})
+        rules.append({
+            "strategy": "STOPLOSS",
+            "trigger_type": _leg_trigger_type(
+                getattr(order, "stop_loss_trigger_type", None), side, "STOPLOSS"
+            ),
+            "trigger_price": stop_loss,
+        })
     if target > 0:
-        rules.append({"strategy": "TARGET", "trigger_type": "IMMEDIATE", "trigger_price": target})
+        rules.append({
+            "strategy": "TARGET",
+            "trigger_type": _leg_trigger_type(
+                getattr(order, "target_trigger_type", None), side, "TARGET"
+            ),
+            "trigger_price": target,
+        })
     return ("MULTIPLE" if len(rules) > 1 else "SINGLE"), rules
+
+
+def _leg_trigger_type(override: Any, side: str, strategy: str) -> str:
+    """Resolve a protective leg's trigger_type: explicit override or derived."""
+    if override is not None and str(override).strip():
+        code = str(override).strip().upper()
+        if code not in _GTT_TRIGGER_TYPES:
+            raise UpstoxMappingError(
+                f"Upstox GTT trigger_type must be one of {sorted(_GTT_TRIGGER_TYPES)}, "
+                f"got {override!r}"
+            )
+        return code
+    return _protective_trigger_type(side, strategy)
 
 
 def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
@@ -470,7 +618,7 @@ def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
     product = str(order.product).upper()
     if product not in PRODUCT_TO_UPSTOX:
         raise UpstoxMappingError(f"Unsupported product {product!r}")
-    gtt_type, rules = _gtt_rules(order)
+    gtt_type, rules = _gtt_rules(order, side=side)
     return {
         "type": gtt_type,
         "quantity": int(_num(order.quantity, 0)),
@@ -494,8 +642,11 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
         trigger_price = changes.get("trigger_price", 0)
         stop_loss_price = changes.get("stop_loss_price", 0)
         target_price = changes.get("target_price", 0)
+        stop_loss_trigger_type = changes.get("stop_loss_trigger_type")
+        target_trigger_type = changes.get("target_trigger_type")
 
-    gtt_type, rules = _gtt_rules(_Changes)
+    side = str(changes.get("transaction_type", changes.get("action", "BUY"))).upper()
+    gtt_type, rules = _gtt_rules(_Changes, side=side)
     return {
         "type": str(changes.get("type", gtt_type)).upper(),
         "quantity": int(_num(changes.get("quantity", 0), 0)),
@@ -988,3 +1139,107 @@ def to_option_chain_dict(underlying: str, exchange: str, resp: dict[str, Any]) -
             "pe_bid": put["bid"], "pe_ask": put["ask"],
         })
     return {"underlying": underlying, "exchange": exchange, "strikes": strikes}
+
+
+# ---------------------------------------------------------------------------
+# Broker-error translation (contract §7 — SDK errors never escape the adapter)
+# ---------------------------------------------------------------------------
+
+
+def is_api_exception(exc: BaseException) -> bool:
+    """True for an upstox-python ``rest.ApiException`` (without importing the SDK).
+
+    The OpenAPI-generated SDK raises ``upstox_client.rest.ApiException`` on any
+    non-2xx response. The SDK is not installed in the test/runtime environment,
+    so this duck-types the exception by class name plus its ``status``/``body``
+    attribute shape rather than importing it. Tests inject a stand-in with the
+    same shape.
+
+    Args:
+        exc: The caught exception.
+
+    Returns:
+        Whether ``exc`` looks like an Upstox ``ApiException``.
+    """
+    return (
+        type(exc).__name__ == "ApiException"
+        and hasattr(exc, "status")
+        and hasattr(exc, "body")
+    )
+
+
+def _parse_error_body(body: Any) -> tuple[str, str]:
+    """Extract ``(error_code, message)`` from an Upstox error response body.
+
+    Upstox error payloads follow ``ApiGatewayErrorResponse``:
+    ``{"status": "error", "errors": [{"error_code": ..., "message": ...}]}``.
+    The body arrives as bytes or a str (raw HTTP response data); a non-JSON body
+    degrades gracefully to ``("", "<raw>")`` so the broker message is never lost.
+
+    Args:
+        body: The ``ApiException.body`` (bytes / str / already-decoded dict).
+
+    Returns:
+        ``(error_code, message)`` — either field may be empty.
+    """
+    payload: Any = body
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            payload = json.loads(body.decode("utf-8", "replace"))
+        except (ValueError, UnicodeDecodeError):
+            return "", body.decode("utf-8", "replace").strip()
+    elif isinstance(body, str):
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            return "", body.strip()
+    if not isinstance(payload, dict):
+        return "", str(payload or "").strip()
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        first = errors[0]
+        return str(first.get("error_code") or ""), str(first.get("message") or "")
+    # Some endpoints return a flat ``{"error_code", "message"}`` body.
+    return str(payload.get("error_code") or ""), str(payload.get("message") or "")
+
+
+def map_upstox_error(exc: BaseException) -> BrokerError:
+    """Map an Upstox ``ApiException`` to the FlintTrade exception taxonomy.
+
+    Translates the HTTP status and parsed error body to the canonical
+    :class:`~flinttrade_core.exceptions.BrokerError` subtree (contract §7), so a
+    rejected order (4xx), expired daily token (401), or rate-limit (429) surfaces
+    as a typed FlintTrade error instead of a raw SDK exception. The broker's own
+    message and error code are preserved for the audit chain.
+
+    Args:
+        exc: The caught ``ApiException``-shaped exception.
+
+    Returns:
+        The mapped ``BrokerError`` subclass instance.
+    """
+    status = getattr(exc, "status", None)
+    try:
+        status_code = int(status) if status is not None else 0
+    except (TypeError, ValueError):
+        status_code = 0
+    error_code, message = _parse_error_body(getattr(exc, "body", None))
+    if not message:
+        message = str(getattr(exc, "reason", "") or "") or f"Upstox API error (HTTP {status_code})"
+    kwargs: dict[str, str] = {"broker_code": error_code or str(status_code), "broker_id": "upstox"}
+    code = error_code.upper()
+    msg_l = message.lower()
+
+    if status_code in (401, 403) or "token" in code.lower() or "unauthor" in msg_l:
+        return SessionExpired(message, **kwargs)
+    if status_code == 429 or "rate" in msg_l and "limit" in msg_l:
+        return RateLimitError(message, endpoint="default", **kwargs)
+    if "margin" in msg_l or "insufficient" in msg_l or "funds" in msg_l:
+        return InsufficientFunds(message, **kwargs)
+    if "quantity" in msg_l or "lot size" in msg_l or "freeze" in msg_l:
+        return InvalidQuantity(message, **kwargs)
+    if "price" in msg_l or "circuit" in msg_l or "tick size" in msg_l:
+        return InvalidPrice(message, **kwargs)
+    if 400 <= status_code < 500:
+        return OrderRejectedByBroker(message, **kwargs)
+    return BrokerError(message, **kwargs)

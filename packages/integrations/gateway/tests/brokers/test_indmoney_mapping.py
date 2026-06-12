@@ -207,9 +207,12 @@ def test_to_place_order_payload_validation_failures() -> None:
 
 
 def test_to_smart_order_payload_gtt_with_both_legs() -> None:
+    # Doc-valid leg limit prices: SL limit strictly BELOW its trigger,
+    # target limit strictly ABOVE its trigger (smart-orders.md:192-194).
     order = _order(
         exchange="NFO", product="NRML", quantity="75", price="37",
         variety="gtt", stop_loss_price="34", target_price="41",
+        sl_limit_price="33", tgt_limit_price="42",
     )
     payload = m.to_smart_order_payload(order, "51011")
     assert payload["segment"] == "DERIVATIVE" and payload["product"] == "MARGIN"
@@ -217,8 +220,43 @@ def test_to_smart_order_payload_gtt_with_both_legs() -> None:
     assert payload["validity"] == "DAY"  # smart orders are DAY-only
     assert payload["sl_trigger_price"] == 34.0
     assert payload["tgt_trigger_price"] == 41.0
-    # The broker rejects a leg without its limit price — defaulted to the trigger.
-    assert payload["sl_limit_price"] == 34.0 and payload["tgt_limit_price"] == 41.0
+    # Explicit leg limit prices — and the documented strict inequalities hold.
+    assert payload["sl_limit_price"] == 33.0 and payload["tgt_limit_price"] == 42.0
+    assert payload["sl_limit_price"] < payload["sl_trigger_price"]
+    assert payload["tgt_limit_price"] > payload["tgt_trigger_price"]
+
+
+def test_to_smart_order_payload_missing_leg_limit_price_raises() -> None:
+    # smart-orders.md:208-209 — a leg without its limit price is rejected;
+    # the mapping must NOT default it to the trigger (would break the inequality).
+    sl_only = _order(
+        exchange="NFO", product="NRML", quantity="75", price="37",
+        variety="gtt", stop_loss_price="34",  # no sl_limit_price
+    )
+    with pytest.raises(m.IndMoneyMappingError, match="sl_limit_price"):
+        m.to_smart_order_payload(sl_only, "51011")
+    tgt_only = _order(
+        exchange="NFO", product="NRML", quantity="75", price="37",
+        variety="gtt", target_price="41",  # no tgt_limit_price
+    )
+    with pytest.raises(m.IndMoneyMappingError, match="tgt_limit_price"):
+        m.to_smart_order_payload(tgt_only, "51011")
+
+
+def test_to_smart_order_payload_leg_limit_inequality_enforced() -> None:
+    # Equal values (the old defaulted shape) violate the strict inequalities.
+    sl_equal = _order(
+        exchange="NFO", product="NRML", quantity="75", price="37",
+        variety="gtt", stop_loss_price="34", sl_limit_price="34",
+    )
+    with pytest.raises(m.IndMoneyMappingError, match="strictly less"):
+        m.to_smart_order_payload(sl_equal, "51011")
+    tgt_equal = _order(
+        exchange="NFO", product="NRML", quantity="75", price="37",
+        variety="gtt", target_price="41", tgt_limit_price="41",
+    )
+    with pytest.raises(m.IndMoneyMappingError, match="strictly greater"):
+        m.to_smart_order_payload(tgt_equal, "51011")
 
 
 def test_to_smart_order_payload_distinct_leg_limit_prices() -> None:

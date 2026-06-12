@@ -11,12 +11,49 @@ verified against the staged SDK models in
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from flinttrade_core.exceptions import (
+    BrokerError,
+    InsufficientFunds,
+    InvalidPrice,
+    InvalidQuantity,
+    OrderRejectedByBroker,
+    RateLimitError,
+    SessionExpired,
+)
 from flinttrade_core.models import Order
 from flinttrade_gateway.brokers import upstox_mapping as m
 
 pytestmark = pytest.mark.unit
+
+
+class _StandInApiException(Exception):
+    """ApiException-shaped stand-in (the upstox-python SDK is not installed).
+
+    Mirrors ``upstox_client.rest.ApiException``: same class name + ``status`` /
+    ``reason`` / ``body`` attribute shape, so ``is_api_exception`` duck-types it.
+    """
+
+    def __init__(self, status, body=None, reason=""):
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+        self.body = body
+        self.headers = None
+
+
+# Rename so duck-typing by class name (``ApiException``) matches the real SDK.
+_StandInApiException.__name__ = "ApiException"
+
+
+def _err_body(error_code: str, message: str) -> bytes:
+    """Build an ApiGatewayErrorResponse-shaped JSON error body (as bytes)."""
+    return json.dumps(
+        {"status": "error", "errors": [{"error_code": error_code, "message": message}]}
+    ).encode("utf-8")
 
 
 def _order(**kw) -> Order:
@@ -82,6 +119,39 @@ def test_place_order_amo_variety_sets_is_amo():
     assert p["is_amo"] is True and p["tag"] == "A1"
     regular = m.to_place_order_params(_order(), "NSE_EQ|X")
     assert regular["is_amo"] is False
+
+
+# ---------------------------------------------------------------------------
+# Validity pass-through (PlaceOrderRequest.validity: DAY | IOC)
+# ---------------------------------------------------------------------------
+
+
+def test_place_order_validity_defaults_to_day_and_maps_ioc():
+    # None / unset → DAY (Upstox default); explicit IOC survives the build.
+    assert m.to_place_order_params(_order(), "NSE_EQ|X")["validity"] == "DAY"
+    assert m.to_place_order_params(_order(validity="IOC"), "NSE_EQ|X")["validity"] == "IOC"
+    # Lower-case is normalised.
+    assert m.to_place_order_params(_order(validity="ioc"), "NSE_EQ|X")["validity"] == "IOC"
+
+
+def test_place_order_ioc_survives_v3_and_multi_builders():
+    assert m.to_place_order_v3_params(_order(validity="IOC"), "NSE_EQ|X")["validity"] == "IOC"
+    payloads = m.to_multi_order_params([(_order(validity="IOC"), "NSE_EQ|A")])
+    assert payloads[0]["validity"] == "IOC"
+
+
+def test_place_order_rejects_unsupported_validity():
+    # Upstox place accepts only DAY/IOC; GTC/GTD/EOS must be refused, not
+    # silently coerced to DAY.
+    with pytest.raises(m.UpstoxMappingError, match="DAY/IOC"):
+        m.to_place_order_params(_order(validity="GTC"), "NSE_EQ|X")
+
+
+def test_modify_order_validity_validated():
+    assert m.to_modify_order_params("OID1", {"validity": "IOC"})["validity"] == "IOC"
+    assert m.to_modify_order_params("OID1", {})["validity"] == "DAY"
+    with pytest.raises(m.UpstoxMappingError, match="DAY/IOC"):
+        m.to_modify_order_params("OID1", {"validity": "GTD"})
 
 
 def test_place_order_v3_params_slices_iceberg():
@@ -175,6 +245,44 @@ def test_to_gtt_modify_params_rebuilds_rules():
         m.to_gtt_modify_params("", {"trigger_price": 100})
 
 
+def test_gtt_protective_legs_use_directional_trigger_type_not_immediate():
+    # ENTRY stays IMMEDIATE; the protective STOPLOSS/TARGET legs must NOT be
+    # hardcoded IMMEDIATE — they fire directionally (ABOVE/BELOW) by side.
+    buy = m.to_gtt_place_params(
+        _order(variety="gtt", action="BUY", trigger_price="2850",
+               stop_loss_price="2800", target_price="2950"),
+        "NSE_EQ|X",
+    )
+    by_strategy = {r["strategy"]: r for r in buy["rules"]}
+    assert by_strategy["ENTRY"]["trigger_type"] == "IMMEDIATE"
+    # Long book: stop fires when price falls (BELOW), target when it rises (ABOVE).
+    assert by_strategy["STOPLOSS"]["trigger_type"] == "BELOW"
+    assert by_strategy["TARGET"]["trigger_type"] == "ABOVE"
+
+    sell = m.to_gtt_place_params(
+        _order(variety="gtt", action="SELL", trigger_price="2850",
+               stop_loss_price="2900", target_price="2750"),
+        "NSE_EQ|X",
+    )
+    by_strategy = {r["strategy"]: r for r in sell["rules"]}
+    # Short book is the mirror.
+    assert by_strategy["STOPLOSS"]["trigger_type"] == "ABOVE"
+    assert by_strategy["TARGET"]["trigger_type"] == "BELOW"
+
+
+def test_gtt_explicit_trigger_type_override_and_validation():
+    order = _order(variety="gtt", action="BUY", trigger_price="2850", stop_loss_price="2800")
+    object.__setattr__(order, "stop_loss_trigger_type", "ABOVE")
+    p = m.to_gtt_place_params(order, "NSE_EQ|X")
+    sl = next(r for r in p["rules"] if r["strategy"] == "STOPLOSS")
+    assert sl["trigger_type"] == "ABOVE"  # explicit override wins over the derived BELOW
+
+    bad = _order(variety="gtt", action="BUY", trigger_price="2850", stop_loss_price="2800")
+    object.__setattr__(bad, "stop_loss_trigger_type", "SIDEWAYS")
+    with pytest.raises(m.UpstoxMappingError, match="trigger_type"):
+        m.to_gtt_place_params(bad, "NSE_EQ|X")
+
+
 def test_to_gtt_cancel_params_and_id_detection():
     assert m.to_gtt_cancel_params("GTT-CU25") == {"gtt_order_id": "GTT-CU25"}
     with pytest.raises(m.UpstoxMappingError, match="gtt_order_id"):
@@ -205,6 +313,61 @@ def test_from_upstox_gtt_order_normalises_rules():
     assert out["gtt_order_id"] == "GTT-CU1" and out["product"] == "CNC"
     assert out["rules"][0]["order_id"] == "250228010168535"
     assert out["rules"][1]["strategy"] == "STOPLOSS" and out["rules"][1]["order_id"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Product disambiguation: Upstox "D" → CNC (equity) vs NRML (F&O carry-forward)
+# ---------------------------------------------------------------------------
+
+
+def test_from_upstox_order_equity_d_is_cnc():
+    # An equity-segment "D" position is delivery → CNC.
+    out = m.from_upstox_order({
+        "order_id": "1", "trading_symbol": "RELIANCE",
+        "instrument_token": "NSE_EQ|INE002A01018", "product": "D",
+        "transaction_type": "BUY", "order_type": "LIMIT", "quantity": 1, "price": 2900,
+    })
+    assert out["exchange"] == "NSE" and out["product"] == "CNC"
+
+
+def test_from_upstox_order_fno_d_is_nrml():
+    # An F&O-segment "D" position is carry-forward → NRML, NOT CNC. Reading it
+    # back as CNC would feed reconciliation the wrong product.
+    out = m.from_upstox_order({
+        "order_id": "2", "trading_symbol": "NIFTY 24600 CE",
+        "instrument_token": "NSE_FO|54452", "product": "D",
+        "transaction_type": "SELL", "order_type": "MARKET", "quantity": 75,
+    })
+    assert out["exchange"] == "NFO" and out["product"] == "NRML"
+
+
+def test_from_upstox_position_d_disambiguated_by_segment():
+    equity = m.from_upstox_position({
+        "trading_symbol": "TCS", "instrument_token": "NSE_EQ|INE467B01029",
+        "product": "D", "quantity": 5, "average_price": 3500,
+    })
+    fno = m.from_upstox_position({
+        "trading_symbol": "BANKNIFTY FUT", "instrument_token": "NSE_FO|99999",
+        "product": "D", "quantity": 15, "average_price": 50000,
+    })
+    assert equity["product"] == "CNC"
+    assert fno["product"] == "NRML"
+    # MTF still maps to NRML regardless of segment (unambiguous code).
+    mtf = m.from_upstox_position({
+        "trading_symbol": "SBIN", "instrument_token": "NSE_EQ|INE062A01020",
+        "product": "MTF", "quantity": 100, "average_price": 600,
+    })
+    assert mtf["product"] == "NRML"
+
+
+def test_from_upstox_d_uses_explicit_segment_field_when_present():
+    # When the record carries an explicit Upstox segment string, an F&O segment
+    # disambiguates "D" to NRML even if the exchange field is generic.
+    out = m.from_upstox_position({
+        "trading_symbol": "GOLD FUT", "exchange": "MCX", "segment": "MCX_FO",
+        "product": "D", "quantity": 1, "average_price": 70000,
+    })
+    assert out["product"] == "NRML"
 
 
 # ---------------------------------------------------------------------------
@@ -439,3 +602,51 @@ def test_from_upstox_feed_ticks_full_feed_market_and_index():
 def test_from_upstox_feed_ticks_tolerates_junk_messages():
     assert m.from_upstox_feed_ticks({}) == []
     assert m.from_upstox_feed_ticks({"feeds": "nope"}) == []
+
+
+# ---------------------------------------------------------------------------
+# Broker-error translation (contract §7)
+# ---------------------------------------------------------------------------
+
+
+def test_is_api_exception_duck_types_by_shape():
+    assert m.is_api_exception(_StandInApiException(400, _err_body("E", "x"))) is True
+    assert m.is_api_exception(ValueError("nope")) is False
+    assert m.is_api_exception(m.UpstoxMappingError("bad")) is False
+
+
+def test_map_upstox_error_rejected_order_400():
+    exc = _StandInApiException(400, _err_body("UDAPI100038", "Invalid order parameters"),
+                              reason="Bad Request")
+    mapped = m.map_upstox_error(exc)
+    assert isinstance(mapped, OrderRejectedByBroker)
+    assert "Invalid order parameters" in str(mapped)  # broker message preserved
+    assert mapped.broker_code == "UDAPI100038" and mapped.broker_id == "upstox"
+
+
+def test_map_upstox_error_expired_token_401_is_session_expired():
+    exc = _StandInApiException(401, _err_body("UDAPI100050", "Invalid token"), reason="Unauthorized")
+    assert isinstance(m.map_upstox_error(exc), SessionExpired)
+
+
+def test_map_upstox_error_rate_limit_429():
+    exc = _StandInApiException(429, _err_body("UDAPI10005", "Too many requests"), reason="Too Many Requests")
+    mapped = m.map_upstox_error(exc)
+    assert isinstance(mapped, RateLimitError) and mapped.endpoint == "default"
+
+
+def test_map_upstox_error_specialises_by_message():
+    funds = m.map_upstox_error(_StandInApiException(400, _err_body("E", "Insufficient margin available")))
+    assert isinstance(funds, InsufficientFunds)
+    qty = m.map_upstox_error(_StandInApiException(400, _err_body("E", "Quantity below lot size")))
+    assert isinstance(qty, InvalidQuantity)
+    price = m.map_upstox_error(_StandInApiException(400, _err_body("E", "Price outside circuit limit")))
+    assert isinstance(price, InvalidPrice)
+
+
+def test_map_upstox_error_5xx_and_non_json_body():
+    server = m.map_upstox_error(_StandInApiException(500, None, reason="Internal Server Error"))
+    assert isinstance(server, BrokerError) and "Internal Server Error" in str(server)
+    # A non-JSON body still surfaces its text rather than being lost.
+    raw = m.map_upstox_error(_StandInApiException(503, b"upstream gateway down", reason="Unavailable"))
+    assert "upstream gateway down" in str(raw)

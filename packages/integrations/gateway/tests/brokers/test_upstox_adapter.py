@@ -16,13 +16,31 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError
+from flinttrade_core.exceptions import BrokerError, OrderRejectedByBroker, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
-from flinttrade_gateway.brokers.upstox import _ROUTER_TOKEN, UpstoxAdapter
+from flinttrade_gateway.brokers.upstox import (
+    _ROUTER_TOKEN,
+    UpstoxAdapter,
+    _facade_with_error_translation,
+)
 from flinttrade_gateway.brokers.upstox_mapping import UpstoxMappingError
 
 pytestmark = pytest.mark.unit
+
+
+class _StandInApiException(Exception):
+    """ApiException-shaped stand-in (the upstox-python SDK is not installed)."""
+
+    def __init__(self, status, body=None, reason=""):
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+        self.body = body
+        self.headers = None
+
+
+_StandInApiException.__name__ = "ApiException"  # match the SDK class name for duck-typing
 
 _OK = {"status": "success"}
 
@@ -486,6 +504,12 @@ async def test_convert_position_resolves_token_and_maps_products():
     ("exit_all_positions", ()),
     ("convert_position", ({"symbol": "RELIANCE", "exchange": "NSE", "old_product": "MIS",
                            "new_product": "CNC", "transaction_type": "BUY", "quantity": 1},)),
+    # modify/cancel for BOTH the regular and the GTT-prefix dispatch branches —
+    # every write path must refuse a bare call (no router token).
+    ("modify_order", ("240221025997024", {"quantity": 4, "price": 2950})),
+    ("modify_order", ("GTT-CU100", {"quantity": 2, "trigger_price": 2860})),
+    ("cancel_order", ("240221025997024",)),
+    ("cancel_order", ("GTT-CU100",)),
 ])
 async def test_every_write_is_router_gated(method, args):
     mock = MockUpstox()
@@ -494,6 +518,89 @@ async def test_every_write_is_router_gated(method, args):
     with pytest.raises(SafetyBypassError):
         await getattr(adapter, method)(session, *args)
     assert mock.calls == []  # the broker was never touched
+
+
+@pytest.mark.asyncio
+async def test_place_order_ioc_validity_reaches_broker():
+    # IOC survives the gated place path (PlaceOrderRequest.validity DAY|IOC).
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    await adapter.place_order(session, _order(validity="IOC"), _router_token=_ROUTER_TOKEN)
+    kind, params = mock.calls[0]
+    assert kind == "place" and params["validity"] == "IOC"
+
+
+# ---------------------------------------------------------------------------
+# Broker-error translation: the facade maps SDK ApiException to the taxonomy
+# ---------------------------------------------------------------------------
+
+
+def _err_body(error_code: str, message: str) -> bytes:
+    import json
+
+    return json.dumps({"status": "error", "errors": [{"error_code": error_code, "message": message}]}).encode()
+
+
+def test_facade_translates_api_exception_to_taxonomy():
+    # The class decorator wraps every public facade method so a raw SDK
+    # ApiException never escapes — it becomes a mapped BrokerError (contract §7).
+    @_facade_with_error_translation
+    class _FakeFacade:
+        def place_order(self, params):  # noqa: ARG002
+            raise _StandInApiException(400, _err_body("UDAPI100038", "Order rejected by exchange"))
+
+        def funds(self):
+            raise _StandInApiException(401, _err_body("UDAPI100050", "Token expired"), reason="Unauthorized")
+
+    facade = _FakeFacade()
+    with pytest.raises(OrderRejectedByBroker) as ei:
+        facade.place_order({})
+    assert ei.value.broker_id == "upstox" and ei.value.broker_code == "UDAPI100038"
+    assert "rejected by exchange" in str(ei.value)  # broker message survives
+    with pytest.raises(SessionExpired):
+        facade.funds()
+
+
+def test_facade_passes_non_api_exceptions_through():
+    @_facade_with_error_translation
+    class _FakeFacade:
+        def boom(self):
+            raise ValueError("not an ApiException")
+
+    with pytest.raises(ValueError, match="not an ApiException"):
+        _FakeFacade().boom()
+
+
+@pytest.mark.asyncio
+async def test_adapter_surfaces_mapped_broker_error_from_facade():
+    # A facade write that raises a mapped (in-taxonomy) error must surface it as
+    # a typed BrokerError through the gated adapter path, not a raw SDK error.
+    class _RaisingUpstox(MockUpstox):
+        def place_order(self, params):  # noqa: ARG002
+            raise OrderRejectedByBroker("Order rejected: circuit limit", broker_code="UDAPI100038",
+                                        broker_id="upstox")
+
+    adapter = _adapter(_RaisingUpstox())
+    session = await _session(adapter)
+    with pytest.raises(OrderRejectedByBroker, match="circuit limit"):
+        await adapter.place_order(session, _order(), _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_captures_mapped_broker_error_on_fetch_failure():
+    # Once SDK errors map to BrokerError, reconcile's (BrokerError, ValueError)
+    # catch turns a broker fetch failure into an error report, not a raised
+    # exception (contract §14).
+    class _RaisingUpstox(MockUpstox):
+        def order_book(self):
+            raise SessionExpired("Token expired", broker_code="UDAPI100050", broker_id="upstox")
+
+    adapter = _adapter(_RaisingUpstox())
+    session = await _session(adapter)
+    report = await adapter.reconcile(session)
+    assert report.adapter_id == "upstox"
+    assert "broker fetch failed" in report.error and "Token expired" in report.error
 
 
 # ---------------------------------------------------------------------------

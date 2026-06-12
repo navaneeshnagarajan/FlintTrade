@@ -4,6 +4,7 @@ WebSocket frames; no SDK, no network, no credentials needed."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -247,19 +248,36 @@ SMART_RESP = {
 }
 
 
+def _gtt_order(**overrides) -> SimpleNamespace:
+    """A duck-typed GTT order carrying explicit, doc-valid leg limit prices.
+
+    The mapping reads every leg price off the order by attribute; leg limit
+    prices (``sl_limit_price``/``tgt_limit_price``) are mandatory and must
+    satisfy the documented strict inequalities (smart-orders.md:192-194), so the
+    smart-order path is exercised with a SL limit below its trigger and a target
+    limit above its trigger.
+    """
+    base = dict(symbol="51011", action="BUY", exchange="NFO", pricetype="LIMIT",
+                product="NRML", quantity="75", price="37", trigger_price="0", variety="gtt",
+                stop_loss_price="34", target_price="41", sl_limit_price="33", tgt_limit_price="42")
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 @pytest.mark.asyncio
 async def test_gtt_variety_dispatches_to_smart_order() -> None:
     transport = FakeTransport({("POST", "/smart/order"): SMART_RESP})
     adapter = _adapter(transport, security_resolver=lambda s, e: "51011")
     session = await _session(adapter)
-    order = _order(exchange="NFO", product="NRML", quantity="75", price="37",
-                   variety="gtt", stop_loss_price="34", target_price="41")
-    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    oid = await adapter.place_order(session, _gtt_order(), _router_token=_ROUTER_TOKEN)
     assert oid == "DRV-28131451"  # parent id returned
     assert adapter.last_child_order_id == "GTT-2914581"  # child surfaced
     payload = transport.calls[0]["json"]
     assert payload["sl_trigger_price"] == 34.0 and payload["tgt_trigger_price"] == 41.0
-    assert payload["sl_limit_price"] == 34.0 and payload["tgt_limit_price"] == 41.0
+    # Explicit leg limits, honouring the documented strict inequalities.
+    assert payload["sl_limit_price"] == 33.0 and payload["tgt_limit_price"] == 42.0
+    assert payload["sl_limit_price"] < payload["sl_trigger_price"]
+    assert payload["tgt_limit_price"] > payload["tgt_trigger_price"]
     assert payload["validity"] == "DAY"
 
 

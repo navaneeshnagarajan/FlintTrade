@@ -70,6 +70,40 @@ LIMITS_PRODUCTS = frozenset({"CNC", "MIS", "NRML", "ALL"})
 # REST quotes quote_type values (Quotes.md).
 QUOTE_TYPES = frozenset({"all", "depth", "ohlc", "ltp", "oi", "52w", "circuit_limits", "scrip_details"})
 
+# Index exchange identifiers (``webSocket.md`` "For Indexes" + Quotes.md): the
+# ``instrument_token`` for an index is its NAME, not a numeric scrip token. Both
+# the quote and the subscription path pass these names through unresolved.
+# Compared case-insensitively (``is_index_name``) since callers vary the casing.
+INDEX_NAMES = frozenset({
+    "NIFTY 50",
+    "NIFTY BANK",
+    "NIFTY FIN SERVICE",
+    "SENSEX",
+    "INDIA VIX",
+    "NIFTY MIDCAP 100",
+    "NIFTY 100",
+    "NIFTY PSU BANK",
+    "NIFTY PHARMA",
+    "NIFTY IT",
+    "NIFTY PSE",
+    "NIFTY FMCG",
+    "NIFTY 500",
+    "NIFTY AUTO",
+    "NIFTY CPSE",
+    "NIFTY 200",
+    "NIFTY NEXT 50",
+    "NIFTY MID SELECT",
+})
+
+
+def is_index_name(name: str) -> bool:
+    """Return ``True`` if ``name`` is a NEO index identifier (passed by name).
+
+    Index quotes/subscriptions key the instrument by its name (``webSocket.md``
+    "For Indexes"); everything else needs a numeric scrip token resolved first.
+    """
+    return str(name).strip().upper() in INDEX_NAMES
+
 # HSM live-feed terse keys -> long names (settings.stock_key_mapping).
 STOCK_FEED_KEYS = {
     "ltt": "last_traded_time",
@@ -81,7 +115,7 @@ STOCK_FEED_KEYS = {
     "bp": "buy_price",
     "sp": "sell_price",
     "bq": "buy_quantity",
-    "bs": "sell_quantity",
+    "sq": "sell_quantity",
     "ap": "average_price",
     "oi": "open_interest",
     "lo": "low",
@@ -187,21 +221,55 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
     return params
 
 
+# Bracket-only NEO leg fields (``Place_Order.md`` marks every one "Applicable
+# only for Bracket Order"). A cover order MUST NOT carry these — its stop level
+# rides ``trigger_price`` instead — so the cover branch strips any that leaked in.
+_BRACKET_ONLY_LEG_FIELDS = (
+    "stop_loss_value",
+    "stop_loss_type",
+    "square_off_value",
+    "square_off_type",
+    "trailing_stop_loss",
+    "trailing_sl_value",
+)
+
+
 def _apply_variety_legs(order: Any, variety: str, params: dict[str, Any]) -> None:
     """Attach bracket/cover legs onto ``params`` (shared by place + margin).
 
-    NEO leg-type / flag enums are forwarded verbatim to the OMS (slt/sot/tlt),
-    so they MUST match the documented values: square_off_type/stop_loss_type
-    ∈ {"Absolute","Ticks"} and trailing_stop_loss ∈ {"Y","N"} (Place_Order.md).
-    Sending "abs"/"YES" silently drops the protective legs on a live order.
+    Bracket (BO) and cover (CO) differ in how the stop level is carried:
+
+    * **Bracket** attaches the protective legs via the bracket-only fields —
+      ``square_off_*``/``stop_loss_*``/``trailing_*``. Their enum values are
+      forwarded verbatim to the OMS, so they MUST match the documented set:
+      square_off_type/stop_loss_type ∈ {"Absolute","Ticks"} and
+      trailing_stop_loss ∈ {"Y","N"} (``Place_Order.md``). Sending "abs"/"YES"
+      silently drops the protective legs on a live order.
+    * **Cover** has only a stop-loss, which the OMS reads from ``trigger_price``
+      (``Place_Order.md``: required for stop-loss and cover order); the
+      bracket-only leg fields do not apply and are dropped. The stop level is
+      taken from ``stop_loss_price`` (falling back to ``trigger_price`` when the
+      caller set only that).
     """
     target = _num(getattr(order, "target_price", 0))
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     if variety == "cover":
-        target = 0.0  # a cover order has only a stop-loss leg
+        params["product"] = "CO"
+        # CO carries its stop level in trigger_price, NOT a bracket leg field.
+        cover_trigger = stop_loss if stop_loss > 0 else _num(getattr(order, "trigger_price", 0))
+        if cover_trigger <= 0:
+            raise KotakNeoMappingError(
+                "A cover order needs a stop level (stop_loss_price or trigger_price)"
+            )
+        params["trigger_price"] = str(cover_trigger)
+        # Strip any bracket-only legs that the base place/margin params seeded.
+        for field in _BRACKET_ONLY_LEG_FIELDS:
+            params.pop(field, None)
+        return
+
     if target <= 0 and stop_loss <= 0:
-        raise KotakNeoMappingError("A bracket/cover order needs a target_price or stop_loss_price")
-    params["product"] = "BO" if variety == "bracket" else "CO"
+        raise KotakNeoMappingError("A bracket order needs a target_price or stop_loss_price")
+    params["product"] = "BO"
     params["stop_loss_value"] = str(stop_loss)
     params["stop_loss_type"] = "Absolute"
     if target > 0:
@@ -213,6 +281,15 @@ def _apply_variety_legs(order: Any, variety: str, params: dict[str, Any]) -> Non
         params["trailing_sl_value"] = str(trailing)
 
 
+# NEO modify quick-path discriminators (``neo_api.modify_order`` line 361). The
+# SDK takes the quick path only when ALL four are set, and the order-id path only
+# when ``instrument_token``/``exchange_segment``/``trading_symbol`` are ALL unset
+# — any partial set falls through to its ``raise ValueError``. We enforce the
+# all-or-nothing contract here so a clear ``KotakNeoMappingError`` is raised
+# before the SDK does (``Modify_Order.md`` Methods 1 & 2).
+_MODIFY_QUICK_FIELDS = ("instrument_token", "exchange_segment", "product", "trading_symbol")
+
+
 def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``NeoAPI.modify_order`` kwargs.
 
@@ -221,7 +298,19 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
     / ``product`` / ``trading_symbol`` / ``transaction_type``) plus the ``amo`` /
     ``market_protection`` / ``filled_quantity`` / ``dd`` flags are forwarded only
     when present in ``changes``, so the SDK picks the right modification path.
+
+    The four quick-method discriminators are all-or-nothing: the SDK requires the
+    complete set for the quick path (and none of them for the order-id path), so
+    a partial set is rejected with a clear ``KotakNeoMappingError`` here rather
+    than the SDK's opaque ``ValueError``.
     """
+    quick_present = [f for f in _MODIFY_QUICK_FIELDS if changes.get(f)]
+    if quick_present and len(quick_present) != len(_MODIFY_QUICK_FIELDS):
+        missing = [f for f in _MODIFY_QUICK_FIELDS if not changes.get(f)]
+        raise KotakNeoMappingError(
+            "Kotak Neo modify quick-method requires all of "
+            f"{list(_MODIFY_QUICK_FIELDS)} together or none — missing {missing}"
+        )
     ptype = _norm(changes.get("pricetype", changes.get("order_type", "LIMIT")))
     validity = str(changes.get("validity", "DAY")).upper()
     if validity not in VALIDITY_ALLOWED:
@@ -385,19 +474,27 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     ``lotSz`` — FlintTrade reports total quantity across every adapter (Dhan /
     OpenAlgo do the same), so a lots-based F&O display would be an adapter-level
     inconsistency; that normalisation, if ever wanted, belongs at the Position
-    layer. Average price is per-unit: ``amount / (qty * genNum/genDen *
-    prcNum/prcDen)`` rounded to the scrip ``precision`` (the ``multiplier``/
-    ``lotSz`` terms in the doc formula cancel once qty stays in raw units).
+    layer. Average price is per-unit and follows the documented denominator
+    (``Positions.md`` §"Avg Price Fields"): ``amount / (qty * multiplier *
+    genNum/genDen * prcNum/prcDen)`` rounded to the scrip ``precision``. The
+    ``multiplier`` term does NOT cancel — it is 1 for equity but ≠1 for some
+    currency / commodity derivatives, so omitting it overstates the avg price on
+    those scrips.
 
     P&L is the **realised** component only — ``matched_qty * (sell_avg -
-    buy_avg)`` where ``matched_qty = min(buy_qty, sell_qty)`` — which is unit-safe
-    regardless of lot size. The open leg's unrealised P&L needs a live LTP not in
+    buy_avg) * unit_factor`` where ``matched_qty = min(buy_qty, sell_qty)`` and
+    ``unit_factor = multiplier * genNum/genDen * prcNum/prcDen`` (the same
+    per-unit factor used for the avg, so the value is amount-consistent on
+    multiplier≠1 scrips). The open leg's unrealised P&L needs a live LTP not in
     the record and is left to merge from quotes (``ltp`` is ``0``; none is
     fabricated). This matches Dhan (realised+unrealised) / Upstox (broker pnl)
     once a quote is merged.
     """
-    price_div = _ratio(d.get("genNum", 1), d.get("genDen", 1)) * _ratio(d.get("prcNum", 1), d.get("prcDen", 1))
-    price_div = price_div or 1.0
+    ratios = _ratio(d.get("genNum", 1), d.get("genDen", 1)) * _ratio(d.get("prcNum", 1), d.get("prcDen", 1))
+    multiplier = _num(d.get("multiplier", 1), 1.0)
+    # Full per-unit factor (``Positions.md``: multiplier × genNum/genDen ×
+    # prcNum/prcDen). 1.0 for equity; ≠1 for some currency/commodity scrips.
+    unit_factor = (ratios * multiplier) or 1.0
     # Clamp to a sane decimal-place range: a malformed/negative precision would
     # otherwise make the avg-price f-string raise ValueError and abort the whole
     # positions() fetch instead of degrading one row.
@@ -409,8 +506,8 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     sell_amt = _num(d.get("cfSellAmt", 0)) + _num(d.get("sellAmt", 0))
     net_qty = buy_qty - sell_qty
 
-    buy_avg = buy_amt / (buy_qty * price_div) if buy_qty else 0.0
-    sell_avg = sell_amt / (sell_qty * price_div) if sell_qty else 0.0
+    buy_avg = buy_amt / (buy_qty * unit_factor) if buy_qty else 0.0
+    sell_avg = sell_amt / (sell_qty * unit_factor) if sell_qty else 0.0
     if buy_qty > sell_qty:
         avg_price = buy_avg
     elif sell_qty > buy_qty:
@@ -419,9 +516,11 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
         avg_price = 0.0
 
     matched = min(buy_qty, sell_qty)
-    # `... or 0.0` normalises Python negative zero: an open long (matched == 0,
-    # buy_avg > 0) yields 0.0 * -buy_avg == -0.0, which would render as "-0.00".
-    realised_pnl = matched * (sell_avg - buy_avg) or 0.0
+    # Realised = closed-leg sell amount − buy amount. Re-multiplying by
+    # ``unit_factor`` recovers the amount-space value the per-unit avgs were
+    # divided out of. `... or 0.0` normalises Python negative zero: an open long
+    # (matched == 0, buy_avg > 0) yields -0.0, which would render as "-0.00".
+    realised_pnl = matched * (sell_avg - buy_avg) * unit_factor or 0.0
 
     return {
         "symbol": d.get("trdSym", d.get("sym", "")),
@@ -477,8 +576,15 @@ def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
+def to_margin_params(order: Any, trading_symbol: str, *, instrument_token: str | None = None) -> dict[str, Any]:
     """Build ``NeoAPI.margin_required`` kwargs from an ``Order`` (pre-trade).
+
+    ``instrument_token`` is the numeric ``pSymbol`` from the ScripMaster files —
+    the field NEO's ``margin_required`` keys the scrip by (``Margin_Required.md``
+    line 35); ``trading_symbol`` is the ``pTrdSymbol`` and rides its own field.
+    When the numeric token is not resolvable the trading symbol is used as a
+    best-effort fallback (NEO may still resolve some scrips by symbol), and the
+    ``trading_symbol`` field is always set so the estimate is unambiguous.
 
     Mirrors the place-order translation: a bracket/cover variety overrides the
     product to BO/CO and carries its stop-loss / target / trailing legs so the
@@ -503,7 +609,9 @@ def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
         "order_type": ORDER_TYPE_TO_KOTAK[ptype],
         "product": PRODUCT_TO_KOTAK[product],
         "quantity": str(int(_num(order.quantity, 0))),
-        "instrument_token": str(trading_symbol),
+        # instrument_token = numeric pSymbol; trading_symbol = pTrdSymbol.
+        "instrument_token": str(instrument_token) if instrument_token else str(trading_symbol),
+        "trading_symbol": str(trading_symbol),
         "transaction_type": SIDE_TO_KOTAK[side],
     }
     trigger = _num(getattr(order, "trigger_price", 0))
@@ -542,16 +650,20 @@ def from_kotak_margin(resp: dict[str, Any]) -> dict[str, Any]:
 
 
 def to_quote_tokens(resolved: list[tuple[str, str]]) -> list[dict[str, str]]:
-    """Build the NEO ``quotes`` request from ``(trading_symbol, exchange)`` pairs.
+    """Build the NEO ``quotes`` request from ``(instrument_token, exchange)`` pairs.
 
     NEO's ``quotes(instrument_tokens=[...])`` takes a list of
-    ``{"instrument_token": <scrip>, "exchange_segment": <seg>}`` dicts.
+    ``{"instrument_token": <wToken/pSymbol>, "exchange_segment": <seg>}`` dicts.
+    The ``instrument_token`` is the numeric scrip token (``pSymbol``), resolved by
+    the adapter — only indexes pass a NAME here (``webSocket.md`` "For Indexes").
+    This function just shapes whatever resolved value it is given; the
+    symbol→token resolution lives in the adapter.
     """
     tokens: list[dict[str, str]] = []
-    for trading_symbol, exchange in resolved:
+    for instrument_token, exchange in resolved:
         ex = _norm(exchange)
         tokens.append({
-            "instrument_token": str(trading_symbol),
+            "instrument_token": str(instrument_token),
             "exchange_segment": EXCHANGE_TO_KOTAK.get(ex, ex.lower()),
         })
     return tokens
@@ -752,6 +864,11 @@ def decode_kotak_feed(frame: Any) -> list[dict[str, Any]]:
                 "volume": int(_num(_fv(rec, "v", STOCK_FEED_KEYS))),
                 "bid": _num(_fv(rec, "bp", STOCK_FEED_KEYS)),
                 "ask": _num(_fv(rec, "sp", STOCK_FEED_KEYS)),
+                # Best bid/ask size at level 1: NEO's SDK ``stock_key_mapping``
+                # keys these ``bq``/``sq`` (NOT ``bs`` — that is a depth-frame
+                # offer-size key), so the long-name fallback resolves them too.
+                "buy_quantity": int(_num(_fv(rec, "bq", STOCK_FEED_KEYS))),
+                "sell_quantity": int(_num(_fv(rec, "sq", STOCK_FEED_KEYS))),
                 "oi": int(_num(_fv(rec, "oi", STOCK_FEED_KEYS))),
                 "timestamp": str(_fv(rec, "ltt", STOCK_FEED_KEYS, "") or ""),
             })
