@@ -103,7 +103,7 @@ If the local checklist passes, CI catches drift rather than regressions.
 | 4 | Draft-PR guard on every test job | Wasted CI on work-in-progress PRs. |
 | 5 | `paths-ignore` for doc-only commits | Routine doc updates burning runner minutes. |
 | 6 | `continue-on-error: true` confined to the nightly workflow — never `test.yml` | Cosmetic matrix entries inflating perceived failure rate. |
-| 7 | Stop-time review gate (`/codex:setup --enable-review-gate`) — runs a deeper review before each stop during active development | High-level design / contract / safety issues unit tests cannot see. |
+| 7 | Stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional**: Codex was retired from the review pipeline (2026-06-05), so this gate is no longer part of the standard flow (claude ultracode panels → maintainer). Kept only for contributors who still run a local Codex CLI | High-level design / contract / safety issues unit tests cannot see. |
 | 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn macOS / Windows regressions before they pile up. |
 
 ---

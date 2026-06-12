@@ -1,4 +1,4 @@
-# FlintTrade — tick-engine
+# FlintTrade — ticks
 
 > High-performance tick processing engine — Rust core with Python bindings via PyO3
 

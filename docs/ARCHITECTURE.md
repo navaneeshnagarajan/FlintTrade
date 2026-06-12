@@ -35,12 +35,12 @@ flowchart LR
         IND[indicators]
         ING[webhooks]
         GW[gateway]
-        TICK[tick-engine · Rust/PyO3]
+        TICK[ticks · Rust/PyO3]
     end
 
     subgraph NativeGateway["Native gateway · alpha"]
         NGA[adapter contract + routing]
-        DHAN[Dhan scaffold gated]
+        DHAN[Dhan · Upstox · Kotak Neo · IndMoney<br/>adapters built to parity]
     end
 
     subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (optional external service)"]
@@ -78,8 +78,9 @@ flowchart LR
 The terminal always talks to FlintTrade on port 5100 through `/ft-api`.
 OpenAlgo on 5000 and its WebSocket on 8765 are optional external integration
 origins, proxied through Vite only when that bridge is enabled. The native
-gateway contract and routing are present, while direct Dhan live SDK calls are
-still gated pending SDK attestation.
+gateway contract and routing are present, and all four founder-broker adapters
+(Dhan, Upstox, Kotak Neo, IndMoney) are built to full doc-grounded parity; the
+remaining work is live-credential testing only.
 
 ---
 
@@ -104,7 +105,7 @@ flowchart TD
     engine --> data
     engine --> gateway
     backtestEngine[backtest] --> engine
-    backtestEngine --> tickEngine[tick-engine]
+    backtestEngine --> tickEngine[ticks]
     backtestEngine --> historical
     backtestEngine --> indicators
 
@@ -240,7 +241,7 @@ documented, and limited to analysis modules.
 ## 4. Backend architecture
 
 FlintTrade's backend is a single Flask application registered as
-`packages/core/core/src/app.py`. It binds to port 5100, mounts every package's
+`packages/core/core/src/flinttrade_core/app.py`. It binds to port 5100, mounts every package's
 blueprints behind `/v1/*`, and exposes them externally under
 `/ft-api/v1/*` thanks to the WSGI prefix-strip middleware (see §6).
 
@@ -317,7 +318,7 @@ out through the safety layers and the mode guard. Practice orders stay
 inside FlintTrade's native sandbox; live orders route through a native
 broker adapter or an OpenAlgo-compatible endpoint. Fills come back through
 the tick stream and reconcile with the REST cache via
-`packages/services/engine/src/reconciliation.py`.
+`packages/services/engine/src/flinttrade_engine/reconciliation.py`.
 
 ---
 
@@ -325,7 +326,7 @@ the tick stream and reconcile with the REST cache via
 
 The terminal calls `/ft-api/v1/X`. The Vite dev proxy and the production
 reverse proxy forward that to the FlintTrade backend on port 5100. The
-WSGI middleware in `packages/core/core/src/app.py` strips the `/ft-api`
+WSGI middleware in `packages/core/core/src/flinttrade_core/app.py` strips the `/ft-api`
 prefix before URL dispatch:
 
 ```
@@ -421,7 +422,7 @@ fallbacks.
 - Carries `sub` (user), `exp` (expiry), `mode` (Explore / Practice /
   Live), `jti` (unique ID).
 - Revocation blocklist keyed by `jti` in
-  `packages/core/core/src/auth_state.py`.
+  `packages/core/core/src/flinttrade_core/auth_state.py`.
 
 ### Server-side mode enforcement
 
@@ -432,7 +433,7 @@ live action. Trying to place a live order on a Practice JWT returns
 ### OpenAlgo X-API-Key
 
 OpenAlgo's own endpoints use API-key auth, forwarded as the
-`X-API-KEY` header by `packages/core/core/src/openalgo_client.py`. The key
+`X-API-KEY` header by `packages/core/core/src/flinttrade_core/openalgo_client.py`. The key
 comes from `.env`.
 
 ---
@@ -467,7 +468,7 @@ into `.local/external/`.
 | Service | Local-dev path | Source | Role |
 |---|---|---|---|
 | OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | Broker gateway. |
-| OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway. |
+| OpenClaw | `.local/external/openclaw/` | [openclaw/openclaw](https://github.com/openclaw/openclaw) | AI agent gateway. |
 
 AlgoMirror is intentionally absent — its mirroring patterns are reimplemented
 natively in `packages/services/ditto/` (our own code; the upstream repo is not

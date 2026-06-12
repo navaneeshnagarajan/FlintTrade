@@ -19,7 +19,7 @@ FlintTrade exposes two HTTP surfaces and one WebSocket channel.
 
 ## 1. OpenAlgo passthrough (`/api/v1/*`)
 
-Source of truth: `packages/core/core/src/openalgo_client.py`. All endpoints are
+Source of truth: `packages/core/core/src/flinttrade_core/openalgo_client.py`. All endpoints are
 POST unless explicitly marked **GET**.
 
 ### Orders
@@ -123,7 +123,7 @@ path because they require session auth, not API-key auth.
 
 ## 2. FlintTrade backend (`/ft-api/v1/*`)
 
-Source of truth: `packages/core/core/src/app.py` and the `*_routes.py` files
+Source of truth: `packages/core/core/src/flinttrade_core/app.py` and the `*_routes.py` files
 under `packages/*/src/`. Externally clients call `/ft-api/v1/…`;
 internally blueprints are registered at `/v1/…` (or `/api/v1/…` for the
 OpenAlgo-style paths). Both shapes route to the same handler thanks to
@@ -162,7 +162,7 @@ POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
 
 ### Broker capabilities & recommendations (`/api/v1/broker/*`, GET)
 
-Source: `packages/integrations/gateway/src/capabilities_routes.py`.
+Source: `packages/integrations/gateway/src/flinttrade_gateway/capabilities_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -185,7 +185,7 @@ Source: `packages/services/ai/`. GET unless noted.
 
 ### Sandbox / paper trading (`/ft-api/v1/sandbox/*`)
 
-Native virtual-capital paper trading. Source: `packages/core/data/src/sandbox_routes.py`.
+Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade_data/sandbox_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -199,7 +199,7 @@ Native virtual-capital paper trading. Source: `packages/core/data/src/sandbox_ro
 
 ### Strategies (`/ft-api/v1/strategies/*`)
 
-Source: `packages/services/engine/src/strategy_routes.py`. Backed by the
+Source: `packages/services/engine/src/flinttrade_engine/strategy_routes.py`. Backed by the
 `STRATEGY_RUNNER` + `CRON_SCHEDULER` wired at app creation.
 
 | Endpoint | Purpose |
@@ -225,7 +225,7 @@ journal populates in Live mode.
 
 ### Auth (`/ft-api/v1/auth/*`)
 
-JWT-based. Source: `packages/core/core/src/auth_routes.py`.
+JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -238,7 +238,7 @@ JWT-based. Source: `packages/core/core/src/auth_routes.py`.
 
 ### Monitoring And Observability
 
-GET endpoints. Source: `packages/core/core/src/monitoring_routes.py`,
+GET endpoints. Source: `packages/core/core/src/flinttrade_core/monitoring_routes.py`,
 `health_routes.py`, `infra_routes.py`, and the scoped audit/activity routes in
 `packages/core/data/src/flinttrade_data`.
 
@@ -267,7 +267,7 @@ The terminal has two development proxy namespaces:
 
 There are roughly 20 FlintTrade-specific endpoint families across the
 13 Python packages. The complete list of registered Flask blueprints
-appears in `packages/core/core/src/app.py` — search for `register_blueprint`.
+appears in `packages/core/core/src/flinttrade_core/app.py` — search for `register_blueprint`.
 
 ---
 
@@ -355,7 +355,7 @@ The JWT carries three claims you care about:
 
 A `jti` (JWT ID) is included so the server can revoke individual tokens
 when the user logs out or switches mode. The revocation blocklist lives
-in `packages/core/core/src/auth_state.py`.
+in `packages/core/core/src/flinttrade_core/auth_state.py`.
 
 ### Backend API Keys
 
@@ -373,7 +373,7 @@ header by `OpenAlgoClient` only for OpenAlgo/live bridge calls.
 
 ## 5. Rate limits
 
-Source: `packages/core/core/src/openalgo_client.py` (`_RateLimiter`).
+Source: `packages/core/core/src/flinttrade_core/openalgo_client.py` (`_RateLimiter`).
 
 | Category | Limit |
 |---|---|

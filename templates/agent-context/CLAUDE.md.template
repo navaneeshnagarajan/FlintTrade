@@ -74,7 +74,7 @@ localhost:5173/
 ├── /explore        → Demo mode with sample data (no broker needed)
 ├── /setup          → First-time wizard (Quick / Guided / Advanced)
 ├── /settings       → Standalone settings page
-├── /trade          → Trader workspace (Dockview canvas, 82 widgets)
+├── /trade          → Trader workspace (Dockview canvas, ≈90 widgets — run the registry for the exact count)
 ├── /invest         → Investor dashboard (holdings, net worth, SIPs)
 ├── /learn          → Beginner center (courses, glossary, strategies)
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
@@ -204,7 +204,7 @@ Two-tier config. No exceptions.
 
 | Package | Description |
 |---|---|
-| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (32 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); OpenAlgo is one optional bridge adapter; `shims/` holds OpenAlgo infra shims only |
+| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (32 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); the four founder-broker native adapters (Dhan, Upstox, Kotak Neo, IndMoney) are built to full doc-grounded parity (SDKs pinned in `brokers.lock`; remaining work is live-credential testing); OpenAlgo is one optional bridge adapter; `shims/` holds OpenAlgo infra shims only |
 | `integrations/webhooks` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
 
 #### `packages/apps/` — front-ends (2)
@@ -216,9 +216,9 @@ Two-tier config. No exceptions.
 
 ## Terminal — Widgets & Tools
 
-82 widgets (all TSX) + 7 tools + 13 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
+≈90 widgets (all TSX) + 7 tools + 13 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx` (run the registry for the exact count).
 
-- **Widgets:** `src/widgets/` — Trading (22), Analysis (38), Utility (22). See `packages/apps/terminal/src/widgets/{trading,analysis,utility}/` for the full set.
+- **Widgets:** `src/widgets/` — Trading / Analysis / Utility. See `packages/apps/terminal/src/widgets/{trading,analysis,utility}/` for the full set.
 - **Tools:** `src/tools/` — BacktestLab, FlowBuilder, MarketIntelligence, PnLDashboard, Settings, StrategyBuilder, TradeJournal.
 - **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG).
 - **Workspace presets:** 13 presets in `packages/apps/terminal/src/layout/workspacePresets.ts` (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View, plus 7 more). Serialised via Dockview API.
@@ -228,7 +228,7 @@ Two-tier config. No exceptions.
 - **Version:** 0.6.0-alpha (tag `v0.6.0-alpha`, 2026-05-30) — alpha restructure snapshot. Not production ready; see `disclaimer.md`, `changelog.md`, and `docs/releases/v0.6.0-alpha.md`.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
 - **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI.md` for the contract.
-- **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
+- **Terminal:** ≈90 widgets (TSX, run the registry for the exact count) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
 - **AI Skills:** 30 markdown files under `packages/services/ai/skills/` covering trading, analysis, execution, compliance, options, psychology domains
 - **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies in `packages/services/engine/src/strategies/` (`ema_crossover`, `wheel_live`)
 - **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
@@ -244,7 +244,7 @@ Two-tier config. No exceptions.
 - **Ticker System:** Configurable marquee (4 modes), symbol editor, settings integration
 - **Onboarding:** Cinematic /welcome, /explore demo mode, setup wizard with persona × interest matrix
 - **Routes:** 12 public (`/welcome`, `/explore`, `/setup`, `/setup-account`, `/settings`, `/home`, `/trade`, `/invest`, `/learn`, `/lab`, `/automate`, `/ai`, `/ditto`) + DEV-only `/admin` + 404 — all with Glass Adaptive styling. `/terminal` is an alias for `/trade`. Routes are lazy-loaded in `packages/apps/terminal/src/main.tsx`.
-- **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), 20 FlintTrade backend endpoints
+- **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), many FlintTrade backend endpoint families (reconciliation, smart-route, agent, forever/super/conditional orders, recommendations, and more — grown well past the original 20)
 - **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion, OrderPad form a11y, route focus management
 - **Package structure:** 13 Python packages with pyproject.toml + hatchling, uv workspace, wheel source mappings
 - **OpenAlgo:** Tested with broker sandbox, first trade placed

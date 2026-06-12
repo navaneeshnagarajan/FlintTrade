@@ -8,9 +8,9 @@ FlintTrade is pre-1.0. Only the latest minor release receives patches.
 
 | Version | Supported |
 |---------|-----------|
-| 0.5.x   | Yes (latest, receives patches) |
-| 0.4.x   | No                             |
-| < 0.4   | No                             |
+| 0.6.x   | Yes (latest, receives patches) |
+| 0.5.x   | No                             |
+| < 0.5   | No                             |
 
 When 1.0 ships, this policy will expand to cover the previous minor for a defined window.
 

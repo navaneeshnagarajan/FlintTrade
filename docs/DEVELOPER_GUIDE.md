@@ -25,8 +25,8 @@ package with Python bindings.
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
-| `tick-engine` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | Native broker adapter contract/routing, Dhan scaffold, credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
+| `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
+| `gateway` | Python | Native broker adapter contract/routing, four founder-broker adapters (Dhan, Upstox, Kotak Neo, IndMoney) built to full parity, credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
@@ -53,7 +53,7 @@ Pick the guide for your platform and follow it end-to-end:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 A complete dev environment includes Python 3.12, Node 22+ (24 recommended),
-and Rust stable if you build `tick-engine`. OpenAlgo is optional: install it
+and Rust stable if you build `ticks`. OpenAlgo is optional: install it
 separately, or clone a local-dev copy into `.local/external/openalgo/` with
 `scripts/setup-test-deps.sh`, only when you want the OpenAlgo-compatible
 integration path.
@@ -98,7 +98,7 @@ npx vitest run -t "renders the order pad"  # single test by name
 npx vitest                                 # watch mode (great for TDD)
 ```
 
-### Rust (tick-engine)
+### Rust (ticks)
 
 From `packages/core/ticks/`:
 
@@ -121,7 +121,7 @@ npm run build
 Output lands in `packages/apps/terminal/dist/`. The build runs `tsc --noEmit`
 first, then `vite build` — both must pass clean.
 
-### tick-engine
+### ticks
 
 ```bash
 cd packages/core/ticks
@@ -412,11 +412,11 @@ stores and you guarantee a bug.
 2. **`closeposition` ignores strategy.** Track positions per-strategy
    yourself.
 3. **WebSocket drops without heartbeat.** The client in
-   `packages/core/core/src/openalgo_client.py` implements ping/pong.
+   `packages/core/core/src/flinttrade_core/openalgo_client.py` implements ping/pong.
 4. **PNL calculation incorrect for some brokers.** Compute it locally
    from `tradebook`.
 5. **MCX symbol format inconsistency.** Normalise in
-   `packages/core/core/src/symbol_utils.py`.
+   `packages/core/core/src/flinttrade_core/symbol_utils.py`.
 6. **Never touch OpenAlgo's SQLite directly.** Concurrent access
    corrupts the DB. Always go through the REST API.
 

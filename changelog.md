@@ -8,6 +8,30 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Native broker adapters at full feature parity (Dhan, Upstox, Kotak Neo, IndMoney)** —
+  the four founder-broker adapters were built out from gated skeletons to the **complete**
+  doc-grounded surface, each from a feature matrix vs the broker's own API docs/SDK. Dhan:
+  orders (all products/validities), forever (GTT) + super (CO/BO) + conditional-trigger
+  (v2.5) management, order slicing, Trader's Control (P&L exit + Exit All), EDIS,
+  convert-position, margin, historical incl. expired options, option chain, quotes,
+  market-feed + 20/200-level depth + order-update WebSockets. Upstox: full v2/v3 surface
+  incl. OAuth, GTT, slicing, multi-order, cancel-all/exit-all, brokerage + P&L, v3
+  quotes/Greeks, 1-second candles + expired instruments, a broker-error→taxonomy mapping,
+  and the v3 feed. Kotak Neo: TOTP login, BO/CO leg cancels, order/trade history, limits,
+  8 quote types + depth, scrip master/search, HSM feeds. IndMoney (no official SDK): a
+  REST + WebSocket adapter built from scratch with smart (GTT/OCO) orders. All four advertise
+  honest capabilities, mint every write through the gated path, and stay dormant until SDK
+  attestation + vault credentials — the remaining work is live-credential testing only.
+- **Extended gated routing + reconciliation** — `gate_broker_write` + `BrokerRouter.execute_gated`
+  (table-driven, the verb discriminator signed into the one-shot HMAC) make the forever / super /
+  conditional-trigger / convert-position / exit-all / multi-order / cancel-all / smart-cancel
+  verbs reachable through the single gated path, exposed as `/api/v1/orders/*` + `/api/v1/positions/*`
+  routes and as Forever (GTT), Super Orders and Conditional Triggers terminal widgets (plus a
+  broker-target selector and typed-EXIT confirmation on the Positions widget's Convert / Exit-all).
+  `Order` gained optional `validity` + OCO leg fields. A reconciliation layer
+  (`flinttrade_gateway.reconciliation` + an engine-side runner persisting JSONL reports and
+  emitting `RECONCILIATION_MISMATCH` audit events) compares broker-side state to FlintTrade's,
+  surfaced in a Reconciliation widget.
 - **Autonomous trading agent — control plane** — `POST /api/v1/ai/agent/{start,stop,status}`
   runs the LLM-driven analyse → signal → risk-check → execute loop as a background
   session, surfaced in the AI route's **Agent** panel (start form, live P&L / cycles /
@@ -92,8 +116,6 @@ Versioning: [Semantic Versioning](https://semver.org/).
   local `.env` pins `DUCKDB_PATH` — the test harness isolates a per-worker scratch
   database (at the repo root and the data package), fixing a recurring trade-store
   wiring flake.
-- The Windows `make test` target now includes the ditto (Account Manager) package
-  tests, matching the POSIX glob.
 - The Windows `make test` target now includes the ditto (Account Manager) package
   tests, matching the POSIX glob.
 - ftApi helpers now surface the backend's actionable `{status, message}` body on a

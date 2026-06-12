@@ -35,7 +35,7 @@ connecting a broker or enabling Live mode.
 ## What it does
 
 - **Intraday F&O scalping** — sub-second order entry, bracket orders, hotkey-driven OrderPad, kill switch wired to Telegram and the UI.
-- **Multi-broker support** — one workspace for FlintTrade's native gateway scaffolding plus optional OpenAlgo-compatible integrations; switch accounts without leaving the canvas.
+- **Multi-broker support** — one workspace for FlintTrade's native gateway with built-out broker adapters plus optional OpenAlgo-compatible integrations; switch accounts without leaving the canvas.
 - **Options analysis** — option chain with OI heatmaps, IV smile, max-pain, GEX, portfolio Greeks, payoff visualiser, and a futures quadrant.
 - **Paper trading mode** — three-mode safety model (Explore / Practice / Live) with server-enforced isolation; learn without risking capital.
 - **AI-assisted signals** — local LLM chat (LM Studio), ChromaDB RAG over your trades, LightGBM signal pipeline, news sentiment, and a multi-agent risk debate.
@@ -45,7 +45,7 @@ connecting a broker or enabling Live mode.
 
 ## Supported brokers
 
-FlintTrade's native broker gateway contract and routing are in alpha, with the Dhan direct adapter scaffolded and gated pending SDK attestation. Optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations remain available — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
+FlintTrade's native broker gateway contract and routing are in alpha, with all four founder-broker adapters (Dhan, Upstox, Kotak Neo, IndMoney) built to full doc-grounded parity — the remaining work is live-credential testing only. Optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations remain available — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
 ## Quickstart (5-minute Docker)
 
@@ -71,7 +71,7 @@ flowchart LR
     subgraph FT["FlintTrade"]
         UI["Terminal<br/>React 19 + TypeScript<br/>Dockview workspace"]
         BE["Python backend<br/>Strategy engine, AI,<br/>backtest, screener"]
-        TE["tick-engine<br/>Rust + PyO3"]
+        TE["ticks<br/>Rust + PyO3"]
         UI <-->|"/ft-api/v1/"| BE
         BE <--> TE
     end

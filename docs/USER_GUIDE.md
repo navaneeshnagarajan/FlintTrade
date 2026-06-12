@@ -27,7 +27,7 @@ FlintTrade's backend for connection.
 ### Prerequisites
 
 - **Python 3.12+** (every package declares `requires-python >=3.12,<3.14`).
-- **Node.js 20+** (24 recommended for current LTS parity).
+- **Node.js 22+** (24 recommended for current LTS parity).
 - **Git**.
 - **Broker access.** FlintTrade can use its own broker gateway as adapters
   mature, and it can also connect to an existing OpenAlgo-compatible server.
@@ -191,7 +191,7 @@ sync across sessions.
 | `/explore` | Demo mode with sample data — no broker connection needed. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Trader workspace — Dockview canvas, 83 widgets, 13 presets. |
+| `/trade` | Trader workspace — Dockview canvas, ≈90 widgets, 13 presets. |
 | `/invest` | Investor dashboard — holdings, net worth, SIPs, mutual-fund tracker. |
 | `/learn` | Beginner centre — courses, glossary, strategies, paper trading. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
@@ -200,17 +200,20 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The 83 widgets
+### The widgets (≈90)
 
-Widgets are organised into three categories under
-`packages/apps/terminal/src/widgets/`:
+Widgets are organised into three categories — Trading / Analysis / Utility —
+under `packages/apps/terminal/src/widgets/`. The lists below are
+representative, not exhaustive; run the widget registry
+(`packages/apps/terminal/src/layout/widgetFactory.tsx`) for the exact current
+count:
 
-- **Trading (22)** — Dashboard, Scalper, Positions, Orders, Holdings,
+- **Trading** — Dashboard, Scalper, Positions, Orders, Holdings,
   Trade Book, Order Pad, Intraday P&L, MTM Monitor, Risk Panel, Action
   Center, Position Heat Map, Trade Copier, Portfolio Allocation, Quick
   Trade, Session Stats, Risk Dashboard, Trade Log, Trade Performance,
   Strategy Monitor, Net Positions, and Order Ladder.
-- **Analysis (39)** — Chart, Multi Chart, Option Chain, OI Chart,
+- **Analysis** — Chart, Multi Chart, Option Chain, OI Chart,
   Straddle, Depth, Greeks, Sector Map, GEX Dashboard, Vol Surface, IV
   Smile, Straddle P&L, OI Profile, Order Flow, Depth Heatmap,
   Three-Panel Chart, OI Heatmap, Greeks Surface, Pivot Points, Order
@@ -219,7 +222,7 @@ Widgets are organised into three categories under
   Compare, Spread View, Greeks Heatmap, Gap Analysis, Implied Move,
   Options Flow, Market Microstructure, Correlation Matrix, IV Skew,
   Sector Performance, Footprint Chart, and DOM Heatmap.
-- **Utility (22)** — Watchlist, Calculator, News Feed, Ticker, AI
+- **Utility** — Watchlist, Calculator, News Feed, Ticker, AI
   Advisor, Pre-Market Scanner, Price Alerts, System Health, Funding
   Rates, Currency Converter, Earnings Calendar, Global Indices,
   Strategy Templates, Audit Trail, Economic Calendar, Profit Target
@@ -295,7 +298,7 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 3. **Pick a date range.** Historical OHLCV data is sourced from your
    configured providers (OpenChart, yfinance, or a paid feed).
 4. **Run.** The backtest engine processes ticks vector-wise (VectorBT for
-   exploration, Rust/PyO3 `tick-engine` for tick-level precision when
+   exploration, Rust/PyO3 `ticks` for tick-level precision when
    you opt in).
 5. **Review.** Equity curve, Sharpe, Sortino, max drawdown, win rate,
    trade list, Monte Carlo confidence band.
@@ -490,7 +493,7 @@ when it detects the 401.
    are sent at all (by design).
 2. Open the **Orderbook** widget and look at the rejection reason column.
 3. Check the FlintTrade backend logs (where you ran `python
-   packages/core/core/src/app.py` or `make start`) — every rejected order is
+   packages/core/core/src/flinttrade_core/app.py` or `make start`) — every rejected order is
    logged with the safety-layer that blocked it.
 
 ### Front-end shows stale prices

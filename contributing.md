@@ -26,8 +26,8 @@ platform. Pick whatever you already run.
 | Tool | Version | How we manage it |
 |---|---|---|
 | **Python** | `>=3.12,<3.14` | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
-| **Node.js** | `>=20` (22 recommended) | [`pnpm`](https://pnpm.io/) via Corepack — the repo pins the package manager. |
-| **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick-engine. |
+| **Node.js** | `>=22` | [`pnpm`](https://pnpm.io/) via Corepack — the repo pins the package manager. |
+| **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick engine. |
 
 `uv` and `pnpm` install cleanly on Linux, macOS, and Windows; follow each tool's
 own cross-platform instructions. Enable Corepack once so the pinned `pnpm`
@@ -47,7 +47,7 @@ uv sync                          # Python interpreter + all Python package deps
 pnpm install                     # JS/TS workspace deps (terminal, site, …)
 ```
 
-To build the Rust tick-engine (optional unless you touch it):
+To build the Rust `ticks` tick engine (optional unless you touch it):
 
 ```bash
 cd packages/core/ticks && cargo build --release
@@ -104,7 +104,7 @@ cd packages/apps/terminal && pnpm run typecheck       # tsc --noEmit, strict mod
 # Terminal (React + Vite)
 cd packages/apps/terminal && npm run build
 
-# Rust tick-engine (PyO3 bindings)
+# Rust ticks tick engine (PyO3 bindings)
 cd packages/core/ticks && cargo build --release
 ```
 
@@ -159,7 +159,7 @@ Allowed types and examples:
 | `test` | Tests added or refactored, no behaviour change | `test(screener): cover option chain Greeks edge cases` |
 | `chore` | Tooling, dependencies, repo housekeeping | `chore: bump vite to 6.4.2` |
 | `refactor` | Code restructure with no behaviour change | `refactor(ditto): extract margin calculator into its own module` |
-| `perf` | Performance improvement | `perf(tick-engine): avoid allocating per-tick in hot path` |
+| `perf` | Performance improvement | `perf(ticks): avoid allocating per-tick in hot path` |
 | `ci` | CI configuration only | `ci: shard widget tests across four runners` |
 
 Scopes are package names (`terminal`, `engine`, `gateway`, `screener`, …) or focus areas (`docs`, `ci`, `repo`).
