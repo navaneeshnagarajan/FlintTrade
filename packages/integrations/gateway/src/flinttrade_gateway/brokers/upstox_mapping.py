@@ -1,14 +1,18 @@
-"""Pure FlintTrade <-> Upstox v2 mapping.
+"""Pure FlintTrade <-> Upstox v2/v3 mapping.
 
 Kept separate from the adapter so order translation and response parsing are
 fully unit-testable without the upstox-python SDK or live credentials. Field
-names / enum codes follow the Upstox v2 API (PlaceOrderRequest fields verified
-against the staged SDK model).
+names / enum codes follow the Upstox v2 and v3 APIs (request fields verified
+against the staged SDK models: ``PlaceOrderRequest``, ``PlaceOrderV3Request``,
+``MultiOrderRequest``, ``GttPlaceOrderRequest``/``GttModifyOrderRequest``/
+``GttCancelOrderRequest``, ``ConvertPositionRequest`` and the ChargeApi /
+MarketQuoteV3Api / TradeProfitAndLossApi query parameters).
 """
 
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlencode
 
 # Exchange → Upstox segment code (instrument-token prefix / quote segment).
 EXCHANGE_TO_UPSTOX = {
@@ -50,12 +54,8 @@ def _norm_pricetype(pricetype: str) -> str:
     return str(pricetype).upper()
 
 
-def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None = None) -> dict[str, Any]:
-    """Translate a FlintTrade ``Order`` into Upstox ``PlaceOrderRequest`` kwargs.
-
-    ``instrument_token`` is resolved by the adapter (Upstox trades by instrument
-    token, e.g. ``"NSE_EQ|INE002A01018"``). Raises for unmappable enum values.
-    """
+def _validated_core(order: Any, instrument_token: str) -> dict[str, Any]:
+    """Validate the shared order enums and return the common Upstox fields."""
     side = str(order.action).upper()
     if side not in SIDE_TO_UPSTOX:
         raise UpstoxMappingError(f"Unsupported action {side!r}")
@@ -65,18 +65,6 @@ def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None 
     product = str(order.product).upper()
     if product not in PRODUCT_TO_UPSTOX:
         raise UpstoxMappingError(f"Unsupported product {product!r}")
-
-    # Safety: Upstox v2 does not expose bracket/cover/iceberg via place_order
-    # (cover + GTT are separate endpoints, bracket was retired). Refuse an
-    # advanced variety here rather than silently placing it as a plain order —
-    # a bracket order that quietly loses its stop-loss leg would be a real risk.
-    variety = str(getattr(order, "variety", "regular")).lower()
-    if variety not in ("regular", ""):
-        raise UpstoxMappingError(
-            f"Upstox does not place variety {variety!r} via place_order "
-            "(its cover/GTT order endpoints are a separate wave)"
-        )
-
     return {
         "instrument_token": str(instrument_token),
         "quantity": int(_num(order.quantity, 0)),
@@ -87,9 +75,75 @@ def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None 
         "transaction_type": SIDE_TO_UPSTOX[side],
         "disclosed_quantity": int(_num(getattr(order, "disclosed_quantity", 0), 0)),
         "trigger_price": _num(getattr(order, "trigger_price", 0)),
-        "is_amo": False,
-        "tag": tag or "",
     }
+
+
+def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate a FlintTrade ``Order`` into Upstox ``PlaceOrderRequest`` kwargs.
+
+    ``instrument_token`` is resolved by the adapter (Upstox trades by instrument
+    token, e.g. ``"NSE_EQ|INE002A01018"``). Raises for unmappable enum values.
+    An ``"amo"`` variety places the same payload flagged After Market Order.
+    """
+    # Safety: Upstox v2 does not expose bracket/cover via place_order (bracket
+    # was retired); GTT and sliced (iceberg) orders use the dedicated v3
+    # endpoints, dispatched by the adapter BEFORE this builder is called. Refuse
+    # an advanced variety here rather than silently placing it as a plain order —
+    # a bracket order that quietly loses its stop-loss leg would be a real risk.
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety not in ("regular", "amo", ""):
+        raise UpstoxMappingError(
+            f"Upstox does not place variety {variety!r} via place_order "
+            "(GTT/sliced orders use the v3 endpoints; bracket/cover were retired)"
+        )
+
+    params = _validated_core(order, instrument_token)
+    params.update({"is_amo": variety == "amo", "tag": tag or ""})
+    return params
+
+
+def to_place_order_v3_params(order: Any, instrument_token: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate an ``iceberg`` (sliced) ``Order`` into ``PlaceOrderV3Request`` kwargs.
+
+    The v3 place endpoint slices an over-freeze-quantity order into exchange-
+    defined legs server-side when ``slice`` is true — Upstox's iceberg
+    equivalent. AMO is carried through; bracket/cover/GTT are refused (GTT has
+    its own builder; bracket/cover were retired by Upstox).
+    """
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety not in ("regular", "amo", "iceberg", ""):
+        raise UpstoxMappingError(f"Upstox v3 place does not support variety {variety!r}")
+    params = _validated_core(order, instrument_token)
+    params.update({
+        "is_amo": variety == "amo",
+        "slice": variety == "iceberg",
+        "tag": tag or "",
+    })
+    return params
+
+
+def to_multi_order_params(
+    orders_with_tokens: list[tuple[Any, str]], *, tag: str | None = None
+) -> list[dict[str, Any]]:
+    """Translate a basket of ``(Order, instrument_token)`` pairs into the Upstox
+    ``MultiOrderRequest`` payload list (one dict per order, ``correlation_id``
+    assigned positionally so per-order errors map back to the input)."""
+    if not orders_with_tokens:
+        raise UpstoxMappingError("Multi-order needs at least one order")
+    payloads: list[dict[str, Any]] = []
+    for i, (order, token) in enumerate(orders_with_tokens):
+        variety = str(getattr(order, "variety", "regular")).lower()
+        if variety not in ("regular", "amo", "iceberg", ""):
+            raise UpstoxMappingError(f"Upstox multi-order does not support variety {variety!r}")
+        params = _validated_core(order, token)
+        params.update({
+            "is_amo": variety == "amo",
+            "slice": variety == "iceberg",
+            "tag": tag or "",
+            "correlation_id": str(i + 1),
+        })
+        payloads.append(params)
+    return payloads
 
 
 def to_margin_instrument(order: Any, instrument_token: str) -> dict[str, Any]:
@@ -241,8 +295,9 @@ def from_upstox_funds(resp: dict[str, Any]) -> dict[str, Any]:
 
 # FlintTrade interval suffix -> Upstox v3 history (unit, interval) pair.
 # v3 ``get_historical_candle_data1(instrument_key, unit, interval, to, from)``
-# takes unit in {minutes, hours, days, weeks, months} + a numeric interval.
-_UNIT_BY_SUFFIX = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks", "mo": "months"}
+# takes unit in {seconds, minutes, hours, days, weeks, months} + a numeric
+# interval ("1s" reaches the v3 one-second candles).
+_UNIT_BY_SUFFIX = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks", "mo": "months"}
 
 
 def to_history_params(req: dict[str, Any]) -> dict[str, Any]:
@@ -321,6 +376,575 @@ def from_upstox_quote(rec: dict[str, Any]) -> dict[str, Any]:
         "prev_close": _num(ohlc.get("close")),
         "oi": int(_num(rec.get("oi"))),
     }
+
+
+# ---------------------------------------------------------------------------
+# Auth (OAuth 2.0 — login dialog URL + token-exchange form)
+# ---------------------------------------------------------------------------
+
+UPSTOX_LOGIN_DIALOG_URL = "https://api.upstox.com/v2/login/authorization/dialog"
+UPSTOX_TOKEN_URL = "https://api.upstox.com/v2/login/authorization/token"
+
+
+def build_login_url(client_id: str, redirect_uri: str, state: str | None = None) -> str:
+    """Build the Upstox OAuth login-dialog URL (authentication doc, v2).
+
+    The operator opens this in a browser; Upstox redirects back to
+    ``redirect_uri`` with the single-use ``code`` query parameter.
+    """
+    if not client_id or not redirect_uri:
+        raise UpstoxMappingError("Upstox login URL needs client_id (API key) and redirect_uri")
+    query: dict[str, str] = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+    }
+    if state:
+        query["state"] = state
+    return f"{UPSTOX_LOGIN_DIALOG_URL}?{urlencode(query)}"
+
+
+def to_token_request_params(credentials: dict[str, Any]) -> dict[str, str]:
+    """Build the token-exchange form fields (``POST /v2/login/authorization/token``).
+
+    Requires the single-use auth ``code`` plus the app's API key/secret and the
+    registered redirect URI; ``grant_type`` is always ``authorization_code``.
+    """
+    code = str(credentials.get("code") or "")
+    client_id = str(credentials.get("api_key") or credentials.get("client_id") or "")
+    client_secret = str(credentials.get("api_secret") or credentials.get("client_secret") or "")
+    redirect_uri = str(credentials.get("redirect_uri") or "")
+    if not (code and client_id and client_secret and redirect_uri):
+        raise UpstoxMappingError(
+            "Upstox token exchange needs code, api_key, api_secret and redirect_uri"
+        )
+    return {
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+
+
+def extract_access_token(resp: dict[str, Any]) -> str:
+    """Pull the ``access_token`` out of an Upstox token-exchange response."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    token = str((data or {}).get("access_token", "")) if isinstance(data, dict) else ""
+    if not token:
+        raise UpstoxMappingError(f"No access_token in Upstox token response: {resp!r}")
+    return token
+
+
+# ---------------------------------------------------------------------------
+# GTT orders (v3 /order/gtt — place / modify / cancel / details)
+# ---------------------------------------------------------------------------
+
+
+def _gtt_rules(order: Any) -> tuple[str, list[dict[str, Any]]]:
+    """Build the GTT rule list from an ``Order``'s trigger/leg prices.
+
+    ``trigger_price`` is the ENTRY rule (mandatory); ``stop_loss_price`` and
+    ``target_price`` add STOPLOSS / TARGET rules, upgrading the GTT to MULTIPLE.
+    """
+    entry = _num(getattr(order, "trigger_price", 0))
+    if entry <= 0:
+        raise UpstoxMappingError("An Upstox GTT order needs a trigger_price (the ENTRY rule)")
+    rules: list[dict[str, Any]] = [
+        {"strategy": "ENTRY", "trigger_type": "IMMEDIATE", "trigger_price": entry},
+    ]
+    stop_loss = _num(getattr(order, "stop_loss_price", 0))
+    target = _num(getattr(order, "target_price", 0))
+    if stop_loss > 0:
+        rules.append({"strategy": "STOPLOSS", "trigger_type": "IMMEDIATE", "trigger_price": stop_loss})
+    if target > 0:
+        rules.append({"strategy": "TARGET", "trigger_type": "IMMEDIATE", "trigger_price": target})
+    return ("MULTIPLE" if len(rules) > 1 else "SINGLE"), rules
+
+
+def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
+    """Translate a ``gtt`` ``Order`` into Upstox ``GttPlaceOrderRequest`` kwargs."""
+    side = str(order.action).upper()
+    if side not in SIDE_TO_UPSTOX:
+        raise UpstoxMappingError(f"Unsupported action {side!r}")
+    product = str(order.product).upper()
+    if product not in PRODUCT_TO_UPSTOX:
+        raise UpstoxMappingError(f"Unsupported product {product!r}")
+    gtt_type, rules = _gtt_rules(order)
+    return {
+        "type": gtt_type,
+        "quantity": int(_num(order.quantity, 0)),
+        "product": PRODUCT_TO_UPSTOX[product],
+        "rules": rules,
+        "instrument_token": str(instrument_token),
+        "transaction_type": SIDE_TO_UPSTOX[side],
+    }
+
+
+def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Translate modify ``changes`` into Upstox ``GttModifyOrderRequest`` kwargs.
+
+    A GTT modify is a full rule replacement: quantity plus the trigger prices
+    (``trigger_price`` → ENTRY, ``stop_loss_price``/``target_price`` optional).
+    """
+    if not gtt_order_id:
+        raise UpstoxMappingError("GTT modify needs the gtt_order_id")
+
+    class _Changes:
+        trigger_price = changes.get("trigger_price", 0)
+        stop_loss_price = changes.get("stop_loss_price", 0)
+        target_price = changes.get("target_price", 0)
+
+    gtt_type, rules = _gtt_rules(_Changes)
+    return {
+        "type": str(changes.get("type", gtt_type)).upper(),
+        "quantity": int(_num(changes.get("quantity", 0), 0)),
+        "rules": rules,
+        "gtt_order_id": str(gtt_order_id),
+    }
+
+
+def to_gtt_cancel_params(gtt_order_id: str) -> dict[str, Any]:
+    """Translate a GTT cancel into Upstox ``GttCancelOrderRequest`` kwargs."""
+    if not gtt_order_id:
+        raise UpstoxMappingError("GTT cancel needs the gtt_order_id")
+    return {"gtt_order_id": str(gtt_order_id)}
+
+
+def is_gtt_order_id(order_id: str) -> bool:
+    """True when an order id is an Upstox GTT id (``"GTT-..."`` — webhook doc)."""
+    return str(order_id).upper().startswith("GTT-")
+
+
+def extract_gtt_order_id(resp: dict[str, Any]) -> str:
+    """Pull the GTT order id from a place/modify/cancel GTT response
+    (``data.gtt_order_ids`` per ``GttOrderData``)."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    if isinstance(data, dict):
+        ids = data.get("gtt_order_ids")
+        if isinstance(ids, list) and ids:
+            return str(ids[0])
+        gid = data.get("gtt_order_id")
+        if gid:
+            return str(gid)
+    raise UpstoxMappingError(f"No GTT order id in Upstox response: {resp!r}")
+
+
+def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one Upstox ``GttOrderDetails`` record."""
+    rules = d.get("rules", []) if isinstance(d.get("rules"), list) else []
+    return {
+        "gtt_order_id": str(d.get("gtt_order_id", "")),
+        "type": d.get("type", ""),
+        "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
+        "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+        "product": UPSTOX_TO_PRODUCT.get(d.get("product", ""), d.get("product", "")),
+        "quantity": str(d.get("quantity", 0)),
+        "rules": [
+            {
+                "strategy": r.get("strategy", ""),
+                "status": r.get("status", ""),
+                "trigger_price": str(r.get("trigger_price", 0)),
+                "transaction_type": r.get("transaction_type", ""),
+                "order_id": str(r.get("order_id") or ""),
+            }
+            for r in rules
+            if isinstance(r, dict)
+        ],
+        "created_at": str(d.get("created_at", "")),
+        "expires_at": str(d.get("expires_at", "")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Multi-order / cancel-all / exit-all responses
+# ---------------------------------------------------------------------------
+
+
+def from_upstox_multi_order(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise an Upstox ``MultiOrderResponse`` (per-order ids + errors)."""
+    if not isinstance(resp, dict):
+        raise UpstoxMappingError(f"Unexpected Upstox multi-order response: {resp!r}")
+    rows = resp.get("data", []) if isinstance(resp.get("data"), list) else []
+    errors = resp.get("errors", []) if isinstance(resp.get("errors"), list) else []
+    summary = resp.get("summary", {}) if isinstance(resp.get("summary"), dict) else {}
+    return {
+        "order_ids": [str(r.get("order_id", "")) for r in rows if isinstance(r, dict)],
+        "errors": [e for e in errors if isinstance(e, dict)],
+        "total": int(_num(summary.get("total", len(rows) + len(errors)))),
+        "success": int(_num(summary.get("success", len(rows)))),
+    }
+
+
+def from_upstox_cancel_exit(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a ``CancelOrExitMultiOrderResponse`` (cancel-multi / exit-all)."""
+    if not isinstance(resp, dict):
+        raise UpstoxMappingError(f"Unexpected Upstox cancel/exit response: {resp!r}")
+    data = resp.get("data", {}) if isinstance(resp.get("data"), dict) else {}
+    errors = resp.get("errors", []) if isinstance(resp.get("errors"), list) else []
+    summary = resp.get("summary", {}) if isinstance(resp.get("summary"), dict) else {}
+    ids = data.get("order_ids", []) if isinstance(data.get("order_ids"), list) else []
+    return {
+        "order_ids": [str(i) for i in ids],
+        "errors": [e for e in errors if isinstance(e, dict)],
+        "total": int(_num(summary.get("total", len(ids) + len(errors)))),
+        "success": int(_num(summary.get("success", len(ids)))),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Positions: convert + MTF
+# ---------------------------------------------------------------------------
+
+
+def to_convert_position_params(req: dict[str, Any]) -> dict[str, Any]:
+    """Translate a convert-position request into ``ConvertPositionRequest`` kwargs.
+
+    ``req`` carries the resolved ``instrument_token``, FlintTrade product names
+    (``old_product``/``new_product``), ``transaction_type`` and ``quantity``.
+    """
+    old_product = str(req.get("old_product", "")).upper()
+    new_product = str(req.get("new_product", "")).upper()
+    if old_product not in PRODUCT_TO_UPSTOX or new_product not in PRODUCT_TO_UPSTOX:
+        raise UpstoxMappingError(
+            f"Unsupported convert products {old_product!r} -> {new_product!r}"
+        )
+    if PRODUCT_TO_UPSTOX[old_product] == PRODUCT_TO_UPSTOX[new_product]:
+        raise UpstoxMappingError(
+            f"Convert {old_product!r} -> {new_product!r} is a no-op on Upstox (both map to "
+            f"{PRODUCT_TO_UPSTOX[new_product]!r})"
+        )
+    side = str(req.get("transaction_type", req.get("action", ""))).upper()
+    if side not in SIDE_TO_UPSTOX:
+        raise UpstoxMappingError(f"Unsupported action {side!r}")
+    return {
+        "instrument_token": str(req.get("instrument_token", "")),
+        "new_product": PRODUCT_TO_UPSTOX[new_product],
+        "old_product": PRODUCT_TO_UPSTOX[old_product],
+        "transaction_type": SIDE_TO_UPSTOX[side],
+        "quantity": int(_num(req.get("quantity", 0), 0)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Charges: brokerage (pre-trade) + margin
+# ---------------------------------------------------------------------------
+
+
+def to_brokerage_query(order: Any, instrument_token: str) -> dict[str, Any]:
+    """Build the ``GET /v2/charges/brokerage`` query from an ``Order``."""
+    core = _validated_core(order, instrument_token)
+    return {
+        "instrument_token": core["instrument_token"],
+        "quantity": core["quantity"],
+        "product": core["product"],
+        "transaction_type": core["transaction_type"],
+        "price": core["price"],
+    }
+
+
+def from_upstox_brokerage(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a ``GetBrokerageResponse`` (``data.charges`` per BrokerageData)."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    charges = data.get("charges", data) if isinstance(data, dict) else {}
+    if not isinstance(charges, dict):
+        charges = {}
+    return {
+        "total_charges": str(charges.get("total", 0)),
+        "brokerage": str(charges.get("brokerage", 0)),
+        "taxes": charges.get("taxes", {}) if isinstance(charges.get("taxes"), dict) else {},
+        "other_taxes": charges.get("other_taxes", {}) if isinstance(charges.get("other_taxes"), dict) else {},
+        "extra": charges,
+    }
+
+
+# ---------------------------------------------------------------------------
+# User: profile / kill switch
+# ---------------------------------------------------------------------------
+
+
+def from_upstox_profile(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a ``GetProfileResponse`` (``data`` per ProfileData)."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "user_id": str(data.get("user_id", "")),
+        "user_name": str(data.get("user_name", "")),
+        "email": str(data.get("email", "")),
+        "broker": str(data.get("broker", "UPSTOX")),
+        "exchanges": list(data.get("exchanges", []) or []),
+        "products": list(data.get("products", []) or []),
+        "order_types": list(data.get("order_types", []) or []),
+        "is_active": bool(data.get("is_active", False)),
+        "poa": bool(data.get("poa", False)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Market quotes v3 (OHLC / LTP / option Greeks) + option contracts
+# ---------------------------------------------------------------------------
+
+
+def _quote_records(resp: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    data = resp.get("data", {}) if isinstance(resp, dict) else {}
+    if not isinstance(data, dict):
+        return []
+    return [(k, v) for k, v in data.items() if isinstance(v, dict)]
+
+
+def from_upstox_ohlc_v3(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse a v3 OHLC quote response (``MarketQuoteOHLCV3`` per instrument)."""
+    out: list[dict[str, Any]] = []
+    for key, rec in _quote_records(resp):
+        live = rec.get("live_ohlc", {}) if isinstance(rec.get("live_ohlc"), dict) else {}
+        prev = rec.get("prev_ohlc", {}) if isinstance(rec.get("prev_ohlc"), dict) else {}
+        out.append({
+            "instrument_token": str(rec.get("instrument_token", key)),
+            "ltp": _num(rec.get("last_price")),
+            "open": _num(live.get("open")),
+            "high": _num(live.get("high")),
+            "low": _num(live.get("low")),
+            "close": _num(live.get("close")),
+            "volume": int(_num(live.get("volume"))),
+            "prev_close": _num(prev.get("close")),
+        })
+    return out
+
+
+def from_upstox_ltp_v3(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse a v3 LTP quote response (``MarketQuoteSymbolLtpV3`` per instrument)."""
+    return [
+        {
+            "instrument_token": str(rec.get("instrument_token", key)),
+            "ltp": _num(rec.get("last_price")),
+            "volume": int(_num(rec.get("volume"))),
+            "prev_close": _num(rec.get("cp")),
+        }
+        for key, rec in _quote_records(resp)
+    ]
+
+
+def from_upstox_option_greeks(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse a v3 option-Greek quote response (``MarketQuoteOptionGreekV3``)."""
+    return [
+        {
+            "instrument_token": str(rec.get("instrument_token", key)),
+            "ltp": _num(rec.get("last_price")),
+            "iv": _num(rec.get("iv")),
+            "delta": _num(rec.get("delta")),
+            "gamma": _num(rec.get("gamma")),
+            "theta": _num(rec.get("theta")),
+            "vega": _num(rec.get("vega")),
+            "oi": int(_num(rec.get("oi"))),
+            "volume": int(_num(rec.get("volume"))),
+        }
+        for key, rec in _quote_records(resp)
+    ]
+
+
+def from_upstox_instrument_rows(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise instrument rows (search / option contracts / expired contracts).
+
+    All three endpoints return ``data`` as a list of ``InstrumentData``-shaped
+    records; the useful identity + contract fields are surfaced uniformly.
+    """
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    out: list[dict[str, Any]] = []
+    for d in rows:
+        if not isinstance(d, dict):
+            continue
+        out.append({
+            "instrument_key": str(d.get("instrument_key", "")),
+            "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
+            "name": d.get("name", ""),
+            "exchange": d.get("exchange", ""),
+            "segment": d.get("segment", ""),
+            "instrument_type": d.get("instrument_type", ""),
+            "expiry": str(d.get("expiry", "")),
+            "strike_price": _num(d.get("strike_price")),
+            "lot_size": int(_num(d.get("lot_size"))),
+            "tick_size": _num(d.get("tick_size")),
+            "freeze_quantity": _num(d.get("freeze_quantity")),
+            "underlying_key": str(d.get("underlying_key", "")),
+        })
+    return out
+
+
+def from_upstox_expiries(resp: dict[str, Any]) -> list[str]:
+    """Parse the expiry-date list (``GET /v2/expired-instruments/expiries``)."""
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    return [str(r) for r in rows if r] if isinstance(rows, list) else []
+
+
+# ---------------------------------------------------------------------------
+# Reports: trade history (date range) + trade-wise P&L + P&L charges
+# ---------------------------------------------------------------------------
+
+
+def from_upstox_trade_history(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise the historical trade rows (``/v2/charges/historical-trades``)."""
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    out: list[dict[str, Any]] = []
+    for d in rows if isinstance(rows, list) else []:
+        if not isinstance(d, dict):
+            continue
+        out.append({
+            "trade_id": str(d.get("trade_id", "")),
+            "symbol": d.get("symbol", d.get("scrip_name", "")),
+            "exchange": d.get("exchange", ""),
+            "segment": d.get("segment", ""),
+            "action": d.get("transaction_type", ""),
+            "quantity": str(d.get("quantity", 0)),
+            "price": str(d.get("price", 0)),
+            "amount": str(d.get("amount", 0)),
+            "trade_date": str(d.get("trade_date", "")),
+            "isin": str(d.get("isin", "")),
+            "instrument_token": str(d.get("instrument_token", "")),
+        })
+    return out
+
+
+def from_upstox_pnl_rows(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise trade-wise P&L rows (``/v2/trade/profit-loss/data``)."""
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    out: list[dict[str, Any]] = []
+    for d in rows if isinstance(rows, list) else []:
+        if not isinstance(d, dict):
+            continue
+        buy_amount = _num(d.get("buy_amount"))
+        sell_amount = _num(d.get("sell_amount"))
+        out.append({
+            "symbol": d.get("scrip_name", ""),
+            "isin": str(d.get("isin", "")),
+            "trade_type": d.get("trade_type", ""),
+            "quantity": str(d.get("quantity", 0)),
+            "buy_date": str(d.get("buy_date", "")),
+            "buy_average": str(d.get("buy_average", 0)),
+            "sell_date": str(d.get("sell_date", "")),
+            "sell_average": str(d.get("sell_average", 0)),
+            "buy_amount": str(buy_amount),
+            "sell_amount": str(sell_amount),
+            "pnl": str(sell_amount - buy_amount),
+        })
+    return out
+
+
+def from_upstox_pnl_charges(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise the P&L charges report (``/v2/trade/profit-loss/charges``)."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    charges = data.get("charges_breakdown", data) if isinstance(data, dict) else {}
+    if not isinstance(charges, dict):
+        charges = {}
+    return {
+        "total_charges": str(charges.get("total", 0)),
+        "brokerage": str(charges.get("brokerage", 0)),
+        "extra": charges,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Market information: timings / holidays / status
+# ---------------------------------------------------------------------------
+
+
+def from_upstox_timings(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise exchange timings (``/v2/market/timings/{date}``)."""
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    return [
+        {
+            "exchange": d.get("exchange", ""),
+            "start_time": str(d.get("start_time", "")),
+            "end_time": str(d.get("end_time", "")),
+        }
+        for d in (rows if isinstance(rows, list) else [])
+        if isinstance(d, dict)
+    ]
+
+
+def from_upstox_holidays(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise market holidays (``/v2/market/holidays[/{date}]``)."""
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    return [
+        {
+            "date": str(d.get("date", d.get("_date", ""))),
+            "description": d.get("description", ""),
+            "holiday_type": d.get("holiday_type", ""),
+            "closed_exchanges": list(d.get("closed_exchanges", []) or []),
+        }
+        for d in (rows if isinstance(rows, list) else [])
+        if isinstance(d, dict)
+    ]
+
+
+def from_upstox_market_status(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise the market status (``/v2/market/status/{exchange}``)."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "exchange": data.get("exchange", ""),
+        "status": data.get("status", ""),
+        "last_updated": str(data.get("last_updated", "")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Streaming (v3 market-data feed) — authorise + decoded-message parsing
+# ---------------------------------------------------------------------------
+
+
+def extract_authorized_uri(resp: dict[str, Any]) -> str:
+    """Pull the one-time authorised wss:// URI from a feed-authorise response."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    uri = str((data or {}).get("authorized_redirect_uri", "")) if isinstance(data, dict) else ""
+    if not uri:
+        raise UpstoxMappingError(f"No authorised feed URI in Upstox response: {resp!r}")
+    return uri
+
+
+def _ltpc_of(rec: dict[str, Any]) -> dict[str, Any]:
+    """Locate the ``ltpc`` block in a v3 feed record (ltpc or fullFeed modes)."""
+    ltpc = rec.get("ltpc")
+    if isinstance(ltpc, dict):
+        return ltpc
+    full = rec.get("fullFeed", {}) if isinstance(rec.get("fullFeed"), dict) else {}
+    for branch in ("marketFF", "indexFF"):
+        sub = full.get(branch, {}) if isinstance(full.get(branch), dict) else {}
+        if isinstance(sub.get("ltpc"), dict):
+            return sub["ltpc"]
+    return {}
+
+
+def from_upstox_feed_ticks(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse one decoded v3 market-feed message into flat tick dicts.
+
+    The live protobuf frames are decoded by the SDK's ``MarketDataStreamerV3``
+    (or an injected equivalent), which emits ``{"feeds": {instrument_key:
+    {ltpc|fullFeed: ...}}}`` dicts — this parser only handles that decoded form.
+    """
+    feeds = message.get("feeds", {}) if isinstance(message, dict) else {}
+    if not isinstance(feeds, dict):
+        return []
+    ticks: list[dict[str, Any]] = []
+    for key, rec in feeds.items():
+        if not isinstance(rec, dict):
+            continue
+        ltpc = _ltpc_of(rec)
+        if not ltpc:
+            continue
+        full = rec.get("fullFeed", {}) if isinstance(rec.get("fullFeed"), dict) else {}
+        market = full.get("marketFF", {}) if isinstance(full.get("marketFF"), dict) else {}
+        ticks.append({
+            "instrument_key": str(key),
+            "ltp": _num(ltpc.get("ltp")),
+            "ltq": int(_num(ltpc.get("ltq"))),
+            "ltt": str(ltpc.get("ltt", "")),
+            "prev_close": _num(ltpc.get("cp")),
+            "volume": int(_num(market.get("vtt"))),
+            "oi": int(_num(market.get("oi"))),
+        })
+    return ticks
 
 
 def _leg(side: dict[str, Any]) -> dict[str, Any]:

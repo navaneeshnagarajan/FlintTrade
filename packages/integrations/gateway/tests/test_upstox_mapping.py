@@ -71,21 +71,29 @@ def test_place_order_unmapped_product_raises():
         to_place_order_params(order, "NSE_EQ|X")
 
 
-@pytest.mark.parametrize(
-    ("variety", "flag"),
-    [("cover", "cover_order_native"), ("iceberg", "iceberg_native"), ("gtt", "gtt_native")],
-)
-def test_capabilities_do_not_advertise_a_variety_the_mapping_refuses(variety, flag):
+def test_capabilities_do_not_advertise_a_variety_the_mapping_refuses():
     # Capability honesty: Upstox must NOT advertise an advanced order type as
-    # native while the mapping refuses to place it (the recommendation engine
-    # scores on these flags). Asserts both halves stay consistent.
+    # native while the adapter refuses to place it (the recommendation engine
+    # scores on these flags). Cover was retired by Upstox, so it stays False
+    # AND the regular-order mapping refuses it.
     from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
 
-    assert getattr(UPSTOX_CAPABILITIES, flag) is False
+    assert UPSTOX_CAPABILITIES.cover_order_native is False
     order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="5", price="2900", variety=variety)
+                  product="MIS", quantity="5", price="2900", variety="cover")
     with pytest.raises(UpstoxMappingError, match="variety"):
         to_place_order_params(order, "NSE_EQ|X")
+
+
+def test_capabilities_advertise_wired_varieties():
+    # The other half of capability honesty: GTT (v3 /order/gtt/*) and sliced
+    # orders (v3 slice=true, our iceberg) ARE dispatched by the gated
+    # place_order, so the adapter must advertise them (under-advertising would
+    # make the recommendation engine under-credit Upstox).
+    from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
+
+    assert UPSTOX_CAPABILITIES.gtt_native is True
+    assert UPSTOX_CAPABILITIES.iceberg_native is True
 
 
 def test_modify_order_params():
