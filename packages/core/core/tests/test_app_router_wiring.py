@@ -224,6 +224,103 @@ def test_dhan_activates_end_to_end_when_sdk_present() -> None:
     assert "upstox" not in router._adapters
 
 
+@pytest.mark.unit
+def test_native_adapter_kwargs_thread_local_state_provider() -> None:
+    """The §14 wiring: adapter_kwargs reaches the native constructor, so the
+    journal-backed ``local_state_provider`` lands on the adapter."""
+    sentinel_provider = lambda _session: None  # noqa: E731 - shape only; never called
+
+    router = build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        native_attest_ok=lambda b: b == "dhan",
+        native_has_credentials=lambda b: b == "dhan",
+        native_adapter_kwargs=lambda _b: {"local_state_provider": sentinel_provider},
+    )
+    assert router._adapters["dhan"]._local_state_provider is sentinel_provider
+
+
+@pytest.mark.unit
+def test_on_native_activated_sink_receives_active_natives_only() -> None:
+    """The sink sees exactly the ACTIVE native map — bridge excluded, injected
+    natives included — so the reconciliation runner can enumerate them."""
+
+    class _FakeNative:
+        broker_id = "upstox"
+
+    activated: dict[str, object] = {}
+    router = build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        adapters={"upstox": _FakeNative()},
+        openalgo_client=object(),
+        native_attest_ok=lambda b: b == "dhan",
+        native_has_credentials=lambda b: b == "dhan",
+        on_native_activated=activated.update,
+    )
+    assert set(activated) == {"dhan", "upstox"}
+    assert "openalgo" not in activated  # bridge never qualifies
+    assert activated["dhan"] is router._adapters["dhan"]
+
+
+@pytest.mark.unit
+def test_on_native_activated_sink_empty_when_dormant() -> None:
+    activated: dict[str, object] = {}
+    build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        openalgo_client=object(),
+        on_native_activated=activated.update,
+    )
+    assert activated == {}
+
+
+@pytest.mark.unit
+def test_reconcile_targets_provider_yields_only_live_native_sessions() -> None:
+    """``_build_reconcile_targets_provider`` resolves at call time: a selector
+    becomes a target only when its adapter is active AND a session exists."""
+    from flinttrade_core.app import _build_reconcile_targets_provider
+
+    class _FakeAdapter:
+        broker_id = "dhan"
+
+    reg = BrokerRegistry()
+    adapter = _FakeAdapter()
+    natives: dict[str, object] = {}
+    targets = _build_reconcile_targets_provider(
+        reg, natives, ["dhan:personal", "upstox:main", "not-a-selector"]
+    )
+
+    # Nothing active, nothing logged in → no targets.
+    assert targets() == []
+
+    # Adapter active but no session yet (pre-login) → still no targets.
+    natives["dhan"] = adapter
+    assert targets() == []
+
+    # Session established (credential-replay login) → picked up next call.
+    session = object()
+    reg.put_session("dhan", "personal", session)
+    assert targets() == [(adapter, session)]
+
+    # A session for a DORMANT adapter never becomes a target.
+    reg.put_session("upstox", "main", object())
+    assert targets() == [(adapter, session)]
+
+
+@pytest.mark.unit
+def test_create_flask_app_defaults_reconcile_config_keys() -> None:
+    """The factory always defines NATIVE_ADAPTERS / RECONCILE_TARGETS, and with
+    the default config (no natives credentialled) the provider yields nothing."""
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    assert app.config["NATIVE_ADAPTERS"] == {}
+    targets = app.config["RECONCILE_TARGETS"]
+    assert callable(targets)
+    assert targets() == []
+
+
 def test_authorise_default_actor_trust_on_first_use() -> None:
     """A freshly authenticated operator claims the default execution selector once."""
     from flinttrade_engine.request_context import RequestContext

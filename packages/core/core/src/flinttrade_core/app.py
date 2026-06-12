@@ -614,6 +614,52 @@ def _native_activation_checks(
     return attest_ok, has_credentials
 
 
+def _build_reconcile_targets_provider(
+    registry: BrokerRegistry,
+    native_adapters: dict[str, Any],
+    registered_selectors: list[str],
+) -> Callable[[], list[tuple[Any, Any]]]:
+    """Build the ``(adapter, session)`` enumerator the reconciliation runner polls.
+
+    Resolved AT CALL TIME so natives that authenticate after boot (the
+    credential-replay login step) are picked up on the runner's next cycle: a
+    registered selector yields a target only when its adapter is active in
+    ``native_adapters`` AND the registry holds an adapter-layer session for it.
+    The bridge adapter (``openalgo``) is excluded by construction — only native
+    broker ids ever appear in ``native_adapters``.
+
+    Args:
+        registry: The broker registry holding adapter-layer sessions.
+        native_adapters: Live ``broker_id -> adapter`` map (mutated in place by
+            the ``on_native_activated`` sink as natives activate).
+        registered_selectors: The workspace ``brokers.registered`` selectors.
+
+    Returns:
+        Zero-argument callable returning the current reconcile targets.
+    """
+
+    def _targets() -> list[tuple[Any, Any]]:
+        from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
+
+        pairs: list[tuple[Any, Any]] = []
+        for selector in registered_selectors:
+            try:
+                adapter_id, account_id = parse_selector(selector)
+            except ValueError:
+                continue
+            adapter = native_adapters.get(adapter_id)
+            if adapter is None:
+                continue
+            try:
+                session = registry.get_session_for(adapter_id, account_id)
+            except Exception:
+                continue  # no live session yet — not an error, just dormant
+            pairs.append((adapter, session))
+        return pairs
+
+    return _targets
+
+
 def build_broker_router(
     registry: BrokerRegistry,
     brokers_config: dict[str, Any],
@@ -623,6 +669,7 @@ def build_broker_router(
     native_attest_ok: Callable[[str], bool] | None = None,
     native_has_credentials: Callable[[str], bool] | None = None,
     native_adapter_kwargs: Callable[[str], dict[str, Any]] | None = None,
+    on_native_activated: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     """Construct a config-driven :class:`BrokerRouter` (contract §13 / §11.4).
 
@@ -648,6 +695,12 @@ def build_broker_router(
     until the credential-replay login step establishes one; an unauthenticated
     native selector simply has no session to dispatch to.
 
+    ``on_native_activated`` (when supplied) is called once with the final
+    ``broker_id -> adapter`` map of ACTIVE native adapters (factory-built or
+    injected) so the caller can wire engine-side consumers — the reconciliation
+    runner — without reaching into the router's internals. Best-effort: a sink
+    failure is logged and never bricks routing.
+
     Raises:
         RoutingConfigError: If ``brokers_config`` is malformed.
     """
@@ -655,6 +708,7 @@ def build_broker_router(
     from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
     from flinttrade_gateway.brokers.native_factory import (  # noqa: PLC0415
         build_native_adapters,
+        is_native_broker,
     )
     from flinttrade_gateway.router import BrokerRouter  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingConfig  # noqa: PLC0415
@@ -713,6 +767,17 @@ def build_broker_router(
                         adapter_id="openalgo",
                     ),
                 )
+
+    # Report the ACTIVE native adapters (factory-built or injected) to the
+    # caller's sink so the engine-side reconciliation runner can enumerate them
+    # without reaching into the router. The bridge (openalgo) never qualifies.
+    if on_native_activated is not None:
+        try:
+            on_native_activated(
+                {aid: adapter for aid, adapter in resolved_adapters.items() if is_native_broker(aid)}
+            )
+        except Exception as exc:  # pragma: no cover - observability only
+            logger.warning("Native-adapter activation sink failed (%s)", exc)
 
     # Per-broker API rate limiter (DATA & INFRA: customizable rate limits). Built
     # from each registered adapter's capability metadata, with operator overrides
@@ -1055,8 +1120,15 @@ def create_flask_app(
     # Smart routing stays disabled when the brokers block fails to parse —
     # the smart-route endpoint reads this and fails closed with a clear 403.
     app.config["SMART_ROUTING"] = {}
+    # Active native adapters (broker_id -> adapter) + the reconciliation
+    # targets provider the engine runner polls (contract §14.2). Defaults to
+    # "no natives, no targets" so a failed router build disables reconciliation
+    # alongside routing rather than erroring.
+    app.config["NATIVE_ADAPTERS"] = {}
+    app.config["RECONCILE_TARGETS"] = None
     try:
         from .workspace_migrations import default_workspace_config  # noqa: PLC0415
+        from flinttrade_engine.local_state_provider import JournalLocalStateProvider  # noqa: PLC0415
 
         _brokers_cfg = _read_workspace_brokers()
         _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
@@ -1066,12 +1138,28 @@ def create_flask_app(
         # fetch a real option chain through the functional bridge adapter rather
         # than always falling back to sample data.
         app.config["OPENALGO_CLIENT"] = client
+        # Journal-backed local-state provider threaded into every native
+        # adapter (contract §14): the flinttrade-side mirror reconcile() diffs
+        # broker state against. Handles resolve lazily from app.config so the
+        # shared trade store (created later in this factory) is picked up.
+        _local_state_provider = JournalLocalStateProvider(
+            storage_provider=lambda: app.config.get("TRADE_STORAGE"),
+            lock_provider=lambda: app.config.get("TRADE_STORAGE_LOCK"),
+        )
+        _native_adapters: dict[str, Any] = app.config["NATIVE_ADAPTERS"]
         app.config["BROKER_ROUTER"] = build_broker_router(
             registry,
             _effective_brokers,
             openalgo_client=client,
             native_attest_ok=_native_attest_ok,
             native_has_credentials=_native_has_credentials,
+            native_adapter_kwargs=lambda _broker_id: {"local_state_provider": _local_state_provider},
+            on_native_activated=_native_adapters.update,
+        )
+        app.config["RECONCILE_TARGETS"] = _build_reconcile_targets_provider(
+            registry,
+            _native_adapters,
+            [str(s) for s in (_effective_brokers.get("registered") or [])],
         )
         if _brokers_cfg is not None:
             _snapshot_brokers_bak(_brokers_cfg)
@@ -2282,6 +2370,10 @@ class FlintTradeApp:
         self._tick_recorder: Any | None = None
         self._tick_recorder_task: Any | None = None
 
+        # Broker reconciliation runner (contract §14.2) — wired in start().
+        self._reconciliation_runner: Any | None = None
+        self._reconciliation_task: Any | None = None
+
         self._stop_event = asyncio.Event()
 
         logger.info("FlintTradeApp initialised — v%s", self.version)
@@ -2429,6 +2521,32 @@ class FlintTradeApp:
             except Exception as exc:
                 logger.warning("Tick capture failed to start (%s); not recording ticks", exc)
 
+        # Broker reconciliation runner (contract §14.2): reconciles every ACTIVE
+        # native (adapter, session) pair on start and then every
+        # Capabilities.reconcile_recommended_seconds — persisting JSONL under
+        # <home>/reconciliation/<broker>/<account>.jsonl and auditing
+        # RECONCILIATION_MISMATCH on drift. Launched as a background task on
+        # this loop (mirrors the tick recorder): never blocks boot, polls so
+        # sessions established after boot are picked up, cancelled in stop().
+        try:
+            _reconcile_targets = flask_app.config.get("RECONCILE_TARGETS")
+            if _reconcile_targets is not None:
+                from flinttrade_engine.reconciliation_runner import ReconciliationRunner  # noqa: PLC0415
+
+                _reconciler = ReconciliationRunner(_reconcile_targets, audit_logger=self.audit)
+                self._reconciliation_runner = _reconciler
+                self._reconciliation_task = asyncio.create_task(_reconciler.run())
+                # Exposed on app.config for observability/manual-trigger routes.
+                flask_app.config["RECONCILIATION_RUNNER"] = _reconciler
+            else:
+                logger.info(
+                    "Reconciliation runner inactive — broker routing was not built this boot"
+                )
+        except Exception as exc:
+            logger.warning(
+                "Reconciliation runner failed to start (%s); broker reconciliation inactive", exc
+            )
+
         # Broker SDK attestation — log which native broker SDKs match brokers.lock
         # so the operator can see what is / isn't ready to go live. No native
         # adapter is wired into the router yet, so this is informational here;
@@ -2507,6 +2625,12 @@ class FlintTradeApp:
             self._tick_recorder.stop()
         if self._tick_recorder_task is not None:
             self._tick_recorder_task.cancel()
+
+        # Stop the reconciliation runner (signal the loop, then cancel the task)
+        if self._reconciliation_runner is not None:
+            self._reconciliation_runner.stop()
+        if self._reconciliation_task is not None:
+            self._reconciliation_task.cancel()
 
         # Log shutdown to audit before closing
         self.audit.log_event("APP_STOP", version=self.version)
