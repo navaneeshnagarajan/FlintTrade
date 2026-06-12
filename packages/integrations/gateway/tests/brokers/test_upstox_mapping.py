@@ -50,9 +50,14 @@ _StandInApiException.__name__ = "ApiException"
 
 
 def _err_body(error_code: str, message: str) -> bytes:
-    """Build an ApiGatewayErrorResponse-shaped JSON error body (as bytes)."""
+    """Build an ApiGatewayErrorResponse-shaped JSON error body (as bytes).
+
+    Uses the REAL wire key ``errorCode`` (camelCase) — ``ApiException.body`` is
+    the raw HTTP data and the SDK ``Problem`` model maps ``error_code ->
+    "errorCode"``. A snake_case fixture would not exercise the parser honestly.
+    """
     return json.dumps(
-        {"status": "error", "errors": [{"error_code": error_code, "message": message}]}
+        {"status": "error", "errors": [{"errorCode": error_code, "message": message}]}
     ).encode("utf-8")
 
 
@@ -310,9 +315,31 @@ def test_from_upstox_gtt_order_normalises_rules():
         ],
         "created_at": 1740641185000000, "expires_at": 1772216999000000,
     })
-    assert out["gtt_order_id"] == "GTT-CU1" and out["product"] == "CNC"
+    assert out["gtt_order_id"] == "GTT-CU1" and out["product"] == "CNC"  # equity D -> CNC
     assert out["rules"][0]["order_id"] == "250228010168535"
     assert out["rules"][1]["strategy"] == "STOPLOSS" and out["rules"][1]["order_id"] == ""
+
+
+def test_from_upstox_trade_and_gtt_disambiguate_fno_product_d():
+    # Upstox product "D" is delivery (CNC) for equity but carry-forward (NRML)
+    # for F&O. The trade and GTT read paths must disambiguate by segment, not
+    # blindly map D->CNC (which would mislabel every F&O record).
+    trade = m.from_upstox_trade({
+        "order_id": "9", "trading_symbol": "BANKNIFTY", "exchange": "NFO",
+        "transaction_type": "SELL", "product": "D", "quantity": 15, "average_price": 1.2,
+    })
+    assert trade["product"] == "NRML"
+    gtt = m.from_upstox_gtt_order({
+        "gtt_order_id": "GTT-F1", "type": "SINGLE", "trading_symbol": "NIFTY",
+        "exchange": "NFO", "product": "D", "quantity": 50, "rules": [],
+    })
+    assert gtt["product"] == "NRML"
+    # An equity trade still maps D -> CNC.
+    eq = m.from_upstox_trade({
+        "order_id": "10", "trading_symbol": "TCS", "exchange": "NSE",
+        "transaction_type": "BUY", "product": "D", "quantity": 5, "average_price": 3500,
+    })
+    assert eq["product"] == "CNC"
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +649,19 @@ def test_map_upstox_error_rejected_order_400():
     assert isinstance(mapped, OrderRejectedByBroker)
     assert "Invalid order parameters" in str(mapped)  # broker message preserved
     assert mapped.broker_code == "UDAPI100038" and mapped.broker_id == "upstox"
+
+
+def test_map_upstox_error_reads_camelcase_errorcode_wire_key():
+    # The wire key is errorCode (camelCase). A snake_case-only parser would lose
+    # the broker code; assert the real envelope's code reaches broker_code.
+    camel = json.dumps(
+        {"status": "error", "errors": [{"errorCode": "UDAPI100038", "message": "Rejected"}]}
+    ).encode("utf-8")
+    mapped = m.map_upstox_error(_StandInApiException(400, camel, reason="Bad Request"))
+    assert mapped.broker_code == "UDAPI100038"
+    # The snake_case fallback still works for any endpoint that emits it.
+    snake = json.dumps({"status": "error", "errors": [{"error_code": "X9", "message": "Rejected"}]}).encode("utf-8")
+    assert m.map_upstox_error(_StandInApiException(400, snake)).broker_code == "X9"
 
 
 def test_map_upstox_error_expired_token_401_is_session_expired():

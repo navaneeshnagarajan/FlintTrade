@@ -226,18 +226,40 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     return kwargs
 
 
-def to_amo_order_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
-    """Translate an ``amo`` ``Order`` into after-market ``dhanhq.place_order`` kwargs.
+def to_amo_order_payload(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate an ``amo`` ``Order`` into a Dhan ``POST /orders`` REST payload.
 
     An after-market order is a regular order placed outside market hours: it
-    carries ``after_market_order=True`` plus an ``amoTime`` pump window
-    (``order.amo_time``, default ``OPEN`` — annexure.md). Every other field
-    matches a regular order, so this builds on :func:`to_place_order_kwargs`.
+    carries ``afterMarketOrder=true`` plus an ``amoTime`` pump window
+    (``order.amo_time``, default ``OPEN`` — annexure.md; valid PRE_OPEN/OPEN/
+    OPEN_30/OPEN_60 per orders.md).
+
+    NOTE: this does NOT go through ``dhanhq.place_order``. The pinned dhanhq
+    2.2.0 ``place_order`` both rejects ``PRE_OPEN`` and — critically — omits
+    ``amoTime`` from the wire payload entirely (``_order.py:113``), so the pump
+    window never reaches the broker. To deliver real AMO parity we build the
+    documented ``/orders`` body ourselves and POST it via the SDK's
+    ``DhanHTTP`` transport, exactly as the v2.5 endpoints do. Field names are
+    camelCase to match orders.md.
     """
     kwargs = to_place_order_kwargs(order, security_id, tag=tag)
-    kwargs["after_market_order"] = True
-    kwargs["amo_time"] = _norm_amo_time(getattr(order, "amo_time", None))
-    return kwargs
+    payload: dict[str, Any] = {
+        "transactionType": kwargs["transaction_type"],
+        "exchangeSegment": kwargs["exchange_segment"],
+        "productType": kwargs["product_type"],
+        "orderType": kwargs["order_type"],
+        "validity": kwargs["validity"],
+        "securityId": kwargs["security_id"],
+        "quantity": kwargs["quantity"],
+        "disclosedQuantity": kwargs["disclosed_quantity"],
+        "price": kwargs["price"],
+        "triggerPrice": kwargs["trigger_price"],
+        "afterMarketOrder": True,
+        "amoTime": _norm_amo_time(getattr(order, "amo_time", None)),
+    }
+    if tag:
+        payload["correlationId"] = tag
+    return payload
 
 
 def _validated_core(order: Any, security_id: str) -> dict[str, Any]:
@@ -610,6 +632,12 @@ def to_convert_position_kwargs(req: dict[str, Any], security_id: str) -> dict[st
         "convert_qty": qty,
         "to_product_type": _to_dhan_product(req.get("to_product", req.get("to_product_type", ""))),
     }
+
+
+# The plain order-placement REST endpoint. Used directly (not via the SDK) for
+# after-market orders, because the pinned dhanhq 2.2.0 ``place_order`` drops the
+# ``amoTime`` field from its payload (see ``to_amo_order_payload``).
+ORDERS_ENDPOINT = "/orders"
 
 
 # ---------------------------------------------------------------------------

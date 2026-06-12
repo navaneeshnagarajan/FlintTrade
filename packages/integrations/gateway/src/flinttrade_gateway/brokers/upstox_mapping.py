@@ -342,7 +342,10 @@ def from_upstox_trade(d: dict[str, Any]) -> dict[str, Any]:
         "action": d.get("transaction_type", ""),
         "quantity": str(d.get("quantity", 0)),
         "price": str(d.get("average_price", d.get("price", 0))),
-        "product": UPSTOX_TO_PRODUCT.get(d.get("product", ""), d.get("product", "")),
+        "product": _product_from_upstox(
+            d.get("product", ""), d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+            d.get("segment", ""),
+        ),
         "timestamp": str(d.get("order_timestamp", d.get("exchange_timestamp", ""))),
     }
 
@@ -689,7 +692,10 @@ def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
         "type": d.get("type", ""),
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
         "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
-        "product": UPSTOX_TO_PRODUCT.get(d.get("product", ""), d.get("product", "")),
+        "product": _product_from_upstox(
+            d.get("product", ""), d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+            d.get("segment", ""),
+        ),
         "quantity": str(d.get("quantity", 0)),
         "rules": [
             {
@@ -1172,9 +1178,12 @@ def _parse_error_body(body: Any) -> tuple[str, str]:
     """Extract ``(error_code, message)`` from an Upstox error response body.
 
     Upstox error payloads follow ``ApiGatewayErrorResponse``:
-    ``{"status": "error", "errors": [{"error_code": ..., "message": ...}]}``.
-    The body arrives as bytes or a str (raw HTTP response data); a non-JSON body
-    degrades gracefully to ``("", "<raw>")`` so the broker message is never lost.
+    ``{"status": "error", "errors": [{"errorCode": ..., "message": ...}]}``.
+    The error code's wire key is ``errorCode`` (camelCase) — the SDK ``Problem``
+    model maps ``error_code -> "errorCode"``, and ``ApiException.body`` is the
+    RAW HTTP data, so we read the camelCase key (with a snake_case fallback for
+    safety). The body arrives as bytes or a str; a non-JSON body degrades
+    gracefully to ``("", "<raw>")`` so the broker message is never lost.
 
     Args:
         body: The ``ApiException.body`` (bytes / str / already-decoded dict).
@@ -1198,9 +1207,11 @@ def _parse_error_body(body: Any) -> tuple[str, str]:
     errors = payload.get("errors")
     if isinstance(errors, list) and errors and isinstance(errors[0], dict):
         first = errors[0]
-        return str(first.get("error_code") or ""), str(first.get("message") or "")
-    # Some endpoints return a flat ``{"error_code", "message"}`` body.
-    return str(payload.get("error_code") or ""), str(payload.get("message") or "")
+        code = first.get("errorCode") or first.get("error_code") or ""
+        return str(code), str(first.get("message") or "")
+    # Some endpoints return a flat ``{"errorCode", "message"}`` body.
+    code = payload.get("errorCode") or payload.get("error_code") or ""
+    return str(code), str(payload.get("message") or "")
 
 
 def map_upstox_error(exc: BaseException) -> BrokerError:

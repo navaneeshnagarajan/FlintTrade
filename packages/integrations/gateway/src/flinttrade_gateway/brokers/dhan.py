@@ -293,9 +293,14 @@ class DhanAdapter(BrokerAdapter):
         if variety in ("regular", ""):
             resp = await self._call(client.place_order, **M.to_place_order_kwargs(order, security_id, tag=tag))
         elif variety == "amo":
-            # After-market order: the SAME place_order endpoint with
-            # after_market_order=True + an amoTime pump window (annexure.md).
-            resp = await self._call(client.place_order, **M.to_amo_order_kwargs(order, security_id, tag=tag))
+            # After-market order: POST /orders directly via DhanHTTP with the
+            # afterMarketOrder flag + amoTime pump window. We bypass the SDK's
+            # place_order because dhanhq 2.2.0 drops amoTime from its payload
+            # (so the pump window would never reach the broker) — see
+            # to_amo_order_payload. Still the SAME gated method/variety dispatch.
+            resp = await self._call(
+                self._http(session).post, M.ORDERS_ENDPOINT, M.to_amo_order_payload(order, security_id, tag=tag)
+            )
         elif variety in ("bracket", "cover"):
             resp = await self._call(client.place_super_order, **M.to_super_order_kwargs(order, security_id, tag=tag))
         elif variety == "iceberg":

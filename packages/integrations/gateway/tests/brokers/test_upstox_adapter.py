@@ -539,7 +539,8 @@ async def test_place_order_ioc_validity_reaches_broker():
 def _err_body(error_code: str, message: str) -> bytes:
     import json
 
-    return json.dumps({"status": "error", "errors": [{"error_code": error_code, "message": message}]}).encode()
+    # Real wire key is errorCode (camelCase) — see upstox_mapping._parse_error_body.
+    return json.dumps({"status": "error", "errors": [{"errorCode": error_code, "message": message}]}).encode()
 
 
 def test_facade_translates_api_exception_to_taxonomy():

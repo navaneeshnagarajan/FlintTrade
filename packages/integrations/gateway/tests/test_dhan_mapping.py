@@ -22,7 +22,7 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     from_dhan_expiry_list,
     from_dhan_margin,
     from_dhan_statement_list,
-    to_amo_order_kwargs,
+    to_amo_order_payload,
     to_margin_kwargs,
     to_forever_kwargs,
     to_modify_order_kwargs,
@@ -88,25 +88,31 @@ def test_place_order_validity_defaults_to_day_and_rejects_unknown():
         to_place_order_kwargs(bad, "11536")
 
 
-def test_amo_order_kwargs_sets_after_market_and_time():
-    """An ``amo`` order carries after_market_order=True + an amoTime window
-    (annexure.md); every other field mirrors a regular order."""
+def test_amo_order_payload_sets_after_market_and_time():
+    """An ``amo`` order builds a /orders REST payload with afterMarketOrder=True
+    + an amoTime window (orders.md); camelCase field names, amoTime carried on
+    the wire (the SDK drops it, so we POST the payload directly)."""
     order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="CNC", quantity="10", price="2900", variety="amo")
-    kw = to_amo_order_kwargs(order, "11536", tag="A1")
-    assert kw["after_market_order"] is True
-    assert kw["amo_time"] == "OPEN"  # default pump window
-    assert kw["order_type"] == "LIMIT" and kw["product_type"] == "CNC" and kw["tag"] == "A1"
+    p = to_amo_order_payload(order, "11536", tag="A1")
+    assert p["afterMarketOrder"] is True
+    assert p["amoTime"] == "OPEN"  # default pump window
+    assert p["orderType"] == "LIMIT" and p["productType"] == "CNC" and p["correlationId"] == "A1"
+    assert p["securityId"] == "11536" and p["transactionType"] == "BUY"
 
 
-def test_amo_order_kwargs_honours_explicit_time_and_rejects_bad():
+def test_amo_order_payload_honours_explicit_time_incl_pre_open_and_rejects_bad():
     order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="CNC", quantity="10", price="2900", variety="amo")
     object.__setattr__(order, "amo_time", "OPEN_30")
-    assert to_amo_order_kwargs(order, "11536")["amo_time"] == "OPEN_30"
+    assert to_amo_order_payload(order, "11536")["amoTime"] == "OPEN_30"
+    # PRE_OPEN is documented (orders.md/annexure.md) and reaches the broker via
+    # the direct payload, even though the SDK's place_order would reject it.
+    object.__setattr__(order, "amo_time", "PRE_OPEN")
+    assert to_amo_order_payload(order, "11536")["amoTime"] == "PRE_OPEN"
     object.__setattr__(order, "amo_time", "MIDNIGHT")
     with pytest.raises(DhanMappingError, match="amo_time"):
-        to_amo_order_kwargs(order, "11536")
+        to_amo_order_payload(order, "11536")
 
 
 def test_super_order_bracket_carries_both_legs():

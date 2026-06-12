@@ -13,11 +13,38 @@ from flinttrade_gateway.brokers.dhan import DhanAdapter, _ROUTER_TOKEN
 pytestmark = pytest.mark.unit
 
 
+class MockHTTP:
+    """Stand-in for the SDK's DhanHTTP transport (direct-endpoint paths)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict | None]] = []
+        self.responses: dict[tuple[str, str], dict] = {}
+
+    def _respond(self, method: str, endpoint: str, payload: dict | None = None) -> dict:
+        self.calls.append((method, endpoint, payload))
+        return self.responses.get(
+            (method, endpoint), {"status": "success", "data": {"orderId": "OID1", "orderStatus": "TRANSIT"}}
+        )
+
+    def get(self, endpoint):
+        return self._respond("GET", endpoint)
+
+    def post(self, endpoint, payload):
+        return self._respond("POST", endpoint, payload)
+
+    def put(self, endpoint, payload):
+        return self._respond("PUT", endpoint, payload)
+
+    def delete(self, endpoint):
+        return self._respond("DELETE", endpoint)
+
+
 class MockDhan:
     """Stand-in for the synchronous dhanhq 2.2.0 client."""
 
     def __init__(self):
         self.calls: list[tuple] = []
+        self.dhan_http = MockHTTP()
 
     def place_order(self, **kw):
         self.calls.append(("place", kw))
@@ -290,9 +317,10 @@ async def test_advanced_order_still_requires_router_token():
 
 
 @pytest.mark.asyncio
-async def test_amo_order_dispatches_to_place_order_after_market():
-    """An ``amo`` variety routes to place_order with after_market_order=True +
-    amoTime, instead of falling through to the unsupported-variety error."""
+async def test_amo_order_posts_orders_payload_with_amotime():
+    """An ``amo`` variety POSTs /orders directly via DhanHTTP with
+    afterMarketOrder + amoTime on the wire, instead of the SDK place_order
+    (which drops amoTime). The SDK place_order is never touched."""
     mock = MockDhan()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -300,9 +328,10 @@ async def test_amo_order_dispatches_to_place_order_after_market():
                   product="CNC", quantity="5", price="2900", variety="amo")
     oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert oid == "OID1"
-    kind, kw = mock.calls[0]
-    assert kind == "place"  # the regular place_order endpoint
-    assert kw["after_market_order"] is True and kw["amo_time"] == "OPEN"
+    assert mock.calls == []  # the SDK place_order endpoint was NOT used
+    method, endpoint, payload = mock.dhan_http.calls[0]
+    assert (method, endpoint) == ("POST", "/orders")
+    assert payload["afterMarketOrder"] is True and payload["amoTime"] == "OPEN"
 
 
 @pytest.mark.asyncio
