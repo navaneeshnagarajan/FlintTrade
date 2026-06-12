@@ -46,9 +46,7 @@ from ._base import BrokerAdapter, Session
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
-    from flinttrade_gateway.reconciliation import ReconciliationReport
-
-_PENDING = "Dhan {0} — market-data/streaming wave pending live SDK verification"
+    from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
 DHAN_CAPABILITIES = Capabilities(
     segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.MCX,
@@ -162,6 +160,11 @@ class DhanAdapter(BrokerAdapter):
             behind the SDK's ``fulldepth.FullDepth``).
         login_factory: ``client_id -> DhanLogin-like`` override for the auth
             surface (token generation / renewal / static-IP management).
+        local_state_provider: ``session -> LocalStateSnapshot`` supplying the
+            flinttrade-side mirror that ``reconcile`` diffs broker state
+            against. Defaults to EMPTY local state (every broker-side row then
+            surfaces as ``exists_only_on_broker``) until the engine wave wires
+            the journal-backed provider.
     """
 
     def __init__(
@@ -173,6 +176,7 @@ class DhanAdapter(BrokerAdapter):
         order_feed_factory: Callable[[Session], AsyncIterator[Any]] | None = None,
         depth_feed_factory: Callable[[Session, int], AsyncIterator[bytes]] | None = None,
         login_factory: Callable[[str], Any] | None = None,
+        local_state_provider: Callable[[Session], LocalStateSnapshot] | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._security_resolver = security_resolver
@@ -180,6 +184,7 @@ class DhanAdapter(BrokerAdapter):
         self._order_feed_factory = order_feed_factory
         self._depth_feed_factory = depth_feed_factory
         self._login_factory = login_factory
+        self._local_state_provider = local_state_provider
         # security_id -> (symbol, exchange) for routing decoded ticks back to names.
         self._feed_map: dict[str, tuple[str, str]] = {}
         # security_id -> requested feed RequestCode (TICKER/QUOTE/FULL).
@@ -922,11 +927,41 @@ class DhanAdapter(BrokerAdapter):
     # ---------- reconciliation ----------
 
     async def reconcile(self, session: Session) -> ReconciliationReport:
-        # The §14 reconciliation wave has not landed: flinttrade_gateway has no
-        # reconciliation module / ReconciliationReport model yet (TYPE_CHECKING
-        # forward reference only), so there is nothing contract-shaped to
-        # return. Implement when the model ships.
-        raise NotImplementedError(_PENDING.format("reconcile"))
+        """Broker-truth vs flinttrade-mirror diff (contract §14).
+
+        Fetches the order book, positions and holdings through this adapter's
+        own reads and diffs them against the injected ``local_state_provider``
+        snapshot (empty until the engine wave wires the journal-backed
+        provider). A broker fetch failure is captured on the report's
+        ``error`` field instead of raised, so the runner retries next cycle.
+        """
+        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, build_report  # noqa: PLC0415
+
+        generated_at = datetime.now(tz=timezone.utc)
+        local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
+        try:
+            broker_orders = await self.order_book(session)
+            broker_positions = await self.positions(session)
+            broker_holdings = await self.holdings(session)
+        except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes
+            return build_report(
+                adapter_id=self.broker_id,
+                account_id=session.account_id,
+                generated_at=generated_at,
+                local_state=local,
+                error=f"broker fetch failed: {exc}",
+            )
+        # The read methods return the normalised row dicts at runtime (see the
+        # mapping layer); build_report consumes them as plain mappings.
+        return build_report(
+            adapter_id=self.broker_id,
+            account_id=session.account_id,
+            generated_at=generated_at,
+            broker_orders=broker_orders,  # type: ignore[arg-type]
+            broker_positions=broker_positions,  # type: ignore[arg-type]
+            broker_holdings=broker_holdings,
+            local_state=local,
+        )
 
 
 from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # noqa: E402  shared per-process token (§8.0c)

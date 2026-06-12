@@ -750,8 +750,11 @@ async def test_stream_yields_tick_events_from_injected_feed():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_still_pending():
+async def test_reconcile_clean_on_empty_state():
+    # Empty broker books + the default EMPTY local state agree → clean report.
+    # The diff semantics themselves are covered by tests/test_reconciliation.py.
     adapter = _adapter(MockUpstox())
     session = await _session(adapter)
-    with pytest.raises(NotImplementedError, match="reconcile"):
-        await adapter.reconcile(session)
+    report = await adapter.reconcile(session)
+    assert report.adapter_id == "upstox"
+    assert report.clean and report.error == ""

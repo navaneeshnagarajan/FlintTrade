@@ -788,8 +788,11 @@ async def test_error_status_in_200_body_still_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconcile_raises_pending_wave() -> None:
+async def test_reconcile_clean_on_empty_state() -> None:
+    # Empty broker books + the default EMPTY local state agree → clean report.
+    # The diff semantics themselves are covered by tests/test_reconciliation.py.
     adapter = _adapter(FakeTransport())
     session = await _session(adapter)
-    with pytest.raises(NotImplementedError, match="reconcil"):
-        await adapter.reconcile(session)
+    report = await adapter.reconcile(session)
+    assert report.adapter_id == "indmoney"
+    assert report.clean and report.error == ""
