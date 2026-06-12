@@ -8,12 +8,14 @@ backtest/strategy lifecycle.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 from datetime import timedelta as _td
 from datetime import timezone as _tz
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -1408,3 +1410,215 @@ def positions_exit_all() -> tuple[Any, int]:
         adapter_id=adapter_id, account_id=account_id,
         audit_event="POSITIONS_EXITED_ALL", fail_message="Exit-all positions failed",
     )
+
+
+# ------------------------------------------------------------------
+# Reconciliation observability (contract §14.2)
+#
+# The engine's ReconciliationRunner persists every broker-vs-flinttrade
+# report as one JSONL line under
+# ``<workspace home>/reconciliation/<broker_id>/<account_id>.jsonl`` and is
+# exposed at runtime as ``app.config["RECONCILIATION_RUNNER"]``. These
+# routes are the READ side (history + per-target status) plus an
+# operator-triggered ``run_once()``. Like the audit-log read above, the
+# GETs carry the observability read scope; like the other operator POSTs
+# in this file (kill switch, safety config), the run trigger relies on the
+# app-level operator API-key auth plus the same scope check for narrowed
+# session tokens.
+# ------------------------------------------------------------------
+
+_RECONCILIATION_DEFAULT_LIMIT = 5
+_RECONCILIATION_MAX_LIMIT = 100
+
+
+def _reconciliation_safe_component(raw: Any, fallback: str) -> str:
+    """Sanitise a broker/account id into a single safe path component.
+
+    Mirrors the engine runner's ``_safe_component``
+    (``flinttrade_engine.reconciliation_runner``) so the read side resolves
+    EXACTLY the file the write side produced: anything outside
+    ``[A-Za-z0-9._-]`` becomes ``_``; results that are empty or consist
+    solely of separators/dots (e.g. ``".."``) collapse to ``fallback`` so a
+    hostile id can never traverse out of the ``reconciliation/`` tree.
+
+    Args:
+        raw: The caller-supplied broker or account identifier.
+        fallback: Component to use when the cleaned id is unusable.
+
+    Returns:
+        A single, filesystem-safe path component.
+    """
+    text = str(raw or "").strip()
+    cleaned = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in text)
+    if not cleaned or set(cleaned) <= {".", "_", "-"}:
+        return fallback
+    return cleaned
+
+
+def _reconciliation_root() -> Path:
+    """The runner's JSONL persistence root (``<workspace>/reconciliation``)."""
+    from .workspace import workspace_dir  # noqa: PLC0415
+
+    return (workspace_dir() / "reconciliation").resolve()
+
+
+def _read_jsonl_tail(path: Path, limit: int) -> list[dict[str, Any]]:
+    """Parse the last ``limit`` JSONL report lines of ``path``, newest first.
+
+    Malformed or blank lines are skipped (the runner writes one JSON object
+    per line; a torn final line from a crash must not break the read side).
+
+    Args:
+        path: The per-account JSONL file.
+        limit: Maximum number of reports to return.
+
+    Returns:
+        Up to ``limit`` parsed report dicts, newest first; empty when the
+        file is unreadable.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    reports: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            reports.append(payload)
+        if len(reports) >= limit:
+            break
+    return reports
+
+
+@operations_bp.route("/reconciliation/reports", methods=["GET"])
+@require_scope("admin.observability.read")
+def reconciliation_reports() -> tuple[Any, int]:
+    """Return the last N persisted reconciliation reports for one account.
+
+    Query parameters:
+        broker (str): The adapter's canonical broker id (required).
+        account_id (str): The broker account id (required).
+        limit (int): Maximum reports to return (default 5, max 100).
+
+    Returns:
+        JSON with ``status`` and ``data.reports`` — parsed JSONL report
+        dicts newest first; an empty list when no history exists yet.
+    """
+    broker = request.args.get("broker", "").strip()
+    account_id = request.args.get("account_id", "").strip()
+    if not broker or not account_id:
+        return jsonify({
+            "status": "error",
+            "message": "broker and account_id query parameters are required",
+        }), 400
+    try:
+        limit = int(request.args.get("limit", _RECONCILIATION_DEFAULT_LIMIT))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "limit must be a positive integer"}), 400
+    if limit < 1:
+        return jsonify({"status": "error", "message": "limit must be a positive integer"}), 400
+    limit = min(limit, _RECONCILIATION_MAX_LIMIT)
+
+    try:
+        root = _reconciliation_root()
+        safe_broker = _reconciliation_safe_component(broker, "unknown")
+        safe_account = _reconciliation_safe_component(account_id, "default")
+        path = (root / safe_broker / f"{safe_account}.jsonl").resolve()
+        # Belt-and-braces: the sanitiser already collapses traversal input to a
+        # single component, but never read outside the reconciliation tree.
+        if not path.is_relative_to(root):
+            return jsonify({"status": "error", "message": "Invalid broker or account_id"}), 400
+        reports = _read_jsonl_tail(path, limit) if path.is_file() else []
+        return jsonify({
+            "status": "success",
+            "data": {"broker": safe_broker, "account_id": safe_account, "reports": reports},
+        }), 200
+    except Exception:
+        logger.exception("reconciliation_reports error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/reconciliation/status", methods=["GET"])
+@require_scope("admin.observability.read")
+def reconciliation_status() -> tuple[Any, int]:
+    """Per-target reconciliation status from the latest line of each history.
+
+    Walks every ``<root>/<broker>/<account>.jsonl`` the runner has written
+    and summarises the most recent report per target. Also reports whether
+    the background runner is currently active so the terminal can render an
+    honest "dormant" state when no native broker sessions exist.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``targets`` — a list of
+        objects with ``broker``, ``account_id``, ``last_report_at``,
+        ``clean``, ``severity``, ``severity_counts``, and ``error`` — plus
+        ``runner_active`` (bool).
+    """
+    try:
+        targets: list[dict[str, Any]] = []
+        root = _reconciliation_root()
+        if root.is_dir():
+            for broker_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+                for history in sorted(broker_dir.glob("*.jsonl")):
+                    latest = _read_jsonl_tail(history, 1)
+                    if not latest:
+                        continue
+                    report = latest[0]
+                    targets.append({
+                        "broker": broker_dir.name,
+                        "account_id": history.stem,
+                        "last_report_at": str(report.get("generated_at", "")),
+                        "clean": bool(report.get("clean", False)),
+                        "severity": str(report.get("severity", "")),
+                        "severity_counts": dict(report.get("severity_counts") or {}),
+                        "error": str(report.get("error", "")),
+                    })
+        runner = current_app.config.get("RECONCILIATION_RUNNER")
+        runner_active = runner is not None and bool(getattr(runner, "is_running", False))
+        return jsonify({
+            "status": "success",
+            "data": {"targets": targets, "runner_active": runner_active},
+        }), 200
+    except Exception:
+        logger.exception("reconciliation_status error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/reconciliation/run", methods=["POST"])
+@require_scope("admin.observability.read")
+def reconciliation_run() -> tuple[Any, int]:
+    """Operator-triggered reconciliation cycle over the active native targets.
+
+    Invokes the app-config runner's ``run_once()`` (broker reads only — no
+    order writes traverse this path). Targets reconciled very recently may
+    be skipped: the runner re-arms each target's per-broker cadence, so a
+    cycle can honestly produce zero reports. 503 when no runner is active
+    (dormant natives — broker routing was not built this boot).
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``count`` plus the
+        ``reports`` produced by this cycle.
+    """
+    import asyncio  # noqa: PLC0415
+
+    runner = current_app.config.get("RECONCILIATION_RUNNER")
+    if runner is None:
+        return jsonify({
+            "status": "error",
+            "message": "Reconciliation runner not active — no native broker sessions to reconcile",
+        }), 503
+    try:
+        payloads = asyncio.run(runner.run_once())
+        return jsonify({
+            "status": "success",
+            "data": {"count": len(payloads), "reports": payloads},
+        }), 200
+    except Exception:
+        logger.exception("reconciliation_run error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
