@@ -99,10 +99,51 @@ def test_dhan_tops_historical_data() -> None:
     # opposite — Dhan's v2 history API serves 1/5/15/25/60-minute intraday for
     # the last ~5 years (90 days is its per-REQUEST range, not the lookback;
     # historical-data.md), whereas Upstox's 1-minute candles reach only ~1 month
-    # (HistoryApi.md; the 1-year figure was 30-minute-only). With both adapters'
-    # capability metadata now honest, the engine correctly ranks Dhan first for
+    # (HistoryApi.md; the 1-year figure was 30-minute-only). With every adapter's
+    # capability metadata honest, the engine correctly ranks Dhan first for
     # intraday HISTORICAL_DATA.
     assert best_broker_for(BrokerUseCase.HISTORICAL_DATA).broker_id == "dhan"
+
+
+def test_indmoney_is_registered_and_ranked() -> None:
+    # IndMoney is a full-parity native adapter (INDMONEY_CAPABILITIES) and must be
+    # registered in NATIVE_BROKER_CAPABILITIES so the engine — and the
+    # ``?brokers=indmoney`` route filter that validates against it — recognise it.
+    assert "indmoney" in NATIVE_BROKER_CAPABILITIES
+    ranked_ids = {r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)}
+    assert "indmoney" in ranked_ids
+
+
+def test_dhan_beats_indmoney_on_documented_intraday_depth() -> None:
+    # The honest invariant the scorer must defend: deep DOCUMENTED intraday
+    # lookback (Dhan, ~5 years) outranks a broad-but-shallow interval menu
+    # (IndMoney — 12 intervals but only ~7-day 1-minute depth, lookback unset),
+    # which in turn outranks Upstox's ~1-month 1-minute depth. A future reweight
+    # toward raw interval count would over-credit IndMoney and break this — that
+    # is the regression this test guards against.
+    by_broker = {r.broker_id: r for r in recommend(BrokerUseCase.HISTORICAL_DATA)}
+    assert by_broker["dhan"].raw_score > by_broker["indmoney"].raw_score
+    assert by_broker["indmoney"].raw_score > by_broker["upstox"].raw_score
+
+
+def test_historical_data_full_ranking_with_indmoney() -> None:
+    # Pin the exact HISTORICAL_DATA order with all four natives registered:
+    #   dhan (5 intervals + 1825-day lookback = 70.83)
+    #   > indmoney (12 intervals * 2 = 24.0; lookback honestly unset)
+    #   > upstox (5 intervals + 31-day lookback = 11.03)
+    #   > kotakneo (no candle API = 0.0).
+    # IndMoney displaces Upstox at #2 on documented interval breadth, but Dhan's
+    # real ~5-year intraday depth keeps it #1 — the doc-honest outcome.
+    ranked_ids = [r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)]
+    assert ranked_ids == ["dhan", "indmoney", "upstox", "kotakneo"]
+
+
+def test_indmoney_scores_zero_for_options() -> None:
+    # IndMoney's options/utility family is "Coming Soon" broker-side, so it has no
+    # option chain and no historical-options API — it must score 0 for both.
+    for use_case in (BrokerUseCase.OPTIONS_ANALYTICS, BrokerUseCase.OPTIONS_HISTORY):
+        by_broker = {r.broker_id: r for r in recommend(use_case)}
+        assert by_broker["indmoney"].raw_score == 0.0
 
 
 def test_options_analytics_excludes_brokers_without_a_chain() -> None:

@@ -133,3 +133,12 @@ class TestRecommendationsRoute:
         data = response.get_json()
         assert data["status"] == "error"
         assert "known_brokers" in data
+
+    def test_indmoney_broker_subset_accepted(self, client) -> None:  # type: ignore[no-untyped-def]
+        # IndMoney is a full-parity native broker; the ``?brokers=`` filter
+        # validates against NATIVE_BROKER_CAPABILITIES, so it must NOT be rejected
+        # as unknown (regression guard for the registration gap that 400'd it).
+        response = client.get("/api/v1/broker/recommendations?use_case=historical_data&brokers=indmoney")
+        assert response.status_code == 200
+        ids = {r["broker_id"] for r in response.get_json()["recommendations"]}
+        assert ids == {"indmoney"}

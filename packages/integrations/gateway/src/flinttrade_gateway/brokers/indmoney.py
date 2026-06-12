@@ -92,9 +92,14 @@ INDMONEY_CAPABILITIES = Capabilities(
     cost_inr_per_month=0,
     brokerage_free=False,
     brokerage_note="Flat ₹5 brokerage per order regardless of size; API access itself is free.",
-    # Historical-data interval table: sub-minute (1 day/request), minutes
-    # (7 days), hours (14 days), day/week/month (1 year). The doc advertises
-    # 10+ years of total history; per-request caps are enforced in the mapping.
+    # Historical-data interval table — the doc advertises only per-request "Max
+    # Fetch Range" per resolution (sub-minute 1 day, minutes 7 days, hours
+    # 14 days, day/week/month 1 year), NOT a documented multi-year intraday
+    # total, so historical_max_lookback_days_intraday is intentionally left unset
+    # (None). The per-request caps are enforced in the mapping. Leaving lookback
+    # unset keeps the recommendation engine honest: IndMoney is credited for its
+    # broad interval menu, not over-credited for intraday depth it does not
+    # document.
     historical_intraday_intervals_minutes=[1, 2, 3, 4, 5, 10, 15, 30, 60, 120, 180, 240],
     option_chain_supported=False,  # utility family is "Coming Soon" broker-side
     option_chain_greeks_supported=False,

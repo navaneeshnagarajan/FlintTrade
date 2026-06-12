@@ -20,17 +20,21 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .brokers.dhan import DHAN_CAPABILITIES
+from .brokers.indmoney import INDMONEY_CAPABILITIES
 from .brokers.kotakneo import KOTAKNEO_CAPABILITIES
 from .brokers.upstox import UPSTOX_CAPABILITIES
 from .capabilities import Capabilities
 
-# Native broker capabilities keyed by ``broker_id``. The OpenAlgo bridge is
-# deliberately excluded — it is a meta-adapter whose real capabilities depend on
-# the underlying broker, so it cannot be ranked as a single broker here.
+# Native broker capabilities keyed by ``broker_id``. Every full-parity native
+# adapter belongs here so the engine and the ``?brokers=`` route filter agree on
+# what a valid native broker is. The OpenAlgo bridge is deliberately excluded —
+# it is a meta-adapter whose real capabilities depend on the underlying broker,
+# so it cannot be ranked as a single broker here.
 NATIVE_BROKER_CAPABILITIES: dict[str, Capabilities] = {
     "dhan": DHAN_CAPABILITIES,
     "upstox": UPSTOX_CAPABILITIES,
     "kotakneo": KOTAKNEO_CAPABILITIES,
+    "indmoney": INDMONEY_CAPABILITIES,
 }
 
 
@@ -63,6 +67,15 @@ class BrokerRecommendation:
 
 
 def _score_historical(c: Capabilities) -> tuple[float, str]:
+    # Deep fine-resolution intraday lookback is intentionally the dominant term:
+    # for "best broker for historical data" the depth of retrievable history is
+    # the headline signal, so a broker with years of intraday history (e.g. Dhan,
+    # ~5 years) should outrank one with a broader interval menu but only days of
+    # depth (e.g. IndMoney). Do NOT flatten lookback toward interval count — that
+    # would over-credit breadth and misrepresent the documented depth gap. The
+    # candles/1000 term is 0 for every native today (none documents a per-request
+    # candle cap); it is retained, not dead, so a broker that later advertises a
+    # finite cap is credited — do not delete it.
     intervals = len(c.historical_intraday_intervals_minutes)
     lookback = c.historical_max_lookback_days_intraday or 0
     candles = c.historical_max_candles_per_request or 0
