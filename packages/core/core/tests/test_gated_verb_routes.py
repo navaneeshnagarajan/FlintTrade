@@ -535,6 +535,91 @@ def test_trigger_unsupported_broker_returns_501() -> None:
     assert resp.status_code == 501
 
 
+def test_trigger_place_runs_full_safetysystem_per_leg() -> None:
+    """Audit MEDIUM: a trigger PLACEMENT runs check_order (L1–L4) per leg, not
+    just the L5 kill switch — like multi_order_place does."""
+    router = _gated_router(result="AL-1")
+    safety = _passing_safety()
+    client = _app(broker_router=router, safety=safety).test_client()
+    resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
+    assert resp.status_code == 200
+    # The single leg cleared the full risk pipeline before the gate was minted.
+    assert safety.check_order.call_count == 1
+    leg = safety.check_order.call_args.args[0]
+    assert leg.symbol == "RELIANCE"
+
+
+def test_trigger_place_over_limit_leg_blocked_by_l1_before_gate() -> None:
+    """An over-limit conditional-trigger leg (e.g. NFO qty 9999999) is rejected
+    by L1 BEFORE any gate is minted — the gap this fix closes."""
+    blocked = MagicMock(passed=False, layer="L1_ORDER", reason="quantity 9999999 exceeds the per-order limit")
+    safety = MagicMock()
+    safety.check_order.return_value = [blocked]
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    router = _gated_router()
+    client = _app(broker_router=router, safety=safety).test_client()
+    body = {
+        "condition": {"field": "LTP", "operator": ">=", "value": 2900, "symbol": "RELIANCE", "exchange": "NSE"},
+        "orders": [{"symbol": "RELIANCE", "exchange": "NFO", "action": "SELL", "quantity": 9999999}],
+        "broker": "dhan",
+    }
+    resp = client.post("/api/v1/orders/triggers", json=body, headers=_live_headers())
+    assert resp.status_code == 403
+    assert "L1_ORDER" in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()  # no gate minted
+
+
+def test_trigger_modify_over_limit_leg_blocked_by_l1() -> None:
+    """A trigger MODIFY re-runs the full SafetySystem over the replacement legs."""
+    blocked = MagicMock(passed=False, layer="L1_ORDER", reason="quantity exceeds limit")
+    safety = MagicMock()
+    safety.check_order.return_value = [blocked]
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    router = _gated_router()
+    client = _app(broker_router=router, safety=safety).test_client()
+    body = {
+        "condition": {"field": "LTP", "operator": ">=", "value": 2900, "symbol": "RELIANCE", "exchange": "NSE"},
+        "orders": [{"symbol": "RELIANCE", "exchange": "NFO", "action": "SELL", "quantity": 9999999}],
+        "broker": "dhan",
+    }
+    resp = client.put("/api/v1/orders/triggers/AL-1", json=body, headers=_live_headers())
+    assert resp.status_code == 403
+    assert "L1_ORDER" in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
+
+
+def test_gated_verb_surfaces_broker_rejection_message() -> None:
+    """Audit MEDIUM: a broker rejection / adapter mapping error propagates its
+    OWN message to the response (502) — it is NOT swallowed into a generic 500."""
+    from flinttrade_core.exceptions import OrderRejectedByBroker
+
+    router = MagicMock()
+    router.execute_gated = AsyncMock(
+        side_effect=OrderRejectedByBroker("Dhan rejected: segment not enabled for this account")
+    )
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
+    assert resp.status_code == 502
+    assert "segment not enabled" in resp.get_json()["message"]
+
+
+def test_gated_verb_surfaces_mapping_value_error_message() -> None:
+    """An adapter mapping ValueError (the *MappingError classes subclass it)
+    surfaces its message rather than a generic failure."""
+    router = MagicMock()
+    router.execute_gated = AsyncMock(
+        side_effect=ValueError("No Dhan segment for exchange 'XYZ'")
+    )
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.put(
+        "/api/v1/orders/forever/GTT-1",
+        json={"changes": {"price": "2900"}, "broker": "dhan"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 502
+    assert "No Dhan segment" in resp.get_json()["message"]
+
+
 # ---------------------------------------------------------------------------
 # Multi-order placement — every leg through the SafetySystem first
 # ---------------------------------------------------------------------------

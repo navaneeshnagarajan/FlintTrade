@@ -6,7 +6,7 @@
  * gated safety actions (per-row Convert and the typed exit-all flow).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
@@ -14,6 +14,15 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // Force DEV mode so ftApi.helpers' getBase() returns "/ft-api" — the convert
 // and exit-all actions go through the real helpers with a stubbed fetch.
 vi.stubEnv("DEV", true);
+
+// Radix Select (the broker-target picker) references ResizeObserver internally.
+beforeAll(() => {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -50,6 +59,16 @@ vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
   emitNotification: (...args: unknown[]) => mockEmitNotification(...args),
 }));
 
+// brokerStore feeds BrokerTargetSelect's native-account options. Default empty
+// (only the OpenAlgo bridge default); tests can push a native account.
+let mockBrokerAccounts: { broker: string; account_id: string; label: string }[] = [];
+vi.mock("@/stores/brokerStore", () => ({
+  useBrokerStore: (selector?: (s: { accounts: unknown[] }) => unknown) => {
+    const state = { accounts: mockBrokerAccounts };
+    return typeof selector === "function" ? selector(state) : state;
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Import component under test
 // ---------------------------------------------------------------------------
@@ -83,6 +102,7 @@ function queryResult(overrides = {}) {
 describe("PositionsWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockBrokerAccounts = [];
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
   });
 
@@ -400,7 +420,11 @@ describe("PositionsWidget", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe("/ft-api/api/v1/positions/exit-all");
       expect(init.method).toBe("POST");
-      expect(JSON.parse(String(init.body))).toStrictEqual({ confirm: true, broker: "openalgo" });
+      expect(JSON.parse(String(init.body))).toStrictEqual({
+        confirm: true,
+        broker: "openalgo",
+        account_id: "default",
+      });
 
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
@@ -426,6 +450,61 @@ describe("PositionsWidget", () => {
         await screen.findByText("Live mode is locked — verify your PIN to unlock live trading"),
       ).toBeInTheDocument();
       expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
+    });
+
+    // ── Broker-target selector (HONESTY: convert/exit-all are native-only verbs) ──
+
+    it("renders the broker-target selector so the operator can pick a native account", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      // The selector is the BrokerTargetSelect from the orders widgets.
+      expect(screen.getByRole("combobox", { name: /broker account/i })).toBeInTheDocument();
+    });
+
+    it("threads the selected native broker into the convert request", async () => {
+      // A native account is available — the operator can target it instead of
+      // the OpenAlgo bridge (which implements neither verb → always 501).
+      mockBrokerAccounts = [{ broker: "dhan", account_id: "DHAN-1", label: "Primary" }];
+      const fetchMock = stubFetch();
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      // Pick the native broker target.
+      fireEvent.click(screen.getByRole("combobox", { name: /broker account/i }));
+      fireEvent.click(await screen.findByRole("option", { name: /DHAN/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Convert NIFTY24APR24000CE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Convert NIFTY24APR24000CE to MIS" }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as { broker: string; account_id: string };
+      expect(body.broker).toBe("dhan");
+      expect(body.account_id).toBe("DHAN-1");
+    });
+
+    it("threads the selected native broker into the exit-all request", async () => {
+      mockBrokerAccounts = [{ broker: "upstox", account_id: "UP-9", label: "F&O" }];
+      const fetchMock = stubFetch({ status: "success", data: { status: "ok" } });
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("combobox", { name: /broker account/i }));
+      fireEvent.click(await screen.findByRole("option", { name: /UPSTOX/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {
+        target: { value: "EXIT" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(String(init.body))).toStrictEqual({
+        confirm: true,
+        broker: "upstox",
+        account_id: "UP-9",
+      });
     });
   });
 });

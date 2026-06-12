@@ -22,6 +22,8 @@ from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.dhan import _ROUTER_TOKEN
 from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter
 
+pytestmark = pytest.mark.unit
+
 
 class _FakeClient:
     """Minimal async stand-in for OpenAlgoClient."""
@@ -159,3 +161,34 @@ async def test_rate_limit_error_mapped() -> None:
     a = _adapter(_FakeClient(raise_exc=OpenAlgoRateLimitError("429")))
     with pytest.raises(RateLimitError):
         await a.place_order(_session(), _order(), _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.parametrize("variety", ["gtt", "bracket", "cover", "iceberg", "conditional"])
+async def test_place_order_non_regular_variety_refused(variety: str) -> None:
+    """Audit HIGH: a forever/GTT (or bracket/cover/iceberg/conditional) place
+    against the bridge must raise UnsupportedCapabilityError, NOT silently
+    downgrade to an immediate regular order. The OpenAlgo client is never
+    called — nothing is placed."""
+    client = _FakeClient()
+    a = _adapter(client)
+    order = SimpleNamespace(
+        symbol="RELIANCE", exchange="NSE", action="BUY", quantity=10,
+        pricetype="LIMIT", variety=variety, trigger_price="2890",
+    )
+    with pytest.raises(UnsupportedCapabilityError, match=variety):
+        await a.place_order(_session(), order, _router_token=_ROUTER_TOKEN)
+    assert client.calls == []  # the honesty guard short-circuits ahead of OpenAlgo
+
+
+@pytest.mark.parametrize("variety", ["", "regular", "REGULAR"])
+async def test_place_order_regular_variety_still_forwards(variety: str) -> None:
+    """A regular (or unset) variety keeps the legacy forward — no regression."""
+    client = _FakeClient()
+    a = _adapter(client)
+    order = SimpleNamespace(
+        symbol="RELIANCE", exchange="NSE", action="BUY", quantity=10,
+        pricetype="MARKET", variety=variety,
+    )
+    oid = await a.place_order(_session(), order, _router_token=_ROUTER_TOKEN)
+    assert oid == "OID-1"
+    assert client.calls[0][0] == "place_order"

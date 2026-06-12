@@ -182,6 +182,21 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     async def place_order(self, session: Session, order: "Order", *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        # Honesty guard (audit HIGH): this bridge forwards a plain order to
+        # OpenAlgo's /placeorder, which fires IMMEDIATELY — it has no resting
+        # trigger semantics. A non-regular variety (gtt/forever, bracket, cover,
+        # iceberg, conditional) carries a trigger/OCO/validity contract the
+        # forward silently drops, so a "working order that rests until the
+        # trigger fires" would instead be placed NOW. Refuse honestly rather
+        # than downgrade. (capabilities advertises gtt/bracket/cover/iceberg as
+        # not native; the route maps UnsupportedCapabilityError to a 501.)
+        variety = str(getattr(order, "variety", "") or "").strip().lower()
+        if variety not in ("", "regular"):
+            raise UnsupportedCapabilityError(
+                f"OpenAlgo bridge adapter does not support {variety!r} orders — it forwards a plain "
+                "immediate order with no resting trigger. Route forever/GTT, bracket, cover, iceberg "
+                "and conditional orders to a native broker adapter (Dhan/Upstox/…)."
+            )
         with self._mapped("order placement"):
             resp = await self._client(session).place_order(order)
         return self._order_id_or_raise(resp)

@@ -1505,7 +1505,11 @@ def _gated_verb_write(
     """
     import asyncio  # noqa: PLC0415
 
-    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
+    from flinttrade_core.exceptions import (  # noqa: PLC0415
+        BrokerError,
+        SafetyBypassError,
+        UnsupportedCapabilityError,
+    )
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import gate_broker_write  # noqa: PLC0415
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
@@ -1574,6 +1578,22 @@ def _gated_verb_write(
             "status": "error",
             "message": str(exc) or f"This operation is not yet available for broker '{adapter_id}'.",
         }), 501
+    except (BrokerError, ValueError) as exc:
+        # Honesty (audit MEDIUM): a real broker rejection (BrokerError, incl.
+        # OrderRejectedByBroker) or an adapter mapping refusal (the *MappingError
+        # classes, which subclass ValueError — e.g. DhanMappingError "segment not
+        # enabled") carries a message the operator NEEDS. Surface it verbatim
+        # rather than swallowing it into the generic 500. Mirrors how the live
+        # place path surfaces broker rejections (see _dispatch_live_order). 502 =
+        # the broker refused; the FlintTrade gate itself worked.
+        logger.warning(
+            "Live %s rejected by broker/adapter | adapter=%s account=%s: %s",
+            verb, adapter_id, account_id, exc,
+        )
+        return jsonify({
+            "status": "error",
+            "message": str(exc) or fail_message,
+        }), 502
     except Exception:
         logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, ref, adapter_id)
         return jsonify({"status": "error", "message": fail_message}), 500
@@ -1704,6 +1724,52 @@ def _trigger_legs_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], list[
             raise ValueError(f"orders[{index}] must be an object")
         legs.append(_body_to_order(leg))
     return condition, legs
+
+
+def _check_legs_through_safety(legs: list[Any], adapter_id: str) -> tuple[Any, int] | None:
+    """Run the full SafetySystem (L1–L5) over each typed placement leg.
+
+    Conditional-trigger PLACEMENT and MODIFY arm real orders the instant the
+    condition fires, so — like :func:`multi_order_place` — every leg MUST clear
+    the risk pipeline before the gate is minted (the route-level
+    ``kill_switch_gated`` flag only runs L5). Without this, an over-limit leg
+    (e.g. NFO qty 9999999) bypassed L1–L4. L2 reads live exposure best-effort,
+    exactly as the place path does.
+
+    Args:
+        legs: Typed :class:`~flinttrade_core.models.Order` legs (already coerced
+            by :func:`_body_to_order`).
+        adapter_id: Target broker adapter id (scopes the L2 exposure read).
+
+    Returns:
+        ``None`` when every leg passes; otherwise a ``(flask.Response,
+        http_status)`` 403 carrying the first blocking layer's reason — ready to
+        be returned from the route handler before any gate is minted.
+    """
+    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
+
+    safety = current_app.config.get("SAFETY")
+    if safety is None:
+        safety = SafetySystem(SafetyConfig())
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id)
+    for leg in legs:
+        results = safety.check_order(
+            leg,
+            positions=l2_positions,
+            used_margin=l2_used_margin,
+            total_balance=l2_total_balance,
+        )
+        blocked = next((r for r in results if not r.passed), None)
+        if blocked is not None:
+            logger.warning(
+                "Conditional-trigger leg blocked by safety layer %s | symbol=%s: %s",
+                blocked.layer, getattr(leg, "symbol", "?"), blocked.reason,
+            )
+            return jsonify({
+                "status": "error",
+                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+            }), 403
+    return None
 
 
 # --- Forever (GTT) orders — Dhan-native; placed via the gated trio path ----
@@ -1879,6 +1945,11 @@ def trigger_place() -> tuple[Any, int]:
     except ValueError as exc:
         return jsonify({"status": "error", "message": f"Trigger validation failed: {exc}"}), 400
     adapter_id, account_id = _gated_target(body)
+    # Run the FULL SafetySystem (L1–L5) over every leg — a placement path must
+    # never skip the risk layers (the kill-switch flag below only runs L5).
+    blocked = _check_legs_through_safety(legs, adapter_id)
+    if blocked is not None:
+        return blocked
     return _gated_verb_write(
         "place_conditional_trigger", {"condition": condition, "orders": legs}, payload,
         adapter_id=adapter_id, account_id=account_id,
@@ -1913,6 +1984,11 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
     except ValueError as exc:
         return jsonify({"status": "error", "message": f"Trigger validation failed: {exc}"}), 400
     adapter_id, account_id = _gated_target(body)
+    # A modify replaces the armed legs, so re-run the FULL SafetySystem (L1–L5)
+    # over the new legs before re-gating — same brake as placement.
+    blocked = _check_legs_through_safety(legs, adapter_id)
+    if blocked is not None:
+        return blocked
     return _gated_verb_write(
         "modify_conditional_trigger",
         {"alert_id": alert_id, "condition": condition, "orders": legs},

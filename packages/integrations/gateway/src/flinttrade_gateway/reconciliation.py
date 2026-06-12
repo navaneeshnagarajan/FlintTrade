@@ -118,9 +118,12 @@ class LocalStateSnapshot:
 
     Rows use the SAME normalised dict shapes the adapters' own reads emit
     (``order_book`` / ``positions`` / ``holdings``), so a journal-backed
-    provider can replay recorded reads verbatim. The default is EMPTY state:
-    until the engine wave wires the real provider, every broker-side row
-    surfaces as ``exists_only_on_broker``.
+    provider can replay recorded reads verbatim. The default is EMPTY state.
+    The engine wave's :class:`flinttrade_engine.local_state_provider.JournalLocalStateProvider`
+    is the wired provider and DELIBERATELY returns this empty snapshot — the
+    journal records no account-attributed, status-bearing order/position mirror
+    (see its module docstring), so every broker-side row honestly surfaces as
+    ``exists_only_on_broker`` rather than fabricating a discrepancy.
     """
 
     orders: tuple[Mapping[str, Any], ...] = ()

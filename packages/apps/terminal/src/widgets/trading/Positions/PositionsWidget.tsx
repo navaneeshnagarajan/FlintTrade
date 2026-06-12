@@ -25,6 +25,11 @@ import { downloadExcel } from "@/services/ftApi.data";
 import { post } from "@/services/ftApi.helpers";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import {
+  BrokerTargetSelect,
+  DEFAULT_BROKER_TARGET,
+} from "@/widgets/orders/OrdersManagerShared";
+import type { BrokerTarget } from "@/lib/brokerOrdersApi";
+import {
   type ColumnDef,
   flexRender,
   getCoreRowModel,
@@ -64,9 +69,6 @@ const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 /** Position products supported by the convert verb (Indian F&O/equity). */
 const PRODUCTS = ["MIS", "CNC", "NRML"] as const;
 
-/** The OpenAlgo bridge is the only functional adapter today (backend default). */
-const DEFAULT_BROKER = "openalgo";
-
 function formatPnl(pnl: number): string {
   return `${pnl >= 0 ? "+" : ""}₹${INR.format(Math.abs(pnl))}`;
 }
@@ -77,11 +79,12 @@ function formatPnl(pnl: number): string {
 
 interface ConvertPositionDialogProps {
   position: PositionRow;
+  target: Required<BrokerTarget>;
   onClose: () => void;
   onConverted: () => void;
 }
 
-function ConvertPositionDialog({ position, onClose, onConverted }: ConvertPositionDialogProps) {
+function ConvertPositionDialog({ position, target, onClose, onConverted }: ConvertPositionDialogProps) {
   const [toProduct, setToProduct] = useState<string>(position.product === "MIS" ? "CNC" : "MIS");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -94,7 +97,8 @@ function ConvertPositionDialog({ position, onClose, onConverted }: ConvertPositi
       // verb; the field superset covers each adapter's expected names
       // (from/to_product, old/new_product, position_type, transaction_type).
       await post("positions/convert", {
-        broker: DEFAULT_BROKER,
+        broker: target.broker,
+        account_id: target.account_id,
         req: {
           symbol: position.symbol,
           exchange: position.exchange,
@@ -122,7 +126,7 @@ function ConvertPositionDialog({ position, onClose, onConverted }: ConvertPositi
     } finally {
       setIsSubmitting(false);
     }
-  }, [position, toProduct, onClose, onConverted]);
+  }, [position, target, toProduct, onClose, onConverted]);
 
   return (
     <Dialog
@@ -185,11 +189,12 @@ function ConvertPositionDialog({ position, onClose, onConverted }: ConvertPositi
 interface ExitAllDialogProps {
   open: boolean;
   positionCount: number;
+  target: Required<BrokerTarget>;
   onOpenChange: (open: boolean) => void;
   onExited: () => void;
 }
 
-function ExitAllDialog({ open, positionCount, onOpenChange, onExited }: ExitAllDialogProps) {
+function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: ExitAllDialogProps) {
   const [confirmText, setConfirmText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -211,7 +216,11 @@ function ExitAllDialog({ open, positionCount, onOpenChange, onExited }: ExitAllD
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
-      await post("positions/exit-all", { confirm: true, broker: DEFAULT_BROKER });
+      await post("positions/exit-all", {
+        confirm: true,
+        broker: target.broker,
+        account_id: target.account_id,
+      });
       emitNotification({
         category: "system",
         title: "Exit-all submitted",
@@ -226,7 +235,7 @@ function ExitAllDialog({ open, positionCount, onOpenChange, onExited }: ExitAllD
     } finally {
       setIsSubmitting(false);
     }
-  }, [confirmed, onExited, close]);
+  }, [confirmed, target, onExited, close]);
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -277,6 +286,10 @@ function PositionsWidget(_props: WidgetProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
   const [exitAllOpen, setExitAllOpen] = useState(false);
+  // Broker/account target for the gated convert + exit-all verbs. The OpenAlgo
+  // bridge implements NEITHER verb (it would 501), so the operator picks a
+  // native account (Dhan/Upstox/…) here, mirroring the orders widgets.
+  const [brokerTarget, setBrokerTarget] = useState<Required<BrokerTarget>>(DEFAULT_BROKER_TARGET);
 
   const rows = useMemo<PositionRow[]>(() => {
     const raw = (positionsData ?? []) as RawPositionRow[];
@@ -405,6 +418,9 @@ function PositionsWidget(_props: WidgetProps) {
           Positions{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
         <div className="flex items-center gap-2">
+          {/* Convert + Exit-all are gated native-broker verbs; pick the target
+              account here (the OpenAlgo bridge implements neither). */}
+          <BrokerTargetSelect value={brokerTarget} onChange={setBrokerTarget} />
           <span className={`font-mono tabular-nums font-medium ${totalPnl >= 0 ? "text-profit" : "text-loss"}`}>
             P&L: {formatPnl(totalPnl)}
           </span>
@@ -520,6 +536,7 @@ function PositionsWidget(_props: WidgetProps) {
         <ConvertPositionDialog
           key={`${convertTarget.symbol}-${convertTarget.exchange}-${convertTarget.product}`}
           position={convertTarget}
+          target={brokerTarget}
           onClose={() => setConvertTarget(null)}
           onConverted={() => void refetch()}
         />
@@ -529,6 +546,7 @@ function PositionsWidget(_props: WidgetProps) {
       <ExitAllDialog
         open={exitAllOpen}
         positionCount={rows.length}
+        target={brokerTarget}
         onOpenChange={setExitAllOpen}
         onExited={() => void refetch()}
       />
