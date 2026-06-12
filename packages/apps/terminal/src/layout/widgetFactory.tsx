@@ -15,6 +15,10 @@ const lazyWidgets = {
   holdings: lazy(() => import("@/widgets/trading/Holdings/HoldingsWidget")),
   tradebook: lazy(() => import("@/widgets/trading/TradeBook/TradeBookWidget")),
   orderpad: lazy(() => import("@/widgets/trading/OrderPad/OrderPadWidget")),
+  foreverorders: lazy(() => import("@/widgets/orders/ForeverOrdersWidget")),
+  superorders: lazy(() => import("@/widgets/orders/SuperOrdersWidget")),
+  conditionaltriggers: lazy(() => import("@/widgets/orders/ConditionalTriggersWidget")),
+  reconciliation: lazy(() => import("@/widgets/account/ReconciliationWidget")),
 
   // Analysis widgets
   chart: lazy(() => import("@/widgets/analysis/Chart/ChartWidget")),
@@ -181,6 +185,9 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading", description: "Live status of all running automated strategies with PnL per strategy" },
   { id: "netposition", name: "Net Positions", icon: "Layers", category: "Trading", description: "Aggregated net position across all accounts for a given instrument" },
   { id: "orderladder", name: "Order Ladder", icon: "ArrowUpDown", category: "Trading", description: "Ladder-style DOM view for rapid limit order placement and cancellation" },
+  { id: "foreverorders", name: "Forever (GTT) Orders", icon: "Clock", category: "Trading", description: "Place and manage forever/GTT orders incl. OCO legs and validity — native brokers only" },
+  { id: "superorders", name: "Super Orders", icon: "Target", category: "Trading", description: "Bracket-style super orders with leg-aware modify and cancel — native brokers only" },
+  { id: "conditionaltriggers", name: "Conditional Triggers", icon: "Zap", category: "Trading", description: "Condition-based trigger orders: place, modify and cancel market-condition alerts that fire orders" },
 
   // Analysis
   { id: "chart", name: "Chart", icon: "CandlestickChart", category: "Analysis", description: "Interactive candlestick chart with indicators, drawing tools, and replay" },
@@ -239,6 +246,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Pre-market gap scanner filtering by OI buildup, IV rank, and price action" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Price and indicator alerts with Telegram and in-app notifications" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "OpenAlgo connection status, WebSocket latency, and API health metrics" },
+  { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },
   { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates across exchanges for arbitrage tracking" },
   { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility", description: "Live currency converter for INR, USD, and major pairs" },
   { id: "earningscalendar", name: "Earnings Calendar", icon: "CalendarDays", category: "Utility", description: "Upcoming earnings announcements and results calendar for NSE stocks" },

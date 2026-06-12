@@ -2,9 +2,27 @@
 // Replaces direct getPositionbook() call with usePositions() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table for sortable positions grid.
 import { useMemo, useState, useCallback, memo } from "react";
-import { Clock, Layers, FileDown } from "lucide-react";
+import { Clock, Layers, FileDown, LogOut, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { downloadExcel } from "@/services/ftApi.data";
+import { post } from "@/services/ftApi.helpers";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import {
   type ColumnDef,
@@ -28,25 +46,244 @@ import type { RawPosition } from "@/types/rawApi";
 
 interface PositionRow {
   symbol: string;
+  exchange: string;
+  product: string;
   qty: number;
   ltp: number;
   pnl: number;
 }
 
+/** Raw positionbook rows also carry exchange/product (used by Convert). */
+type RawPositionRow = RawPosition & {
+  exchange?: string | number;
+  product?: string | number;
+};
+
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
+
+/** Position products supported by the convert verb (Indian F&O/equity). */
+const PRODUCTS = ["MIS", "CNC", "NRML"] as const;
+
+/** The OpenAlgo bridge is the only functional adapter today (backend default). */
+const DEFAULT_BROKER = "openalgo";
 
 function formatPnl(pnl: number): string {
   return `${pnl >= 0 ? "+" : ""}₹${INR.format(Math.abs(pnl))}`;
 }
 
+// ---------------------------------------------------------------------------
+// Convert-position dialog (gated convert_position verb)
+// ---------------------------------------------------------------------------
+
+interface ConvertPositionDialogProps {
+  position: PositionRow;
+  onClose: () => void;
+  onConverted: () => void;
+}
+
+function ConvertPositionDialog({ position, onClose, onConverted }: ConvertPositionDialogProps) {
+  const [toProduct, setToProduct] = useState<string>(position.product === "MIS" ? "CNC" : "MIS");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleConvert = useCallback(async () => {
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      // The backend signs the req object through the gated convert_position
+      // verb; the field superset covers each adapter's expected names
+      // (from/to_product, old/new_product, position_type, transaction_type).
+      await post("positions/convert", {
+        broker: DEFAULT_BROKER,
+        req: {
+          symbol: position.symbol,
+          exchange: position.exchange,
+          quantity: Math.abs(position.qty),
+          position_type: position.qty >= 0 ? "LONG" : "SHORT",
+          transaction_type: position.qty >= 0 ? "BUY" : "SELL",
+          product: position.product,
+          from_product: position.product,
+          old_product: position.product,
+          to_product: toProduct,
+          new_product: toProduct,
+        },
+      });
+      emitNotification({
+        category: "system",
+        title: "Position conversion submitted",
+        body: `${position.symbol}: ${position.product || "current product"} → ${toProduct}.`,
+      });
+      onConverted();
+      onClose();
+    } catch (err) {
+      // Surface mode-guard 403s and broker rejections honestly — the backend
+      // message tells the operator exactly what blocked the conversion.
+      setErrorMsg(err instanceof Error ? err.message : "Position conversion failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [position, toProduct, onClose, onConverted]);
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Convert position</DialogTitle>
+          <DialogDescription>
+            Change the product of {position.symbol} ({position.qty >= 0 ? "long" : "short"}{" "}
+            {Math.abs(position.qty)}
+            {position.product ? `, currently ${position.product}` : ""}). Converting a position
+            changes its margin treatment with your broker.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="convert-to-product">Target product</Label>
+          <Select value={toProduct} onValueChange={setToProduct}>
+            <SelectTrigger id="convert-to-product" className="w-full">
+              <SelectValue placeholder="Select product" />
+            </SelectTrigger>
+            <SelectContent>
+              {PRODUCTS.filter((p) => p !== position.product).map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {errorMsg && (
+          <p className="text-xs text-loss" role="alert">
+            {errorMsg}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleConvert()}
+            disabled={isSubmitting || !toProduct}
+            aria-label={`Convert ${position.symbol} to ${toProduct}`}
+          >
+            {isSubmitting ? "Converting…" : "Convert"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Exit-all dialog (gated exit_all_positions verb — typed confirmation)
+// ---------------------------------------------------------------------------
+
+interface ExitAllDialogProps {
+  open: boolean;
+  positionCount: number;
+  onOpenChange: (open: boolean) => void;
+  onExited: () => void;
+}
+
+function ExitAllDialog({ open, positionCount, onOpenChange, onExited }: ExitAllDialogProps) {
+  const [confirmText, setConfirmText] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const confirmed = confirmText.trim() === "EXIT";
+
+  const close = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        setConfirmText("");
+        setErrorMsg(null);
+      }
+      onOpenChange(next);
+    },
+    [onOpenChange],
+  );
+
+  const handleExitAll = useCallback(async () => {
+    if (!confirmed) return;
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      await post("positions/exit-all", { confirm: true, broker: DEFAULT_BROKER });
+      emitNotification({
+        category: "system",
+        title: "Exit-all submitted",
+        body: "Every open position is being squared off at market.",
+      });
+      onExited();
+      close(false);
+    } catch (err) {
+      // Mode-guard 403s ("live mode only", PIN unlock) and broker errors are
+      // shown verbatim — never a generic failure.
+      setErrorMsg(err instanceof Error ? err.message : "Exit-all positions failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [confirmed, onExited, close]);
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Exit all positions?</DialogTitle>
+          <DialogDescription>
+            This squares off EVERY open position ({positionCount}) in your live broker account at
+            market price. Fills in a fast market can land far from the last traded price, and the
+            action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="exit-all-confirm">Type EXIT (in capitals) to confirm</Label>
+          <Input
+            id="exit-all-confirm"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="EXIT"
+            autoComplete="off"
+          />
+        </div>
+        {errorMsg && (
+          <p className="text-xs text-loss" role="alert">
+            {errorMsg}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => close(false)} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleExitAll()}
+            disabled={!confirmed || isSubmitting}
+            aria-label="Confirm exit all positions"
+            className="bg-loss hover:bg-loss/90 text-white"
+          >
+            {isSubmitting ? "Exiting…" : "Exit all positions"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PositionsWidget(_props: WidgetProps) {
   const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions();
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
+  const [exitAllOpen, setExitAllOpen] = useState(false);
 
   const rows = useMemo<PositionRow[]>(() => {
-    const raw = (positionsData ?? []) as RawPosition[];
+    const raw = (positionsData ?? []) as RawPositionRow[];
     return raw.map((p) => ({
       symbol: p.symbol,
+      exchange: String(p.exchange ?? ""),
+      product: String(p.product ?? ""),
       qty: parseInt(String(p.quantity ?? 0), 10),
       ltp: parseFloat(String(p.ltp ?? 0)),
       pnl: parseFloat(String(p.pnl ?? 0)),
@@ -130,6 +367,23 @@ function PositionsWidget(_props: WidgetProps) {
           </span>
         ),
       },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setConvertTarget(row.original)}
+            aria-label={`Convert ${row.original.symbol}`}
+            title={`Convert ${row.original.symbol} to another product`}
+            className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
+          >
+            <Repeat size={10} aria-hidden="true" /> Convert
+          </Button>
+        ),
+      },
     ],
     [],
   );
@@ -171,6 +425,18 @@ function PositionsWidget(_props: WidgetProps) {
             >
               <FileDown size={12} className={isExporting ? "animate-pulse" : ""} />
             </button>
+          )}
+          {rows.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setExitAllOpen(true)}
+              aria-label="Exit all positions"
+              title="Square off every open position at market"
+              className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
+            >
+              <LogOut size={10} aria-hidden="true" /> Exit all…
+            </Button>
           )}
         </div>
       </div>
@@ -248,6 +514,24 @@ function PositionsWidget(_props: WidgetProps) {
           </div>
         </div>
       )}
+
+      {/* Convert-position dialog — keyed so state resets per position */}
+      {convertTarget && (
+        <ConvertPositionDialog
+          key={`${convertTarget.symbol}-${convertTarget.exchange}-${convertTarget.product}`}
+          position={convertTarget}
+          onClose={() => setConvertTarget(null)}
+          onConverted={() => void refetch()}
+        />
+      )}
+
+      {/* Exit-all typed-confirmation dialog */}
+      <ExitAllDialog
+        open={exitAllOpen}
+        positionCount={rows.length}
+        onOpenChange={setExitAllOpen}
+        onExited={() => void refetch()}
+      />
     </div>
   );
 }
