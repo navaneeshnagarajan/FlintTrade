@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the splash window. The backend sidecar is spawned from Rust (not from JS), so no shell-execute permission is exposed to the webview. The main window loads the loopback backend over HTTP, where Tauri IPC is disabled by default.",
+  "windows": ["splash"],
+  "permissions": ["core:default"]
+}

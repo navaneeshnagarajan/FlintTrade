@@ -38,32 +38,42 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# Ensure repo root is on sys.path for cross-package imports.
-_REPO_ROOT = str(Path(__file__).resolve().parents[5])
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+# Frozen-mode detection — when packaged by PyInstaller for the native desktop
+# app, every ``flinttrade_*`` package is collected into the bundle, so the
+# source-tree ``sys.path`` wiring below is both unnecessary and wrong (the
+# ``packages/<group>/<pkg>/src`` directories do not exist inside the bundle).
+# ``sys.frozen`` is set by PyInstaller; ``sys._MEIPASS`` points at the unpacked
+# bundle root.  See ``flinttrade_core.desktop`` for the desktop entry point.
+_FROZEN = bool(getattr(sys, "frozen", False))
+_BUNDLE_DIR = getattr(sys, "_MEIPASS", None)
 
-# Add sibling package ``src`` directories after the stdlib/site paths.  Keeping
-# these as appends avoids local modules such as ``statistics.py`` shadowing
-# Python's standard library while still supporting non-installed source runs.
-for _package_src in [
-    "packages/core/data/src",
-    "packages/core/historical/src",
-    "packages/core/indicators/src",
-    "packages/core/ticks/python",
-    "packages/services/engine/src",
-    "packages/services/screener/src",
-    "packages/services/backtest/src",
-    "packages/services/ai/src",
-    "packages/services/ditto/src",
-    "packages/services/automation/src",
-    "packages/services/journal/src",
-    "packages/integrations/gateway/src",
-    "packages/integrations/webhooks/src",
-]:
-    _src_path = str(Path(_REPO_ROOT) / _package_src)
-    if _src_path not in sys.path:
-        sys.path.append(_src_path)
+# Ensure repo root is on sys.path for cross-package imports (source runs only).
+_REPO_ROOT = str(Path(__file__).resolve().parents[5]) if not _FROZEN else (_BUNDLE_DIR or "")
+if not _FROZEN:
+    if _REPO_ROOT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT)
+
+    # Add sibling package ``src`` directories after the stdlib/site paths.  Keeping
+    # these as appends avoids local modules such as ``statistics.py`` shadowing
+    # Python's standard library while still supporting non-installed source runs.
+    for _package_src in [
+        "packages/core/data/src",
+        "packages/core/historical/src",
+        "packages/core/indicators/src",
+        "packages/core/ticks/python",
+        "packages/services/engine/src",
+        "packages/services/screener/src",
+        "packages/services/backtest/src",
+        "packages/services/ai/src",
+        "packages/services/ditto/src",
+        "packages/services/automation/src",
+        "packages/services/journal/src",
+        "packages/integrations/gateway/src",
+        "packages/integrations/webhooks/src",
+    ]:
+        _src_path = str(Path(_REPO_ROOT) / _package_src)
+        if _src_path not in sys.path:
+            sys.path.append(_src_path)
 
 import hmac  # noqa: E402
 import time  # noqa: E402
@@ -859,7 +869,18 @@ def create_flask_app(
     # If the build output is missing we fall back to API-only mode and
     # log a clear warning.
     # ------------------------------------------------------------------
-    _dist_path = Path(_REPO_ROOT) / "packages" / "apps" / "terminal" / "dist"
+    # Resolve the built React bundle. Three sources, in priority order:
+    #   1. ``FLINTTRADE_FRONTEND_DIST`` env override (any deployment).
+    #   2. Frozen desktop build — the bundle ships ``frontend/`` alongside the
+    #      packaged code (PyInstaller unpacks it under ``sys._MEIPASS``).
+    #   3. Source tree — ``packages/apps/terminal/dist``.
+    _dist_override = os.environ.get("FLINTTRADE_FRONTEND_DIST")
+    if _dist_override:
+        _dist_path = Path(_dist_override)
+    elif _FROZEN and _BUNDLE_DIR:
+        _dist_path = Path(_BUNDLE_DIR) / "frontend"
+    else:
+        _dist_path = Path(_REPO_ROOT) / "packages" / "apps" / "terminal" / "dist"
     _dist_index = _dist_path / "index.html"
     _frontend_available = _dist_index.exists()
 

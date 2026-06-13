@@ -27,6 +27,12 @@ dependencies = [
     "psutil>=5.9",
 ]
 
+[project.scripts]
+# Workspace CLI (init/status) and the native-desktop backend sidecar that the
+# Tauri shell launches. Both become console entry points on ``pip install``.
+flinttrade = "flinttrade_core.cli:main"
+flinttrade-desktop-backend = "flinttrade_core.desktop:main"
+
 [project.optional-dependencies]
 # One-shot DuckDB→SQLite migration tooling (scripts/migrate-*-duckdb-to-sqlite.py).
 # Heavy + migration-only, so kept out of the default install. Enable with:
@@ -35,6 +41,12 @@ migration = [
     "duckdb>=1.1",
     "pyarrow>=17.0",
     "pyrage>=1.1",
+]
+# Native-desktop packaging — PyInstaller freezes the backend sidecar that the
+# Tauri shell bundles. Build-time only; never shipped inside the binary.
+#   uv sync --extra desktop
+desktop = [
+    "pyinstaller>=6.10",
 ]
 
 [build-system]

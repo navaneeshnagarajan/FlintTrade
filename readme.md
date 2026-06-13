@@ -63,6 +63,33 @@ Open <http://localhost:5173> and follow the welcome wizard.
 
 ---
 
+## Desktop app (Linux / Windows / macOS)
+
+FlintTrade also ships as a **native desktop application** — the backend and
+terminal bundled into a single installable package, with **no server to run and
+no `.env` to configure**.
+
+| OS | Packages | Architectures |
+|---|---|---|
+| macOS | `.dmg`, `.app` | Apple Silicon (arm64) + Intel (x64) |
+| Windows | `.msi`, `.exe` (NSIS) | x64 |
+| Linux | `.deb`, `.rpm`, `.AppImage` | x64 + arm64 |
+
+Download the installer for your platform from the
+[latest release](https://github.com/navaneeshnagarajan/FlintTrade/releases),
+or build it yourself:
+
+```bash
+uv sync && uv pip install pyinstaller && pnpm install
+make desktop-build      # installers → packages/apps/desktop/src-tauri/target/release/bundle/
+make desktop-dev        # or run the desktop app in dev mode
+```
+
+Architecture, per-OS install/uninstall, and the CI release matrix are documented
+in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
+
+---
+
 ## For developers
 
 ### Architecture

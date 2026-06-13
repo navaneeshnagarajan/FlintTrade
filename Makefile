@@ -42,7 +42,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore logs-clear
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
 
 # ======================================================================
 # Setup
@@ -142,6 +142,28 @@ ifeq ($(OS),Windows_NT)
 else
 	@$(PYTHON) -m ruff check packages/ tests/ || echo ruff not installed. Install with: pip install ruff
 endif
+
+# ======================================================================
+# Native desktop app (Tauri 2 shell + PyInstaller backend sidecar)
+# ======================================================================
+# Produces installable packages (.dmg/.app, .msi/.exe, .deb/.rpm/.AppImage).
+# Each target builds for the CURRENT OS/arch; the full cross-platform matrix is
+# produced by .github/workflows/desktop-release.yml. See docs/DESKTOP.md.
+
+desktop-icons: ## Regenerate the desktop app icons from the brand mark
+	@$(PYTHON) packaging/make-icons.py
+
+desktop-backend: ## Freeze the backend into a Tauri sidecar (current OS/arch)
+	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
+
+desktop-build: ## Build native desktop installers for this OS (frontend + sidecar + bundle)
+	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
+	@cd packages/apps/desktop && pnpm install && pnpm tauri build
+	@echo -e "$(GREEN)✓ Installers under packages/apps/desktop/src-tauri/target/release/bundle/$(RESET)"
+
+desktop-dev: ## Run the desktop app in dev mode (builds the sidecar first)
+	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
+	@cd packages/apps/desktop && pnpm install && pnpm tauri dev
 
 # ======================================================================
 # Maintenance

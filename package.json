@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/core/design-system",
     "packages/apps/terminal",
-    "packages/apps/site"
+    "packages/apps/site",
+    "packages/apps/desktop"
   ],
   "pnpm": {
     "overrides": {

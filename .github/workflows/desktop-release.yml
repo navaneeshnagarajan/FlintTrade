@@ -1,0 +1,158 @@
+name: Desktop Release
+
+# Builds the native FlintTrade desktop installers for every supported OS /
+# architecture and (on a version tag) attaches them to a GitHub Release.
+#
+#   • macOS    — .dmg + .app           (arm64 + Intel x64)
+#   • Windows  — .msi + .exe (NSIS)    (x64)
+#   • Linux    — .deb + .rpm + .AppImage (x64 + arm64)
+#
+# Each job freezes the Python backend into a sidecar (PyInstaller), then bundles
+# it inside a Tauri 2 shell. See docs/DESKTOP.md and packaging/.
+#
+# Trigger: push a tag like ``v0.6.0`` or run manually (workflow_dispatch).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish under (e.g. v0.6.0-desktop). Leave blank to only upload build artifacts.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - label: macos-x64
+            runner: macos-13
+            target: x86_64-apple-darwin
+          - label: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: linux-x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - label: linux-arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # --- Toolchains ----------------------------------------------------
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/apps/desktop/src-tauri -> target
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      # --- Linux system dependencies for Tauri 2 -------------------------
+      - name: Install Linux build dependencies
+        if: startsWith(matrix.runner, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            build-essential \
+            file
+
+      # --- Python backend deps + PyInstaller -----------------------------
+      - name: Install Python dependencies
+        run: |
+          uv sync --frozen
+          uv pip install "pyinstaller>=6.10"
+
+      # --- Frontend deps + build -----------------------------------------
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build terminal frontend
+        # Force base "/" so the bundle is never contaminated by a site-demo
+        # build (base "/demo-app/"); the backend serves the SPA from the root.
+        run: pnpm --filter @flinttrade/terminal build -- --base=/
+
+      # --- Freeze the backend into a Tauri sidecar -----------------------
+      - name: Build backend sidecar
+        shell: bash
+        env:
+          SKIP_FRONTEND: '1'
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: bash packaging/build-backend.sh
+
+      # --- Bundle the Tauri desktop app ----------------------------------
+      - name: Build desktop installers
+        run: pnpm --filter @flinttrade/desktop tauri build --target ${{ matrix.target }}
+
+      # --- Collect installers --------------------------------------------
+      - name: Stage installers
+        id: stage
+        shell: bash
+        run: |
+          OUT="dist-installers"
+          mkdir -p "$OUT"
+          BUNDLE="packages/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+          # Copy every produced installer, ignoring missing per-OS types.
+          find "$BUNDLE" -type f \
+            \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp {} "$OUT/" \; 2>/dev/null || true
+          echo "Installers staged:"; ls -lah "$OUT" || true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flinttrade-desktop-${{ matrix.label }}
+          path: dist-installers/*
+          if-no-files-found: warn
+
+      # --- Attach to the GitHub Release on a version tag -----------------
+      - name: Publish to release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist-installers/*
+          draft: true
+          fail_on_unmatched_files: false

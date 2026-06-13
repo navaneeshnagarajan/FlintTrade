@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FlintTrade",
+  "version": "0.6.0",
+  "identifier": "com.flinttrade.app",
+  "build": {
+    "frontendDist": "../splash"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "splash",
+        "title": "FlintTrade",
+        "width": 460,
+        "height": 320,
+        "resizable": false,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Finance",
+    "shortDescription": "Open-source modular trading platform for Indian F&O, commodities, and crypto.",
+    "longDescription": "FlintTrade is an open-source, native-first trading platform for Indian F&O, commodities, and crypto. The desktop app bundles the FlintTrade backend and terminal into a single installable application — no separate server to run.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/flinttrade-backend"],
+    "resources": [],
+    "copyright": "Copyright © FlintTrade contributors. Licensed AGPL-3.0.",
+    "licenseFile": "../../../../LICENSE",
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}

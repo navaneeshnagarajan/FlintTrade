@@ -1,0 +1,37 @@
+[package]
+name = "flinttrade-desktop"
+version = "0.6.0"
+description = "FlintTrade native desktop application"
+authors = ["FlintTrade"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+# Tauri keeps the app logic in a library so the same crate can target desktop
+# and (future) mobile. ``main.rs`` is a thin shim that calls ``run()``.
+name = "flinttrade_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+# Cross-platform CSPRNG for provisioning the credential-vault master password
+# on first launch (loopback, single-user desktop). No other runtime deps —
+# kept minimal so the CI build matrix stays green across all three OSes.
+getrandom = "0.2"
+
+[features]
+# This feature is used to enable the production custom-protocol asset server in
+# release builds; Tauri's CLI injects it.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"     # smaller binary; we never unwind across the FFI boundary
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
