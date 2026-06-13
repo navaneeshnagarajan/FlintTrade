@@ -8,7 +8,7 @@
  * Skip with FLINTTRADE_SKIP_DEMO=1 (e.g. docs-only local work).
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,7 +44,10 @@ const buildEnv = Object.fromEntries(
 );
 
 console.log('[generate-demo] building terminal (vite build --base=/demo-app/)…');
-execSync('npx --no-install vite build --base=/demo-app/', {
+execFileSync(join(terminalDir, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite'), [
+  'build',
+  '--base=/demo-app/',
+], {
   cwd: terminalDir,
   stdio: 'inherit',
   env: buildEnv,
