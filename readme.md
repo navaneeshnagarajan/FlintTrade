@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://flinttrade.vercel.app/flinttrade/logo.svg?v=20260530" alt="FlintTrade logo" width="120" />
+  <img src="https://flinttrade.vercel.app/flinttrade/logo.svg?v=20260613" alt="FlintTrade logo" width="120" />
 </p>
 
 # FlintTrade
@@ -9,19 +9,20 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-v0.6.0--alpha-orange.svg)](VERSION)
 [![CI](https://img.shields.io/badge/CI-local%20verified-brightgreen.svg)](https://github.com/navaneeshnagarajan/FlintTrade/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/tests-terminal%202159%20%7C%20repo%2016-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-terminal%203663%20%7C%20python%2010313-brightgreen.svg)](#)
 [![Status](https://img.shields.io/badge/status-alpha%20not%20production%20ready-orange.svg)](disclaimer.md)
 [![Website](https://img.shields.io/badge/website-live-blue.svg)](https://flinttrade.vercel.app)
+[![Live Demo](https://img.shields.io/badge/live%20demo-explore%20mode-22c55e.svg)](https://flinttrade.vercel.app/demo)
 
 A self-hosted trading workspace that turns a native broker gateway contract, optional OpenAlgo-compatible integrations, real-time tick streams, and a strategy engine into one keyboard-driven cockpit you actually own.
 
 <p align="center">
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260530" alt="Cinematic welcome screen on first launch" width="48%" /></a>
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260530" alt="Trade canvas with Dockview widget-composable workspace" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260613" alt="Cinematic welcome screen on first launch" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260613" alt="Trade canvas with Dockview widget-composable workspace" width="48%" /></a>
 </p>
 <p align="center">
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260530" alt="AI Centre with chat, signals, sentiment, and RAG panels" width="48%" /></a>
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260530" alt="Strategy Lab for backtest, forward test, and walk-forward optimisation" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260613" alt="AI Centre with chat, signals, sentiment, and RAG panels" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260613" alt="Strategy Lab for backtest, forward test, and walk-forward optimisation" width="48%" /></a>
 </p>
 
 ## Alpha disclaimer
