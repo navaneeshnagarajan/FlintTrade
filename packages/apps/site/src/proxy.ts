@@ -1,4 +1,3 @@
-import { INLINE_STYLE_HASHES } from '@/lib/csp-style-hashes.generated';
 import { NextResponse, type NextRequest } from 'next/server';
 
 function createNonce(): string {
@@ -19,7 +18,6 @@ export function buildCsp(
   glitchtipUrl: string | null,
   nodeEnv = process.env.NODE_ENV,
 ): string {
-  const styleHashes = INLINE_STYLE_HASHES.join(' ');
   const connectSrc = [
     "'self'",
     'https://vitals.vercel-analytics.com',
@@ -41,7 +39,13 @@ export function buildCsp(
   return [
     "default-src 'self'",
     `script-src ${scriptSrc}`,
-    `style-src 'self' ${styleHashes}`,
+    // Inline styles must be allowed: fumadocs' DocsLayout computes the whole
+    // #nd-docs-layout grid (grid-template + --fd-sidebar-col/--fd-docs-row-*)
+    // as a runtime inline style attribute, and radix floating-ui sets runtime
+    // positions the same way. CSP style hashes don't cover style *attributes*,
+    // and style-src-attr isn't cross-browser — so a public docs site needs
+    // 'unsafe-inline' here. script-src stays strict (nonce-based).
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' data:",
     `connect-src ${connectSrc}`,
@@ -72,7 +76,9 @@ export function proxy(req: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: '/((?!api/|_next/static|_next/image|favicon.ico).*)',
+      // demo-app is the static Explore-mode terminal bundle; it gets its own
+      // scoped CSP from next.config.mjs headers() instead of the site CSP.
+      source: '/((?!api/|_next/static|_next/image|favicon.ico|demo-app(?:/|$)).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },
