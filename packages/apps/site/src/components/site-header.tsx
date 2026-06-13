@@ -2,7 +2,10 @@ import { LogoIcon } from '@flinttrade/design-system/brand';
 import { Github } from 'lucide-react';
 import Link from 'next/link';
 
+import { ThemeToggle } from '@/components/theme-toggle';
+
 const navItems = [
+  { href: '/demo', label: 'Live Demo' },
   { href: '/docs', label: 'Docs' },
   { href: '/api-reference', label: 'API' },
   { href: '/mcp', label: 'MCP' },
@@ -23,15 +26,18 @@ export function SiteHeader() {
           </Link>
         ))}
       </nav>
-      <Link
-        className="github-link"
-        href="https://github.com/navaneeshnagarajan/FlintTrade"
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Open FlintTrade on GitHub"
-      >
-        <Github aria-hidden="true" />
-      </Link>
+      <div className="header-tools">
+        <ThemeToggle />
+        <Link
+          className="github-link"
+          href="https://github.com/navaneeshnagarajan/FlintTrade"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open FlintTrade on GitHub"
+        >
+          <Github aria-hidden="true" />
+        </Link>
+      </div>
     </header>
   );
 }

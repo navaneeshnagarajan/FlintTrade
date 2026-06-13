@@ -191,7 +191,7 @@ sync across sessions.
 | `/explore` | Demo mode with sample data — no broker connection needed. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Trader workspace — Dockview canvas, ≈90 widgets, 13 presets. |
+| `/trade` | Trader workspace — Dockview canvas, 95 widgets, 13 presets. |
 | `/invest` | Investor dashboard — holdings, net worth, SIPs, mutual-fund tracker. |
 | `/learn` | Beginner centre — courses, glossary, strategies, paper trading. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
@@ -200,7 +200,7 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (≈90)
+### The widgets (95)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are

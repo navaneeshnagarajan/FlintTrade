@@ -6,6 +6,7 @@ on:
     types: [opened, synchronize, ready_for_review, reopened]
     paths:
       - 'packages/apps/site/**'
+      - 'packages/apps/terminal/**'
       - 'packages/core/design-system/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -17,6 +18,7 @@ on:
     branches: [main, dev]
     paths:
       - 'packages/apps/site/**'
+      - 'packages/apps/terminal/**'
       - 'packages/core/design-system/**'
       - 'package.json'
       - 'pnpm-lock.yaml'

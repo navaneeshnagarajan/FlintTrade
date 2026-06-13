@@ -1,9 +1,9 @@
 import { LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, Cable, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, Cable, PlayCircle, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import type { CSSProperties } from 'react';
 
+import { HeroCinematic } from '@/components/hero-cinematic';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
@@ -34,18 +34,23 @@ const docsCards = [
   { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and optional OpenAlgo passthrough.' },
 ];
 
-const meteorTracks = [8, 19, 31, 44, 58, 71, 84];
 const wordmarkChars = 'FlintTrade'.split('');
-const impactDebris = [
-  ['-54px', '-38px'],
-  ['48px', '-52px'],
-  ['-44px', '34px'],
-  ['62px', '28px'],
-  ['-26px', '-62px'],
-  ['38px', '52px'],
-  ['-66px', '8px'],
-  ['24px', '-66px'],
+
+// Same six-word slogan cascade as the terminal WelcomeRoute. Colours and
+// stagger delays live in globals.css (nth-child) — the site CSP blocks
+// server-rendered style attributes, so styling must come from stylesheets.
+const sloganWords = ['Learn', 'Invest', 'Trade', 'Automate', 'Analyse', 'Evolve'] as const;
+
+// Same four feature chips as the terminal welcome screen.
+const welcomeFeatures = [
+  'Native broker gateway plus optional OpenAlgo bridge',
+  'Explore, Practice, and Live safety modes',
+  'Option chain, Greeks, order flow, and depth',
+  'Strategy lab, SIP tracking, and AI context',
 ] as const;
+
+// Eight debris particles; offsets/delays are nth-child CSS in globals.css.
+const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
 export default function HomePage() {
   const packages = listPackages().slice(0, 8);
@@ -53,17 +58,7 @@ export default function HomePage() {
   return (
     <main className="site-shell">
       <div className="site-cinematic-backdrop" aria-hidden="true">
-        {meteorTracks.map((left, index) => (
-          <span
-            className="site-meteor"
-            key={left}
-            style={{
-              left: `${left}%`,
-              animationDelay: `${index * 0.68}s`,
-              animationDuration: `${4.1 + index * 0.36}s`,
-            }}
-          />
-        ))}
+        <HeroCinematic />
       </div>
       <SiteHeader />
 
@@ -74,16 +69,8 @@ export default function HomePage() {
             <span className="site-impact-blast" />
             <span className="site-shock-ring" />
             <span className="site-shock-ring site-shock-ring-secondary" />
-            {impactDebris.map(([dx, dy], index) => (
-              <span
-                className="site-impact-debris"
-                key={`${dx}-${dy}`}
-                style={{
-                  '--dx': dx,
-                  '--dy': dy,
-                  animationDelay: `${1.34 + index * 0.025}s`,
-                } as CSSProperties}
-              />
+            {impactDebris.map((index) => (
+              <span className="site-impact-debris" key={index} />
             ))}
             <div className="hero-logo-mark hero-logo-reveal">
               <LogoIcon size={86} aria-hidden="true" />
@@ -91,24 +78,36 @@ export default function HomePage() {
           </div>
           <h1 aria-label="FlintTrade">
             {wordmarkChars.map((char, index) => (
-              <span
-                aria-hidden="true"
-                className="hero-title-char"
-                key={`${char}-${index}`}
-                style={{ animationDelay: `${1.95 + index * 0.055}s` }}
-              >
+              <span aria-hidden="true" className="hero-title-char" key={`${char}-${index}`}>
                 {char}
               </span>
             ))}
           </h1>
+          <p className="sr-only">Learn. Invest. Trade. Automate. Analyse. Evolve.</p>
+          <div className="hero-slogan" aria-hidden="true">
+            {sloganWords.map((word, index) => (
+              <span key={word}>
+                {word}
+                {index < sloganWords.length - 1 && <span className="slogan-dot">.</span>}
+              </span>
+            ))}
+          </div>
           <p>
-            An open-source modular trading platform for Indian F&O, commodities, and crypto. It layers a
-            keyboard-driven terminal, analytics, automation, and AI workflows over FlintTrade's backend with optional OpenAlgo compatibility.
+            Open-source trading platform for Indian markets, with learning, investing, trading,
+            automation, and AI research orbiting one centre.
           </p>
           <p className="hero-disclaimer">
             v0.6.0-alpha is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
+          <div className="hero-feature-grid">
+            {welcomeFeatures.map((item) => (
+              <div key={item}>{item}</div>
+            ))}
+          </div>
           <div className="hero-actions">
+            <Link className="button shimmer" href="/demo">
+              Try the live demo <PlayCircle aria-hidden="true" size={17} />
+            </Link>
             <Link className="button primary" href="/docs">
               Read the docs <ArrowRight aria-hidden="true" size={17} />
             </Link>
@@ -144,7 +143,7 @@ export default function HomePage() {
             <span>Package surfaces across Python, React, shared UI, and Rust/PyO3.</span>
           </div>
           <div>
-            <strong>83</strong>
+            <strong>95</strong>
             <span>Terminal widgets described by the public contributor documentation.</span>
           </div>
           <div>

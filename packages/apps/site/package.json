@@ -6,14 +6,15 @@
   "scripts": {
     "predev": "npm run generate:content",
     "dev": "next dev --port 3000",
-    "prebuild": "npm run generate:content",
+    "prebuild": "npm run generate:content && npm run generate:demo",
     "build": "next build --webpack",
     "pretypecheck": "npm run generate:content",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run generate:content",
     "test": "vitest run",
     "generate:content": "node scripts/generate-content.mjs && fumadocs-mdx",
-    "mcp:stdio": "node scripts/generate-content.mjs >/dev/null && tsx src/mcp/stdio.ts"
+    "mcp:stdio": "node scripts/generate-content.mjs >/dev/null && tsx src/mcp/stdio.ts",
+    "generate:demo": "node scripts/generate-demo.mjs"
   },
   "dependencies": {
     "@flinttrade/design-system": "file:../../core/design-system",
@@ -26,6 +27,7 @@
     "lucide-react": "^0.577.0",
     "mcp-handler": "^1.1.0",
     "next": "^16.2.6",
+    "next-themes": "^0.4.6",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "zod": "^4.4.3"

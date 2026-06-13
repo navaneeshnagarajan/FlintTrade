@@ -10,3 +10,4 @@ public/llms-full.txt
 src/generated/
 *.tsbuildinfo
 .vercel
+public/demo-app/
