@@ -56,7 +56,8 @@ export class RouteErrorBoundary extends Component<Props, State> {
   };
 
   private handleGoHome = (): void => {
-    window.location.href = "/";
+    // Honour Vite's base so subpath hosting (e.g. /demo-app/) stays inside the app.
+    window.location.href = import.meta.env.BASE_URL;
   };
 
   override render(): ReactNode {

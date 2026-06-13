@@ -129,7 +129,16 @@ const router = createBrowserRouter([
       { path: "*", element: <Suspense fallback={<Loading />}><NotFoundRoute /></Suspense> },
     ],
   },
-]);
+], {
+  // Follow Vite's `base` so subpath hosting works (e.g. the public site
+  // serves an Explore-mode build under /demo-app/). The default base "/"
+  // must stay "/" — react-router treats basename "" as a non-root prefix
+  // and navigate("/") becomes a no-op. Relative bases ("./") cannot be
+  // mapped to a router basename, so they fall back to "/".
+  basename: import.meta.env.BASE_URL.startsWith("/")
+    ? import.meta.env.BASE_URL.replace(/\/+$/, "") || "/"
+    : "/",
+});
 
 renderReactRoot(
   document.getElementById("root")!,

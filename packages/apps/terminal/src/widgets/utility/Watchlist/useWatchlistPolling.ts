@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { getMultiQuotes } from "@/services/api";
+import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { WsInstrument } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { SPARK_MAX } from "./types";
@@ -47,14 +47,24 @@ export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPol
       const data = await getMultiQuotes(symbols);
       setFetchError(null);
 
-      if (Array.isArray(data)) {
+      const isResultsShape =
+        !!data && !Array.isArray(data) && typeof data === "object" && "results" in data;
+      if (Array.isArray(data) || isResultsShape) {
+        // Standard v2 `{ results }` shape and flat arrays both go through
+        // normaliseMultiQuotes — matching by symbol:exchange, falling back
+        // to positional order for adapters that omit symbol fields.
+        const flat = normaliseMultiQuotes(data);
+        const byKey = new Map<string, PartialQuote>();
+        flat.forEach((q) => {
+          if (q.symbol && q.exchange) byKey.set(`${q.symbol}:${q.exchange}`, q);
+        });
         const next: QuoteMap = {};
         setSparkHistory((prevSpark) => {
           const histNext: SparkMap = { ...prevSpark };
-          data.forEach((q: PartialQuote, idx: number) => {
-            const item = currentWatchlist[idx];
-            if (!item) return;
+          currentWatchlist.forEach((item, idx) => {
             const key = `${item.symbol}:${item.exchange}`;
+            const q = byKey.get(key) ?? flat[idx];
+            if (!q) return;
             next[key] = q;
             const ltp = q?.ltp ?? q?.close ?? null;
             if (ltp != null) {
@@ -65,7 +75,9 @@ export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPol
         });
         setQuotes((prev) => ({ ...prev, ...next }));
       } else if (data && typeof data === "object") {
-        const dataObj = data as Record<string, PartialQuote>;
+        // Legacy keyed-map shape from some adapters — outside the declared
+        // return type of getMultiQuotes, hence the double cast.
+        const dataObj = data as unknown as Record<string, PartialQuote>;
         const next: QuoteMap = {};
         setSparkHistory((prevSpark) => {
           const histNext: SparkMap = { ...prevSpark };
