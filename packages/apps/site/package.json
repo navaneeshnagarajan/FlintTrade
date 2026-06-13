@@ -1,6 +1,6 @@
 {
   "name": "@flinttrade/site",
-  "version": "0.6.0-alpha",
+  "version": "0.6.0-beta",
   "private": true,
   "type": "module",
   "scripts": {

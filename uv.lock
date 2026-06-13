@@ -1262,7 +1262,7 @@ wheels = [
 
 [[package]]
 name = "flinttrade-ai"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/ai" }
 dependencies = [
     { name = "catboost" },
@@ -1314,7 +1314,7 @@ provides-extras = ["ml", "scraping"]
 
 [[package]]
 name = "flinttrade-automation"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/automation" }
 dependencies = [
     { name = "apscheduler" },
@@ -1339,7 +1339,7 @@ requires-dist = [
 
 [[package]]
 name = "flinttrade-backtest"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/backtest" }
 dependencies = [
     { name = "flask" },
@@ -1377,7 +1377,7 @@ provides-extras = ["vectorbt"]
 
 [[package]]
 name = "flinttrade-core"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/core/core" }
 dependencies = [
     { name = "argon2-cffi" },
@@ -1439,7 +1439,7 @@ provides-extras = ["migration", "desktop"]
 
 [[package]]
 name = "flinttrade-data"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/core/data" }
 dependencies = [
     { name = "duckdb" },
@@ -1471,7 +1471,7 @@ provides-extras = ["export"]
 
 [[package]]
 name = "flinttrade-ditto"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/ditto" }
 dependencies = [
     { name = "cryptography" },
@@ -1501,7 +1501,7 @@ provides-extras = ["numba"]
 
 [[package]]
 name = "flinttrade-engine"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/engine" }
 dependencies = [
     { name = "duckdb" },
@@ -1524,7 +1524,7 @@ requires-dist = [
 
 [[package]]
 name = "flinttrade-gateway"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/integrations/gateway" }
 dependencies = [
     { name = "cryptography" },
@@ -1547,7 +1547,7 @@ requires-dist = [
 
 [[package]]
 name = "flinttrade-historical"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/core/historical" }
 dependencies = [
     { name = "duckdb" },
@@ -1570,7 +1570,7 @@ requires-dist = [
 
 [[package]]
 name = "flinttrade-indicators"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/core/indicators" }
 dependencies = [
     { name = "numpy" },
@@ -1596,7 +1596,7 @@ provides-extras = ["talib", "numba"]
 
 [[package]]
 name = "flinttrade-journal"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/journal" }
 dependencies = [
     { name = "duckdb" },
@@ -1617,7 +1617,7 @@ requires-dist = [
 
 [[package]]
 name = "flinttrade-screener"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/services/screener" }
 dependencies = [
     { name = "duckdb" },
@@ -1655,12 +1655,12 @@ provides-extras = ["greeks", "nse"]
 
 [[package]]
 name = "flinttrade-ticks"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/core/ticks" }
 
 [[package]]
 name = "flinttrade-webhooks"
-version = "0.6.0a0"
+version = "0.6.0b0"
 source = { editable = "packages/integrations/webhooks" }
 dependencies = [
     { name = "flask" },

@@ -341,7 +341,7 @@ export function useChangelogAutoOpen(currentVersion: string): {
 export interface ChangelogViewerProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Current app version string without the leading v, e.g. "0.6.0-alpha" */
+  /** Current app version string without the leading v, e.g. "0.6.0-beta" */
   currentVersion?: string;
 }
 

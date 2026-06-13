@@ -1,7 +1,7 @@
 # Backup and Restore
 
 FlintTrade can create local `.tar.gz` backups of the `~/.flinttrade` workspace.
-This is an alpha-stage safety feature; test restore on a temporary directory
+This is a beta-stage safety feature; test restore on a temporary directory
 before trusting a backup.
 
 ## Create a Backup

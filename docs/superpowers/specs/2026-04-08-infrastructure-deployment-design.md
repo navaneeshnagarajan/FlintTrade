@@ -14,7 +14,7 @@
 2. **100% open source** — every component MIT, Apache, AGPL, or BSD. No BSL/SSPL.
 3. **Deploy anywhere** — NAS, Raspberry Pi, cloud VM, bare metal, Docker
 4. **Single-user first** — no Kubernetes, no Elasticsearch, no Redis. Lightweight.
-5. **5-minute setup** — `git clone && make setup && make start` (current v0.6.0-alpha flow; OpenAlgo is optional)
+5. **5-minute setup** — `git clone && make setup && make start` (current v0.6.0-beta flow; OpenAlgo is optional)
 6. **Zero vendor lock-in** — self-hosted everything, user owns all data
 
 ---

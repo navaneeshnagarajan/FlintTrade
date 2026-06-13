@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-indicators"
-version = "0.6.0-alpha"
+version = "0.6.0-beta"
 description = "Technical analysis indicators — TA-Lib batch (150+), Numba streaming, Pine Script conversion"
 requires-python = ">=3.12"
 dependencies = [

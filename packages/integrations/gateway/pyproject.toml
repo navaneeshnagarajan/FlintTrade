@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-gateway"
-version = "0.6.0-alpha"
+version = "0.6.0-beta"
 description = "Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge"
 requires-python = ">=3.12"
 dependencies = [

@@ -6,7 +6,7 @@ untested or only partially wired**, or **(c) referenced but not built / blocked*
 It is a living document — update it in the same change that moves a feature
 between buckets.
 
-`v0.6.0-alpha` is not production ready. The four founder-broker native adapters
+`v0.6.0-beta` is not production ready. The four founder-broker native adapters
 (Dhan / Upstox / Kotak Neo / IndMoney) are built to full doc-grounded parity, and
 `brokers.lock` carries real pins (dhanhq 2.2.0, upstox-python-sdk 2.27.0,
 neo-api-client 2.0.0 from git; IndMoney is REST-only with no SDK pin). The one

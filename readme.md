@@ -7,10 +7,10 @@
 > Open-source modular trading platform for Indian F&O, commodities, and crypto.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.6.0--alpha-orange.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-v0.6.0--beta-orange.svg)](VERSION)
 [![CI](https://img.shields.io/badge/CI-local%20verified-brightgreen.svg)](https://github.com/navaneeshnagarajan/FlintTrade/actions/workflows/test.yml)
 [![Tests](https://img.shields.io/badge/tests-terminal%203663%20%7C%20python%2010313-brightgreen.svg)](#)
-[![Status](https://img.shields.io/badge/status-alpha%20not%20production%20ready-orange.svg)](disclaimer.md)
+[![Status](https://img.shields.io/badge/status-beta%20not%20production%20ready-orange.svg)](disclaimer.md)
 [![Website](https://img.shields.io/badge/website-live-blue.svg)](https://flinttrade.vercel.app)
 [![Live Demo](https://img.shields.io/badge/live%20demo-explore%20mode-22c55e.svg)](https://flinttrade.vercel.app/demo)
 
@@ -25,9 +25,9 @@ A self-hosted trading workspace that turns a native broker gateway contract, opt
   <a href="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260613" alt="Strategy Lab for backtest, forward test, and walk-forward optimisation" width="48%" /></a>
 </p>
 
-## Alpha disclaimer
+## Beta disclaimer
 
-FlintTrade `v0.6.0-alpha` is **not production ready**. It is educational,
+FlintTrade `v0.6.0-beta` is **not production ready**. It is educational,
 self-hosted trading software for research, paper trading, and contributor
 development first. Nothing in this repository is financial, investment, tax,
 legal, or regulatory advice. Read [disclaimer.md](disclaimer.md) before
@@ -46,7 +46,7 @@ connecting a broker or enabling Live mode.
 
 ## Supported brokers
 
-FlintTrade's native broker gateway contract and routing are in alpha, with all four founder-broker adapters (Dhan, Upstox, Kotak Neo, IndMoney) built to full doc-grounded parity — the remaining work is live-credential testing only. Optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations remain available — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
+FlintTrade's native broker gateway contract and routing are in beta, with all four founder-broker adapters (Dhan, Upstox, Kotak Neo, IndMoney) built to full doc-grounded parity — the remaining work is live-credential testing only. Optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations remain available — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
 ## Quickstart (5-minute Docker)
 
@@ -166,7 +166,7 @@ TypeScript design-system package, and 1 Rust/PyO3 tick engine.
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Repo layout, dev setup, adding widgets and strategies |
 | [Architecture](docs/ARCHITECTURE.md) | Diagrams, data flow, mode system, auth, WSGI |
 | [API Reference](docs/API.md) | FlintTrade `/ft-api/v1/` endpoints plus broker/OpenAlgo-compatible bridge routes |
-| [Disclaimer](disclaimer.md) | Alpha-stage, no-advice, trading-risk, and user-responsibility notice |
+| [Disclaimer](disclaimer.md) | Beta-stage, no-advice, trading-risk, and user-responsibility notice |
 | [Changelog](changelog.md) | Release notes by version |
 | [Security](security.md) | Disclosure policy, supported versions, threat model |
 

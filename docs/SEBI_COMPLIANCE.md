@@ -10,7 +10,7 @@
 > requirement that touches FlintTrade is a **static IP** for API access (registered with
 > your broker); the regulatory obligations (registration of algo products, audit
 > record-keeping, surveillance) rest with **your broker and the exchanges**, not with this
-> tool. FlintTrade `v0.6.0-alpha` is not production-ready; you remain solely responsible
+> tool. FlintTrade `v0.6.0-beta` is not production-ready; you remain solely responsible
 > for your own broker, exchange, tax, and regulatory obligations before any live use. The
 > "status" column below describes whether a rule is *relevant to FlintTrade's operation* —
 > it is **not** an assertion that you, or FlintTrade, are compliant.

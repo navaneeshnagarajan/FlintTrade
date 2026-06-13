@@ -8,9 +8,9 @@
 
 ---
 
-## Current state — v0.6.0-alpha
+## Current state — v0.6.0-beta
 
-- **Version:** `v0.6.0-alpha` (alpha restructure; not production-ready — see `disclaimer.md`).
+- **Version:** `v0.6.0-beta` (beta restructure; not production-ready — see `disclaimer.md`).
 - **Structure:** fat-core 4-way nest under `packages/` — 17 surfaces:
   - `core/` → core, data, historical, indicators (Python) · ticks (Rust/PyO3) · design-system (TS)
   - `services/` → engine, screener, backtest, ai, ditto, automation, journal (Python)

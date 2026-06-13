@@ -1,6 +1,6 @@
 # FlintTrade Disclaimer
 
-FlintTrade `v0.6.0-alpha` is an alpha-stage open-source project. It is **not production ready**, not a registered investment advisory product, and not a managed trading service.
+FlintTrade `v0.6.0-beta` is a beta-stage open-source project. It is **not production ready**, not a registered investment advisory product, and not a managed trading service.
 
 Use FlintTrade for learning, research, paper trading, local automation experiments, and contributor development first. Do not place live orders until you have reviewed the source, configured broker-side safeguards, verified the backend and terminal locally, and accepted the operational risk yourself.
 
@@ -12,7 +12,7 @@ Nothing in this repository, the terminal UI, the public website, generated docs,
 
 Trading F&O, commodities, crypto, equities, and automated strategies can result in rapid and complete loss of capital. Backtests, paper trades, simulated fills, and demo data do not predict live execution quality or future returns. Broker outages, network delays, API changes, exchange halts, rate limits, incorrect configuration, and software defects can all create unexpected losses.
 
-## Alpha Software
+## Beta Software
 
 FlintTrade currently changes quickly. Some modules use sample data, some integrations require external services, and live broker support depends on the configured native adapter or optional OpenAlgo-compatible server. Treat every release before `1.0.0` as experimental unless a release note explicitly says otherwise.
 

@@ -38,7 +38,7 @@ is not tracked or pulled.
 ## Brokers
 
 FlintTrade supports two broker paths: the native FlintTrade gateway and an
-optional OpenAlgo-compatible bridge. The native path is alpha: the gateway
+optional OpenAlgo-compatible bridge. The native path is beta: the gateway
 contract, routing, credentials, capabilities, and all four founder-broker
 adapters (Dhan, Upstox, Kotak Neo, IndMoney) are built to full doc-grounded
 parity in the repo. They stay dormant until SDK attestation plus vault

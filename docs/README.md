@@ -1,6 +1,6 @@
 # FlintTrade Documentation
 
-Welcome to the FlintTrade documentation. FlintTrade is an alpha-stage,
+Welcome to the FlintTrade documentation. FlintTrade is a beta-stage,
 open-source, modular trading and investment platform for Indian F&O,
 commodities, and crypto, with its own backend, native sandbox, direct broker
 gateway, and an optional OpenAlgo-compatible bridge. One application serves
@@ -35,7 +35,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 | File | Audience | One-line description |
 |---|---|---|
 | [readme.md](../readme.md) | Everyone | Repository landing page. |
-| [disclaimer.md](../disclaimer.md) | Everyone | Alpha-stage, no-advice, trading-risk, and user-responsibility notice. |
+| [disclaimer.md](../disclaimer.md) | Everyone | Beta-stage, no-advice, trading-risk, and user-responsibility notice. |
 | [INVENTORY.md](INVENTORY.md) | Everyone / Contributor | Build-status inventory — what is (a) built & working, (b) built but untested, (c) referenced but not built. |
 | [USER_GUIDE.md](USER_GUIDE.md) | Trader / Investor | Install, connect a broker, walk through every workspace. |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Contributor | Repo layout, dev environment, tests, build, how to add a widget / strategy / broker. |

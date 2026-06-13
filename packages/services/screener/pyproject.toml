@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-screener"
-version = "0.6.0-alpha"
+version = "0.6.0-beta"
 description = "Option chain, OI analysis, PCR, max pain, portfolio Greeks, IV surface, market scanner"
 requires-python = ">=3.12"
 dependencies = [

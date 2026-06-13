@@ -1,6 +1,6 @@
 [package]
 name = "flinttrade-desktop"
-version = "0.6.0"
+version = "0.6.0-beta"
 description = "FlintTrade native desktop application"
 authors = ["FlintTrade"]
 edition = "2021"

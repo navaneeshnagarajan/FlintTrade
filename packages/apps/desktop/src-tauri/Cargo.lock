@@ -781,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "flinttrade-desktop"
-version = "0.6.0"
+version = "0.6.0-beta"
 dependencies = [
  "getrandom 0.2.17",
  "tauri",

@@ -1,6 +1,6 @@
 # FlintTrade Architecture
 
-> Reflects `v0.6.0-alpha`. 17 package surfaces (13 Python + 2 React apps +
+> Reflects `v0.6.0-beta`. 17 package surfaces (13 Python + 2 React apps +
 > 1 shared TypeScript design-system package + 1 Rust/PyO3 tick engine).
 > Run `make test` and terminal Vitest locally for the current test counts.
 
@@ -38,7 +38,7 @@ flowchart LR
         TICK[ticks · Rust/PyO3]
     end
 
-    subgraph NativeGateway["Native gateway · alpha"]
+    subgraph NativeGateway["Native gateway · beta"]
         NGA[adapter contract + routing]
         DHAN[Dhan · Upstox · Kotak Neo · IndMoney<br/>adapters built to parity]
     end

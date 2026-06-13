@@ -97,7 +97,7 @@ export default function HomePage() {
             automation, and AI research orbiting one centre.
           </p>
           <p className="hero-disclaimer">
-            v0.6.0-alpha is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
+            v0.6.0-beta is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
           <div className="hero-feature-grid">
             {welcomeFeatures.map((item) => (
