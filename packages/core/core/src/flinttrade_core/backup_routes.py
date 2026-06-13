@@ -2,9 +2,12 @@
 
 Routes:
 
-- ``POST /admin/backup/create``  — create a new backup archive
-- ``POST /admin/backup/restore`` — restore from an existing archive
-- ``GET  /admin/backup/list``    — list available backups
+- ``POST /v1/admin/backup/create``  — create a new backup archive
+- ``POST /v1/admin/backup/restore`` — restore from an existing archive
+- ``GET  /v1/admin/backup/list``    — list available backups
+
+The ``/v1/admin`` prefix matches the sibling dev-gated admin blueprints
+(``admin_bp``, ``infra_bp``) so callers face one admin namespace.
 
 Usage::
 
@@ -28,20 +31,20 @@ def create_backup_blueprint(
     """Create the backup admin Blueprint.
 
     Args:
-        workspace_dir: Override the workspace directory.  Defaults to
-            ``~/.flinttrade``.
+        workspace_dir: Override the workspace directory.  Defaults to the
+            platform workspace directory resolved by
+            :func:`flinttrade_core.workspace.workspace_dir`.
 
     Returns:
         Configured Flask :class:`~flask.Blueprint`.
     """
     from flinttrade_core.backup import WorkspaceBackup, BackupError  # noqa: PLC0415
 
-    bp = Blueprint("backup_admin", __name__)
+    bp = Blueprint("backup_admin", __name__, url_prefix="/v1/admin")
 
-    kwargs = {"workspace_dir": workspace_dir} if workspace_dir else {}
-    bk = WorkspaceBackup(**kwargs)  # type: ignore[arg-type]
+    bk = WorkspaceBackup(workspace_dir=workspace_dir)
 
-    @bp.route("/admin/backup/create", methods=["POST"])
+    @bp.route("/backup/create", methods=["POST"])
     def backup_create() -> Response:
         """Create a new workspace backup.
 
@@ -61,10 +64,14 @@ def create_backup_blueprint(
         if output_str:
             output_path = Path(output_str).expanduser()
         else:
-            import tempfile  # noqa: PLC0415
+            # Default into the same directory backup_list() searches —
+            # a temp-dir default would vanish on OS cleanup and never
+            # show up in /admin/backup/list.
             from datetime import datetime, timezone  # noqa: PLC0415
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            output_path = Path(tempfile.gettempdir()) / f"flint_backup_{ts}.tar.gz"
+            backup_dir = Path.home() / "flint-backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            output_path = backup_dir / f"flint_backup_{ts}.tar.gz"
 
         try:
             created = bk.create_backup(
@@ -83,7 +90,7 @@ def create_backup_blueprint(
         except BackupError as exc:
             return jsonify({"status": "error", "message": exc.message}), 500  # type: ignore[return-value]
 
-    @bp.route("/admin/backup/restore", methods=["POST"])
+    @bp.route("/backup/restore", methods=["POST"])
     def backup_restore() -> Response:
         """Restore a workspace backup.
 
@@ -115,7 +122,7 @@ def create_backup_blueprint(
         except BackupError as exc:
             return jsonify({"status": "error", "message": exc.message}), 500  # type: ignore[return-value]
 
-    @bp.route("/admin/backup/list", methods=["GET"])
+    @bp.route("/backup/list", methods=["GET"])
     def backup_list() -> Response:
         """List available backup archives.
 

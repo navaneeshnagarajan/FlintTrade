@@ -6,6 +6,7 @@ Covers create, restore, and list backup admin endpoints.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -18,16 +19,21 @@ from flask import Flask
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
     """Flask test client with backup blueprint registered using a temp dir.
 
     Args:
         tmp_path: Pytest-provided temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
 
     Yields:
         Flask test client.
     """
     from flinttrade_core.backup_routes import create_backup_blueprint
+
+    # The create route mkdirs ~/flint-backups before the (mocked) backup
+    # runs — keep the test from touching the real home directory.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
 
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
@@ -56,7 +62,7 @@ class TestBackupCreate:
             "flinttrade_core.backup.WorkspaceBackup.create_backup",
             return_value=fake_archive,
         ):
-            resp = client.post("/admin/backup/create", json={})
+            resp = client.post("/v1/admin/backup/create", json={})
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -76,7 +82,7 @@ class TestBackupCreate:
             "flinttrade_core.backup.WorkspaceBackup.create_backup",
             side_effect=BackupError("Disk full"),
         ):
-            resp = client.post("/admin/backup/create", json={})
+            resp = client.post("/v1/admin/backup/create", json={})
 
         assert resp.status_code == 500
         assert resp.get_json()["status"] == "error"
@@ -94,7 +100,7 @@ class TestBackupRestore:
         Args:
             client: Flask test client.
         """
-        resp = client.post("/admin/backup/restore", json={})
+        resp = client.post("/v1/admin/backup/restore", json={})
         assert resp.status_code == 400
         assert resp.get_json()["status"] == "error"
         assert "path" in resp.get_json()["message"]
@@ -111,7 +117,7 @@ class TestBackupRestore:
             return_value=result_payload,
         ):
             resp = client.post(
-                "/admin/backup/restore",
+                "/v1/admin/backup/restore",
                 json={"path": "/tmp/fake_backup.tar.gz"},
             )
 
@@ -133,7 +139,7 @@ class TestBackupRestore:
             side_effect=BackupError("Archive corrupt"),
         ):
             resp = client.post(
-                "/admin/backup/restore",
+                "/v1/admin/backup/restore",
                 json={"path": "/tmp/bad.tar.gz"},
             )
 
@@ -157,7 +163,7 @@ class TestBackupList:
             "flinttrade_core.backup.WorkspaceBackup.list_backups",
             return_value=[],
         ):
-            resp = client.get("/admin/backup/list")
+            resp = client.get("/v1/admin/backup/list")
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -175,7 +181,7 @@ class TestBackupList:
             "flinttrade_core.backup.WorkspaceBackup.list_backups",
             return_value=entries,
         ):
-            resp = client.get("/admin/backup/list")
+            resp = client.get("/v1/admin/backup/list")
 
         data = resp.get_json()
         assert len(data["backups"]) == 1

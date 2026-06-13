@@ -1473,6 +1473,9 @@ def create_flask_app(
         # Register infrastructure admin routes (traffic/latency/analyzer)
         from .infra_routes import infra_bp  # noqa: PLC0415
         app.register_blueprint(infra_bp)
+        # Workspace backup/restore admin routes (/admin/backup/*)
+        from .backup_routes import create_backup_blueprint  # noqa: PLC0415
+        app.register_blueprint(create_backup_blueprint(workspace_dir=_workspace_dir()))
         logger.info("Admin endpoints registered (dev mode)")
 
     # Register Activity Log blueprint (/api/v1/admin/activity)

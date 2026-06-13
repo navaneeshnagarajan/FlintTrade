@@ -345,6 +345,31 @@ class TestListAccounts:
         assert ids == {"AA001", "BB002"}
 
 
+class TestListSessions:
+    def test_list_sessions_empty_registry(self) -> None:
+        """list_sessions() must return an empty list when no accounts are added."""
+        registry = BrokerRegistry()
+        assert registry.list_sessions() == []
+
+    def test_list_sessions_reports_connection_state(self) -> None:
+        """list_sessions() must expose account_id/broker/is_connected dicts (health contract)."""
+        mock_a = _make_mock_session(account_id="AA001")
+        mock_a.is_connected = True
+        mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
+        mock_b.is_connected = False
+        registry = BrokerRegistry()
+        with patch(_SESSION_PATCH, return_value=mock_a):
+            registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
+        with patch(_SESSION_PATCH, return_value=mock_b):
+            registry.add_account("BB002", _BROKER2, _LABEL2, _CREDS)
+
+        sessions = {s["account_id"]: s for s in registry.list_sessions()}
+        assert sessions["AA001"]["is_connected"] is True
+        assert sessions["BB002"]["is_connected"] is False
+        assert sessions["AA001"]["broker"] == _BROKER
+        assert sessions["BB002"]["broker"] == _BROKER2
+
+
 # ---------------------------------------------------------------------------
 # 9. set_primary
 # ---------------------------------------------------------------------------

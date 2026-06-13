@@ -347,6 +347,30 @@ class BrokerRegistry:
 
         return [self._build_info(s) for s in sessions_snapshot]
 
+    def list_sessions(self) -> list[dict[str, Any]]:
+        """Connection snapshot for health checks.
+
+        The monitoring layer (``HealthAggregator.check_broker_connections``,
+        ``health_monitor``) duck-types the registry as "exposes
+        ``list_sessions()`` returning dicts with an ``is_connected`` key";
+        this is that read-only contract.
+
+        Returns:
+            One dict per registered session with ``account_id``, ``broker``
+            and ``is_connected`` keys, in insertion order.
+        """
+        with self._lock:
+            sessions_snapshot = list(self._sessions.items())
+
+        return [
+            {
+                "account_id": account_id,
+                "broker": session.info.broker,
+                "is_connected": bool(session.is_connected),
+            }
+            for account_id, session in sessions_snapshot
+        ]
+
     # ------------------------------------------------------------------
     # Delegated broker operations — READ ONLY
     #

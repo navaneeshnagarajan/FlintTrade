@@ -323,9 +323,9 @@ def _get_login_activity():  # type: ignore[return]
     la = current_app.config.get("LOGIN_ACTIVITY")
     if la is None:
         # Lazy-initialise a persistent instance on first use.
-        from pathlib import Path  # noqa: PLC0415
+        from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
 
-        db_path = Path.home() / ".flinttrade" / "activity.db"
+        db_path = workspace_dir() / "activity.db"
         la = LoginActivity(str(db_path))
         current_app.config["LOGIN_ACTIVITY"] = la
     return la
@@ -337,9 +337,9 @@ def _get_session_tracker():  # type: ignore[return]
 
     st = current_app.config.get("SESSION_TRACKER")
     if st is None:
-        from pathlib import Path  # noqa: PLC0415
+        from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
 
-        db_path = Path.home() / ".flinttrade" / "activity.db"
+        db_path = workspace_dir() / "activity.db"
         st = SessionTracker(str(db_path))
         current_app.config["SESSION_TRACKER"] = st
     return st
@@ -351,9 +351,9 @@ def _get_security_tracker():  # type: ignore[return]
 
     skt = current_app.config.get("SECURITY_TRACKER")
     if skt is None:
-        from pathlib import Path  # noqa: PLC0415
+        from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
 
-        db_path = Path.home() / ".flinttrade" / "security.db"
+        db_path = workspace_dir() / "security.db"
         skt = SecurityTracker(str(db_path))
         current_app.config["SECURITY_TRACKER"] = skt
     return skt

@@ -1,7 +1,8 @@
 """Workspace backup and restore.
 
 Creates compressed tar.gz archives of the FlintTrade workspace directory
-(``~/.flinttrade/``) containing ``workspace.json``, DuckDB databases,
+(resolved by :func:`flinttrade_core.workspace.workspace_dir`) containing
+``workspace.json``, DuckDB databases,
 audit logs, and config files.  Tick data (potentially large) is excluded
 unless *include_ticks* is set.
 
@@ -79,8 +80,11 @@ class WorkspaceBackup:
     """Create and restore workspace backups as compressed tar.gz archives.
 
     Args:
-        workspace_dir: Root of the FlintTrade workspace.  Defaults to
-            ``~/.flinttrade``.
+        workspace_dir: Root of the FlintTrade workspace.  Defaults to the
+            platform workspace directory resolved by
+            :func:`flinttrade_core.workspace.workspace_dir` (``~/.flinttrade``
+            on Linux, ``~/Library/Application Support/flinttrade`` on macOS,
+            ``%APPDATA%/flinttrade`` on Windows).
 
     Example::
 
@@ -91,8 +95,12 @@ class WorkspaceBackup:
 
     def __init__(
         self,
-        workspace_dir: Path = Path.home() / ".flinttrade",
+        workspace_dir: Path | None = None,
     ) -> None:
+        if workspace_dir is None:
+            from flinttrade_core.workspace import workspace_dir as _resolve  # noqa: PLC0415
+
+            workspace_dir = _resolve()
         self._workspace_dir = workspace_dir
 
     # ------------------------------------------------------------------
@@ -196,9 +204,10 @@ class WorkspaceBackup:
         Args:
             backup_path: Path to a ``.tar.gz`` file created by
                 :meth:`create_backup`.
-            target_dir: Directory to restore into.  Defaults to the parent
-                of :attr:`workspace_dir` (i.e. ``~``).  The workspace
-                will be restored under ``target_dir/.flinttrade/``.
+            target_dir: Directory to restore into.  Defaults to the
+                parent of the resolved workspace directory; the workspace
+                is restored under ``target_dir/<workspace-dir-name>/``
+                (``flinttrade`` on macOS/Windows, ``.flinttrade`` on Linux).
             force: When ``True``, overwrite existing files without error.
                 When ``False`` (default) the restore fails if any target
                 file already exists.
