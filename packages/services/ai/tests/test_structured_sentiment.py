@@ -10,6 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -334,6 +336,49 @@ class TestGenerateMarketSummary:
         client.chat.side_effect = RuntimeError("connection refused")
         result = generate_market_summary(client, {})
         assert result is None
+
+    def test_does_not_force_response_format(self):
+        # Reasoning models on LM Studio return empty content when a json_schema
+        # grammar is applied (verified live against qwen3.6), so generate_market_summary
+        # must rely on prompt-only JSON rather than forcing response_format.
+        from flinttrade_ai.structured_sentiment import generate_market_summary
+
+        client = _make_llm_client(json.dumps(_valid_payload()))
+        generate_market_summary(client, {"nifty": 24000})
+        kwargs = client.chat.call_args.kwargs
+        assert "response_format" not in kwargs
+
+    def test_prompt_lists_every_required_schema_field(self):
+        # Without response_format the prompt is the only thing telling the model
+        # which keys to emit. If it omits the field names, reasoning models invent
+        # their own structure (verified live: 'flows', 'analyst_summary', etc.)
+        # and validation fails. The prompt must name every required field AND enum
+        # value the schema defines, including NESTED ones (indices.signal,
+        # fii_dii_flow.fii_net, …) — those are exactly the keys a human is most
+        # likely to forget when editing the hand-written skeleton.
+        from flinttrade_ai.structured_sentiment import (
+            MARKET_SUMMARY_SCHEMA,
+            generate_market_summary,
+        )
+
+        def walk(node: object) -> list[str]:
+            """Collect every `required` key name and `enum` value, recursively."""
+            tokens: list[str] = []
+            if isinstance(node, dict):
+                tokens += node.get("required", [])
+                tokens += node.get("enum", [])
+                for value in node.values():
+                    tokens += walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    tokens += walk(value)
+            return tokens
+
+        client = _make_llm_client(json.dumps(_valid_payload()))
+        generate_market_summary(client, {"nifty": 24000})
+        prompt_text = " ".join(m.content for m in client.chat.call_args[0][0])
+        for token in walk(MARKET_SUMMARY_SCHEMA["json_schema"]["schema"]):
+            assert token in prompt_text, f"prompt missing schema token: {token}"
 
     def test_temperature_passed_to_client(self):
         from flinttrade_ai.structured_sentiment import generate_market_summary

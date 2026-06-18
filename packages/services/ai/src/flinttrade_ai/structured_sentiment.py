@@ -297,13 +297,35 @@ market data provided. Be factual, concise, and use Indian market conventions \
 Return ONLY the JSON object — no prose, no markdown fences.\
 """
 
+# Explicit field skeleton embedded in the prompt. Without response_format (which
+# reasoning models on LM Studio do not honour — they return empty content),
+# naming the exact keys is the only way to stop the model inventing its own
+# structure (e.g. "flows"/"analyst_summary"). Keep these keys in sync with
+# MARKET_SUMMARY_SCHEMA — a test walks the schema and asserts every required
+# field and enum value (top-level AND nested) appears in this hint.
+_SCHEMA_HINT = """\
+Return ONLY a JSON object with EXACTLY these keys — no extra keys, no markdown:
+{
+  "sentiment_score": <number from -10 to 10>,
+  "market_sentiment": "<STRONGLY_BULLISH|BULLISH|NEUTRAL|BEARISH|STRONGLY_BEARISH>",
+  "indices": [{"name": "<index>", "value": <number>, "change_pct": <number>, "signal": "<BUY|SELL|HOLD|WATCH>"}],
+  "sectors": [{"name": "<sector>", "performance": "<Outperforming|Underperforming|Neutral>", "outlook": "<one sentence>"}],
+  "key_points": ["<point>", "<point>", "<point>"],
+  "fii_dii_flow": {"fii_net": <crore INR>, "dii_net": <crore INR>, "interpretation": "<one sentence>"},
+  "risks": ["<risk>"],
+  "opportunities": ["<opportunity>"]
+}\
+"""
+
 _USER_PROMPT_TEMPLATE = """\
 Analyse the following Indian market data and generate a structured market \
 sentiment summary:
 
 {market_data}
 
-Generate the JSON summary now, strictly following the required schema.\
+{schema_hint}
+
+Generate the JSON summary now, strictly following the schema above.\
 """
 
 
@@ -382,11 +404,18 @@ def generate_market_summary(
     prompt_text = _build_prompt(market_data)
     messages = [
         LLMMessage(role="system", content=_SYSTEM_PROMPT),
-        LLMMessage(role="user", content=_USER_PROMPT_TEMPLATE.format(market_data=prompt_text)),
+        LLMMessage(role="user", content=_USER_PROMPT_TEMPLATE.format(
+            market_data=prompt_text, schema_hint=_SCHEMA_HINT)),
     ]
 
-    # Attempt structured output via response_format if the provider supports it.
-    # Fall back to plain chat if the provider ignores the extra kwarg.
+    # Prompt-only structured output. We deliberately do NOT pass
+    # ``MARKET_SUMMARY_SCHEMA`` as ``response_format`` here: LM Studio applies a
+    # json_schema grammar to the visible-content channel, and reasoning models
+    # (Qwen3, DeepSeek-R1, …) then emit their think block and stop without
+    # producing the constrained JSON — yielding empty content. The system prompt
+    # already constrains the model to return JSON, and the reasoning-aware client
+    # gives it enough budget. Callers that know their model honours grammars can
+    # still opt in via ``LLMClient.chat(response_format=...)``.
     response = None
     try:
         response = llm_client.chat(

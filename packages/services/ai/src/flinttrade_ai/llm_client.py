@@ -59,6 +59,10 @@ class LLMConfig:
     context_length: int = 32768
     temperature: float = 0.7
     max_tokens: int = 4096
+    # Budget used to retry a reasoning model whose chain of thought consumed the
+    # whole ``max_tokens`` budget, leaving an empty visible answer. See
+    # ``LLMClient._chat_openai_compat``. Set to 0 to disable the retry.
+    reasoning_max_tokens: int = 8192
 
     @classmethod
     def from_env(cls) -> LLMConfig:
@@ -96,6 +100,7 @@ class LLMConfig:
                 or os.getenv("OPENROUTER_API_KEY", "")
             ),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
+            reasoning_max_tokens=int(os.getenv("LLM_REASONING_MAX_TOKENS", "8192")),
         )
 
 
@@ -118,6 +123,7 @@ class LLMResponse:
     completion_tokens: int = 0
     total_tokens: int = 0
     finish_reason: str = ""
+    reasoning: str = ""  # chain-of-thought from reasoning models, if surfaced
     error: str = ""
 
     @property
@@ -215,10 +221,22 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         model: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
-        """Send a chat completion request. Falls back to secondary on failure."""
+        """Send a chat completion request. Falls back to secondary on failure.
+
+        Args:
+            messages: Conversation messages.
+            temperature: Sampling temperature override.
+            max_tokens: Token cap override.
+            model: Model override.
+            response_format: Optional OpenAI-compatible structured-output hint
+                (e.g. ``{"type": "json_schema", "json_schema": {...}}``) passed
+                straight to the provider for constrained decoding. Ignored by the
+                Anthropic path.
+        """
         resp = self._chat_with_config(
-            self.config, messages, temperature, max_tokens, model,
+            self.config, messages, temperature, max_tokens, model, response_format,
         )
         if resp.success:
             return resp
@@ -230,6 +248,7 @@ class LLMClient:
             )
             return self._chat_with_config(
                 self.fallback_config, messages, temperature, max_tokens, model,
+                response_format,
             )
 
         return resp
@@ -241,6 +260,7 @@ class LLMClient:
         temperature: float | None,
         max_tokens: int | None,
         model: str | None,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Execute chat completion against a specific provider config."""
         provider = cfg.provider.lower()
@@ -251,7 +271,9 @@ class LLMClient:
         if provider == "anthropic":
             return self._chat_anthropic(cfg, messages, use_model, use_temp, use_max)
 
-        return self._chat_openai_compat(cfg, messages, use_model, use_temp, use_max)
+        return self._chat_openai_compat(
+            cfg, messages, use_model, use_temp, use_max, response_format,
+        )
 
     def _chat_openai_compat(
         self,
@@ -260,21 +282,34 @@ class LLMClient:
         model: str,
         temperature: float,
         max_tokens: int,
+        response_format: dict[str, Any] | None = None,
+        *,
+        allow_reasoning_retry: bool = True,
     ) -> LLMResponse:
-        """OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI)."""
+        """OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI).
+
+        Reasoning models (Qwen3, DeepSeek-R1, …) emit the chain of thought in
+        ``message.reasoning_content``, which counts against ``max_tokens``. With a
+        modest budget the reasoning exhausts the cap and the visible ``content``
+        comes back empty (``finish_reason == "length"``). When that happens we
+        retry once with ``cfg.reasoning_max_tokens`` so callers still receive a
+        real answer; non-reasoning models are never retried.
+        """
         url = resolve_endpoint(cfg.provider, cfg.host)
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if cfg.api_key:
             headers["Authorization"] = f"Bearer {cfg.api_key}"
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
 
         try:
             resp = self._http.post(url, json=payload, headers=headers)
@@ -285,15 +320,42 @@ class LLMClient:
                 )
             data = resp.json()
             choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {}) or {}
             usage = data.get("usage", {})
+            content = message.get("content", "") or ""
+            finish_reason = choice.get("finish_reason", "")
+            reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+            reasoning_tokens = (usage.get("completion_tokens_details") or {}).get(
+                "reasoning_tokens", 0
+            )
+
+            # Reasoning ate the whole budget before producing a visible answer —
+            # retry once with the larger reasoning budget.
+            if (
+                allow_reasoning_retry
+                and not content.strip()
+                and finish_reason == "length"
+                and (reasoning or reasoning_tokens)
+                and cfg.reasoning_max_tokens > max_tokens
+            ):
+                logger.info(
+                    "Reasoning model returned empty content at max_tokens=%d; "
+                    "retrying at %d.", max_tokens, cfg.reasoning_max_tokens,
+                )
+                return self._chat_openai_compat(
+                    cfg, messages, model, temperature, cfg.reasoning_max_tokens,
+                    response_format, allow_reasoning_retry=False,
+                )
+
             return LLMResponse(
-                content=choice.get("message", {}).get("content", ""),
+                content=content,
                 model=data.get("model", model),
                 provider=cfg.provider,
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
-                finish_reason=choice.get("finish_reason", ""),
+                finish_reason=finish_reason,
+                reasoning=reasoning,
             )
         except Exception as exc:
             return LLMResponse(provider=cfg.provider, model=model, error=str(exc))
@@ -365,7 +427,15 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> Generator[str, None, None]:
-        """Stream chat completion tokens. Yields content chunks."""
+        """Stream chat completion tokens. Yields content chunks.
+
+        Note: unlike :meth:`chat`, the streaming path yields only visible
+        ``content`` deltas — a reasoning model's chain of thought is consumed
+        silently and there is no empty-response retry (a stream cannot be
+        replayed mid-flight). The default ``max_tokens`` leaves room for both
+        reasoning and answer; if you stream a reasoning model with a very small
+        ``max_tokens`` the answer may not fit and the stream can end empty.
+        """
         cfg = self.config
         provider = cfg.provider.lower()
 

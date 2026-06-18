@@ -162,3 +162,113 @@ def test_chat_falls_back_to_a_different_providers_endpoint() -> None:
         "http://127.0.0.1:11434/v1/chat/completions",
     ]
     client.close()
+
+
+# ---------------------------------------------------------------------------
+# Reasoning-model support: LM Studio (and other OpenAI-compatible runtimes)
+# serve reasoning models that emit the chain of thought in
+# `message.reasoning_content`, which consumes the `max_tokens` budget. With a
+# modest budget the visible `content` comes back empty (`finish_reason ==
+# "length"`). The client must capture the reasoning AND retry with a larger
+# budget so callers still get a real answer.
+# ---------------------------------------------------------------------------
+
+_REASONING_TRUNCATED_PAYLOAD = {
+    "choices": [{"message": {"content": "", "reasoning_content": "Let me think step by step..."},
+                 "finish_reason": "length"}],
+    "usage": {"prompt_tokens": 5, "completion_tokens": 64, "total_tokens": 69,
+              "completion_tokens_details": {"reasoning_tokens": 64}},
+    "model": "reasoner",
+}
+_REASONING_FULL_PAYLOAD = {
+    "choices": [{"message": {"content": "PCR indicates sentiment.",
+                             "reasoning_content": "Thought it through."},
+                 "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 5, "completion_tokens": 200, "total_tokens": 205,
+              "completion_tokens_details": {"reasoning_tokens": 170}},
+    "model": "reasoner",
+}
+
+
+def test_reasoning_content_is_captured_on_the_response() -> None:
+    # A reasoning model's chain of thought is surfaced on LLMResponse.reasoning
+    # so callers can log/inspect it instead of silently dropping it.
+    cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="reasoner")
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_REASONING_FULL_PAYLOAD))
+
+    resp = client.chat(_MSGS)
+
+    assert resp.success, resp.error
+    assert resp.content == "PCR indicates sentiment."
+    assert resp.reasoning == "Thought it through."
+    client.close()
+
+
+def test_empty_content_from_truncated_reasoning_retries_with_larger_budget() -> None:
+    # The headline reasoning-model fix: the first call exhausts the small budget
+    # on reasoning (empty content, finish_reason=length); the client retries once
+    # at reasoning_max_tokens and returns the real answer.
+    cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="reasoner",
+                    max_tokens=64, reasoning_max_tokens=4096)
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(side_effect=[
+        _fake_response(_REASONING_TRUNCATED_PAYLOAD),
+        _fake_response(_REASONING_FULL_PAYLOAD),
+    ])
+
+    resp = client.chat(_MSGS, max_tokens=64)
+
+    assert resp.success, resp.error
+    assert resp.content == "PCR indicates sentiment."
+    assert client._http.post.call_count == 2
+    first_payload = client._http.post.call_args_list[0].kwargs["json"]
+    second_payload = client._http.post.call_args_list[1].kwargs["json"]
+    assert first_payload["max_tokens"] == 64
+    assert second_payload["max_tokens"] == 4096
+    client.close()
+
+
+def test_no_retry_when_content_is_present() -> None:
+    # Non-reasoning models are unaffected: a normal completion never retries.
+    cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="m",
+                    max_tokens=64, reasoning_max_tokens=4096)
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_OPENAI_PAYLOAD))
+
+    resp = client.chat(_MSGS)
+
+    assert resp.success and resp.content == "ok"
+    assert client._http.post.call_count == 1
+    client.close()
+
+
+def test_no_retry_when_reasoning_budget_not_larger() -> None:
+    # If reasoning_max_tokens <= the requested budget there is no headroom to
+    # gain, so the client must not loop or retry.
+    cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="reasoner",
+                    max_tokens=4096, reasoning_max_tokens=4096)
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_REASONING_TRUNCATED_PAYLOAD))
+
+    resp = client.chat(_MSGS, max_tokens=4096)
+
+    assert client._http.post.call_count == 1
+    assert not resp.success  # genuinely empty; surfaced rather than silently looped
+    client.close()
+
+
+def test_chat_passes_response_format_into_the_payload() -> None:
+    # Structured-output passthrough: response_format reaches the OpenAI-compatible
+    # payload so LM Studio's constrained decoding can enforce a JSON schema.
+    cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="m")
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_OPENAI_PAYLOAD))
+    schema = {"type": "json_schema",
+              "json_schema": {"name": "x", "strict": True, "schema": {"type": "object"}}}
+
+    client.chat(_MSGS, response_format=schema)
+
+    payload = client._http.post.call_args.kwargs["json"]
+    assert payload["response_format"] == schema
+    client.close()
