@@ -93,8 +93,9 @@ export default function HomePage() {
             ))}
           </div>
           <p>
-            Open-source trading platform for Indian markets, with learning, investing, trading,
-            automation, and AI research orbiting one centre.
+            Open-source trading platform for Indian F&amp;O, commodities, and crypto — learning,
+            investing, trading, automation, and AI research orbiting one core. One native app
+            for macOS, Windows, and Linux.
           </p>
           <p className="hero-disclaimer">
             v0.6.0-beta is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.

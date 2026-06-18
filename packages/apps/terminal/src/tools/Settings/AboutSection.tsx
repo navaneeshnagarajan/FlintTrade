@@ -25,8 +25,9 @@ export function AboutSection() {
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
           Native-first modular trading and investment platform for Indian F&amp;O, commodities, and crypto.
-          FlintTrade has its own backend, native gateway contract, 90+ widgets, and an optional
-          OpenAlgo-compatible bridge. Monorepo with 17 package surfaces across Python, React, shared UI, and Rust.
+          FlintTrade has its own backend, native gateway contract, 95 widgets, and an optional
+          OpenAlgo-compatible bridge, and ships as a native desktop app for macOS, Windows, and Linux.
+          Monorepo with 18 package surfaces across Python, React, Tauri, shared UI, and Rust.
         </p>
       </div>
 
