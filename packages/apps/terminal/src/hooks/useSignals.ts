@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
+import { getBase } from "@/services/ftApi.helpers";
 import { safeParse } from "@/lib/safeParse";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -149,7 +150,7 @@ export function useSignalStream(
   const connect = useCallback(() => {
     if (mode === "explore" || !enabled) return;
 
-    const base = import.meta.env.DEV ? "/ft-api" : "";
+    const base = getBase();
     const url = `${base}/api/v1/signals/stream`;
     const es = new EventSource(url);
 

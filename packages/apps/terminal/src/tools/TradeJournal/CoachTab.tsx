@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Brain, AlertCircle, Loader2 } from "lucide-react";
 import { computeAnalytics } from "@/lib/journalAnalytics";
 import { type JournalTrade } from "@/services/ftApi";
+import { getBase } from "@/services/ftApi.helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,7 +54,7 @@ export function CoachTab({ trades }: { trades: JournalTrade[] }) {
     setAiResponse(null);
 
     try {
-      const base = import.meta.env.DEV ? "/ft-api" : "";
+      const base = getBase();
       const res = await fetch(`${base}/api/v1/advisor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -19,6 +19,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getBase, buildHeaders } from "@/services/ftApi.helpers";
 import {
   Trophy,
   Users,
@@ -108,11 +109,16 @@ const DEMO_STRATEGIES: StrategyCard[] = [
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
-const FT_API_BASE = "/ft-api/v1";
+// Resolve the backend base through the canonical helper so social calls behave
+// identically in dev (Vite proxy) and the packaged desktop app (same origin),
+// and carry the standard auth headers (X-API-Key + JWT) like every other
+// FT-API caller. Social endpoints live in the bare ``/v1/social/*`` family.
+const FT_API_BASE = `${getBase()}/v1`;
 
 async function fetchLeaderboard(metric: string): Promise<TraderRow[]> {
   const res = await fetch(
     `${FT_API_BASE}/social/leaderboard?metric=${metric}&limit=20`,
+    { headers: buildHeaders(false) },
   );
   if (!res.ok) throw new Error("Failed to fetch leaderboard");
   const json: LeaderboardResponse = await res.json();
@@ -122,7 +128,9 @@ async function fetchLeaderboard(metric: string): Promise<TraderRow[]> {
 async function fetchStrategies(category: string | null): Promise<StrategyCard[]> {
   const params = new URLSearchParams({ limit: "50" });
   if (category) params.set("category", category);
-  const res = await fetch(`${FT_API_BASE}/social/strategies?${params.toString()}`);
+  const res = await fetch(`${FT_API_BASE}/social/strategies?${params.toString()}`, {
+    headers: buildHeaders(false),
+  });
   if (!res.ok) throw new Error("Failed to fetch strategies");
   const json: StrategiesResponse = await res.json();
   return json.data.strategies;
@@ -134,7 +142,7 @@ async function copyStrategy(
 ): Promise<{ status: string; message: string }> {
   const res = await fetch(`${FT_API_BASE}/social/strategies/copy`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify({ strategy_id: strategyId, user_id: userId }),
   });
   const json = await res.json();
