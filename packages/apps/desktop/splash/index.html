@@ -9,15 +9,18 @@
         --bg: #0b0d12;
         --fg: #e6e8ee;
         --muted: #8b91a1;
-        --accent: #ff6a3d;
-        --accent-2: #ffb072;
+        /* Brand green — matches the design-system flint spark (#22c55e / #4ade80)
+           and the terminal's Graphite accent, so the splash and the app are one
+           continuous brand surface. */
+        --accent: #22c55e;
+        --accent-2: #4ade80;
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
       html, body {
         height: 100%;
         background: var(--bg);
         color: var(--fg);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         -webkit-user-select: none;
         user-select: none;
         overflow: hidden;
@@ -30,30 +33,29 @@
         justify-content: center;
         gap: 18px;
         background:
-          radial-gradient(120% 80% at 50% 0%, rgba(255, 106, 61, 0.10), transparent 60%),
+          radial-gradient(120% 80% at 50% 0%, rgba(34, 197, 94, 0.10), transparent 60%),
           var(--bg);
       }
       .mark {
-        width: 56px;
-        height: 56px;
+        width: 64px;
+        height: 64px;
         position: relative;
         display: grid;
         place-items: center;
       }
-      .spark {
-        width: 26px;
-        height: 26px;
-        border-radius: 6px;
-        background: linear-gradient(135deg, var(--accent), var(--accent-2));
-        transform: rotate(45deg);
-        box-shadow: 0 0 24px rgba(255, 106, 61, 0.55);
-        animation: pulse 1.6s ease-in-out infinite;
+      /* The real FlintTrade flint mark (F letterform + faceted green spark),
+         identical geometry to design-system/src/brand/Logo.tsx. */
+      .mark svg {
+        width: 44px;
+        height: 44px;
+        filter: drop-shadow(0 0 18px rgba(34, 197, 94, 0.45));
+        animation: pulse 1.8s ease-in-out infinite;
       }
       .ring {
         position: absolute;
         inset: 0;
         border-radius: 50%;
-        border: 2px solid rgba(255, 106, 61, 0.18);
+        border: 2px solid rgba(34, 197, 94, 0.16);
         border-top-color: var(--accent);
         animation: spin 0.9s linear infinite;
       }
@@ -72,8 +74,8 @@
       .dot:nth-child(3) { animation-delay: 0.4s; }
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes pulse {
-        0%, 100% { transform: rotate(45deg) scale(1); opacity: 1; }
-        50% { transform: rotate(45deg) scale(0.82); opacity: 0.75; }
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(0.92); opacity: 0.82; }
       }
       @keyframes blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
     </style>
@@ -82,7 +84,15 @@
     <div class="wrap">
       <div class="mark">
         <div class="ring"></div>
-        <div class="spark"></div>
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="FlintTrade">
+          <!-- F letterform -->
+          <rect x="3" y="3" width="5" height="26" rx="1" fill="var(--fg)" />
+          <rect x="3" y="3" width="20" height="5" rx="1" fill="var(--fg)" />
+          <rect x="3" y="13" width="14" height="5" rx="1" fill="var(--fg)" />
+          <!-- Faceted flint spark -->
+          <polygon points="24,1 29,6 24,11 21,7 24,5 21,3" fill="var(--accent)" />
+          <polygon points="25,0 28,3 26,3 24,1" fill="var(--accent-2)" opacity="0.75" />
+        </svg>
       </div>
       <div class="title">FlintTrade</div>
       <div class="status" id="status">
