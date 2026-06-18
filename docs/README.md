@@ -85,10 +85,10 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 
 ## Where the source code lives
 
-The repository is a monorepo with 17 package surfaces: 13 Python packages,
-2 React applications (`packages/apps/terminal` and `packages/apps/site`),
-1 shared TypeScript design-system package, and 1 Rust/PyO3 package
-(`packages/core/ticks`). See
+The repository is a monorepo with 18 package surfaces: 13 Python packages,
+3 applications (`packages/apps/terminal`, `packages/apps/desktop`, and
+`packages/apps/site`), 1 shared TypeScript design-system package, and 1
+Rust/PyO3 package (`packages/core/ticks`). See
 [ARCHITECTURE.md](ARCHITECTURE.md) for the package dependency graph and
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the package-by-package map.
 

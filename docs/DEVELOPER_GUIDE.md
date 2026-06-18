@@ -12,14 +12,15 @@ contract, see [API.md](API.md). For CI behaviour, see [CI.md](CI.md).
 
 ## 1. Repository layout
 
-FlintTrade is a monorepo with 17 package surfaces: 13 Python packages, 2
-React applications, 1 shared TypeScript design-system package, and 1 Rust
-package with Python bindings.
+FlintTrade is a monorepo with 18 package surfaces: 13 Python packages, 3
+applications (React terminal, Tauri desktop shell, Next.js site), 1 shared
+TypeScript design-system package, and 1 Rust package with Python bindings.
 
 | Package | Language | Purpose | Tests |
 |---|---|---|---|
 | `site` | TypeScript / Next.js | Public website, generated documentation, contribution pages, and read-only docs MCP | `packages/apps/site/src/**/*.test.ts` |
 | `terminal` | TypeScript / React | User-facing single-page application; Dockview workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
+| `desktop` | TypeScript / Rust (Tauri 2) | Native desktop shell; bundles the PyInstaller-frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin | `packages/apps/desktop/src-tauri/src/**` (cargo tests) |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |

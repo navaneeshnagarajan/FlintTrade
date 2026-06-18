@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-FlintTrade is an open-source modular trading platform for Indian F&O, commodities, and crypto. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **17 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12,<3.14`, Node `>=22`. The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
+FlintTrade is an open-source modular trading platform for Indian F&O, commodities, and crypto. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Tauri desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12,<3.14`, Node `>=22`. The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
 
 Version: **v0.6.0-beta** (beta restructure; not production-ready). Python tooling is **uv** (workspace lockfile `uv.lock`); JS is **pnpm** (workspace lockfile `pnpm-lock.yaml`).
 
@@ -29,9 +29,11 @@ cd packages/apps/terminal && npm run typecheck                     # tsc --noEmi
 # Build
 cd packages/apps/terminal && npm run build                         # tsc --noEmit + vite build
 cd packages/core/ticks && cargo build --release                    # Rust/PyO3 wheel
+make desktop-build                                                 # native desktop installers (frontend + backend sidecar + Tauri bundle)
 
 # Dev / run
 make dev                                                           # terminal dev server + backend
+make desktop-dev                                                  # run the native desktop app in dev (builds the sidecar first)
 make start                                                         # FlintTrade backend (port 5100)
 make docker-up | docker-down | docker-build
 make full-check                                                    # tests + lint + typecheck snapshot
@@ -85,10 +87,11 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (32 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | TradingView/ChartInk/custom webhooks, flow builder, n8n + WhatsApp bridges |
-| `terminal` | apps | TS/React | SPA: Dockview workspace, ~82 widgets, routes — single source of truth for UI |
+| `terminal` | apps | TS/React | SPA: Dockview workspace, 95 widgets, routes — single source of truth for UI |
+| `desktop` | apps | TS/Rust | Tauri 2 native shell — bundles the PyInstaller-frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 
-(`chrome-extension` and `desktop`/Tauri were dropped in the v0.6.0 restructure.)
+(`chrome-extension` was dropped in the v0.6.0 restructure; the Tauri `desktop` shell was re-added and shipped in v0.6.0-beta — see [docs/DESKTOP.md](docs/DESKTOP.md).)
 
 ## House rules that bite
 

@@ -1,7 +1,8 @@
 # FlintTrade Architecture
 
-> Reflects `v0.6.0-beta`. 17 package surfaces (13 Python + 2 React apps +
-> 1 shared TypeScript design-system package + 1 Rust/PyO3 tick engine).
+> Reflects `v0.6.0-beta`. 18 package surfaces (13 Python + 3 apps: React
+> terminal, Tauri desktop shell, Next.js site + 1 shared TypeScript
+> design-system package + 1 Rust/PyO3 tick engine).
 > Run `make test` and terminal Vitest locally for the current test counts.
 
 This document is the architectural reference for contributors. For a

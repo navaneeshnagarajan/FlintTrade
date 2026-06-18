@@ -7,7 +7,7 @@
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 17 package surfaces (13 Python + 2 React apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
+FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 18 package surfaces (13 Python + 3 apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-beta
 
 ## Architecture
@@ -35,7 +35,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-beta
 
 - ~12,062 tests collected (9,089 Python + ~2,973 terminal) — verified 2026-05-19
 - Latest stable release: none after the beta restructure; treat all pre-1.0 releases as experimental unless the release notes say otherwise.
-- Terminal: 82 widgets (TSX), 7 tools, 12 public routes (+ DEV `/admin` + 404), 13 workspace presets, 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
+- Terminal: 95 widgets (TSX), 7 tools, 12 public routes (+ DEV `/admin` + 404), 13 workspace presets, 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
 - Mode system: 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
 - Auth: argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry, jti revocation blocklist
 - 94 backtest strategy templates + 2 live-engine strategies (`ema_crossover`, `wheel_live`)

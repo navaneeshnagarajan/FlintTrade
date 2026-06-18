@@ -11,11 +11,12 @@
 ## Current state — v0.6.0-beta
 
 - **Version:** `v0.6.0-beta` (beta restructure; not production-ready — see `disclaimer.md`).
-- **Structure:** fat-core 4-way nest under `packages/` — 17 surfaces:
+- **Structure:** fat-core 4-way nest under `packages/` — 18 surfaces:
   - `core/` → core, data, historical, indicators (Python) · ticks (Rust/PyO3) · design-system (TS)
   - `services/` → engine, screener, backtest, ai, ditto, automation, journal (Python)
   - `integrations/` → gateway, webhooks (Python)
-  - `apps/` → terminal (React/Vite) · site (Next.js/fumadocs)
+  - `apps/` → terminal (React/Vite) · desktop (Tauri 2 shell + PyInstaller backend sidecar) · site (Next.js/fumadocs)
+- **Desktop app (shipped):** the Tauri 2 shell bundles the frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), serving the SPA + API from a single loopback origin — no separate server to run. See [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Headline feature (verified solid):** selector-bound principal + gated execution — every reachable live order traverses `SafetySystem` L1–L5 → `gate_order()` (one-shot HMAC `SafetyContext`) → `BrokerRouter` (re-HMAC + field match + ACL) → adapter. No reachable bypass; secrets file-backed + hardened; log redaction disciplined.
 - **Broker connectivity:** the **OpenAlgo bridge adapter** is the live-tested adapter (forwards place/modify/cancel/reads/quotes to OpenAlgo across 32 brokers). The four founder-broker **native adapters** (Dhan, Upstox, Kotak Neo, IndMoney) now carry the FULL doc-grounded surface (2026-06-12 parity wave) and stay dormant until SDK attestation + vault credentials; the only remaining work for them is live-credential testing (see §2).
 - **Modes:** Explore / Practice / Live, server-side JWT-claim enforcement; Practice routes to the native SandboxEngine.
@@ -123,7 +124,7 @@ The **inverse** diff (registered routes with no SPA caller) was classified per c
 
 ## Future / someday (post-v0.6.x)
 
-Mobile app (`/v0.7.0`), Unsloth QLoRA fine-tuning, social/copy trading (`social_trading.py` is a labelled foundation), blue-green deployment, additional second-wave brokers (Angel One, Fyers, XTS-shared set, Groww, ICICI Breeze, Paytm Money, Sharekhan) on demand/contribution.
+Mobile app (`/v0.7.0`; the native **desktop** app already shipped in v0.6.0-beta — see Current state), Unsloth QLoRA fine-tuning, social/copy trading (`social_trading.py` is a labelled foundation), blue-green deployment, additional second-wave brokers (Angel One, Fyers, XTS-shared set, Groww, ICICI Breeze, Paytm Money, Sharekhan) on demand/contribution.
 
 ---
 

@@ -118,13 +118,15 @@ FlintTrade runs its own backend, native sandbox, and broker gateway contract. Op
 
 ### Package map
 
-17 package surfaces — 13 Python packages, 2 React applications, 1 shared
-TypeScript design-system package, and 1 Rust/PyO3 tick engine.
+18 package surfaces — 13 Python packages, 3 applications (React terminal,
+Tauri desktop shell, Next.js site), 1 shared TypeScript design-system package,
+and 1 Rust/PyO3 tick engine.
 
 | Package | Language | Purpose |
 |---|---|---|
 | `packages/apps/site` | Next.js + TS | Public website, generated documentation, and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and Dockview terminal |
+| `packages/apps/desktop` | Tauri 2 (TS + Rust) | Native desktop shell — bundles the backend sidecar + terminal into one cross-OS installer (Linux/Windows/macOS) |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
 | `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |

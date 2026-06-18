@@ -8,6 +8,17 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Native desktop app (Linux, Windows, macOS)** — a Tauri 2 shell
+  (`packages/apps/desktop`) packages the FlintTrade backend and terminal into a
+  single installable app. On launch it provisions the credential-vault master
+  password (first run only), spawns the PyInstaller-frozen backend sidecar on an
+  OS-chosen loopback port, waits for the `FLINTTRADE_BACKEND_READY` handshake,
+  and points one native window at it — the backend serves both the React
+  terminal and the API from that single origin, so every feature works with no
+  separate server to run and no in-app configuration. A brand-matched splash
+  window covers boot. Build with `make desktop-build` (frontend + backend
+  sidecar + Tauri bundle) or run `make desktop-dev`; see
+  [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Native broker adapters at full feature parity (Dhan, Upstox, Kotak Neo, IndMoney)** —
   the four founder-broker adapters were built out from gated skeletons to the **complete**
   doc-grounded surface, each from a feature matrix vs the broker's own API docs/SDK. Dhan:
