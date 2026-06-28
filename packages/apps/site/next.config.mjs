@@ -19,7 +19,7 @@ const nextConfig = {
   },
   async rewrites() {
     return {
-      // SPA fallback for the embedded Explore-mode terminal build under
+      // SPA fallback for the full-page terminal demo build under
       // public/demo-app/ — real files win first, deep routes get index.html.
       afterFiles: [
         { source: '/demo-app', destination: '/demo-app/index.html' },
@@ -30,9 +30,9 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // Scoped CSP for the embedded terminal demo: same-origin only, but
+        // Scoped CSP for the full-page terminal demo: same-origin only, but
         // runtime-injected styles allowed (Dockview/Plotly/inline keyframes)
-        // and frameable by the site itself (/demo iframes it).
+        // and not frameable now that the site opens it as its own page.
         source: '/demo-app/:path*',
         headers: [
           {
@@ -44,7 +44,7 @@ const nextConfig = {
               "img-src 'self' data: blob:",
               "font-src 'self' data:",
               "connect-src 'self'",
-              "frame-ancestors 'self'",
+              "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
               "object-src 'none'",

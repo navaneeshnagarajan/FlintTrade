@@ -1,5 +1,5 @@
 import { LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, Cable, PlayCircle, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, Cable, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 
@@ -106,8 +106,14 @@ export default function HomePage() {
             ))}
           </div>
           <div className="hero-actions">
-            <Link className="button shimmer" href="/demo">
-              Open the Explore demo <PlayCircle aria-hidden="true" size={17} />
+            <Link
+              className="button shimmer"
+              href="/demo-app/welcome"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open the FlintTrade live demo in a new window"
+            >
+              Try live demo <ExternalLink aria-hidden="true" size={17} />
             </Link>
             <Link className="button primary" href="/docs">
               Read the docs <ArrowRight aria-hidden="true" size={17} />

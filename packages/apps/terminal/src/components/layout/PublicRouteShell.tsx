@@ -106,11 +106,11 @@ export default function PublicRouteShell({
     <main
       aria-label={mainLabel}
       className={cn(
-        "relative min-h-screen overflow-hidden bg-surface-base text-text-primary",
+        "relative h-screen overflow-x-hidden overflow-y-auto bg-surface-base text-text-primary overscroll-y-contain",
         className,
       )}
     >
-      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+      <div className="pointer-events-none fixed inset-0" aria-hidden="true">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(34,197,94,0.15),transparent_30rem),radial-gradient(circle_at_50%_72%,rgba(56,189,248,0.09),transparent_34rem),linear-gradient(180deg,rgba(8,13,12,0.18),transparent_42%,rgba(0,0,0,0.18))]" />
         <Particles
           quantity={particleSettings.quantity}

@@ -154,7 +154,9 @@ describe("ExploreRoute", () => {
   it("renders the explore page immediately without the demo choice interstitial", () => {
     renderExplore();
 
-    expect(screen.getByRole("main", { name: /explore mode/i })).toBeInTheDocument();
+    const main = screen.getByRole("main", { name: /explore mode/i });
+    expect(main).toBeInTheDocument();
+    expect(main).toHaveClass("h-screen", "overflow-y-auto", "overflow-x-hidden");
     expect(screen.getByText("Explore FlintTrade")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /demo mode/i })).toBeInTheDocument();
     expect(screen.queryByText(/how would you like to explore flinttrade/i)).not.toBeInTheDocument();

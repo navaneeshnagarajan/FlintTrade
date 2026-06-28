@@ -1,5 +1,5 @@
 /**
- * generate-demo.mjs — build the terminal in Explore mode for the public site.
+ * generate-demo.mjs — build the terminal demo for the public site.
  *
  * Runs `vite build --base=/demo-app/` in packages/apps/terminal and copies
  * the bundle into public/demo-app/ (gitignored). The Next.js rewrites in
@@ -20,7 +20,7 @@ const outDir = join(siteDir, 'public', 'demo-app');
 
 if (process.env.FLINTTRADE_SKIP_DEMO === '1') {
   console.log('[generate-demo] FLINTTRADE_SKIP_DEMO=1 — skipping terminal demo build.');
-  console.log('[generate-demo] note: without public/demo-app the /demo page will 404 its iframe.');
+  console.log('[generate-demo] note: without public/demo-app the /demo-app routes will 404.');
   process.exit(0);
 }
 

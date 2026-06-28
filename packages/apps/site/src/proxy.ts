@@ -76,7 +76,7 @@ export function proxy(req: NextRequest) {
 export const config = {
   matcher: [
     {
-      // demo-app is the static Explore-mode terminal bundle; it gets its own
+      // demo-app is the static terminal demo bundle; it gets its own
       // scoped CSP from next.config.mjs headers() instead of the site CSP.
       source: '/((?!api/|_next/static|_next/image|favicon.ico|demo-app(?:/|$)).*)',
       missing: [

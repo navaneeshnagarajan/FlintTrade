@@ -984,32 +984,6 @@ kbd {
   line-height: 1.6;
 }
 
-/* Explore demo page */
-.demo-frame-wrap {
-  position: relative;
-  z-index: 1;
-  width: min(1380px, calc(100% - 32px));
-  margin: 0 auto 64px;
-}
-
-.demo-frame {
-  width: 100%;
-  height: min(820px, calc(100vh - 220px));
-  border: 1px solid var(--site-line);
-  border-radius: var(--site-radius);
-  background: var(--site-surface-card);
-  box-shadow: 0 32px 90px var(--site-frame-shadow);
-}
-
-.demo-note {
-  margin: 14px auto 0;
-  max-width: 760px;
-  color: var(--site-muted);
-  font-size: 13px;
-  line-height: 1.6;
-  text-align: center;
-}
-
 .site-footer {
   position: relative;
   z-index: 1;

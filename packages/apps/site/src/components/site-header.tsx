@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 const navItems = [
-  { href: '/demo', label: 'Explore Demo' },
+  { href: '/demo-app/welcome', label: 'Live Demo', newWindow: true },
   { href: '/docs', label: 'Docs' },
   { href: '/api-reference', label: 'API' },
   { href: '/mcp', label: 'MCP' },
@@ -21,7 +21,12 @@ export function SiteHeader() {
       </Link>
       <nav className="main-nav" aria-label="Primary navigation">
         {navItems.map((item) => (
-          <Link key={item.href} href={item.href}>
+          <Link
+            key={item.href}
+            href={item.href}
+            target={item.newWindow ? '_blank' : undefined}
+            rel={item.newWindow ? 'noopener noreferrer' : undefined}
+          >
             {item.label}
           </Link>
         ))}
