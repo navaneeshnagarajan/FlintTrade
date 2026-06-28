@@ -11,7 +11,12 @@
   ],
   "pnpm": {
     "overrides": {
-      "postcss": "8.5.15"
+      "@babel/core": "7.29.6",
+      "esbuild": "0.28.1",
+      "hono": "4.12.25",
+      "js-yaml": "4.2.0",
+      "postcss": "8.5.15",
+      "undici": "7.28.0"
     }
   }
 }

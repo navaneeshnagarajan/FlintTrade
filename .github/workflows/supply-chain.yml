@@ -124,11 +124,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          rustflags: ""        # honour packages/core/ticks/rust-toolchain.toml
-      - run: cargo install cargo-audit --locked --version 0.21.0
+          toolchain: stable    # cargo-audit 0.22.x needs a newer compiler than tick-engine's pinned MSRV.
+          rustflags: ""
+      - run: cargo install cargo-audit --locked --version 0.22.2
       - name: cargo audit
         working-directory: packages/core/ticks
-        run: cargo audit --deny warnings --json > cargo-audit-report.json
+        run: cargo +stable audit --deny warnings --json > cargo-audit-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: cargo-audit-report, path: packages/core/ticks/cargo-audit-report.json }
