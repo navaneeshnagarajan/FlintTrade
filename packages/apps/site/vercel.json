@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm run build",
-  "installCommand": "cd ../../.. && pnpm install --frozen-lockfile --reporter=append-only",
+  "installCommand": "cd ../../.. && if [ ! -f .pnpmfile.cjs ]; then cp packages/apps/site/.pnpmfile.cjs .pnpmfile.cjs; fi && pnpm install --frozen-lockfile --reporter=append-only",
   "framework": "nextjs"
 }
