@@ -141,12 +141,18 @@ pnpm --dir packages/apps/terminal run build
 
 ok "Terminal built"
 
-# ── Step 5: Configure environment ──────────────────────────────────────
+# ── Step 5: Configure server fallback environment ──────────────────────
 cd "$INSTALL_DIR"
 
 if [ ! -f "$INSTALL_DIR/.env" ]; then
-    cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-    log "Created .env from .env.example"
+    {
+        echo "# FlintTrade server fallback environment."
+        echo "# Native desktop and normal source runs use Setup/Settings instead."
+        echo "# Keep OpenAlgo API keys in the app workspace UI unless this service"
+        echo "# must run before the UI is available."
+    } > "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+    log "Created minimal server fallback .env for systemd EnvironmentFile"
 fi
 
 # Create user data directory
@@ -388,14 +394,14 @@ echo "    sudo journalctl -u flinttrade-openalgo -f"
 echo "    sudo journalctl -u flinttrade-backend -f"
 echo ""
 echo "  Configuration:"
-echo "    .env:       $INSTALL_DIR/.env"
+echo "    .env:       $INSTALL_DIR/.env (advanced server fallback only)"
 echo "    User data:  $FLINTTRADE_DATA/"
 echo "    Nginx:      /etc/nginx/sites-available/flinttrade"
 echo "    Logs:       journalctl -u flinttrade-*"
 echo ""
 echo "  Next steps:"
-echo "    1. Set OPENALGO_API_KEY in $INSTALL_DIR/.env"
-echo "    2. Configure broker credentials in OpenAlgo"
-echo "    3. sudo systemctl restart flinttrade.target"
-echo "    4. Visit the terminal URL to begin setup"
+echo "    1. Visit the terminal URL and complete Setup"
+echo "    2. Configure OpenAlgo URL/API key in Settings -> Broker Gateway if needed"
+echo "    3. Keep broker credentials inside OpenAlgo or the encrypted FlintTrade vault"
+echo "    4. sudo systemctl restart flinttrade.target after changing server-only fallback values"
 echo ""

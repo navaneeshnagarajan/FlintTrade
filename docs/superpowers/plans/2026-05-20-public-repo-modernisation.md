@@ -275,7 +275,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 >    ```bash
 >    git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 >    cd FlintTrade
->    cp .env.example .env   # optional: set FLINTTRADE_API_KEY / OpenAlgo bridge settings
+>    # optional raw-server fallbacks live in .env; OpenAlgo setup is in app Settings
 >    docker-compose up
 >    ```
 >    Then "Open http://localhost:5173 and follow the welcome wizard." Brief sentence that OpenAlgo must also be running (one-line install link).

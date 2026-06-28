@@ -351,26 +351,9 @@ the internal view of the same endpoint.
 
 ## 7. Configuration architecture
 
-Two tiers. No exceptions.
+Workspace-first with a dev/server fallback.
 
-### Tier 1: `.env` — infrastructure only
-
-Lives in the repo root, never committed. FlintTrade can run locally without
-OpenAlgo; OpenAlgo variables are used only for the optional OpenAlgo-compatible
-bridge/live passthrough path.
-
-| Variable | Purpose |
-|---|---|
-| `FLINTTRADE_API_KEY` | Optional backend API key. If absent, loopback-only local requests are allowed for fresh desktop/dev installs. |
-| `OPENALGO_HOST` | OpenAlgo server URL. |
-| `OPENALGO_PORT` | OpenAlgo server port. |
-| `OPENALGO_API_KEY` | OpenAlgo API key (not your broker's key). |
-| `OPENALGO_WS_PORT` | OpenAlgo WebSocket port (default `8765`). |
-
-Broker credentials are configured **in OpenAlgo**, not in FlintTrade.
-FlintTrade never sees them.
-
-### Tier 2: `workspace.json` — user preferences
+### Tier 1: `workspace.json` — UI-owned runtime configuration
 
 Lives in a platform-specific workspace directory:
 
@@ -383,6 +366,8 @@ Lives in a platform-specific workspace directory:
 
 `workspace.json` contains:
 
+- **OpenAlgo bridge settings** — host, WebSocket port, and OpenAlgo API key
+  written by Setup/Settings when that optional bridge is enabled.
 - **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
 - **Enabled modules** — which packages are active.
 - **UI preferences** — theme, default exchange, time zone, density.
@@ -390,9 +375,15 @@ Lives in a platform-specific workspace directory:
 - **Notification config** — Telegram bot settings.
 - **Order-safety settings** — rate limits, audit retention, kill-switch.
 
-API keys and tokens are stored as `_ref` fields (references). Actual
-secrets live in the OS keyring or in environment variables, never in
-`workspace.json`.
+Native broker credentials live in the encrypted gateway vault. OpenAlgo broker
+credentials remain inside OpenAlgo; FlintTrade stores only the OpenAlgo API key.
+
+### Tier 2: `.env` — advanced dev/server fallback
+
+Lives in the repo root, never committed. Native desktop users do not need it.
+Docker/systemd deployments and contributor experiments may use it for
+`FLINTTRADE_API_KEY`, proxy/deployment flags, and fallback OpenAlgo settings
+when the app UI is not available.
 
 ### How packages read config
 
@@ -400,7 +391,7 @@ secrets live in the OS keyring or in environment variables, never in
 from packages.core.src.config import FlintTradeConfig
 
 config = FlintTradeConfig.from_env()
-config.settings.openalgo_host     # from .env
+config.settings.openalgo_host     # from workspace.json, with .env fallback
 config.workspace.fast_data_dir    # from workspace.json
 config.workspace.get("ui.theme")  # dot-notation access
 ```
@@ -435,7 +426,7 @@ live action. Trying to place a live order on a Practice JWT returns
 
 OpenAlgo's own endpoints use API-key auth, forwarded as the
 `X-API-KEY` header by `packages/core/core/src/flinttrade_core/openalgo_client.py`. The key
-comes from `.env`.
+comes from workspace config, with `.env` retained as an advanced fallback.
 
 ---
 

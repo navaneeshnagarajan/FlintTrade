@@ -214,7 +214,7 @@ terminal (React)
 
 core
   +-- openalgo_client -> OpenAlgo REST API
-  +-- config ----------> .env + workspace.json
+  +-- config ----------> workspace.json + .env fallback
   +-- security --------> rate limiting, threat detection
   +-- monitoring ------> health, traffic, latency
 

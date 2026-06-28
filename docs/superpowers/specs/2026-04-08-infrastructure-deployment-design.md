@@ -314,8 +314,8 @@ services:
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git /opt/flinttrade
 cd /opt/flinttrade && make setup
 
-# 2. Configure
-cp .env.example .env && nano .env
+# 2. Configure local server fallbacks only if needed
+$EDITOR .env.example  # copy selected fallback values into .env when running the raw server
 
 # 3. Install services
 sudo make install-native  # installs current FlintTrade service scripts
@@ -339,17 +339,17 @@ Same as Pattern A or B, plus:
 1. git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 2. cd FlintTrade
 3. make setup                    # installs Python + Node deps, builds React
-4. cp .env.example .env          # configure optional integrations only when needed
-5. make start                    # starts the FlintTrade backend
+4. make start                    # starts the FlintTrade backend
+5. open the desktop app/terminal Setup flow and save OpenAlgo from Settings
 6. make start-openalgo           # optional: start a local-dev OpenAlgo clone when present
 ```
 
 For Docker:
 ```
 1. git clone ...
-2. cp .env.example .env
-3. docker compose up -d
-4. open https://localhost
+2. docker compose up -d
+3. open https://localhost
+4. save OpenAlgo connection details from Setup/Settings
 ```
 
 ---

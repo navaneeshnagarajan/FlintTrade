@@ -76,15 +76,11 @@ else
     warn "Data directory missing or not writable: $DATA_DIR"
 fi
 
-# 5. .env configured
+# 5. Optional server fallback env
 if [ -f "$FLINTTRADE_DIR/.env" ]; then
-    if grep -q "^OPENALGO_API_KEY=.\+" "$FLINTTRADE_DIR/.env" 2>/dev/null; then
-        ok ".env has optional OPENALGO_API_KEY configured"
-    else
-        warn ".env exists but optional OPENALGO_API_KEY is blank"
-    fi
+    ok ".env present as advanced dev/server fallback"
 else
-    warn ".env not found; using built-in defaults where available"
+    ok ".env not required for native/source setup"
 fi
 
 echo ""

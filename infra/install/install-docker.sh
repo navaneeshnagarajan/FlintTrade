@@ -73,22 +73,21 @@ fi
 
 ok "Repository ready at $INSTALL_DIR"
 
-# ── Step 3: Configure environment ──────────────────────────────────────
+# ── Step 3: Configure server fallback environment ──────────────────────
 if [ ! -f "$INSTALL_DIR/.env" ]; then
-    cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-    log "Created .env from .env.example"
+    {
+        echo "# FlintTrade Docker/server fallback environment."
+        echo "# Native desktop and normal source runs use Setup/Settings instead."
+        echo "# OpenAlgo bridge settings should be configured in the app UI unless"
+        echo "# this container must run before the UI is available."
+    } > "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+    log "Created minimal server fallback .env"
 fi
 
-# Prompt for essential configuration
 echo ""
 log "Configuration"
 echo "────────────────────────────────────────"
-
-# OpenAlgo API key
-read -rp "OpenAlgo API key (leave blank to set later): " OPENALGO_API_KEY
-if [ -n "$OPENALGO_API_KEY" ]; then
-    sed -i "s|^OPENALGO_API_KEY=.*|OPENALGO_API_KEY=$OPENALGO_API_KEY|" "$INSTALL_DIR/.env"
-fi
 
 # Domain name for SSL
 read -rp "Domain name for SSL (leave blank for localhost): " DOMAIN_NAME
@@ -314,12 +313,12 @@ echo "    flinttrade-logs      — follow service logs"
 echo "    flinttrade-backup    — run manual backup"
 echo ""
 echo "  Configuration:"
-echo "    .env:       $INSTALL_DIR/.env"
+echo "    .env:       $INSTALL_DIR/.env (advanced Docker/server fallback only)"
 echo "    User data:  $HOME/.flinttrade/"
 echo "    Backups:    /var/backups/flinttrade/"
 echo ""
 echo "  Next steps:"
-echo "    1. Set OPENALGO_API_KEY in $INSTALL_DIR/.env (if not done)"
-echo "    2. Configure broker credentials in OpenAlgo"
-echo "    3. Visit the terminal URL to begin setup"
+echo "    1. Visit the terminal URL and complete Setup"
+echo "    2. Configure OpenAlgo URL/API key in Settings -> Broker Gateway if needed"
+echo "    3. Keep broker credentials inside OpenAlgo or the encrypted FlintTrade vault"
 echo ""

@@ -442,26 +442,18 @@ def _read_openalgo_from_workspace() -> dict[str, Any]:
     return result
 
 
-def _apply_workspace_openalgo_overrides() -> None:
-    """Apply workspace.json OpenAlgo overrides to process environment.
+def _log_workspace_openalgo_overrides() -> None:
+    """Log UI-owned OpenAlgo overrides available in workspace.json.
 
-    Called once during ``create_flask_app()`` — writes values into
-    ``os.environ`` so that subsequent ``Settings.from_env()`` calls pick
-    them up.  workspace.json takes precedence over .env.
+    Settings reads these values directly from the workspace. They are no
+    longer copied into ``os.environ`` as native-runtime configuration.
     """
     overrides = _read_openalgo_from_workspace()
     if not overrides:
         return
 
-    if "api_key" in overrides:
-        os.environ["OPENALGO_API_KEY"] = str(overrides["api_key"])
-    if "host" in overrides:
-        os.environ["OPENALGO_HOST"] = str(overrides["host"])
-    if "ws_port" in overrides:
-        os.environ["OPENALGO_WS_PORT"] = str(overrides["ws_port"])
-
     logger.info(
-        "Applied OpenAlgo overrides from workspace.json (%s)",
+        "OpenAlgo settings available from workspace.json (%s)",
         ", ".join(sorted(overrides.keys())),
     )
 
@@ -849,8 +841,8 @@ def create_flask_app(
     # ------------------------------------------------------------------
     # Pre-init hygiene:
     #   * Clear stale DuckDB .wal files from a previous crashed process.
-    #   * Apply workspace.json overrides for OpenAlgo (host/api_key/ws_port)
-    #     so Settings.from_env() reads the fresh UI-written values.
+    #   * Log workspace.json OpenAlgo overrides when present; Settings reads
+    #     those values directly and uses .env only as a fallback.
     # Both are best-effort — failures here must never prevent startup.
     # ------------------------------------------------------------------
     try:
@@ -859,7 +851,7 @@ def create_flask_app(
         logger.warning("DuckDB WAL cleanup failed: %s", exc)
 
     try:
-        _apply_workspace_openalgo_overrides()
+        _log_workspace_openalgo_overrides()
     except Exception as exc:
         logger.warning("workspace.json override failed: %s", exc)
 
@@ -1747,10 +1739,10 @@ def create_flask_app(
         "/api/v1/errors",     # Same purpose, different sink: this path is
                               # handled by `operations_bp.receive_frontend_error`
                               # which forwards to structlog + Sentry/Glitchtip
-                              # instead of DuckDB. Kept public so the React app,
-                              # the Chrome extension, and external automation
-                              # can all fire-and-forget error reports without
-                              # an API key — neither sink leaks sensitive data
+                              # instead of DuckDB. Kept public so the React app
+                              # and external automation can fire-and-forget
+                              # error reports without an API key — neither sink
+                              # leaks sensitive data
                               # back to the caller.
         "/v1/changelog",      # Frontend changelog viewer — public, paired with /v1/errors.
         "/api/v1/ping",       # Liveness probe — no auth required
@@ -1968,7 +1960,7 @@ def create_flask_app(
     # stripper normalises /ft-api/v1/X → /v1/X before URL dispatch, and the
     # Vite dev proxy does the same rewrite. So a single /v1/... registration
     # is reachable from both environments.
-    @app.route("/v1/config/openalgo", methods=["POST"])
+    @app.route("/v1/config/openalgo", methods=["GET", "POST"])
     @limiter.limit("10 per minute")
     def _set_openalgo_config() -> Any:
         """Persist OpenAlgo connection settings from the UI.
@@ -1989,12 +1981,42 @@ def create_flask_app(
                 "message": "This endpoint is only reachable from localhost",
             }), 403
 
+        if request.method == "GET":
+            try:
+                from .workspace import Workspace  # noqa: PLC0415
+                ws = Workspace()
+                if not ws.config_path.exists():
+                    ws.initialise()
+                config = ws.as_dict()
+                openalgo = config.get("openalgo") if isinstance(config, dict) else {}
+                if not isinstance(openalgo, dict):
+                    openalgo = {}
+                api_key = str(openalgo.get("api_key", "") or "")
+                return jsonify({
+                    "status": "success",
+                    "data": {
+                        "api_key_configured": bool(api_key),
+                        "api_key_last4": api_key[-4:] if api_key else "",
+                        "host": str(openalgo.get("host", "") or ""),
+                        "ws_port": openalgo.get("ws_port", 8765),
+                    },
+                }), 200
+            except Exception as exc:
+                logger.error("Failed to read OpenAlgo config from workspace.json: %s", exc)
+                return jsonify({
+                    "status": "error",
+                    "message": f"Could not read config: {exc}",
+                }), 500
+
         payload = request.get_json(silent=True) or {}
+        has_api_key = "api_key" in payload
+        has_host = "host" in payload
+        has_ws_port = "ws_port" in payload
         api_key = str(payload.get("api_key", "")).strip()
         host = str(payload.get("host", "")).strip()
         ws_port = payload.get("ws_port")
 
-        if not api_key and not host and ws_port is None:
+        if not has_api_key and not has_host and not has_ws_port:
             return jsonify({
                 "status": "error",
                 "message": "At least one of api_key, host, ws_port is required",
@@ -2005,12 +2027,12 @@ def create_flask_app(
             from .workspace import Workspace  # noqa: PLC0415
             ws = Workspace()
             if not ws.config_path.exists():
-                ws.initialize()
-            if api_key:
+                ws.initialise()
+            if has_api_key:
                 ws.set("openalgo.api_key", api_key)
-            if host:
+            if has_host:
                 ws.set("openalgo.host", host)
-            if ws_port is not None:
+            if has_ws_port:
                 ws.set("openalgo.ws_port", int(ws_port))
         except Exception as exc:
             logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)
@@ -2019,10 +2041,10 @@ def create_flask_app(
                 "message": f"Could not persist config: {exc}",
             }), 500
 
-        # Re-apply overrides into process env so any code reading .env picks
-        # up the new values immediately.
+        # Settings reads workspace.json directly; log the fresh UI-owned
+        # settings for diagnostics without copying secrets into os.environ.
         try:
-            _apply_workspace_openalgo_overrides()
+            _log_workspace_openalgo_overrides()
         except Exception:
             pass
 
@@ -2281,13 +2303,6 @@ class FlintTradeApp:
     """
 
     def __init__(self) -> None:
-        # Load environment
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()
-        except ImportError:
-            pass
-
         self.version = _read_version()
 
         # Audit logger first — must be available before anything else

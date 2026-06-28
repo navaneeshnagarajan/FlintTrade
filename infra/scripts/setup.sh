@@ -65,21 +65,18 @@ else
 fi
 
 # ------------------------------------------------------------------
-# 3. Configure .env
+# 3. Workspace defaults
 # ------------------------------------------------------------------
-header "Configuration"
+header "Workspace defaults"
 
-if [ ! -f "$FLINTTRADE_DIR/.env" ]; then
-    cp "$FLINTTRADE_DIR/.env.example" "$FLINTTRADE_DIR/.env"
-    warn "Created .env from template. Edit it with your settings before running."
+if [ -f "$FLINTTRADE_DIR/.env" ]; then
+    warn "Using existing .env as an advanced dev/server fallback."
+    set -a
+    source "$FLINTTRADE_DIR/.env" 2>/dev/null || true
+    set +a
 else
-    ok ".env exists"
+    ok "No .env required for native/source setup; app Setup and Settings own runtime config."
 fi
-
-# Source .env for directory paths
-set -a
-source "$FLINTTRADE_DIR/.env" 2>/dev/null || true
-set +a
 
 DATA_DIR="${DATA_DIR:-$FLINTTRADE_DIR/data}"
 LOG_DIR="${LOG_DIR:-$FLINTTRADE_DIR/logs}"
@@ -148,7 +145,7 @@ if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
 else
     warn "OpenAlgo is an optional external integration. To get a local-dev copy for testing, run:"
     warn "    bash scripts/setup-test-deps.sh"
-    warn "Or install OpenAlgo separately and point FlintTrade at it via OPENALGO_HOST in .env."
+    warn "Or install OpenAlgo separately and point FlintTrade at it from Setup/Settings."
 fi
 
 # ------------------------------------------------------------------

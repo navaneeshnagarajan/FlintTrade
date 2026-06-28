@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useConnectionStore } from "../connectionStore";
 
 describe("connectionStore", () => {
@@ -10,6 +10,19 @@ describe("connectionStore", () => {
     const state = useConnectionStore.getState();
     expect(state.status).toBe("disconnected");
     expect(state.wsConnected).toBe(false);
+  });
+
+  it("starts without build-time OpenAlgo connection defaults", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_OPENALGO_HOST", "http://192.0.2.10:5000");
+    vi.stubEnv("VITE_OPENALGO_WS", "ws://192.0.2.10:8765");
+    const { useConnectionStore: freshStore } = await import("../connectionStore");
+
+    const state = freshStore.getInitialState();
+
+    expect(state.host).toBe("");
+    expect(state.wsUrl).toBe("");
+    vi.unstubAllEnvs();
   });
 
   it("updates connection status", () => {

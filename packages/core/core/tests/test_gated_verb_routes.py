@@ -695,8 +695,8 @@ def test_multi_place_unsupported_broker_returns_501() -> None:
 
 
 # ---------------------------------------------------------------------------
-# cancel-all — gated verb for explicitly-named native brokers; legacy forward
-# for the OpenAlgo bridge (its adapter has no cancel_all_orders verb yet)
+# cancel-all — gated verb for explicitly-named native brokers; OpenAlgo bridge
+# cancel-all is disabled until it has a gated BrokerRouter verb.
 # ---------------------------------------------------------------------------
 
 
@@ -714,24 +714,19 @@ def test_cancel_all_named_native_broker_routes_gated() -> None:
     assert kw["hint"].adapter_id == "upstox"
 
 
-def test_cancel_all_without_broker_keeps_legacy_forward(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No explicit broker → the OpenAlgo direct forward is preserved (no regression)."""
+def test_cancel_all_without_broker_fails_closed_until_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No explicit broker must not fall back to the raw OpenAlgo forward."""
     import flinttrade_core.order_routes as orr
 
-    forwarded: dict[str, Any] = {}
-
     def _fake_forward(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]:
-        from flask import jsonify
-
-        forwarded["endpoint"] = endpoint
-        return jsonify({"status": "success"}), 200
+        raise AssertionError(f"raw OpenAlgo forward reached for {endpoint}: {body}")
 
     monkeypatch.setattr(orr, "_forward_to_openalgo", _fake_forward)
     router = _gated_router()
     client = _app(broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/cancel-all", json={}, headers=_live_headers())
-    assert resp.status_code == 200
-    assert forwarded["endpoint"] == "cancelallorder"
+    assert resp.status_code == 501
+    assert "gated broker router" in resp.get_json()["message"]
     router.execute_gated.assert_not_called()
 
 

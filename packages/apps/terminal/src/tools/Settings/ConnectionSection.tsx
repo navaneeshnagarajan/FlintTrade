@@ -44,7 +44,7 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
 
       <FieldRow
         label="API Key"
-        hint="API key for the selected broker bridge. Kept in session storage for this browser tab."
+        hint="API key for the selected broker bridge. Saved in the local FlintTrade workspace; existing saved keys are kept unless you enter a replacement."
       >
         <TextInput
           value={settings.apiKey}

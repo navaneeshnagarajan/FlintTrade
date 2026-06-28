@@ -484,52 +484,18 @@ class TestPracticeMode:
 
 
 # ---------------------------------------------------------------------------
-# 4. Live mode — forwards to OpenAlgo
+# 4. Live mode — gated writes only
 # ---------------------------------------------------------------------------
 
 
 class TestLiveModeForwarding:
-    """Live mode dispatch: ``place`` is gated; other live actions forward.
+    """Live mode dispatch: every executable write must be gated.
 
     After the C1 fix, ``/api/v1/orders/place`` live runs through the SafetySystem
     + one-shot gate + per-account ACL BrokerRouter and NEVER hits the raw OpenAlgo
-    forward. The remaining live actions (place-smart/modify/cancel/...) have no
-    BrokerRouter dispatch yet, so they stay on the direct forward (gated behind
-    the L5 kill switch) — those tests exercise the forward contract via
-    ``place-smart``.
+    forward. Legacy live actions without BrokerRouter verbs fail closed until
+    they are implemented through the same gated channel.
     """
-
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_smart_order_forwards_correctly(self, mock_client_cls, client):
-        # place-smart has no BrokerRouter dispatch yet, so it stays on the direct
-        # forward (gated behind the L5 kill switch) and exercises the forward
-        # payload contract (apikey injection) that /place no longer uses.
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "status": "success",
-            "order_id": "OA-123",
-        }
-        mock_response.status_code = 200
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.return_value = mock_response
-        mock_client_cls.return_value = mock_http
-
-        resp = client.post(
-            "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["order_id"] == "OA-123"
-
-        # Verify the forwarded payload includes apikey
-        call_args = mock_http.post.call_args
-        forwarded_body = call_args.kwargs.get("json") or call_args[1].get("json")
-        assert forwarded_body["apikey"] == _TEST_API_KEY
-        assert forwarded_body["symbol"] == "NIFTY"
 
     @patch("flinttrade_core.order_routes.httpx.Client")
     def test_live_place_order_is_gated_not_forwarded(self, mock_client_cls, client):
@@ -574,70 +540,34 @@ class TestLiveModeForwarding:
         mock_http.post.assert_not_called()
         assert resp.status_code == 403
 
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/api/v1/orders/place-smart",
+            "/api/v1/orders/cancel-all",
+            "/api/v1/orders/close-position",
+            "/api/v1/orders/open-position",
+            "/api/v1/orders/options",
+            "/api/v1/orders/options-multi",
+        ],
+    )
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_forwards_to_correct_openalgo_endpoint(self, mock_client_cls, client):
-        """Each non-place live route should map to the correct OpenAlgo endpoint.
-
-        ``/api/v1/orders/place`` is intentionally absent — it is now gated through
-        the BrokerRouter and no longer forwards (see
-        ``test_live_place_order_is_gated_not_forwarded``).
-        """
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"status": "success"}
-        mock_response.status_code = 200
+    def test_live_legacy_openalgo_actions_fail_closed_until_gated(self, mock_client_cls, endpoint, client):
+        """Legacy live OpenAlgo writes must not use the raw HTTP forward."""
         mock_http = MagicMock()
         mock_http.__enter__ = MagicMock(return_value=mock_http)
         mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.return_value = mock_response
-        mock_client_cls.return_value = mock_http
-
-        # place/modify/cancel are gated through the BrokerRouter and no longer
-        # forward; only these remaining live actions still use the direct forward.
-        endpoint_map = {
-            "/api/v1/orders/place-smart": "placesmartorder",
-            "/api/v1/orders/cancel-all": "cancelallorder",
-            "/api/v1/orders/close-position": "closeposition",
-            "/api/v1/orders/open-position": "openposition",
-            "/api/v1/orders/options": "optionsorder",
-            "/api/v1/orders/options-multi": "optionsmultiorder",
-        }
-
-        for ft_route, oa_endpoint in endpoint_map.items():
-            mock_http.post.reset_mock()
-            resp = client.post(
-                ft_route,
-                json=_SAMPLE_ORDER_BODY,
-                headers=_auth_headers(mode="live", include_live_token=True),
-            )
-            assert resp.status_code == 200, f"Failed for {ft_route}"
-            call_url = mock_http.post.call_args[0][0]
-            assert call_url.endswith(f"/api/v1/{oa_endpoint}"), (
-                f"Expected URL ending with /api/v1/{oa_endpoint}, got {call_url}"
-            )
-
-    @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_propagates_openalgo_error_status(self, mock_client_cls, client):
-        """If OpenAlgo returns an error status on a forwarded action, propagate it."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "status": "error",
-            "message": "Insufficient margin",
-        }
-        mock_response.status_code = 400
-        mock_http = MagicMock()
-        mock_http.__enter__ = MagicMock(return_value=mock_http)
-        mock_http.__exit__ = MagicMock(return_value=False)
-        mock_http.post.return_value = mock_response
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place-smart",
+            endpoint,
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 501
         data = resp.get_json()
-        assert data["message"] == "Insufficient margin"
+        assert "gated broker router" in data["message"]
+        mock_http.post.assert_not_called()
 
     def test_live_without_pin_token_returns_403(self, client):
         """Live orders without a PIN-unlocked JWT must be rejected with 403."""
@@ -652,88 +582,95 @@ class TestLiveModeForwarding:
 
 
 # ---------------------------------------------------------------------------
-# 5. Error handling — connection errors, timeouts, missing API key
-#
-# These exercise _forward_to_openalgo, which (post-C1) is reached only by the
-# non-place live actions, so they target /place-smart.
+# 5. Raw OpenAlgo forwarding helper remains fail-closed
 # ---------------------------------------------------------------------------
 
 
 class TestLiveModeErrors:
-    """Error handling when forwarding a non-place live action to OpenAlgo fails."""
+    """Error handling for the dormant raw OpenAlgo forward helper."""
 
+    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_unreachable_returns_502(self, mock_client_cls, client):
+    def test_openalgo_unreachable_returns_502(self, mock_client_cls, _mock_key):
         import httpx
+        from flask import Flask
+        from flinttrade_core.order_routes import _forward_to_openalgo
+
         mock_http = MagicMock()
         mock_http.__enter__ = MagicMock(return_value=mock_http)
         mock_http.__exit__ = MagicMock(return_value=False)
         mock_http.post.side_effect = httpx.ConnectError("Connection refused")
         mock_client_cls.return_value = mock_http
 
-        resp = client.post(
-            "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 502
+        app = Flask(__name__)
+        with app.app_context():
+            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
+
+        assert status_code == 502
         data = resp.get_json()
         assert "unreachable" in data["message"].lower()
 
+    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_timeout_returns_504(self, mock_client_cls, client):
+    def test_openalgo_timeout_returns_504(self, mock_client_cls, _mock_key):
         import httpx
+        from flask import Flask
+        from flinttrade_core.order_routes import _forward_to_openalgo
+
         mock_http = MagicMock()
         mock_http.__enter__ = MagicMock(return_value=mock_http)
         mock_http.__exit__ = MagicMock(return_value=False)
         mock_http.post.side_effect = httpx.ReadTimeout("Read timed out")
         mock_client_cls.return_value = mock_http
 
-        resp = client.post(
-            "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 504
+        app = Flask(__name__)
+        with app.app_context():
+            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
+
+        assert status_code == 504
         data = resp.get_json()
         assert "timed out" in data["message"].lower()
 
+    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_generic_http_error_returns_502(self, mock_client_cls, client):
+    def test_openalgo_generic_http_error_returns_502(self, mock_client_cls, _mock_key):
         import httpx
+        from flask import Flask
+        from flinttrade_core.order_routes import _forward_to_openalgo
+
         mock_http = MagicMock()
         mock_http.__enter__ = MagicMock(return_value=mock_http)
         mock_http.__exit__ = MagicMock(return_value=False)
         mock_http.post.side_effect = httpx.HTTPError("Something went wrong")
         mock_client_cls.return_value = mock_http
 
-        resp = client.post(
-            "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 502
+        app = Flask(__name__)
+        with app.app_context():
+            _resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
+
+        assert status_code == 502
 
     @patch("flinttrade_core.order_routes._openalgo_api_key", return_value="")
-    def test_missing_api_key_returns_503(self, _mock_key, client):
-        """If OPENALGO_API_KEY is empty for forwarding, live orders return 503.
+    def test_missing_api_key_returns_503(self, _mock_key):
+        """If the helper sees no OpenAlgo API key, it returns 503."""
+        from flask import Flask
+        from flinttrade_core.order_routes import _forward_to_openalgo
 
-        Note: the auth middleware still sees the real env var (so the request
-        passes auth), but _forward_to_openalgo sees an empty key via the
-        patched helper and returns 503.
-        """
-        resp = client.post(
-            "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 503
+        app = Flask(__name__)
+        with app.app_context():
+            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
+
+        assert status_code == 503
         data = resp.get_json()
         assert "API key" in data["message"]
 
+    @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_openalgo_non_json_response(self, mock_client_cls, client):
+    def test_openalgo_non_json_response(self, mock_client_cls, _mock_key):
         """If OpenAlgo returns non-JSON, return an error with the status code."""
+        from flask import Flask
+        from flinttrade_core.order_routes import _forward_to_openalgo
+
         mock_response = MagicMock()
         mock_response.json.side_effect = ValueError("No JSON")
         mock_response.status_code = 500
@@ -743,12 +680,11 @@ class TestLiveModeErrors:
         mock_http.post.return_value = mock_response
         mock_client_cls.return_value = mock_http
 
-        resp = client.post(
-            "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live", include_live_token=True),
-        )
-        assert resp.status_code == 500
+        app = Flask(__name__)
+        with app.app_context():
+            resp, status_code = _forward_to_openalgo("placesmartorder", _SAMPLE_ORDER_BODY)
+
+        assert status_code == 500
         data = resp.get_json()
         assert "Non-JSON" in data["message"]
 

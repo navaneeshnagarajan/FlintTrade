@@ -1,16 +1,22 @@
 # FlintTrade on Raspberry Pi
 
+Raspberry Pi is an advanced server-style deployment target. For ordinary
+desktop use on Linux, macOS, or Windows, prefer the native desktop installer.
+
 ## Requirements
 - Raspberry Pi 4 or 5 (4GB RAM minimum, 8GB recommended)
 - Raspberry Pi OS 64-bit (Bookworm)
 - 32GB+ SD card or USB SSD
 
-## Setup (ARM64)
+## Setup (ARM64 Server)
 1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
 2. `cd FlintTrade`
 3. `bash infra/scripts/setup-production.sh`
-4. `nano .env`
-5. `sudo systemctl start flinttrade`
+4. `sudo systemctl start flinttrade`
+5. Open the terminal URL and complete Setup in the app UI.
 
-Note: Backtest and AI packages may be slow on Pi 4.
-Disable them in .env: `ENABLE_BACKTEST=false ENABLE_AI=false`
+Broker/OpenAlgo configuration belongs in Setup or Settings. `.env` is only for
+server-only fallback values that cannot be supplied through the UI.
+
+Note: Backtest and AI packages may be slow on Pi 4. Prefer disabling optional
+modules from the workspace settings for lightweight installations.

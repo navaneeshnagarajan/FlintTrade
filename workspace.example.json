@@ -2,7 +2,7 @@
   "_comment": [
     "EXAMPLE workspace.json — copy to your FlintTrade home and edit.",
     "Locations: Linux ~/.flinttrade/workspace.json | macOS ~/Library/Application Support/flinttrade/workspace.json | Windows %APPDATA%/flinttrade/workspace.json (override with FLINTTRADE_HOME).",
-    "This file is user PREFERENCES only. Infrastructure (OpenAlgo host/ports) lives in .env; hardened secrets live as ACL-locked files under your FlintTrade home — never here.",
+    "This file is user configuration. Setup/Settings write OpenAlgo bridge settings here; hardened app secrets live as ACL-locked files under your FlintTrade home.",
     "Secrets are NEVER stored in plaintext: *_ref fields name a keyring/env entry that is resolved at runtime. Leave them empty or point them at a reference; never paste a real token.",
     "FlintTrade writes this file with sorted keys on save, and creates it from defaults on first run — you usually do not need to hand-write it. The _comment keys are ignored by the config reader and safe to keep or delete.",
     "British spelling in any prose you add. Never commit your real workspace.json (it is gitignored)."
@@ -79,7 +79,7 @@
     "telegram_enabled": false
   },
   "openalgo": {
-    "_comment": "Mirror of the optional OpenAlgo-compatible bridge. The authoritative connection settings are in .env (OPENALGO_HOST / OPENALGO_PORT / OPENALGO_WS_PORT). Loopback placeholders shown.",
+    "_comment": "Optional OpenAlgo-compatible bridge settings written by Setup/Settings. Broker credentials stay in OpenAlgo; FlintTrade stores only the bridge URL, WebSocket port, and OpenAlgo API key when enabled.",
     "host": "http://127.0.0.1:5000",
     "ws_port": 8765
   },

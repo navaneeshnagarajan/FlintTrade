@@ -34,9 +34,9 @@ export default function ContributePage() {
       <section className="subpage">
         <h1>Contribute without getting lost.</h1>
         <p>
-          FlintTrade spans Python services, a React terminal, Rust tick processing, a Chrome extension,
-          and a desktop shell. The public docs and MCP tools are designed to get contributors to the right
-          package, tests, and context quickly.
+          FlintTrade spans Python services, a React terminal, Rust tick processing,
+          native broker integrations, and a desktop shell. The public docs and MCP tools are designed
+          to get contributors to the right package, tests, and context quickly.
         </p>
 
         <div className="feature-grid">

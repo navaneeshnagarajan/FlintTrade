@@ -26,13 +26,17 @@ cd "$INSTALL_DIR"
 echo "Installing Python dependencies..."
 pip install --break-system-packages --require-hashes -r requirements.lock
 
-# Create .env if not present
+# Create a minimal server fallback env file if not present. OpenAlgo and broker
+# settings should be completed in the app Setup/Settings UI.
 if [ ! -f .env ]; then
-    echo "Creating .env from template..."
-    cp .env.example .env
+    echo "Creating minimal server fallback .env..."
+    {
+        echo "# FlintTrade server fallback environment."
+        echo "# Use Setup/Settings for OpenAlgo and broker configuration."
+    } > .env
+    chmod 600 .env
     echo ""
-    echo "IMPORTANT: Edit .env with your credentials before starting:"
-    echo "  nano $INSTALL_DIR/.env"
+    echo "Runtime configuration is completed from the app UI after startup."
     echo ""
 fi
 
@@ -50,4 +54,4 @@ sudo systemctl enable flinttrade
 
 echo ""
 echo "=== Setup complete ==="
-echo "Next: Edit .env then run: sudo systemctl start flinttrade"
+echo "Next: sudo systemctl start flinttrade, then complete Setup in the app UI"

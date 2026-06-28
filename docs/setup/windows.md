@@ -1,29 +1,38 @@
 # FlintTrade on Windows
 
-## Option A — Docker (Recommended, easiest)
-1. Install Docker Desktop: https://docs.docker.com/desktop/install/windows-install/
-2. Open PowerShell:
-   ```powershell
-   git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-   cd FlintTrade
-   copy .env.example .env
-   notepad .env   # Optional: add FLINTTRADE_API_KEY and OpenAlgo bridge settings
-   docker compose up
-   ```
-3. Open http://localhost:5173
+## Option A — Native Desktop (Recommended)
+
+1. Download the `.msi` or `.exe` installer from the release page.
+2. Install FlintTrade like any other Windows app.
+3. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
+   in the app; no `.env` file is required.
+
+To build the installer locally:
+
+```powershell
+uv sync
+uv pip install pyinstaller
+pnpm install
+make desktop-build
+```
 
 ## Option B — WSL2 (Native performance)
 1. Install WSL2: `wsl --install`
 2. Open Ubuntu terminal in WSL2
 3. Follow Linux setup instructions ([docs/setup/linux.md](linux.md))
 
-## Option C — Native Windows (Advanced)
-Requires: Python 3.12, Node.js 22, Git
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `cd FlintTrade`
-3. `copy .env.example .env`
-4. `pip install -r requirements.txt`
-5. `python packages/core/core/src/app.py`
+## Option C — Source Development (Advanced)
+
+Requires: Python 3.12, Node.js 22+, Git, and optionally Rust.
+
+```powershell
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+make setup
+make dev
+```
+
+Open http://localhost:5173.
 
 Note: systemd not available on Windows.
 Use Task Scheduler or NSSM to run as a Windows service.

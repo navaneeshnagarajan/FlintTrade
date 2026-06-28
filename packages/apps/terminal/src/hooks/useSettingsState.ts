@@ -77,6 +77,57 @@ export interface DataPathsData {
   archiveStoragePath: string;
 }
 
+interface OpenAlgoConfigResponse {
+  status: string;
+  data?: {
+    api_key_configured?: boolean;
+    api_key_last4?: string;
+    host?: string;
+    ws_port?: string | number;
+  };
+}
+
+export function isAcceptedOpenAlgoConfigStatus(status?: string): boolean {
+  return !status || ["ok", "success", "partial"].includes(status);
+}
+
+function deriveWsUrl(host: string, wsPort: string): string {
+  if (!host.trim()) return "";
+  try {
+    const parsed = new URL(host);
+    const protocol = parsed.protocol === "https:" ? "wss" : "ws";
+    return `${protocol}://${parsed.hostname}:${wsPort || "8765"}`;
+  } catch {
+    return `ws://127.0.0.1:${wsPort || "8765"}`;
+  }
+}
+
+function wsPortFromUrl(wsUrl: string): string {
+  try {
+    const wsUrlObj = new URL(wsUrl.replace(/^ws/, "http"));
+    return wsUrlObj.port || "8765";
+  } catch {
+    return "8765";
+  }
+}
+
+async function persistOpenAlgoPatch(connection: Partial<ConnectionData>): Promise<void> {
+  const body: Record<string, string> = {};
+  if ("apiKey" in connection) body.api_key = connection.apiKey ?? "";
+  if ("host" in connection) body.host = connection.host ?? "";
+  if ("wsPort" in connection) body.ws_port = connection.wsPort ?? "";
+
+  const response = await fetch("/ft-api/v1/config/openalgo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({})) as { status?: string; message?: string };
+  if (!response.ok || !isAcceptedOpenAlgoConfigStatus(payload.status)) {
+    throw new Error(payload.message || `HTTP ${response.status}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hook return type
 // ---------------------------------------------------------------------------
@@ -132,10 +183,39 @@ export function useSettingsState(): SettingsState {
   // ---- restart state (local — not persisted) ----
   const [restarting, setRestarting] = useState(false);
   const restartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingConnectionPatchRef = useRef<Partial<ConnectionData>>({});
 
   // Cleanup pending restart timer when the component that owns this hook unmounts
   useEffect(() => {
     return () => { if (restartRef.current) clearTimeout(restartRef.current); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/ft-api/v1/config/openalgo")
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<OpenAlgoConfigResponse>;
+      })
+      .then((payload) => {
+        if (cancelled || payload.status !== "success") return;
+        const data = payload.data ?? {};
+        const patch = pendingConnectionPatchRef.current;
+        const current = useConnectionStore.getState();
+        const host = "host" in patch ? String(patch.host ?? "") : String(data.host ?? "");
+        const apiKey = "apiKey" in patch ? String(patch.apiKey ?? "") : current.apiKey;
+        const wsPort = "wsPort" in patch ? String(patch.wsPort ?? "") : String(data.ws_port ?? "8765");
+        useConnectionStore.getState().setConfig({
+          host,
+          apiKey,
+          wsUrl: deriveWsUrl(host, wsPort),
+        });
+      })
+      .catch((err) => {
+        console.warn("[settings] failed to hydrate OpenAlgo config:", err);
+      });
+
+    return () => { cancelled = true; };
   }, []);
 
   // ---- Actions ----
@@ -191,22 +271,25 @@ export function useSettingsState(): SettingsState {
   }, []);
 
   const updateConnection = useCallback((field: keyof ConnectionData, value: string) => {
+    pendingConnectionPatchRef.current = { ...pendingConnectionPatchRef.current, [field]: value };
+    const current = useConnectionStore.getState();
+    let host = current.host;
+    let apiKey = current.apiKey;
+    let wsPort = wsPortFromUrl(current.wsUrl);
+
     if (field === "host") {
-      useConnectionStore.getState().setConfig({ host: value });
+      host = value;
     } else if (field === "apiKey") {
-      useConnectionStore.getState().setConfig({ apiKey: value });
+      apiKey = value;
     } else if (field === "wsPort") {
-      // Derive wsUrl from current host + new port, respecting https → wss
-      const host = useConnectionStore.getState().host;
-      try {
-        const parsed = new URL(host);
-        const protocol = parsed.protocol === "https:" ? "wss" : "ws";
-        useConnectionStore.getState().setConfig({ wsUrl: `${protocol}://${parsed.hostname}:${value}` });
-      } catch {
-        // If host isn't a valid URL yet, just store the partial wsUrl
-        useConnectionStore.getState().setConfig({ wsUrl: `ws://127.0.0.1:${value}` });
-      }
+      wsPort = value;
     }
+    const wsUrl = deriveWsUrl(host, wsPort);
+    useConnectionStore.getState().setConfig({ host, apiKey, wsUrl });
+    const save = persistOpenAlgoPatch({ [field]: value });
+    void save.catch((err) => {
+      console.warn("[settings] failed to persist OpenAlgo config:", err);
+    });
   }, []);
 
   const handleRestart = useCallback((onDone?: (msg: string) => void) => {
@@ -286,15 +369,7 @@ export function useSettingsState(): SettingsState {
   );
 
   const connection = useMemo<ConnectionData>(() => {
-    // Extract port from wsUrl; fall back to "8765"
-    let wsPort = "8765";
-    try {
-      const wsUrlObj = new URL(connWsUrl.replace(/^ws/, "http"));
-      wsPort = wsUrlObj.port || "8765";
-    } catch {
-      // default
-    }
-    return { host: connHost, apiKey: connApiKey, wsPort };
+    return { host: connHost, apiKey: connApiKey, wsPort: wsPortFromUrl(connWsUrl) };
   }, [connHost, connApiKey, connWsUrl]);
 
   return {

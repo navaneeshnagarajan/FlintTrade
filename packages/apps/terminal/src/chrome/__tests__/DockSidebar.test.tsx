@@ -6,8 +6,8 @@
  * and Settings always appearing at the bottom.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router-dom";
 
@@ -104,6 +104,14 @@ vi.mock("@/stores/sidebarStore", () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
+beforeAll(() => {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
+
 function renderSidebar(pathname = "/trade") {
   return render(
     <MemoryRouter initialEntries={[pathname]}>
@@ -173,6 +181,26 @@ describe("DockSidebar", () => {
 
     expect(screen.getByTestId("sidebar-item-home-button")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-item-settings-button")).toBeInTheDocument();
+  });
+
+  it("renders icon-mode tooltips through the shared overlay portal", async () => {
+    const { container } = renderSidebar("/trade");
+
+    const homeButton = screen.getByRole("button", { name: "Home" });
+    fireEvent.pointerEnter(homeButton);
+    fireEvent.focus(homeButton);
+
+    await waitFor(() => {
+      const tooltip = screen.getByRole("tooltip");
+      const tooltipContent = document.body.querySelector('[data-slot="tooltip-content"]');
+      if (!tooltipContent) throw new Error("Tooltip portal content was not rendered");
+
+      expect(tooltip).toHaveTextContent("Home");
+      expect(tooltipContent).toHaveTextContent("Home");
+      expect(tooltipContent).toHaveClass("z-[120]");
+      expect(container).not.toContainElement(tooltipContent as HTMLElement);
+      expect(document.body).toContainElement(tooltipContent as HTMLElement);
+    });
   });
 
   it("does not mark inactive routes with aria-current", () => {

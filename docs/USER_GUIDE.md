@@ -19,31 +19,35 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 ## 1. Installation
 
 FlintTrade runs on Windows, macOS, and Linux (including Raspberry Pi). The
-quickest path is `make setup` from a fresh clone — it installs Python and
-Node dependencies, creates the `~/.flinttrade/` workspace, and prepares
-FlintTrade's backend for connection.
+normal path is the native desktop installer. It bundles the backend sidecar and
+terminal UI, creates the OS workspace on first launch, and opens Setup without
+requiring `.env` or a browser dev server.
 
-### Prerequisites
+### Native desktop
 
-- **Python 3.12+** (every package declares `requires-python >=3.12,<3.14`).
-- **Node.js 22+** (24 recommended for current LTS parity).
-- **Git**.
-- **Broker access.** FlintTrade can use its own broker gateway as adapters
-  mature, and it can also connect to an existing OpenAlgo-compatible server.
-
-### Quick install (any platform)
+Download an installer from the repository releases page. Advanced users can
+build the installer from source:
 
 ```bash
-git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-cd FlintTrade
-make setup
-cp .env.example .env       # optional; configure integrations when needed
-make start                 # starts the FlintTrade backend
-cd packages/apps/terminal && npm install && npm run dev
+uv sync && uv pip install pyinstaller && pnpm install
+make desktop-build
 ```
 
-Open `http://localhost:5173` once the dev server is ready. You should land on
-`/welcome` — the first-time cinematic intro.
+Install the generated package from
+`packages/apps/desktop/src-tauri/target/release/bundle/`, launch FlintTrade,
+and follow the first-time Setup flow.
+
+### Contributor source mode
+
+Use this only when developing FlintTrade itself. It requires Python 3.12+,
+Node.js 22+, Git, and optionally Rust for `core/ticks`.
+
+```bash
+make setup
+make dev
+```
+
+Open `http://localhost:5173` once the dev server is ready.
 
 ### Platform-specific setup
 
@@ -80,20 +84,12 @@ run OpenAlgo.
 3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
    copy the generated API key. This is the key FlintTrade uses for the
    OpenAlgo-compatible bridge only (not your broker's key).
-4. **Optional: set the OpenAlgo key in FlintTrade.** Edit `.env` in the
-   FlintTrade repo root:
-
-   ```env
-   OPENALGO_HOST=http://127.0.0.1:5000
-   OPENALGO_PORT=5000
-   OPENALGO_API_KEY=<paste-here>
-   OPENALGO_WS_PORT=8765
-   ```
-
-5. **Restart the terminal.** Kill the `npm run dev` server, run it again,
-   and open `http://localhost:5173/setup`. Walk through the wizard — it will
-   verify the OpenAlgo connection on the last step when you configure that
-   bridge.
+4. **Set the OpenAlgo key in FlintTrade.** Open Setup → OpenAlgo Bridge, or
+   Settings → Broker Gateway, then paste the OpenAlgo URL and API key. The app
+   stores these settings in the OS workspace and hot-reloads the backend client.
+5. **Verify the bridge.** Use the Test Connection button in the same UI. Source
+   contributors can open `http://localhost:5173/setup`; desktop users use the
+   in-app setup window.
 
 ### Why two layers?
 
@@ -408,19 +404,7 @@ in-process inside `packages/services/ditto/` (no external service required).
 
 FlintTrade has two layers of configuration:
 
-### Layer 1: `.env` (infrastructure)
-
-Lives in the repo root, never committed. OpenAlgo variables are only needed
-when you enable the OpenAlgo-compatible bridge:
-
-| Variable | Purpose |
-|---|---|
-| `OPENALGO_HOST` | OpenAlgo server URL (default `http://127.0.0.1:5000`) |
-| `OPENALGO_PORT` | OpenAlgo server port (default `5000`) |
-| `OPENALGO_API_KEY` | The API key copied from OpenAlgo's dashboard |
-| `OPENALGO_WS_PORT` | OpenAlgo WebSocket port (default `8765`) |
-
-### Layer 2: `workspace.json` (user preferences)
+### Layer 1: `workspace.json` (user preferences and integration settings)
 
 Lives in your platform-specific workspace directory:
 
@@ -431,7 +415,7 @@ Lives in your platform-specific workspace directory:
 | Windows | `%APPDATA%/flinttrade/workspace.json` |
 | Override | `FLINTTRADE_HOME` environment variable |
 
-The `/settings` route exposes a form UI over `workspace.json`. Key
+The Setup and Settings UI write `workspace.json`. Key
 sections:
 
 | Section | Maps to | Configures |
@@ -442,6 +426,12 @@ sections:
 | **Notifications** | `telegram.*`, `whatsapp.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L thresholds for auto-pause and auto-kill. |
 | **Order safety** | `sebi.audit_retention_days`, `sebi.rate_limit_*` | Local audit retention, per-endpoint rate limits, and kill-switch settings. |
+
+### Layer 2: `.env` (advanced dev/server fallback)
+
+Native desktop users do not need `.env`. The repo-root `.env.example` exists
+only for Docker/systemd deployments, CI experiments, and contributor fallback
+testing when a setting cannot be supplied through the app UI.
 
 Secrets are stored as `_ref` fields — references to the OS keyring or to
 environment variables. They are never written to `workspace.json` in clear

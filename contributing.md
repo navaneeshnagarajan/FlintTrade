@@ -42,10 +42,15 @@ corepack enable
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-cp .env.example .env             # non-secret infrastructure only — never commit .env
 uv sync                          # Python interpreter + all Python package deps
 pnpm install                     # JS/TS workspace deps (terminal, site, …)
 ```
+
+Do not copy `.env.example` as a normal native-app setup step. Use the app's
+Setup and Settings UI for broker/OpenAlgo, LLM, notification, and storage
+configuration. Copy `.env.example` to `.env` only for advanced Docker/systemd
+server deployments or contributor experiments that deliberately exercise env
+fallbacks.
 
 To build the Rust `ticks` tick engine (optional unless you touch it):
 
@@ -171,7 +176,7 @@ hostnames, VPN configs or endpoints, broker account names or IDs, fund amounts,
 order IDs, API keys, or `.env`. FlintTrade is personal-use open-source: anything
 that points at *your* machine, network, or accounts stays out of the repo. Use
 placeholders (`<YOUR_HOSTNAME>`, `<YOUR_SERVER_IP>`) in examples, keep real
-values in your private, gitignored `.env`, and store secrets as keyring/env
+values in your private, gitignored `.env` only for dev/server fallback paths, and store secrets as keyring/env
 `_ref` references — never plaintext. The `secrets-check` (gitleaks) CI job and a
 pre-commit hook are backstops, not a substitute for not staging the file.
 

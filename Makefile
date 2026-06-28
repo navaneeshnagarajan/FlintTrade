@@ -11,7 +11,7 @@
 # The following targets require WSL2 or Docker on Windows (they use bash
 # scripts, systemd, or Linux-only tools):
 #   make start, make stop, make restart, make dev, make status, make health,
-#   make setup, make update, make clean, make install-docker, make install-native,
+#   make setup, make update, make clean, make install-docker, make install-server-native,
 #   make backup, make restore, make sync-check, make audit
 # ============================================================================
 
@@ -42,7 +42,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
 
 # ======================================================================
 # Setup
@@ -210,7 +210,7 @@ full-check: ## Run full health check (tests + lint + typecheck)
 	@set -o pipefail; $(PYTHON) -m ruff check packages/*/*/src/ --statistics 2>&1 | tail -5
 	@echo -e "$(YELLOW)--- Terminal ---$(RESET)"
 	@cd packages/apps/terminal && set -o pipefail; npm run typecheck 2>&1 | tail -2
-	@cd packages/apps/terminal && set -o pipefail; npx vitest run 2>&1 | tail -3
+	@cd packages/apps/terminal && set -o pipefail; npm run test:vitest 2>&1 | tail -3
 	@echo -e "$(GREEN)=== Done ===$(RESET)"
 
 audit: ## Check repo absorption status
@@ -248,8 +248,10 @@ logs-clear: ## Truncate runtime .log files under .local/dev-logs/
 install-docker: ## Install FlintTrade with Docker (production)
 	@bash infra/install/install-docker.sh
 
-install-native: ## Install FlintTrade on bare metal (Ubuntu/Debian)
+install-server-native: ## Advanced: install FlintTrade as bare-metal Ubuntu/Debian server services
 	@bash infra/install/install-native.sh
+
+install-native: install-server-native ## Deprecated alias for install-server-native; desktop app users want desktop-build
 
 backup: ## Run restic backup of FlintTrade data
 	@bash infra/backup/backup.sh

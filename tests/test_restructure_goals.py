@@ -208,3 +208,33 @@ def test_reset_state_restart_uses_flinttrade_backend_module() -> None:
 
     assert "-m flinttrade_core.app" in script
     assert "python -m packages.core.src.app" not in script
+
+
+def test_native_setup_does_not_create_env_for_normal_source_setup() -> None:
+    """Normal setup must not turn .env into a required native/source step."""
+    script = (ROOT / "infra" / "scripts" / "setup.sh").read_text(encoding="utf-8")
+
+    assert "cp \"$FLINTTRADE_DIR/.env.example\" \"$FLINTTRADE_DIR/.env\"" not in script
+    assert "No .env required for native/source setup" in script
+
+
+def test_server_installer_keeps_openalgo_config_in_ui() -> None:
+    """The advanced server installer may have an EnvironmentFile, but not OpenAlgo-first setup."""
+    installer = (ROOT / "infra" / "install" / "install-native.sh").read_text(encoding="utf-8")
+    docker_installer = (ROOT / "infra" / "install" / "install-docker.sh").read_text(encoding="utf-8")
+
+    assert "cp \"$INSTALL_DIR/.env.example\" \"$INSTALL_DIR/.env\"" not in installer
+    assert "Set OPENALGO_API_KEY" not in installer
+    assert "Settings -> Broker Gateway" in installer
+    assert "cp \"$INSTALL_DIR/.env.example\" \"$INSTALL_DIR/.env\"" not in docker_installer
+    assert "Set OPENALGO_API_KEY" not in docker_installer
+    assert "Settings -> Broker Gateway" in docker_installer
+
+
+def test_workspace_example_documents_ui_owned_openalgo_config() -> None:
+    """workspace.example.json should describe OpenAlgo as UI/workspace config."""
+    workspace_example = (ROOT / "workspace.example.json").read_text(encoding="utf-8")
+
+    assert "Setup/Settings" in workspace_example
+    assert "authoritative connection settings are in .env" not in workspace_example
+    assert "OpenAlgo host/ports) lives in .env" not in workspace_example

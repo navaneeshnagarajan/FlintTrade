@@ -365,9 +365,11 @@ but it is no longer required for native FlintTrade practice/explore flows.
 When neither key exists, loopback-only local requests are allowed so a fresh
 desktop/dev install can reach native setup and sandbox endpoints.
 
-The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. That
-key is read from `.env` (`OPENALGO_API_KEY`) and forwarded as the `X-API-KEY`
-header by `OpenAlgoClient` only for OpenAlgo/live bridge calls.
+The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. The app
+reads that key from Setup/Settings-backed workspace config first, with
+`OPENALGO_API_KEY` retained only as an advanced dev/server fallback, then
+forwards it as the `X-API-KEY` header by `OpenAlgoClient` only for
+OpenAlgo/live bridge calls.
 
 ---
 

@@ -6,8 +6,8 @@ Cross-platform workspace location:
   Windows: %APPDATA%/flinttrade/
   Override: FLINTTRADE_HOME env var
 
-All user preferences (paths, modules, LLM, Telegram, SEBI settings) live
-in workspace.json. Infrastructure settings (OpenAlgo connection) stay in .env.
+All user preferences and UI-owned integration settings live in workspace.json.
+.env is retained only as an advanced dev/server fallback.
 """
 
 from __future__ import annotations

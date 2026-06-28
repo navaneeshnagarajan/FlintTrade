@@ -36,20 +36,37 @@ and user-side validation before any live use. Optional OpenAlgo-compatible
 integrations remain available for users who already run OpenAlgo separately;
 see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
-## Quickstart (5-minute Docker)
+## Quickstart (native desktop)
+
+For normal use, install FlintTrade like any other desktop app. The installer
+bundles the backend sidecar and terminal UI, creates the OS workspace on first
+launch, and lets you configure native brokers or an optional OpenAlgo bridge
+from Setup and Settings — no `.env` file or browser dev server required.
+
+| OS | Packages | Architectures |
+|---|---|---|
+| macOS | `.dmg`, `.app` | Apple Silicon (arm64) + Intel (x64) |
+| Windows | `.msi`, `.exe` (NSIS) | x64 |
+| Linux | `.deb`, `.rpm`, `.AppImage` | x64 + arm64 |
+
+Download an installer from the repository releases page, or build it yourself:
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-cp .env.example .env   # optional: set OPENALGO_API_KEY if using OpenAlgo
-docker-compose up
+uv sync && uv pip install pyinstaller && pnpm install
+make desktop-build
 ```
 
-Open <http://localhost:5173> and follow the welcome wizard.
+Install the generated package from
+`packages/apps/desktop/src-tauri/target/release/bundle/`, launch FlintTrade,
+and follow the welcome wizard.
 
-> OpenAlgo is optional. Run it on port 5000 only if you want the OpenAlgo integration path; FlintTrade's own backend runs on port 5100.
+> OpenAlgo is optional. Configure it from the app only if you want the
+> OpenAlgo-compatible integration path; FlintTrade's native gateway and sandbox
+> do not require a separate OpenAlgo process.
 
-## Local development
+## Contributor development
 
 ```bash
 make setup
@@ -65,27 +82,13 @@ The root `Makefile` is the main entry point:
   and Vite build.
 - `cd packages/apps/terminal && npm run test` runs Vitest.
 
----
+### Advanced server and Docker modes
 
-## Desktop app (Linux / Windows / macOS)
-
-FlintTrade also ships as a **native desktop application** — the backend and
-terminal bundled into a single installable package, with **no server to run and
-no `.env` to configure**.
-
-| OS | Packages | Architectures |
-|---|---|---|
-| macOS | `.dmg`, `.app` | Apple Silicon (arm64) + Intel (x64) |
-| Windows | `.msi`, `.exe` (NSIS) | x64 |
-| Linux | `.deb`, `.rpm`, `.AppImage` | x64 + arm64 |
-
-Download an installer from the repository releases page, or build it yourself:
-
-```bash
-uv sync && uv pip install pyinstaller && pnpm install
-make desktop-build      # installers → packages/apps/desktop/src-tauri/target/release/bundle/
-make desktop-dev        # or run the desktop app in dev mode
-```
+Docker, Nginx, and systemd assets remain for contributors and advanced
+self-host/server deployments. They are not the native desktop install path. In
+those modes, `.env.example` is a dev/server fallback template only; in-app
+Setup and Settings remain the preferred way to configure OpenAlgo for local
+desktop use.
 
 Architecture, per-OS install/uninstall, and the CI release matrix are documented
 in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
@@ -158,7 +161,7 @@ and 1 Rust/PyO3 tick engine.
 
 ### Three ways in
 
-- **Try it locally** — follow the [5-minute Docker quickstart](#quickstart-5-minute-docker) above and explore in sandbox mode.
+- **Try it locally** — install or build the [native desktop app](#quickstart-native-desktop) and explore in sandbox mode.
 - **Build with it** — read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for repo layout, adding widgets, and adding broker adapters.
 - **Contribute** — see [contributing.md](contributing.md) for branch strategy, commit conventions, and good-first-issues.
 

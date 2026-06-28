@@ -164,11 +164,17 @@ def _openalgo_base_url() -> str:
 
 
 def _openalgo_api_key() -> str:
-    """Return the OpenAlgo API key from environment.
+    """Return the OpenAlgo API key from app config or environment.
 
     Returns:
         API key string (may be empty — callers should handle that case).
     """
+    client = current_app.config.get("CLIENT")
+    if client is not None:
+        try:
+            return str(client.settings.openalgo_api_key)
+        except AttributeError:
+            pass
     return os.environ.get("OPENALGO_API_KEY", "")
 
 
@@ -947,15 +953,15 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     # Live mode — single gated, selector-bound execution channel (C1).
     #
     # ``place`` runs the full SafetySystem (L1-L5) + one-shot HMAC gate +
-    # per-account ACL via the BrokerRouter; ``modify`` and ``cancel`` run the same
-    # one-shot gate + ACL (modify also behind the L5 kill switch), and
+    # per-account ACL via the BrokerRouter. ``modify`` and ``cancel`` run the
+    # same one-shot gate + ACL (modify also behind the L5 kill switch), and
     # ``cancel-all`` for an explicitly-named native broker routes through the
-    # gated ``cancel_all_orders`` verb. The remaining live actions
-    # (smart/options/gtt/close/open + the OpenAlgo cancel-all) have no
-    # BrokerRouter dispatch method yet, so they stay on the direct forward —
-    # still gated behind the L5 kill switch so a halted account cannot push ANY
-    # live order. Gating those is a scoped follow-up (needs
-    # BrokerRouter.place_smart_order, etc.).
+    # gated ``cancel_all_orders`` verb.
+    #
+    # Other legacy OpenAlgo write verbs intentionally fail closed until they
+    # have BrokerRouter verbs. Workspace/UI OpenAlgo settings can now provide a
+    # live API key, so leaving the old direct forward in place would wake an
+    # ungated order path.
     # ------------------------------------------------------------------
     if not _is_live_mode_unlocked():
         logger.warning(
@@ -983,9 +989,8 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return _dispatch_live_cancel(body, live_payload, adapter_id="openalgo")
     if ft_action == "cancel-all" and str(body.get("broker") or "").strip().lower() not in ("", "openalgo"):
         # Native adapters sweep through the gated cancel_all_orders verb
-        # (one-shot SafetyContext + ACL). The OpenAlgo bridge keeps the direct
-        # cancelallorder forward below — its adapter does not expose the verb
-        # yet, so gating it would 501 a flow that works today.
+        # (one-shot SafetyContext + ACL). OpenAlgo bridge cancel-all has no
+        # gated verb yet and is rejected by the fail-closed block below.
         adapter_id, account_id = _gated_target(body)
         fields = {k: str(body[k]) for k in ("tag", "segment") if body.get(k) is not None}
         return _gated_verb_write(
@@ -994,32 +999,18 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             audit_event="ORDERS_CANCELLED_ALL", fail_message="Cancel-all failed",
         )
 
-    # Remaining live action (smart/options/gtt/cancel-all/close/open): no
-    # BrokerRouter dispatch yet, so forward directly — gated behind the kill switch.
-    blocked = _live_kill_switch_block()
-    if blocked is not None:
-        logger.warning(
-            "Live %s blocked by kill switch | symbol=%s: %s",
-            ft_action, body.get("symbol", "?"), blocked.reason,
-        )
-        return jsonify({
-            "status": "error",
-            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-        }), 403
-
-    logger.info(
-        "Live order | action=%s symbol=%s exchange=%s qty=%s (forward; kill-switch checked)",
-        ft_action,
-        body.get("symbol", "?"),
-        body.get("exchange", "?"),
-        body.get("quantity", "?"),
+    logger.warning(
+        "Live order action rejected until gated BrokerRouter support exists | "
+        "action=%s endpoint=%s symbol=%s",
+        ft_action, openalgo_endpoint, body.get("symbol", "?"),
     )
-    response, status_code = _forward_to_openalgo(openalgo_endpoint, body)
-    logger.info(
-        "Live order result | action=%s symbol=%s → HTTP %d",
-        ft_action, body.get("symbol", "?"), status_code,
-    )
-    return response, status_code
+    return jsonify({
+        "status": "error",
+        "message": (
+            f"Live action '{ft_action}' is disabled until it is routed through "
+            "the gated broker router"
+        ),
+    }), 501
 
 
 def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dict[str, Any]:

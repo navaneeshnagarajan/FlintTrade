@@ -17,7 +17,7 @@
  *   - Separator items between groups
  */
 
-import { useRef, useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, Reorder, useSpring, useTransform } from "framer-motion";
 import {
@@ -35,6 +35,12 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useSidebarStore } from "@/stores/sidebarStore";
 import type { SidebarItem } from "@/stores/sidebarStore";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ---------------------------------------------------------------------------
 // Icon registry — explicit imports for tree-shaking
@@ -61,42 +67,6 @@ const WIDTH_ICONS = 52;
 const WIDTH_EXPANDED = 160;
 const WIDTH_STRIP = 4;
 const AUTO_HIDE_COLLAPSE_DELAY = 300;
-
-// ---------------------------------------------------------------------------
-// DockItemTooltip
-// ---------------------------------------------------------------------------
-
-interface TooltipProps {
-  label: string;
-  visible: boolean;
-}
-
-function DockItemTooltip({ label, visible }: TooltipProps) {
-  return (
-    <motion.div
-      role="tooltip"
-      initial={{ opacity: 0, x: -6 }}
-      animate={{ opacity: visible ? 1 : 0, x: visible ? 0 : -6 }}
-      transition={{ duration: 0.15, ease: "easeOut" }}
-      style={{ pointerEvents: "none" }}
-      className="absolute left-[52px] top-1/2 -translate-y-1/2 z-50 ml-2
-                 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap
-                 text-text-primary select-none"
-      aria-hidden={!visible}
-    >
-      {/* Glass background */}
-      <span
-        className="absolute inset-0 rounded-md border border-glass-chrome"
-        style={{
-          background: "var(--glass-chrome-bg, rgba(20,20,32,0.88))",
-          backdropFilter: "blur(8px)",
-        }}
-        aria-hidden="true"
-      />
-      <span className="relative z-10">{label}</span>
-    </motion.div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // ActiveIndicator
@@ -126,7 +96,6 @@ interface DockRouteItemProps {
 }
 
 function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemProps) {
-  const [hovered, setHovered] = useState(false);
   const Icon = ICON_MAP[item.icon] ?? Home;
 
   const handleClick = useCallback(() => {
@@ -143,54 +112,65 @@ function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemP
     [item.route, onNavigate],
   );
 
+  const button = (
+    <motion.button
+      type="button"
+      aria-label={item.label}
+      aria-current={isActive ? "page" : undefined}
+      data-testid={`sidebar-item-${item.id}-button`}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      whileHover={{ scale: 1.12 }}
+      whileTap={{ scale: 0.96 }}
+      transition={{ type: "spring", stiffness: 400, damping: 20 }}
+      className={[
+        "relative flex items-center gap-2.5 rounded-[10px] transition-colors duration-150 outline-none",
+        "focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60",
+        showLabel
+          ? "w-full px-3 py-2 justify-start"
+          : "w-9 h-9 justify-center",
+        isActive
+          ? "bg-surface-active text-text-primary"
+          : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
+      ].join(" ")}
+    >
+      <Icon
+        size={16}
+        strokeWidth={isActive ? 2 : 1.75}
+        aria-hidden="true"
+        className="shrink-0"
+      />
+      {showLabel && (
+        <motion.span
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-xs font-medium truncate"
+        >
+          {item.label}
+        </motion.span>
+      )}
+    </motion.button>
+  );
+
   return (
     <div className="relative flex items-center" data-testid={`sidebar-item-${item.id}`}>
       {isActive && <ActiveIndicator />}
 
-      {/* Show tooltip only in icons mode (no label shown) */}
-      {!showLabel && (
-        <DockItemTooltip label={item.label} visible={hovered} />
-      )}
-
-      <motion.button
-        type="button"
-        aria-label={item.label}
-        aria-current={isActive ? "page" : undefined}
-        data-testid={`sidebar-item-${item.id}-button`}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        onHoverStart={() => setHovered(true)}
-        onHoverEnd={() => setHovered(false)}
-        whileHover={{ scale: 1.12 }}
-        whileTap={{ scale: 0.96 }}
-        transition={{ type: "spring", stiffness: 400, damping: 20 }}
-        className={[
-          "relative flex items-center gap-2.5 rounded-[10px] transition-colors duration-150 outline-none",
-          "focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60",
-          showLabel
-            ? "w-full px-3 py-2 justify-start"
-            : "w-9 h-9 justify-center",
-          isActive
-            ? "bg-surface-active text-text-primary"
-            : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
-        ].join(" ")}
-      >
-        <Icon
-          size={16}
-          strokeWidth={isActive ? 2 : 1.75}
-          aria-hidden="true"
-          className="shrink-0"
-        />
-        {showLabel && (
-          <motion.span
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-xs font-medium truncate"
+      {showLabel ? (
+        button
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent
+            side="right"
+            sideOffset={8}
+            collisionPadding={8}
+            className="max-w-48 whitespace-normal border border-glass-chrome bg-[var(--glass-chrome-bg,rgba(20,20,32,0.94))] text-text-primary shadow-2xl"
           >
             {item.label}
-          </motion.span>
-        )}
-      </motion.button>
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -363,75 +343,77 @@ export default function DockSidebar() {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Main nav items — reorderable */}
-      <nav aria-label="Main navigation" className="flex-1 flex flex-col gap-0.5 px-2 overflow-visible">
-        <Reorder.Group
-          axis="y"
-          values={mainItems}
-          onReorder={(newOrder) => {
-            // Find new indices relative to the full items list
-            // and reorder by rebuilding the list
-            useSidebarStore.setState((state) => {
-              const settingsIdx = state.items.findIndex((i) => i.id === "settings");
-              const settingsEntry = settingsIdx >= 0 ? [state.items[settingsIdx]] : [];
-              return { items: [...newOrder, ...settingsEntry] };
-            });
-          }}
-          className="flex flex-col gap-0.5"
-          style={{ listStyle: "none", padding: 0, margin: 0 }}
-        >
-          {mainItems.map((item, index) =>
-            item.type === "separator" ? (
-              <Reorder.Item
-                key={item.id}
-                value={item}
-                drag={false}
-                style={{ listStyle: "none" }}
-              >
-                <DockSeparator id={item.id} />
-              </Reorder.Item>
-            ) : (
-              <Reorder.Item
-                key={item.id}
-                value={item}
-                style={{ listStyle: "none", position: "relative" }}
-                whileDrag={{ scale: 1.05, zIndex: 50, cursor: "grabbing" }}
-                dragTransition={{ bounceStiffness: 600, bounceDamping: 20 }}
-                data-index={index}
-              >
-                <DockRouteItem
-                  item={item}
-                  isActive={
-                    item.route === "/"
-                      ? location.pathname === "/"
-                      : location.pathname.startsWith(item.route)
-                  }
-                  showLabel={showLabel}
-                  onNavigate={handleNavigate}
-                />
-              </Reorder.Item>
-            ),
-          )}
-        </Reorder.Group>
-      </nav>
+      <TooltipProvider delayDuration={0}>
+        {/* Main nav items — reorderable */}
+        <nav aria-label="Main navigation" className="flex-1 flex flex-col gap-0.5 px-2 overflow-visible">
+          <Reorder.Group
+            axis="y"
+            values={mainItems}
+            onReorder={(newOrder) => {
+              // Find new indices relative to the full items list
+              // and reorder by rebuilding the list
+              useSidebarStore.setState((state) => {
+                const settingsIdx = state.items.findIndex((i) => i.id === "settings");
+                const settingsEntry = settingsIdx >= 0 ? [state.items[settingsIdx]] : [];
+                return { items: [...newOrder, ...settingsEntry] };
+              });
+            }}
+            className="flex flex-col gap-0.5"
+            style={{ listStyle: "none", padding: 0, margin: 0 }}
+          >
+            {mainItems.map((item, index) =>
+              item.type === "separator" ? (
+                <Reorder.Item
+                  key={item.id}
+                  value={item}
+                  drag={false}
+                  style={{ listStyle: "none" }}
+                >
+                  <DockSeparator id={item.id} />
+                </Reorder.Item>
+              ) : (
+                <Reorder.Item
+                  key={item.id}
+                  value={item}
+                  style={{ listStyle: "none", position: "relative" }}
+                  whileDrag={{ scale: 1.05, zIndex: 50, cursor: "grabbing" }}
+                  dragTransition={{ bounceStiffness: 600, bounceDamping: 20 }}
+                  data-index={index}
+                >
+                  <DockRouteItem
+                    item={item}
+                    isActive={
+                      item.route === "/"
+                        ? location.pathname === "/"
+                        : location.pathname.startsWith(item.route)
+                    }
+                    showLabel={showLabel}
+                    onNavigate={handleNavigate}
+                  />
+                </Reorder.Item>
+              ),
+            )}
+          </Reorder.Group>
+        </nav>
 
-      {/* Settings — always pinned at bottom, not reorderable */}
-      {settingsItem && (
-        <div
-          className="px-2 pt-1 mt-auto"
-          data-testid="sidebar-settings-section"
-        >
-          <DockSeparator id="sep-bottom" />
-          <div className="mt-0.5">
-            <DockRouteItem
-              item={settingsItem}
-              isActive={location.pathname.startsWith("/settings")}
-              showLabel={showLabel}
-              onNavigate={handleNavigate}
-            />
+        {/* Settings — always pinned at bottom, not reorderable */}
+        {settingsItem && (
+          <div
+            className="px-2 pt-1 mt-auto"
+            data-testid="sidebar-settings-section"
+          >
+            <DockSeparator id="sep-bottom" />
+            <div className="mt-0.5">
+              <DockRouteItem
+                item={settingsItem}
+                isActive={location.pathname.startsWith("/settings")}
+                showLabel={showLabel}
+                onNavigate={handleNavigate}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </TooltipProvider>
     </motion.aside>
   );
 }

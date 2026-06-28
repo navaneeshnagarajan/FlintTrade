@@ -4,15 +4,32 @@
 > FlintTrade `v0.6.0-beta` is not production ready; use Explore and Practice
 > modes before connecting any live broker workflow.
 
-## 1. Clone and Install
+## 1. Install the Native App
+
+For normal use, download the macOS, Windows, or Linux installer from the
+release page and launch FlintTrade like any other app. The first run creates
+your OS workspace and opens the Setup flow. No `.env` file is required.
+
+To build the installer yourself:
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-make setup
+uv sync && uv pip install pyinstaller && pnpm install
+make desktop-build
 ```
 
-`make setup` installs: Python deps, Node deps, workspace init.
+Generated packages live under
+`packages/apps/desktop/src-tauri/target/release/bundle/`.
+
+## 2. Contributor Source Setup
+
+Use this only when developing FlintTrade from source:
+
+```bash
+make setup
+make dev
+```
 
 OpenAlgo is no longer bundled as a git submodule. It is an optional external integration that FlintTrade can talk to over HTTP/WebSocket. Install OpenAlgo separately, or run the helper to clone a local-dev copy only when you want that integration path. AlgoMirror is intentionally absent — its mirroring logic is reimplemented natively in `packages/services/ditto/` (our own code), nothing external to install.
 
@@ -22,21 +39,20 @@ bash scripts/setup-test-deps.sh
 
 This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo clone you can run via `make start-openalgo`.
 
-## 2. Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` only if you want to preconfigure optional integrations such as OpenAlgo.
-
 ## 3. Configure Broker Access
 
-For the native FlintTrade gateway, use the terminal setup flow. For the optional OpenAlgo path, edit OpenAlgo's own `.env` — for the local-dev clone, that's `.local/external/openalgo/.env` (copy from `.sample.env` if needed):
+For the native FlintTrade gateway, use the app setup flow. For the optional
+OpenAlgo path, configure the OpenAlgo server in OpenAlgo itself, then paste the
+OpenAlgo URL/API key in FlintTrade Setup → OpenAlgo Bridge or Settings → Broker
+Gateway. For the local-dev OpenAlgo clone, broker credentials stay in
+`.local/external/openalgo/.env` (copy from `.sample.env` if needed):
 - Set broker name (e.g., your broker or its sandbox variant for testing)
 - Set broker credentials (client ID, API key/secret)
 
 ## 4. Start and Verify
+
+Native app users can skip this section. Contributors running from source can
+use:
 
 ```bash
 make start       # Starts FlintTrade backend on port 5100
@@ -45,6 +61,9 @@ make test        # full pytest suite passes
 ```
 
 ## 5. Run Terminal
+
+Native app users can skip this section. Contributors running from source can
+use:
 
 ```bash
 cd packages/apps/terminal
@@ -64,25 +83,17 @@ Read [`contributing.md`](../../contributing.md) for the contribution flow, then 
 3. Select broker (use sandbox variant for testing)
 4. Login to broker via OAuth redirect
 5. Go to API Key section, generate key
-6. Put key in FlintTrade `.env` as `OPENALGO_API_KEY` only when using the
-   OpenAlgo-compatible bridge.
+6. Paste the OpenAlgo URL and API key into FlintTrade Setup → OpenAlgo Bridge
+   or Settings → Broker Gateway. FlintTrade stores it in the OS workspace.
 
 Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
 
-## Terminal .env
+## Terminal Env
 
-`packages/apps/terminal/.env` is gitignored. The Vite proxy in `vite.config.ts` already forwards `/api` to OpenAlgo, `/ft-api` to the FlintTrade backend, and `/ws` to the WebSocket — you should not need a terminal-side `.env` for normal development.
-
-```
-# Only the host/WS endpoints are configurable from VITE_* env vars.
-# DO NOT put the API key here — Vite inlines VITE_* at build time, leaking
-# the key into the production JS bundle. Configure OPENALGO_API_KEY only for
-# the OpenAlgo-compatible bridge, either in the in-app Settings → Connection
-# flow (it persists to ~/.flinttrade/workspace.json, server-side only) or in
-# the repo-root .env which the FlintTrade backend reads.
-VITE_OPENALGO_HOST=http://127.0.0.1:5000
-VITE_OPENALGO_WS=ws://127.0.0.1:8765
-```
+There is no terminal-side `.env` template. Vite proxy overrides are developer
+only, and production/native connection settings must come from Setup or
+Settings so they remain runtime user choices rather than build-time bundle
+constants.
 
 ## Optional Agent Context
 

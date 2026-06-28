@@ -19,6 +19,10 @@ import pytest
 class TestConfig:
     """Test Settings loading and validation."""
 
+    @pytest.fixture(autouse=True)
+    def _isolated_workspace(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+
     def test_from_env_success(self, monkeypatch):
         monkeypatch.setenv("OPENALGO_HOST", "http://127.0.0.1:5000")
         monkeypatch.setenv("OPENALGO_API_KEY", "test_key_123")
@@ -51,6 +55,25 @@ class TestConfig:
 
         s = Settings.from_env()
         assert s.openalgo_api_key == ""
+
+    def test_workspace_openalgo_overrides_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+        monkeypatch.setenv("OPENALGO_HOST", "http://127.0.0.1:5000")
+        monkeypatch.setenv("OPENALGO_API_KEY", "env-key")
+
+        from flinttrade_core.workspace import Workspace
+        from flinttrade_core.config import Settings
+
+        workspace = Workspace()
+        workspace.initialise()
+        workspace.set("openalgo.host", "http://127.0.0.1:5002")
+        workspace.set("openalgo.api_key", "workspace-key")
+        workspace.set("openalgo.ws_port", 8767)
+
+        s = Settings.from_env()
+        assert s.openalgo_host == "http://127.0.0.1:5002"
+        assert s.openalgo_api_key == "workspace-key"
+        assert s.openalgo_ws_port == 8767
 
     def test_host_must_be_url(self):
         from flinttrade_core.config import Settings

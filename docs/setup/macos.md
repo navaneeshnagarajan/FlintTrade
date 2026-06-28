@@ -1,23 +1,41 @@
 # FlintTrade on macOS
 
-## Option A — Docker (Recommended)
-1. Install Docker Desktop: https://docs.docker.com/desktop/install/mac-install/
-2. Open Terminal:
-   ```bash
-   git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-   cd FlintTrade
-   cp .env.example .env
-   open .env   # Optional: add FLINTTRADE_API_KEY and OpenAlgo bridge settings
-   docker compose up
-   ```
-3. Open http://localhost:5173
+## Option A — Native Desktop (Recommended)
 
-## Option B — Native macOS
-Requires: Python 3.12 (`brew install python`), Node.js 22 (`brew install node`)
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `cd FlintTrade`
-3. `cp .env.example .env`
-4. `pip3 install -r requirements.txt`
-5. `python3 packages/core/core/src/app.py`
+1. Download the `.dmg` or `.app` from the release page.
+2. Install FlintTrade like any other macOS app.
+3. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
+   in the app; no `.env` file is required.
+
+To build the installer locally:
+
+```bash
+uv sync && uv pip install pyinstaller && pnpm install
+make desktop-build
+```
+
+## Option B — Source Development
+
+Requires: Python 3.12, Node.js 22+, Git, and optionally Rust.
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+make setup
+make dev
+```
+
+Open http://localhost:5173.
+
+## Option C — Docker/Server (Advanced)
+
+Docker is retained for advanced self-hosting and contributor testing, not for
+the normal desktop app.
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+docker compose up
+```
 
 Note: For background-service supervision on macOS, write a launchd plist that runs `make start` from your repo root. A sample plist may be added to `infra/launchd/` in a future release; until then, the systemd unit at `infra/systemd/openalgo.service` is the closest reference.

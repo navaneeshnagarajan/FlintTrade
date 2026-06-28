@@ -8,8 +8,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
-import { useSettingsState } from "../useSettingsState";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { isAcceptedOpenAlgoConfigStatus, useSettingsState } from "../useSettingsState";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 
@@ -30,6 +30,45 @@ function resetStores() {
   useConnectionStore.setState(useConnectionStore.getInitialState());
 }
 
+function mockFetchWithOpenAlgoConfig(
+  config = { api_key_configured: false, api_key_last4: "", host: "", ws_port: 8765 },
+) {
+  const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        ok: true,
+        json: async () => ({ status: "ok" }),
+      } as Response;
+    }
+    return {
+      ok: true,
+      json: async () => ({ status: "success", data: config }),
+    } as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function mockFetchWithFailedPost(
+  config = { api_key_configured: false, api_key_last4: "", host: "", ws_port: 8765 },
+) {
+  const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({ status: "error", message: "workspace locked" }),
+      } as Response;
+    }
+    return {
+      ok: true,
+      json: async () => ({ status: "success", data: config }),
+    } as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -37,6 +76,14 @@ function resetStores() {
 describe("useSettingsState", () => {
   beforeEach(() => {
     resetStores();
+    mockFetchWithOpenAlgoConfig();
+  });
+
+  it("accepts backend OpenAlgo config save status variants", () => {
+    expect(isAcceptedOpenAlgoConfigStatus("ok")).toBe(true);
+    expect(isAcceptedOpenAlgoConfigStatus("success")).toBe(true);
+    expect(isAcceptedOpenAlgoConfigStatus("partial")).toBe(true);
+    expect(isAcceptedOpenAlgoConfigStatus("error")).toBe(false);
   });
 
   it("returns general with fontSize from settingsStore", () => {
@@ -93,6 +140,225 @@ describe("useSettingsState", () => {
     expect(result.current.connection.host).toBe("http://192.168.1.10:5000");
     expect(result.current.connection.apiKey).toBe("test-api-key");
     expect(result.current.connection.wsPort).toBe("8765");
+  });
+
+  it("hydrates connection data from the backend workspace endpoint", async () => {
+    mockFetchWithOpenAlgoConfig({
+      api_key_configured: true,
+      api_key_last4: "-key",
+      host: "http://192.168.1.20:5000",
+      ws_port: 8770,
+    });
+
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.host).toBe("http://192.168.1.20:5000");
+      expect(result.current.connection.apiKey).toBe("");
+      expect(result.current.connection.wsPort).toBe("8770");
+    });
+  });
+
+  it("persists pre-hydration connection edits as partial backend patches", async () => {
+    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const { result } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateConnection("host", "https://openalgo.local:5000");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            host: "https://openalgo.local:5000",
+          }),
+        }),
+      );
+    });
+    expect(useConnectionStore.getState().wsUrl).toBe("wss://openalgo.local:8765");
+  });
+
+  it("merges late hydration data around a pre-hydration edit", async () => {
+    let resolveGet: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ status: "ok" }),
+        } as Response);
+      }
+      return new Promise<Response>((resolve) => {
+        resolveGet = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateConnection("host", "https://openalgo.local:5000");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            host: "https://openalgo.local:5000",
+          }),
+        }),
+      );
+    });
+
+    act(() => {
+      resolveGet?.({
+        ok: true,
+        json: async () => ({
+          status: "success",
+          data: {
+            api_key_configured: true,
+            api_key_last4: "-key",
+            host: "http://192.168.1.20:5000",
+            ws_port: 8770,
+          },
+        }),
+      } as Response);
+    });
+
+    await waitFor(() => {
+      expect(result.current.connection.host).toBe("https://openalgo.local:5000");
+      expect(result.current.connection.apiKey).toBe("");
+      expect(result.current.connection.wsPort).toBe("8770");
+    });
+    expect(useConnectionStore.getState().wsUrl).toBe("wss://openalgo.local:8770");
+  });
+
+  it("persists hydrated connection edits as partial backend patches", async () => {
+    const fetchMock = mockFetchWithOpenAlgoConfig({
+      api_key_configured: true,
+      api_key_last4: "-key",
+      host: "http://192.168.1.20:5000",
+      ws_port: 8770,
+    });
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.wsPort).toBe("8770");
+    });
+
+    act(() => {
+      result.current.updateConnection("host", "https://openalgo.local:5000");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            host: "https://openalgo.local:5000",
+          }),
+        }),
+      );
+    });
+  });
+
+  it("accepts the backend ok status without logging a persistence warning", async () => {
+    let postJsonConsumed: (() => void) | undefined;
+    const postJsonConsumedPromise = new Promise<void>((resolve) => {
+      postJsonConsumed = resolve;
+    });
+    const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return {
+          ok: true,
+          json: async () => {
+            postJsonConsumed?.();
+            return { status: "ok" };
+          },
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          status: "success",
+          data: {
+            api_key_configured: false,
+            api_key_last4: "",
+            host: "http://192.168.1.20:5000",
+            ws_port: 8770,
+          },
+        }),
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.wsPort).toBe("8770");
+    });
+
+    act(() => {
+      result.current.updateConnection("host", "https://openalgo.local:5000");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await postJsonConsumedPromise;
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("logs failed backend persistence responses", async () => {
+    const fetchMock = mockFetchWithFailedPost({
+      api_key_configured: true,
+      api_key_last4: "-key",
+      host: "http://192.168.1.20:5000",
+      ws_port: 8770,
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.wsPort).toBe("8770");
+    });
+
+    act(() => {
+      result.current.updateConnection("apiKey", "next-key");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            api_key: "next-key",
+          }),
+        }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[settings] failed to persist OpenAlgo config:",
+        expect.any(Error),
+      );
+    });
+    warnSpy.mockRestore();
   });
 
   it("returns telegram settings from settingsStore", () => {
