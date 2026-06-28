@@ -1,6 +1,6 @@
 # Contributing to FlintTrade
 
-FlintTrade is an open-source Indian fintech project — a modular trading and investment platform for F&O, commodities, and crypto, with a native broker gateway contract plus optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations, licensed under AGPL-3.0. We're building it in the open because Indian retail traders deserve serious, transparent tooling, and because every contributor makes the platform sharper.
+FlintTrade is an AGPL-3.0, open-source financial-market software project with a native broker-gateway contract, a local sandbox, and optional OpenAlgo-compatible integrations. The repository is built in the open so developers can inspect, test, and improve the code together.
 
 Whether you're fixing a typo, shipping a new broker adapter, translating the UI into Hindi, or rewriting an entire widget — you're welcome here. This guide tells you everything you need to start.
 
@@ -114,9 +114,7 @@ The terminal build runs `tsc --noEmit` followed by `vite build`. A clean build i
 
 CI runs on GitHub Actions. The full policy and per-workflow breakdown is in
 [`docs/CI.md`](docs/CI.md) — read it before adding or editing any workflow. The
-guardrails exist because a heavy, daily, multi-platform CI footprint once tripped
-GitHub's over-usage protection and disabled Actions for the whole account. Keep
-within them:
+guardrails keep runner usage bounded and predictable. Keep within them:
 
 - **Per-push CI is Linux-only.** The essential quality gate (tests, lint,
   type-check) runs on Ubuntu for every push and non-draft PR. Contributors are
@@ -124,10 +122,10 @@ within them:
   push or pull-request.
 - **macOS and Windows runners run weekly (cron) or on demand only** —
   `nightly-cross-platform.yml` plus `workflow_dispatch`, never on push / PR /
-  daily. macOS minutes bill at 10x and Windows at 2x, so daily multi-platform
-  matrices are exactly what the abuse heuristics flag.
-- **Every job sets `timeout-minutes`.** A job with no timeout is the single
-  biggest runaway-usage signal. Sensible values: lint ~10, tests ~30,
+  daily. macOS minutes bill at 10x and Windows at 2x, so frequent
+  multi-platform matrices are too expensive for routine CI.
+- **Every job sets `timeout-minutes`.** A job with no timeout can consume the
+  six-hour runner default if it hangs. Sensible values: lint ~10, tests ~30,
   cross-platform ~45.
 - **Least-privilege permissions.** Workflows default to `contents: read`; a job
   adds only what it needs (e.g. `pull-requests: write` solely where it comments).
@@ -225,11 +223,11 @@ User-visible strings, error messages, ARIA labels, docstrings, comments, and doc
 
 ## Areas where help is wanted
 
-Look at the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrade/labels/good%20first%20issue) label for entry points. Beyond that, here's where the project most needs hands:
+Look at the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrade/labels/good%20first%20issue) label for entry points. Beyond that, here are useful implementation and test-coverage areas:
 
-- **Broker adapters** — especially crypto exchanges beyond Delta (CoinDCX, WazirX, Bybit, Binance India), and any broker not yet covered by the 32 OpenAlgo gateways.
-- **Strategy templates** — we ship 94 backtest templates and want more. Mean reversion, momentum, options spreads, sector rotation, volatility plays.
-- **AI prompt engineering** — improving the 30 trading skills under `packages/services/ai/skills/`, refining RAG retrieval, sharpening signal explanations.
+- **Broker adapters** — capability metadata, mocked SDK coverage, error handling, and credential-vault tests.
+- **Strategy templates** — backtest fixtures, parameter validation, result serialisation, and regression coverage.
+- **AI workflows** — refining RAG retrieval, prompt fixtures, local-model fallbacks, and diagnostic summaries.
 - **Translations** — Hindi and Tamil first, then other Indian regional languages. The UI needs an i18n pass; we're looking for translators and engineers to set up the framework.
 - **Accessibility** — WCAG AA is in place; AAA is the target. Screen-reader testing, keyboard-only flows, contrast audits, focus management.
 - **Documentation** — user guides, walkthroughs, video scripts, API references. Every doc PR is a high-value PR.

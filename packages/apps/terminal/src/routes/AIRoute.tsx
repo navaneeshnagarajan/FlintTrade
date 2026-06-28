@@ -549,7 +549,7 @@ function KnowledgeSection() {
           Knowledge Base (RAG)
         </h3>
         <p className="text-xs text-text-secondary leading-relaxed">
-          Query RAG-indexed trading docs, SEBI regs, strategy guides, and custom notes.
+          Query RAG-indexed project docs, order-safety notes, strategy guides, and custom notes.
           Ranked by relevance using ChromaDB vector search.
         </p>
       </Card>

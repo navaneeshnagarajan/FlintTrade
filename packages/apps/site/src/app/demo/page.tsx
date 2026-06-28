@@ -4,9 +4,9 @@ import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 
 export const metadata: Metadata = {
-  title: 'Live Demo',
+  title: 'Explore Demo',
   description:
-    'Try the FlintTrade terminal in Explore mode — every module with simulated data, no account or broker connection needed.',
+    'Open the FlintTrade terminal in Explore mode with simulated data and no account or broker connection.',
 };
 
 export default function DemoPage() {
@@ -14,10 +14,10 @@ export default function DemoPage() {
     <main className="site-shell">
       <SiteHeader />
       <section className="subpage subpage-tight">
-        <h1>Live Demo</h1>
+        <h1>Explore Demo</h1>
         <p>
-          This is the real FlintTrade terminal running in Explore mode — the same React build you
-          self-host, with simulated market data. No account, broker connection, or backend needed.
+          This is the FlintTrade terminal running in Explore mode — the same React build you
+          self-host, with simulated data. No account, broker connection, or backend needed.
         </p>
       </section>
       <div className="demo-frame-wrap">
@@ -28,7 +28,7 @@ export default function DemoPage() {
         <iframe
           className="demo-frame"
           src="/demo-app/explore"
-          title="FlintTrade terminal live demo (Explore mode)"
+          title="FlintTrade terminal Explore demo"
           loading="lazy"
         />
         <p className="demo-note">

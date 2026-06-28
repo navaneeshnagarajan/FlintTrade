@@ -160,14 +160,14 @@ POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
 | `broker/auth/callback` | Receive an OAuth callback. |
 | `broker/reconnect` | Re-authenticate an existing session that has expired. |
 
-### Broker capabilities & recommendations (`/api/v1/broker/*`, GET)
+### Broker capability metadata (`/api/v1/broker/*`, GET)
 
 Source: `packages/integrations/gateway/src/flinttrade_gateway/capabilities_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
 | `broker/capabilities` (**GET**) | Per-broker capability matrix (order types, segments, depth, rate limits). |
-| `broker/recommendations` (**GET**) | Rank native brokers per use-case ("which broker for what"). `?use_case=<id>` for one job (e.g. `low_cost_execution`, `market_depth`); `?brokers=a,b` to restrict to the operator's connected brokers. |
+| `broker/recommendations` (**GET**) | Filter broker capability metadata for an operator-selected use case. `?use_case=<id>` for one job (for example `low_cost_execution`, `market_depth`); `?brokers=a,b` restricts the response to connected brokers. |
 
 ### AI (`/ft-api/v1/ai/*`, `/ft-api/v1/signals/*`)
 

@@ -1,5 +1,5 @@
 /**
- * AgentPanel — control plane for the autonomous trading agent.
+ * AgentPanel — control plane for the AI agent session.
  *
  * Drives /api/v1/ai/agent/{start,stop,status}. Honest by construction:
  *   - The feature is OFF by default; the backend's actionable refusal

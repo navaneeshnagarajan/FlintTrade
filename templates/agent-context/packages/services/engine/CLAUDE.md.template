@@ -1,6 +1,6 @@
 # FlintTrade — engine
 
-> Strategy execution, order routing, 5-layer safety, kill switches, scheduler, action center, sandbox, social trading
+> Strategy execution, order routing, 5-layer safety, kill switches, scheduler, action center, sandbox, local strategy-profile workflows
 
 ## Key Modules
 - `strategy.py` — Base strategy interface
@@ -13,10 +13,10 @@
 - `scheduler.py` — Cron-based strategy scheduling
 - `action_center.py` / `action_center_routes.py` — Action center for manual interventions
 - `sandbox.py` / `sandbox_routes.py` — Paper trading sandbox mode
-- `social_trading.py` — Social trading / copy trading
+- `social_trading.py` — Local strategy-profile library and account-workflow templates
 
 ## Absorbs
-- openengine → event-driven architecture, BaseStrategy interface, live trader
+- openengine → event-driven architecture, BaseStrategy interface, live event consumer
 - algomirror → strategy_executor.py parallel execution patterns
 
 ## Depends on: core

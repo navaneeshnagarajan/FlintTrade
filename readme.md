@@ -1,52 +1,40 @@
-<p align="center">
-  <img src="https://flinttrade.vercel.app/flinttrade/logo.svg?v=20260613" alt="FlintTrade logo" width="120" />
-</p>
-
 # FlintTrade
 
-> Open-source modular trading platform for Indian F&O, commodities, and crypto.
-
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.6.0--beta-orange.svg)](VERSION)
-[![CI](https://img.shields.io/badge/CI-local%20verified-brightgreen.svg)](https://github.com/navaneeshnagarajan/FlintTrade/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/tests-terminal%203663%20%7C%20python%2010313-brightgreen.svg)](#)
-[![Status](https://img.shields.io/badge/status-beta%20not%20production%20ready-orange.svg)](disclaimer.md)
-[![Website](https://img.shields.io/badge/website-live-blue.svg)](https://flinttrade.vercel.app)
-[![Live Demo](https://img.shields.io/badge/live%20demo-explore%20mode-22c55e.svg)](https://flinttrade.vercel.app/demo)
-
-A self-hosted trading workspace that turns a native broker gateway contract, optional OpenAlgo-compatible integrations, real-time tick streams, and a strategy engine into one keyboard-driven cockpit you actually own.
-
-<p align="center">
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260613" alt="Cinematic welcome screen on first launch" width="48%" /></a>
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260613" alt="Trade canvas with Dockview widget-composable workspace" width="48%" /></a>
-</p>
-<p align="center">
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260613" alt="AI Centre with chat, signals, sentiment, and RAG panels" width="48%" /></a>
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260613"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260613" alt="Strategy Lab for backtest, forward test, and walk-forward optimisation" width="48%" /></a>
-</p>
+FlintTrade is an AGPL-3.0, self-hosted software project for local market
+workflow experiments. The repository is a Python, React, TypeScript, and Rust
+monorepo with a Flask backend, Dockview terminal, broker-gateway integration
+layer, sandbox mode, data services, and developer documentation.
 
 ## Beta disclaimer
 
 FlintTrade `v0.6.0-beta` is **not production ready**. It is educational,
-self-hosted trading software for research, paper trading, and contributor
+self-hosted software for research, sandbox workflows, and contributor
 development first. Nothing in this repository is financial, investment, tax,
 legal, or regulatory advice. Read [disclaimer.md](disclaimer.md) before
 connecting a broker or enabling Live mode.
 
-## What it does
+## Project scope
 
-- **Intraday F&O scalping** — sub-second order entry, bracket orders, hotkey-driven OrderPad, kill switch wired to Telegram and the UI.
-- **Multi-broker support** — one workspace for FlintTrade's native gateway with built-out broker adapters plus optional OpenAlgo-compatible integrations; switch accounts without leaving the canvas.
-- **Options analysis** — option chain with OI heatmaps, IV smile, max-pain, GEX, portfolio Greeks, payoff visualiser, and a futures quadrant.
-- **Paper trading mode** — three-mode safety model (Explore / Practice / Live) with server-enforced isolation; learn without risking capital.
-- **AI-assisted signals** — local LLM chat (LM Studio), ChromaDB RAG over your trades, LightGBM signal pipeline, news sentiment, and a multi-agent risk debate.
-- **Custom strategies** — 94 backtest templates, Pine Script conversion, walk-forward optimisation, Monte Carlo, and tick-level simulation in Rust.
-- **Automation flows** — visual flow builder, cron scheduler, TradingView and ChartInk webhooks, Telegram and WhatsApp alerts.
-- **Multi-account orchestration** — Ditto module mirrors orders across child accounts with margin-aware sizing and trailing stop-loss.
+- **Terminal app** — React 19, TypeScript, Dockview, Zustand, TanStack Query,
+  and shadcn/ui components for a local workspace.
+- **Backend services** — Python 3.12 Flask routes for auth, workspace state,
+  broker-gateway orchestration, sandbox data, analytics, and automation.
+- **Gateway integration** — adapter contracts, capability metadata, encrypted
+  credential storage, WebSocket bridges, and optional OpenAlgo-compatible paths.
+- **Safety model** — Explore, Practice, and Live modes with server-side checks,
+  audit records, and a kill-switch boundary for order-capable routes.
+- **Data and simulation** — DuckDB/Parquet storage, indicator packages,
+  backtest services, and a Rust/PyO3 tick-processing engine.
+- **Developer tooling** — Make targets, pytest/Vitest/Playwright suites,
+  packaging scripts, CI notes, and package-level documentation.
 
 ## Supported brokers
 
-FlintTrade's native broker gateway contract and routing are in beta, with all four founder-broker adapters (Dhan, Upstox, Kotak Neo, IndMoney) built to full doc-grounded parity — the remaining work is live-credential testing only. Optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations remain available — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
+FlintTrade's native broker gateway contract and routing are in beta. Broker
+adapters are implemented as software integrations that require local credentials
+and user-side validation before any live use. Optional OpenAlgo-compatible
+integrations remain available for users who already run OpenAlgo separately;
+see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
 ## Quickstart (5-minute Docker)
 
@@ -60,6 +48,22 @@ docker-compose up
 Open <http://localhost:5173> and follow the welcome wizard.
 
 > OpenAlgo is optional. Run it on port 5000 only if you want the OpenAlgo integration path; FlintTrade's own backend runs on port 5100.
+
+## Local development
+
+```bash
+make setup
+make dev
+```
+
+The root `Makefile` is the main entry point:
+
+- `make test` runs the Python pytest suites.
+- `make lint` runs Ruff over Python packages and tests.
+- `make full-check` runs a compact test, lint, and terminal typecheck pass.
+- `cd packages/apps/terminal && npm run build` runs the terminal typecheck
+  and Vite build.
+- `cd packages/apps/terminal && npm run test` runs Vitest.
 
 ---
 
@@ -75,9 +79,7 @@ no `.env` to configure**.
 | Windows | `.msi`, `.exe` (NSIS) | x64 |
 | Linux | `.deb`, `.rpm`, `.AppImage` | x64 + arm64 |
 
-Download the installer for your platform from the
-[latest release](https://github.com/navaneeshnagarajan/FlintTrade/releases),
-or build it yourself:
+Download an installer from the repository releases page, or build it yourself:
 
 ```bash
 uv sync && uv pip install pyinstaller && pnpm install
@@ -114,7 +116,9 @@ flowchart LR
     OA <-->|"broker auth"| BR
 ```
 
-FlintTrade runs its own backend, native sandbox, and broker gateway contract. OpenAlgo remains an optional external integration for users who already rely on its broker gateway.
+FlintTrade runs its own backend, native sandbox, and broker gateway contract.
+OpenAlgo remains an optional external integration for users who already rely on
+its broker gateway.
 
 ### Package map
 
@@ -124,7 +128,7 @@ and 1 Rust/PyO3 tick engine.
 
 | Package | Language | Purpose |
 |---|---|---|
-| `packages/apps/site` | Next.js + TS | Public website, generated documentation, and read-only docs MCP |
+| `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and Dockview terminal |
 | `packages/apps/desktop` | Tauri 2 (TS + Rust) | Native desktop shell — bundles the backend sidecar + terminal into one cross-OS installer (Linux/Windows/macOS) |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
@@ -154,7 +158,7 @@ and 1 Rust/PyO3 tick engine.
 
 ### Three ways in
 
-- **Try it** — follow the [5-minute Docker quickstart](#quickstart-5-minute-docker) above and explore in paper mode.
+- **Try it locally** — follow the [5-minute Docker quickstart](#quickstart-5-minute-docker) above and explore in sandbox mode.
 - **Build with it** — read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for repo layout, adding widgets, and adding broker adapters.
 - **Contribute** — see [contributing.md](contributing.md) for branch strategy, commit conventions, and good-first-issues.
 

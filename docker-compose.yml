@@ -81,7 +81,7 @@ services:
     container_name: flinttrade-backend
     volumes:
       - flinttrade_data:/data/flinttrade
-      - flinttrade_keys:/home/flinttrade/.flinttrade
+      - ${FLINTTRADE_HOME:-~/.flinttrade}:/home/flinttrade/.flinttrade
       - flinttrade_strategies:/data/flinttrade/strategies
       - flinttrade_logs:/data/flinttrade/logs
     ports:
@@ -366,8 +366,6 @@ volumes:
     name: flinttrade_openalgo_data
   flinttrade_data:
     name: flinttrade_platform_data
-  flinttrade_keys:
-    name: flinttrade_keys
   flinttrade_strategies:
     name: flinttrade_strategies
   flinttrade_logs:

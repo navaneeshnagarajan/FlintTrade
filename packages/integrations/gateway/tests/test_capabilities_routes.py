@@ -109,7 +109,7 @@ class TestRecommendationsRoute:
         assert response.status_code == 200
         data = response.get_json()
         assert data["use_case"] == "low_cost_execution"
-        # Kotak Neo's zero-brokerage differentiator should top this ranking.
+        # Kotak Neo's low-cost execution metadata should top this ranking.
         assert data["recommendations"][0]["broker_id"] == "kotakneo"
 
     def test_unknown_use_case_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]

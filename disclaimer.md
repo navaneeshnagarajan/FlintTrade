@@ -32,4 +32,4 @@ You are responsible for:
 
 FlintTrade is provided under the AGPL-3.0 licence on an "as is" basis, without warranty of any kind. The maintainers and contributors are not liable for trading losses, missed orders, rejected orders, incorrect analytics, data loss, service interruptions, regulatory consequences, or any other damages arising from use of the software.
 
-Read [security.md](security.md), [docs/SEBI_COMPLIANCE.md](docs/SEBI_COMPLIANCE.md), and [docs/USER_GUIDE.md](docs/USER_GUIDE.md) before connecting a broker account.
+Read [security.md](security.md), [docs/ORDER_SAFETY.md](docs/ORDER_SAFETY.md), and [docs/USER_GUIDE.md](docs/USER_GUIDE.md) before connecting a broker account.

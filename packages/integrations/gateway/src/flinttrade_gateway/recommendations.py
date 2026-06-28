@@ -1,12 +1,12 @@
-"""Broker recommendation engine — "which broker for what".
+"""Broker capability metadata ranking engine.
 
 Ranks the brokers an operator has connected (or all known native brokers) for
-specific trading use-cases, purely from each broker's advertised
+specific operator-selected use cases, purely from each broker's advertised
 :class:`~flinttrade_gateway.capabilities.Capabilities`, and explains the
 ranking. Side-effect-free and deterministic so it can back both the gateway
 capability routes and the terminal's multi-broker setup UI: an operator running
 several brokers in one account can see, per job, which broker to route to
-(e.g. depth/options data vs. zero-brokerage execution).
+(e.g. depth/options data vs. low-cost execution metadata).
 
 Scores are normalised to ``0.0..1.0`` *within* a use-case (best broker = 1.0)
 and derived only from declared capability fields — no editorial guesses. A
@@ -68,7 +68,7 @@ class BrokerRecommendation:
 
 def _score_historical(c: Capabilities) -> tuple[float, str]:
     # Deep fine-resolution intraday lookback is intentionally the dominant term:
-    # for "best broker for historical data" the depth of retrievable history is
+    # for historical-data capability metadata the depth of retrievable history is
     # the headline signal, so a broker with years of intraday history (e.g. Dhan,
     # ~5 years) should outrank one with a broader interval menu but only days of
     # depth (e.g. IndMoney). Do NOT flatten lookback toward interval count — that

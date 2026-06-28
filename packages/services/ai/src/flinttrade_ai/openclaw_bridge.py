@@ -1,4 +1,4 @@
-"""Bridge to OpenClaw AI agent gateway for autonomous trading agents.
+"""Bridge to the OpenClaw AI agent gateway.
 
 OpenClaw is an external service — it is NOT bundled with FlintTrade. This
 bridge makes HTTP calls to a running OpenClaw instance and never imports
@@ -47,7 +47,7 @@ class OpenClawAgent:
 
 
 class OpenClawBridge:
-    """Bridge to OpenClaw AI agent gateway for autonomous trading agents.
+    """Bridge to OpenClaw AI agent sessions.
 
     All methods are synchronous HTTP calls via ``httpx``.  Connection errors
     are caught and returned as error dicts so callers never see raw exceptions.

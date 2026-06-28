@@ -1,12 +1,12 @@
 /**
  * SocialTab.tsx
  *
- * Social trading foundation — leaderboard + strategy marketplace.
- * Fetches data from /ft-api/v1/social/* endpoints.
+ * Local strategy library foundation — profile rankings + reusable templates.
+ * Fetches data from /ft-api/v1/strategy-library/* endpoints.
  *
  * Two sections:
- *   1. Leaderboard: TanStack Table of top traders ranked by return %
- *   2. Marketplace: GlassCard grid of shared strategies with Copy button
+ *   1. Profile rankings: TanStack Table of sample strategy profiles ranked by return %
+ *   2. Library: GlassCard grid of reusable strategy templates with Add button
  */
 
 import { useState, useMemo } from "react";
@@ -88,7 +88,7 @@ interface StrategiesResponse {
   data: { strategies: StrategyCard[] };
 }
 
-// ── Demo data (seeded from social_trading.py sample data) ───────────────────
+// ── Demo data (seeded from local strategy-library sample data) ───────────────
 
 const DEMO_TRADERS: TraderRow[] = [
   { rank: 1, user_id: "demo_1", display_name: "NiftyScalper", strategy_count: 3, win_rate: 68.5, total_return_pct: 42.3, max_drawdown_pct: 8.2, sharpe_ratio: 2.15, follower_count: 1240, trades_count: 2850, active_since: "2023-04-15", risk_score: 3 },
@@ -109,18 +109,18 @@ const DEMO_STRATEGIES: StrategyCard[] = [
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
-// Resolve the backend base through the canonical helper so social calls behave
+// Resolve the backend base through the canonical helper so library calls behave
 // identically in dev (Vite proxy) and the packaged desktop app (same origin),
 // and carry the standard auth headers (X-API-Key + JWT) like every other
-// FT-API caller. Social endpoints live in the bare ``/v1/social/*`` family.
+// FT-API caller.
 const FT_API_BASE = `${getBase()}/v1`;
 
-async function fetchLeaderboard(metric: string): Promise<TraderRow[]> {
+async function fetchProfileRankings(metric: string): Promise<TraderRow[]> {
   const res = await fetch(
-    `${FT_API_BASE}/social/leaderboard?metric=${metric}&limit=20`,
+    `${FT_API_BASE}/strategy-library/profile-rankings?metric=${metric}&limit=20`,
     { headers: buildHeaders(false) },
   );
-  if (!res.ok) throw new Error("Failed to fetch leaderboard");
+  if (!res.ok) throw new Error("Failed to fetch profile rankings");
   const json: LeaderboardResponse = await res.json();
   return json.data.traders;
 }
@@ -128,7 +128,7 @@ async function fetchLeaderboard(metric: string): Promise<TraderRow[]> {
 async function fetchStrategies(category: string | null): Promise<StrategyCard[]> {
   const params = new URLSearchParams({ limit: "50" });
   if (category) params.set("category", category);
-  const res = await fetch(`${FT_API_BASE}/social/strategies?${params.toString()}`, {
+  const res = await fetch(`${FT_API_BASE}/strategy-library/templates?${params.toString()}`, {
     headers: buildHeaders(false),
   });
   if (!res.ok) throw new Error("Failed to fetch strategies");
@@ -136,17 +136,17 @@ async function fetchStrategies(category: string | null): Promise<StrategyCard[]>
   return json.data.strategies;
 }
 
-async function copyStrategy(
+async function addStrategyTemplate(
   strategyId: string,
   userId: string,
 ): Promise<{ status: string; message: string }> {
-  const res = await fetch(`${FT_API_BASE}/social/strategies/copy`, {
+  const res = await fetch(`${FT_API_BASE}/strategy-library/templates/add`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify({ strategy_id: strategyId, user_id: userId }),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.message ?? "Copy failed");
+  if (!res.ok) throw new Error(json.message ?? "Add failed");
   return json.data;
 }
 
@@ -184,7 +184,7 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
-// ── Leaderboard columns ──────────────────────────────────────────────────────
+// ── Profile-ranking columns ──────────────────────────────────────────────────
 
 function buildLeaderboardColumns(): ColumnDef<TraderRow>[] {
   return [
@@ -278,15 +278,15 @@ function buildLeaderboardColumns(): ColumnDef<TraderRow>[] {
   ];
 }
 
-// ── Leaderboard section ──────────────────────────────────────────────────────
+// ── Profile ranking section ──────────────────────────────────────────────────
 
 function LeaderboardSection() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(() => buildLeaderboardColumns(), []);
 
   const { data: liveTraders = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ["social", "leaderboard"],
-    queryFn: () => fetchLeaderboard("total_return_pct"),
+    queryKey: ["strategy-library", "profile-rankings"],
+    queryFn: () => fetchProfileRankings("total_return_pct"),
     staleTime: 60_000,
   });
 
@@ -310,7 +310,7 @@ function LeaderboardSection() {
         <div className="flex items-center gap-2">
           <Trophy className="size-4 text-warning" />
           <h2 className="text-sm font-heading font-bold text-text-primary">
-            Top Traders
+            Strategy Profiles
           </h2>
           <Badge variant="outline" className="text-xxs h-5 border-border-default text-text-muted">
             {traders.length} ranked
@@ -338,13 +338,13 @@ function LeaderboardSection() {
       {isLoading && (
         <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
           <RefreshCw className="size-5 animate-spin" />
-          <span className="text-sm">Loading leaderboard...</span>
+          <span className="text-sm">Loading profile rankings...</span>
         </div>
       )}
 
       {!isLoading && traders.length > 0 && (
         <div className="overflow-auto max-h-[420px]">
-          <Table aria-label="Trader leaderboard">
+          <Table aria-label="Strategy profile rankings">
             <TableHeader>
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="border-border-default hover:bg-transparent">
@@ -405,12 +405,12 @@ const CATEGORY_FILTERS = [
 
 function StrategyCardItem({
   strategy,
-  onCopy,
-  isCopying,
+  onAdd,
+  isAdding,
 }: {
   strategy: StrategyCard;
-  onCopy: (id: string) => void;
-  isCopying: boolean;
+  onAdd: (id: string) => void;
+  isAdding: boolean;
 }) {
   return (
     <GlassCard className="flex flex-col gap-3">
@@ -492,17 +492,17 @@ function StrategyCardItem({
       <div className="flex items-center justify-between pt-1 border-t border-border-default">
         <div className="flex items-center gap-1.5 text-xxs text-text-muted">
           <Users className="size-3" />
-          <span>{strategy.follower_count.toLocaleString("en-IN")} followers</span>
+          <span>{strategy.follower_count.toLocaleString("en-IN")} saved views</span>
         </div>
         <Button
           variant="outline"
           size="sm"
           className="text-xs h-7 gap-1.5"
-          onClick={() => onCopy(strategy.strategy_id)}
-          disabled={isCopying}
+          onClick={() => onAdd(strategy.strategy_id)}
+          disabled={isAdding}
         >
           <Copy className="size-3" />
-          Copy
+          Add
         </Button>
       </div>
     </GlassCard>
@@ -513,11 +513,11 @@ function StrategyCardItem({
 
 function MarketplaceSection() {
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [addingId, setAddingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data: liveStrategies = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ["social", "strategies", categoryFilter],
+    queryKey: ["strategy-library", "templates", categoryFilter],
     queryFn: () => fetchStrategies(categoryFilter),
     staleTime: 60_000,
   });
@@ -530,19 +530,19 @@ function MarketplaceSection() {
         : DEMO_STRATEGIES)
     : liveStrategies;
 
-  const copyMutation = useMutation({
+  const addMutation = useMutation({
     mutationFn: ({ strategyId }: { strategyId: string }) =>
-      copyStrategy(strategyId, "current_user"),
-    onMutate: ({ strategyId }) => setCopyingId(strategyId),
-    onSettled: () => setCopyingId(null),
+      addStrategyTemplate(strategyId, "current_user"),
+    onMutate: ({ strategyId }) => setAddingId(strategyId),
+    onSettled: () => setAddingId(null),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["social", "strategies"] });
+      queryClient.invalidateQueries({ queryKey: ["strategy-library", "templates"] });
     },
   });
 
-  const handleCopy = (strategyId: string) => {
-    if (isDemo) return; // Don't attempt copy in demo mode
-    copyMutation.mutate({ strategyId });
+  const handleAdd = (strategyId: string) => {
+    if (isDemo) return; // Don't add templates in demo mode
+    addMutation.mutate({ strategyId });
   };
 
   return (
@@ -552,7 +552,7 @@ function MarketplaceSection() {
         <div className="flex items-center gap-2">
           <BarChart3 className="size-4 text-accent" />
           <h2 className="text-sm font-heading font-bold text-text-primary">
-            Strategy Marketplace
+            Strategy Library
           </h2>
           <Badge variant="outline" className="text-xxs h-5 border-border-default text-text-muted">
             {strategies.length} strategies
@@ -606,8 +606,8 @@ function MarketplaceSection() {
               <StrategyCardItem
                 key={s.strategy_id}
                 strategy={s}
-                onCopy={handleCopy}
-                isCopying={copyingId === s.strategy_id}
+                onAdd={handleAdd}
+                isAdding={addingId === s.strategy_id}
               />
             ))}
           </div>

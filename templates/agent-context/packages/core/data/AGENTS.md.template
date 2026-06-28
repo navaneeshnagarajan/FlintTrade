@@ -1,6 +1,6 @@
 # FlintTrade — data
 
-> Real-time tick capture, WebSocket storage, trade logs, SEBI audit trails
+> Real-time tick capture, WebSocket storage, trade logs, local audit trails
 > Order flow analysis, P&L tracking, tax reports
 
 ## Absorbs

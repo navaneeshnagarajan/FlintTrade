@@ -449,7 +449,7 @@ function applySectorView(api: DockviewApi): void {
 }
 
 // ---------------------------------------------------------------------------
-// Preset 9 — Algo Trading
+// Preset 9 — Order Automation
 //
 // ┌────────────────┬──────────────┐
 // │Strategy Monitor│  Flow Builder│  (tab)
@@ -459,7 +459,7 @@ function applySectorView(api: DockviewApi): void {
 // │ Templates      │              │
 // └────────────────┴──────────────┘
 // ---------------------------------------------------------------------------
-function applyAlgoTrading(api: DockviewApi): void {
+function applyOrderAutomation(api: DockviewApi): void {
   const strategyMonitorId = pid("strategymonitor");
   const flowBuilderId = pid("flowbuilder-tab");
   const strategyTemplatesId = pid("strategytemplates");
@@ -967,11 +967,11 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     apply: applySectorView,
   },
   {
-    id: "algo-trading",
-    name: "Algo Trading",
+    id: "order-automation",
+    name: "Order Automation",
     description: "Strategy Monitor + Chart + Strategy Templates + Session Stats",
     icon: "Bot",
-    apply: applyAlgoTrading,
+    apply: applyOrderAutomation,
   },
   {
     id: "portfolio-manager",

@@ -51,21 +51,21 @@ description: Delta, gamma, theta, vega explained with practical trading implicat
 - Long options: positive vega (want IV to rise after entry)
 - Short options: negative vega (want IV to fall after entry)
 
-**Practical:**
-- Before a big event (RBI, budget): IV rises → buy options before, sell after announcement
-- After event: IV crashes (IV crush) → options sold before event profit from collapse
+**Practical study notes:**
+- Before a big event (RBI, budget): IV can rise as markets price uncertainty
+- After event: IV can fall (IV crush), changing long- and short-option payoffs
 - ATM options have the highest vega; OTM options have lower vega
 
 ## Combined Greek Analysis
 
-**Positive theta, negative vega strategy (short premium):**
-- Sell straddle/strangle in high-IV environment
-- Profit from: time passing (theta) + IV falling (vega)
+**Positive theta, negative vega example (short premium):**
+- Inspect short straddle/strangle payoff in a high-IV environment
+- Payoff drivers: time passing (theta) + IV falling (vega)
 - Risk: large directional move (gamma)
 
-**Positive gamma, positive vega strategy (long premium):**
-- Buy straddle/strangle before a catalyst
-- Profit from: big move (gamma) + IV spike (vega)
+**Positive gamma, positive vega example (long premium):**
+- Inspect long straddle/strangle payoff before a catalyst
+- Payoff drivers: big move (gamma) + IV spike (vega)
 - Risk: time decay (theta) if no move occurs
 
 ## Fetching Greeks via OpenAlgo

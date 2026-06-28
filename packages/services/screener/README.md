@@ -2,7 +2,7 @@
 
 > Option chain, OI analysis, PCR, max-pain, futures quadrant, portfolio Greeks, IV smile, fundamental screener, FII / DII tracker, and RRG calculator.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

@@ -42,13 +42,13 @@ A long gamma position (long options) profits from large moves in either directio
 
 Theta is negative for option buyers (positions lose value over time) and positive for sellers (positions gain value).
 
-**Theta farming strategies (earning time decay):**
-- Short straddle/strangle: Maximum theta, but naked. Suitable when IVP > 65.
-- Iron condor / iron butterfly: Defined-risk theta collection. Target: 50% profit before expiry.
-- Covered call (on equity holdings): Sell OTM calls against long stock positions. Low-risk theta income.
+**Theta exposure examples:**
+- Short straddle/strangle: Maximum theta, but naked. Often studied when IVP > 65.
+- Iron condor / iron butterfly: Defined-risk theta collection. Commonly backtested with a 50% profit review band before expiry.
+- Covered call (on equity holdings): short OTM calls against long stock positions. Lower-risk theta example.
 - Calendar spread: Long far-expiry, short near-expiry. Near-expiry decays faster — net positive theta.
 
-**Theta acceleration rule:** Theta decay is not linear. The last 7 days of an option's life see disproportionate decay. Sellers should time entries 5–8 days before expiry to maximise theta per unit of time.
+**Theta acceleration observation:** Theta decay is not linear. The last 7 days of an option's life see disproportionate decay, so many backtests compare 5–8 DTE entry scenarios.
 
 Daily theta for a ₹100 ATM option (approx):
 - 30 DTE: ₹2–3/day

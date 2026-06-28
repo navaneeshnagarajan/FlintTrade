@@ -10,10 +10,10 @@ description: Iron condor entry criteria, strike selection, adjustment rules, max
 An iron condor combines a bull put spread (below the market) and a bear call spread (above the market). You collect net credit and profit if the underlying stays within the profit range until expiry.
 
 Structure:
-- Sell OTM put (lower short strike)
-- Buy further OTM put (lower long strike)
-- Sell OTM call (upper short strike)
-- Buy further OTM call (upper long strike)
+- Short OTM put (lower short strike)
+- Long further OTM put (lower long strike)
+- Short OTM call (upper short strike)
+- Long further OTM call (upper long strike)
 
 Maximum profit = net credit collected. Maximum loss = width of spread − credit collected.
 
@@ -58,18 +58,18 @@ When the underlying moves toward one of the short strikes:
 
 Do not wait for full expiry to collect premium. Exit rules:
 
-| Profit Level | Action |
+| Profit Level | Study Response |
 |-------------|--------|
-| 25% of max profit | No action yet |
-| 50% of max profit | Take off 50% of the position (the preferred level) |
-| 75% of max profit | Close the entire remaining position |
-| Expiry day morning | Close any remaining position — pin risk not worth residual premium |
+| 25% of max profit | Continue monitoring in the model |
+| 50% of max profit | Compare partial-close outcomes against holding |
+| 75% of max profit | Compare full-close outcomes against residual theta |
+| Expiry day morning | Include a time-risk close assumption in the scenario |
 
-50% profit target is the statistically optimal exit point — it balances leaving money on the table vs. time decay risk.
+Many backtests review the 50% profit band because it balances realised premium against remaining time-risk assumptions.
 
 ## Max Loss Management
 
-**Hard stop:** If total position loss reaches 200% of the original credit collected, exit immediately. No averaging, no hoping.
+**Hard-stop model:** If total position loss reaches 200% of the original credit collected, model an immediate close with no averaging.
 
 Example: Collected ₹30 credit per lot on a 100-point spread. If the position shows a loss of ₹60 per lot, exit. Max defined loss on the spread is ₹70 (100 − 30), so the hard stop at 2× credit is well before maximum loss.
 

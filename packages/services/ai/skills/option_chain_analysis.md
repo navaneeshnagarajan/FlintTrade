@@ -29,27 +29,27 @@ description: Reading and trading option chains — OI, PCR, max pain, IV skew in
 
 ### Implied Volatility (IV)
 - High IV → expensive options, prefer selling strategies
-- Low IV → cheap options, prefer buying strategies
-- IV Percentile > 80 → sell premium (strangles, iron condors)
-- IV Percentile < 20 → buy premium (straddles near events)
+- Low IV → lower option premium relative to history
+- IV Percentile > 80 → study short-premium payoff examples (strangles, iron condors)
+- IV Percentile < 20 → study long-premium payoff examples (straddles near events)
 - IV skew: higher Put IV than Call IV → fear premium, participants buying downside protection
 
-## Trading Setups from Option Chain
+## Option Chain Study Patterns
 
 ### Range-Bound Market
 1. Check PCR near 1.0, high OI walls on both sides
-2. Sell ATM straddle or strangle inside the range
-3. Place stop-loss if OI wall breaks with volume
+2. Inspect ATM straddle or strangle payoff examples inside the range
+3. Review how the scenario changes if an OI wall breaks with volume
 
 ### Directional Breakout
 1. Watch for OI unwinding on one side + build-up on the other
-2. Buy ITM option in the breakout direction (lower theta decay)
-3. Set target at next OI resistance/support
+2. Compare ITM and OTM option sensitivity in replay
+3. Study how the next OI resistance/support level affects payoff assumptions
 
 ### Expiry Day
 1. Monitor max pain level — price often converges
-2. Sell OTM options if price is far from max pain with 2h to expiry
-3. Watch for pin risk near ATM strikes
+2. Compare OTM option payoff behaviour when price is far from max pain
+3. Inspect pin risk near ATM strikes
 
 ## Data Source
 Use `/api/v1/optionchain` — returns strikes, call OI, put OI, call IV, put IV, LTP for each strike.

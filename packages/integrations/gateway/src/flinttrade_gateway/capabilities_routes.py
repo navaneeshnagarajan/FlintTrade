@@ -112,7 +112,7 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
 
 @capabilities_bp.route("/broker/recommendations", methods=["GET"])
 def get_recommendations() -> tuple[Any, int]:
-    """Rank native brokers for a trading job — "which broker for what".
+    """Rank native broker capability metadata for an operator-selected job.
 
     Query parameters:
         use_case (str, optional): One of the :class:`BrokerUseCase` values

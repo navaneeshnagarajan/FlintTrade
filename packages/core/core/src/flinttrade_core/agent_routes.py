@@ -142,7 +142,7 @@ def _snapshot() -> dict[str, Any]:
 
 @agent_bp.route("/start", methods=["POST"])
 def start_agent() -> tuple[Any, int]:
-    """Start an autonomous trading session as a background thread.
+    """Start an AI agent session as a background thread.
 
     Request JSON:
         symbols (list[str], required) · exchange (str, default "NSE") ·

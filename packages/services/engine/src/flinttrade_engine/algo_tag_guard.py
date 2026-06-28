@@ -1,9 +1,9 @@
-"""Algo-order tagging guard.
+"""Broker order-tagging guard.
 
-Under SEBI's algo-trading framework, orders placed programmatically must carry
-the broker-assigned ``algo_id``, and brokers cap algo orders per exchange (a
-per-second ceiling). Native adapters advertising ``algo_tag_required=True`` must
-route every order through this guard, which:
+Some broker API programmes require programmatic orders to carry the
+broker-assigned ``algo_id`` and enforce per-exchange order ceilings. Native
+adapters advertising ``algo_tag_required=True`` must route every order through
+this guard, which:
 
 * relays the correct ``algo_id`` to stamp on the order, and
 * enforces a per-(broker, exchange) per-second algo-order ceiling, refusing the

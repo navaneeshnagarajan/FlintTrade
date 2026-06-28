@@ -36,11 +36,11 @@ IV behaviour:
 
 ## Strategy 2 — Post-Earnings IV Crush Fade (Premium Sell)
 
-**Objective:** Sell inflated premium immediately after the announcement; profit from IV collapse.
+**Objective:** Study inflated premium immediately after the announcement and how IV collapse affects payoff.
 
-**Timing:** Sell the straddle/strangle in the first 5–10 minutes after market opens following the earnings release.
+**Timing example:** First 5–10 minutes after market opens following the earnings release.
 
-**Setup:** Sell ATM straddle or 1-strike OTM strangle, expiry = nearest weekly/monthly.
+**Structure:** Short ATM straddle or 1-strike OTM strangle, expiry = nearest weekly/monthly.
 
 **Exit:** Close when 40–50% of the credit is earned (usually within 2–3 sessions as IV normalises).
 

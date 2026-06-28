@@ -388,7 +388,7 @@ Lives in a platform-specific workspace directory:
 - **UI preferences** — theme, default exchange, time zone, density.
 - **LLM config** — provider, host, model.
 - **Notification config** — Telegram bot settings.
-- **SEBI settings** — rate limits, audit retention, kill-switch.
+- **Order-safety settings** — rate limits, audit retention, kill-switch.
 
 API keys and tokens are stored as `_ref` fields (references). Actual
 secrets live in the OS keyring or in environment variables, never in
@@ -509,4 +509,4 @@ Production deployments use `systemd` units under `infra/systemd/`. See
 - Per-version change notes — [releases/](releases/)
 - CI behaviour — [CI.md](CI.md)
 - Supported brokers / exchanges / platforms — [COMPATIBILITY.md](COMPATIBILITY.md)
-- SEBI compliance — [SEBI_COMPLIANCE.md](SEBI_COMPLIANCE.md)
+- Order safety notes — [ORDER_SAFETY.md](ORDER_SAFETY.md)

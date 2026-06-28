@@ -10,12 +10,9 @@ name: Desktop Release
 # Each job freezes the Python backend into a sidecar (PyInstaller), then bundles
 # it inside a Tauri 2 shell. See docs/DESKTOP.md and packaging/.
 #
-# Trigger: push a tag like ``v0.6.0`` or run manually (workflow_dispatch).
+# Trigger: run manually (workflow_dispatch), optionally providing a release tag.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -34,6 +31,7 @@ jobs:
   build:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

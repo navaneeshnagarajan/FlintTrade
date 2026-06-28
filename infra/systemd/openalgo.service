@@ -29,7 +29,7 @@
 # =============================================================================
 
 [Unit]
-Description=OpenAlgo Trading API (broker gateway + WebSocket)
+Description=OpenAlgo broker gateway and WebSocket API
 Documentation=https://openalgo.in
 After=network.target
 Wants=network-online.target

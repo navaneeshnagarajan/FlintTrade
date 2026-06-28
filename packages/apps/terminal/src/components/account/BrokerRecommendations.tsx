@@ -1,14 +1,13 @@
 /**
- * BrokerRecommendations — "which broker for what" smart-routing suggestions.
+ * BrokerRecommendations — broker capability metadata for routing setup.
  *
  * Surfaces the backend recommendation engine
- * (GET /api/v1/broker/recommendations) which ranks the native brokers per
- * trading job from their declared capabilities (lowest cost, market depth,
+ * (GET /api/v1/broker/recommendations) which ranks native broker metadata per
+ * operator-selected job from declared capabilities (lowest cost, market depth,
  * historical data, options analytics, throughput, streaming, advanced orders).
  *
- * This is advisory, capability-derived data — not live prices — so it carries
- * no isConnected guard; it tells the operator which connected broker is best
- * suited to each job.
+ * This is capability-derived metadata, not live prices or financial advice, so
+ * it carries no isConnected guard.
  */
 
 import { useQuery } from "@tanstack/react-query";

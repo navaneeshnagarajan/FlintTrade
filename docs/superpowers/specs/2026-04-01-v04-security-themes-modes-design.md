@@ -37,7 +37,7 @@ Single-user platform deployable anywhere (NAS, cloud, personal machine). One acc
 
 ### 1.2 Daily Login Flow
 
-**Session expiry:** Every day at 08:00 IST, all sessions expire. This enforces daily re-authentication aligned with SEBI's broker login requirement.
+**Session expiry:** Every day at 08:00 IST, all sessions expire. This enforces daily re-authentication aligned with broker login expectations.
 
 **Returning user flow:**
 ```

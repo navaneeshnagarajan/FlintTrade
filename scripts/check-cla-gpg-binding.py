@@ -11,8 +11,9 @@ Failure modes:
 Bootstrap / founder handling:
   - The CI job runs this ONLY on external forks (see supply-chain.yml `if:`), so the
     founder's own branches never reach it.
-  - If the author's record still carries a PLACEHOLDER fingerprint (founder has not yet
-    published a key), the binding cannot be enforced; the script prints a NOTE and exits 0.
+  - If the repo owner's record does not yet carry a fingerprint, the script treats
+    it as owner auto-attestation and exits 0. External contributors must provide a
+    fingerprinted record before merge.
   - When run with no PR context (local invocation) it verifies what it can and exits 0.
 
 Sub-spec §9.3-§9.4; acceptance gate #13.
@@ -92,10 +93,10 @@ def main() -> int:
         )
         return 1
 
-    # cla_text_sha256 drift check (skipped while PLACEHOLDER)
+    # cla_text_sha256 drift check (skipped when no signed hash is recorded)
     artefact = record.get("signed_artefact") or {}
     declared_hash = str(artefact.get("cla_text_sha256", ""))
-    if declared_hash and "PLACEHOLDER" not in declared_hash:
+    if declared_hash:
         current = hashlib.sha256(CLA_TEXT.read_bytes()).hexdigest()
         if current != declared_hash:
             print(
@@ -106,12 +107,21 @@ def main() -> int:
             return 1
 
     fp = _norm_fp(str(record.get("gpg_fingerprint", "")))
-    if not fp or "PLACEHOLDER" in fp:
+    repo_owner = str(cfg.get("repo_owner", "navaneeshnagarajan")).lower()
+    if not fp and actor == repo_owner:
         print(
-            f"NOTE: {actor} has no real GPG fingerprint on record yet "
-            f"(PLACEHOLDER); commit-signature binding not enforced."
+            f"NOTE: {actor} is repo owner with auto-attested CLA record; "
+            "commit-signature binding not enforced."
         )
         return 0
+    if not fp:
+        print(
+            f"FAIL (missing_gpg_fingerprint): PR author {actor!r} has a CLA "
+            "record but no GPG fingerprint. External contributors must provide "
+            "a fingerprinted CLA record before merge.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not cfg.get("require_gpg_signed_commits", True):
         print(f"NOTE: require_gpg_signed_commits disabled; skipping commit check for {actor}")

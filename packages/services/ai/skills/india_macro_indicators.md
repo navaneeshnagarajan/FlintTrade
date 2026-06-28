@@ -1,7 +1,7 @@
 ---
 name: india_macro_indicators
 category: data
-description: RBI policy, GDP/CPI/IIP interpretation, monsoon impact, election cycles, FPI flows, and rupee correlation with Indian equity markets
+description: RBI policy, GDP/CPI/IIP interpretation, monsoon impact, election cycles, FPI flows, and rupee correlation with Indian equity-market data
 ---
 # India Macro Indicators for Market Analysis
 
@@ -11,12 +11,12 @@ The Reserve Bank of India's Monetary Policy Committee (MPC) meets 6 times per ye
 
 | Rate Action | Typical Market Reaction |
 |-------------|------------------------|
-| Rate cut | Bullish equities, especially rate-sensitive sectors (banks, NBFCs, real estate) |
-| Rate hike | Bearish short-term; banking NIM impact; rupee strengthens |
-| Pause with dovish commentary | Mild bullish — markets price in future cuts |
-| Stance change (neutral → accommodative) | Strong bullish signal, can trigger 1–2% Nifty rally |
+| Rate cut | Often supportive for rate-sensitive sector narratives |
+| Rate hike | Often negative for equity multiples in short-term market commentary |
+| Pause with dovish commentary | Often read as supportive by market participants |
+| Stance change (neutral → accommodative) | Often treated as a risk-on macro signal |
 
-**Trading rule:** Nifty tends to be volatile ±1% on RBI policy day. Sell straddles the session before (IV expansion into event); close immediately after announcement.
+**Sandbox note:** RBI policy days often produce wider Nifty ranges and implied-volatility shifts. Use event-calendar markers and historical replay to study the behaviour; do not treat this as an order instruction.
 
 Key MPC dates announced quarterly — mark them in the event calendar.
 

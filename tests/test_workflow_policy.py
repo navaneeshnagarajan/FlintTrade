@@ -1,12 +1,10 @@
 """CI-policy guardrail: keep GitHub Actions usage inside best practice.
 
-This test exists because of a concrete incident. A heavy, daily,
-multi-platform CI footprint — macOS runners are billed at 10x the Linux
-minute rate and Windows at 2x — on a young GitHub account tripped the
-Actions abuse / over-usage auto-flagging, and Actions was disabled
-account-wide. The remediation was to right-size CI to GitHub's published
-best practices and to add this guardrail so that no future change (human
-or agent) silently re-introduces the footprint that caused the flag.
+This test keeps frequent CI work bounded. A heavy, daily, multi-platform CI
+footprint — macOS runners are billed at 10x the Linux minute rate and Windows
+at 2x — can consume the included Actions budget quickly. The guardrail keeps CI
+aligned with GitHub's published best practices so no future change silently
+re-introduces that footprint.
 
 The policy enforced here, asserted against every ``.github/workflows/*.yml``:
 
@@ -18,9 +16,8 @@ The policy enforced here, asserted against every ``.github/workflows/*.yml``:
    (release-tag pushes are covered by the same rule — a tag push is still a
    push, so cross-platform jobs gate behind ``workflow_dispatch`` /
    schedule, never an unconditional push).
-2. **Every job declares ``timeout-minutes``.** A missing timeout is the
-   single clearest runaway signal an abuse heuristic watches for; a hung
-   job otherwise burns minutes up to the six-hour default.
+2. **Every job declares ``timeout-minutes``.** A hung job otherwise consumes
+   minutes up to the six-hour default.
 3. **Every workflow declares a top-level ``permissions`` block.** Pinning
    the token to least privilege (default ``contents: read``) is both a
    security control and a usage-hygiene signal.
@@ -51,7 +48,7 @@ _WORKFLOW_DIR = _REPO_ROOT / ".github" / "workflows"
 _EXPENSIVE_OS_TOKENS = ("macos", "windows")
 
 # Triggers that fire cheaply and frequently. A macOS / Windows job behind any
-# of these is the footprint that tripped the abuse flag.
+# of these is too expensive for routine CI.
 _FREQUENT_PUSH_TRIGGERS = ("push", "pull_request", "pull_request_target")
 
 # Cron day-of-week / day-of-month tokens that still mean "every day", i.e. do
@@ -254,8 +251,8 @@ def test_every_job_declares_timeout(rel: str, doc: dict[str, Any]) -> None:
             missing.append(job_name)
     assert not missing, (
         f"{rel}: job(s) without `timeout-minutes`: {', '.join(missing)}. "
-        "A missing timeout lets a hung job burn minutes up to the 6-hour "
-        "default and is the clearest abuse signal. Add a sensible value "
+        "A missing timeout lets a hung job consume minutes up to the 6-hour "
+        "default. Add a sensible value "
         "(lint ~10, tests ~30, cross-platform ~45)."
     )
 

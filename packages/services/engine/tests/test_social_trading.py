@@ -1,4 +1,4 @@
-"""Tests for social trading — Leaderboard + StrategyMarketplace.
+"""Tests for the local strategy-profile library.
 
 Covers: CRUD operations, sorting, validation, edge cases, seed data.
 """
@@ -260,12 +260,12 @@ class TestStrategyMarketplace:
         with pytest.raises(ValueError, match="user_id"):
             mp.copy("strat_1", "")
 
-    def test_copy_duplicate_returns_already_copied(self) -> None:
+    def test_copy_duplicate_returns_already_added(self) -> None:
         mp = StrategyMarketplace()
         mp.publish(self._make_strategy(follower_count=10))
         mp.copy("strat_1", "user_1")
         result = mp.copy("strat_1", "user_1")
-        assert result["status"] == "already_copied"
+        assert result["status"] == "already_added"
         # follower_count should not increment on duplicate copy
         assert mp.get_strategy("strat_1").follower_count == 11  # type: ignore[union-attr]
 

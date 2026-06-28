@@ -43,6 +43,7 @@ _CATEGORY_ORDER: list[str] = [
     "strategy",
     "analysis",
     "execution",
+    "safety",
     "compliance",
     "crypto",
     "other",

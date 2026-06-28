@@ -1,19 +1,18 @@
 # FlintTrade User Guide
 
-This guide walks you from a fresh install to placing your first live order.
-The default reading order is top-to-bottom — every section builds on the one
-before it. If you already have FlintTrade running, jump to the
+This guide walks you from a fresh install to local setup, sandbox workflows,
+and Live-mode safeguard verification. The default reading order is top-to-bottom
+— every section builds on the one before it. If you already have FlintTrade running, jump to the
 [Workspace tour](#workspace-tour) or use the section list in the sidebar.
 
 > **Beta software.** FlintTrade `v0.6.0-beta` is not production ready and
 > does not provide financial advice. Read [disclaimer.md](../disclaimer.md)
 > before connecting a broker or switching to Live mode.
 
-> **Three personas, one app.** FlintTrade serves traders (intraday F&O),
-> investors (mutual funds, SIPs, holdings), and beginners (learning, paper
-> trading) from the same workspace. The routes are persona-shaped — pick
-> `/trade`, `/invest`, or `/learn` from the top bar to switch persona without
-> losing context.
+> **Multiple workflows, one local app.** FlintTrade has route groups for order
+> workflow testing, portfolio-style records, and guided learning. Pick `/trade`,
+> `/invest`, or `/learn` from the top bar to switch workspaces without losing
+> context.
 
 ---
 
@@ -104,16 +103,16 @@ and first-party broker gateway.
 
 ---
 
-## 3. First paper trade (Practice mode)
+## 3. First sandbox order (Practice mode)
 
-Before risking real money, place a paper trade in **Practice mode**.
-FlintTrade has a three-mode system:
+Before enabling any order-capable integration, exercise the order path in
+**Practice mode**. FlintTrade has a three-mode system:
 
 | Mode | Order behaviour | Best for |
 |---|---|---|
 | **Explore** | No orders sent; demo data only | First-time visitors, screenshots, docs |
-| **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy testing, before-market practice |
-| **Live** | Real orders to your broker | Production trading |
+| **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy tests and integration checks |
+| **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
@@ -124,8 +123,7 @@ claim — switching to Live requires a deliberate confirmation step.
 2. Click the mode badge in the top bar → choose **Practice**. A modal
    confirms the switch.
 3. From the dock sidebar, drag the **Order Pad** widget into the workspace
-   (or pick a preset that contains it — for example "Scalper Zone" or
-   "Options Desk").
+   (or pick a preset that contains it).
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
@@ -143,36 +141,38 @@ WebSocket back to the front-end. No real money moved.
 
 ---
 
-## 4. First live trade (Live mode)
+## 4. Live-mode safeguard verification
 
-Once your strategy is paper-trade-clean for at least a session, switch to
-Live.
+Live mode can send real orders through a configured broker path. This guide
+does not recommend or instruct a live order; use this section to verify the
+software safeguards, prompts, and recovery controls in a local setup.
 
 ### Pre-flight checklist
 
-- [ ] OpenAlgo session is current (the broker token has not expired).
+- [ ] Broker or OpenAlgo session is current if you are intentionally testing a
+      live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Daily P&L kill switch is configured in Settings → Risk.
-- [ ] You have read and accepted the SEBI compliance notes in
-      [SEBI_COMPLIANCE.md](SEBI_COMPLIANCE.md).
+- [ ] You have read the risk and user-responsibility notes in
+      [disclaimer.md](../disclaimer.md).
 
 ### Walkthrough
 
 1. Click the mode badge in the top bar → choose **Live**. A modal warns
    that real orders will be placed and asks for password re-entry.
-2. Place a single-lot, in-the-money order through the Order Pad as a
-   smoke test (the smallest possible position).
-3. Watch the **Positions** widget — it should reflect the broker's real
-   position book within one tick.
-4. Close the position from the broker's terminal *or* from the Positions
-   widget. Confirm both reconcile.
+2. Cancel the modal unless you are deliberately performing your own broker-side
+   test outside this guide.
+3. Confirm the UI clearly shows Live mode, the active account, and the
+   configured safety thresholds before any order-capable action is available.
+4. Return to **Practice** mode and repeat the order-path walkthrough in the
+   sandbox before continuing development work.
 
-If anything looks wrong, hit the **Kill Switch** in the top bar — it
-cancels every open order and squares off every position via OpenAlgo's
-`closeposition` endpoint. The kill switch also fires automatically when
-the daily P&L breach threshold is hit (default 3% pause, 15% kill).
+If anything looks wrong during live-capable testing, hit the **Kill Switch** in
+the top bar. It cancels open orders and asks the configured broker path to close
+positions via the supported close-position endpoint. The kill switch also fires
+automatically when the configured daily P&L breach threshold is hit.
 
 ---
 
@@ -191,9 +191,9 @@ sync across sessions.
 | `/explore` | Demo mode with sample data — no broker connection needed. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Trader workspace — Dockview canvas, 95 widgets, 13 presets. |
-| `/invest` | Investor dashboard — holdings, net worth, SIPs, mutual-fund tracker. |
-| `/learn` | Beginner centre — courses, glossary, strategies, paper trading. |
+| `/trade` | Order-workflow workspace — Dockview canvas, widgets, and presets. |
+| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. |
+| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. |
 | `/ai` | AI Centre — chat, signals, sentiment, RAG. |
@@ -269,8 +269,8 @@ Streaming option-chain widget rendered with
 
 ### OI Profile
 
-Plots Open Interest changes by strike across CE and PE legs. Useful for
-spotting where the smart-money "walls" are setting up.
+Plots Open Interest changes by strike across CE and PE legs for local analysis
+and UI testing.
 
 ### Max Pain
 
@@ -296,7 +296,7 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 2. **Configure parameters.** Each template exposes a parameter form
    (built with `react-hook-form` + `zod`).
 3. **Pick a date range.** Historical OHLCV data is sourced from your
-   configured providers (OpenChart, yfinance, or a paid feed).
+   configured providers (OpenChart, yfinance, or a licensed feed).
 4. **Run.** The backtest engine processes ticks vector-wise (VectorBT for
    exploration, Rust/PyO3 `ticks` for tick-level precision when
    you opt in).
@@ -305,8 +305,8 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 
 ### Forward Test
 
-Same as Backtest, but runs in Practice mode against live ticks. Useful for
-a final sanity check before going live.
+Same as Backtest, but runs in Practice mode against live ticks. Use it to
+validate the software path before any Live-mode use.
 
 ### Optimise
 
@@ -324,9 +324,8 @@ Open `/automate`. Three sub-tools:
 ### Flows
 
 Visual flow builder (drag-and-drop nodes) for "when X happens, do Y"
-automations. Nodes include market events (OI breach, price level, IV
-spike), broker events (order filled, position breach), and actions
-(place order, send Telegram, run script).
+automations. Nodes include market-data events, broker events, and actions such
+as sending a notification or running a local script.
 
 ### Cron
 
@@ -334,7 +333,7 @@ Time-based automations. Examples:
 
 - Run pre-market screener at 9:00 AM IST every weekday.
 - Snapshot positions to a CSV at 3:30 PM IST.
-- Post a daily P&L summary to Telegram at end-of-day.
+- Write a daily P&L summary to local storage at end-of-day.
 
 Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
@@ -353,14 +352,15 @@ Open `/ai`. Four sub-tools backed by `packages/services/ai`:
 
 ### Chat
 
-LLM-powered trading assistant. Wired to LM Studio by default
-(`http://127.0.0.1:1234`) but switchable to OpenAI, Anthropic, Groq, or a
-local Ollama instance from Settings → AI.
+Local AI analysis and debugging tools. The default local provider is LM Studio
+(`http://127.0.0.1:1234`), with optional providers configurable from
+Settings → AI.
 
 ### Signals
 
-Rule-based + ML-derived signals. Includes a swarm executor that runs
-multiple signal generators in parallel and aggregates verdicts.
+Rule-based and ML-derived software outputs. Includes an executor that runs
+multiple generators in parallel and aggregates diagnostics. These outputs are
+educational and are not financial advice.
 
 ### Sentiment
 
@@ -370,8 +370,8 @@ interval.
 
 ### RAG
 
-Retrieval-augmented question answering over your own trading documents
-(strategy notes, broker statements, research reports). Indexed in
+Retrieval-augmented question answering over local user-provided documents
+(for example notes, statements, or research PDFs). Indexed in
 ChromaDB with sentence-transformer embeddings. Startup auto-indexing is off by
 default, and the RAG runtime itself is also off unless enabled, so the backend
 does not download or embed documents during ordinary local launches. Set
@@ -385,9 +385,9 @@ startup.
 
 ## 10. Ditto multi-account walkthrough
 
-Open `/ditto`. Ditto is FlintTrade's multi-account orchestrator — mirror
-one master account to many followers with per-leg margin / lot-size /
-risk overrides.
+Open `/ditto`. Ditto is FlintTrade's multi-account orchestration module for
+testing account relationships, sizing rules, and risk overrides in one local
+workspace.
 
 ### Three views
 
@@ -441,7 +441,7 @@ sections:
 | **AI** | `llm.provider`, `llm.host`, `llm.model` | LLM client (LM Studio, OpenAI, Anthropic, Ollama, Groq). |
 | **Notifications** | `telegram.*`, `whatsapp.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L thresholds for auto-pause and auto-kill. |
-| **SEBI** | `sebi.audit_retention_days`, `sebi.rate_limit_*` | Audit retention (5 years default), per-endpoint rate limits. |
+| **Order safety** | `sebi.audit_retention_days`, `sebi.rate_limit_*` | Local audit retention, per-endpoint rate limits, and kill-switch settings. |
 
 Secrets are stored as `_ref` fields — references to the OS keyring or to
 environment variables. They are never written to `workspace.json` in clear

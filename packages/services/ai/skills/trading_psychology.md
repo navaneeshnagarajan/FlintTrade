@@ -1,35 +1,35 @@
 ---
 name: trading_psychology
 category: analysis
-description: Common cognitive biases in trading, revenge trading prevention, journal review process, sizing discipline, and rules for when to stop trading for the day
+description: Common cognitive biases, revenge-trade prevention, journal review process, sizing discipline, and pause criteria for market workflows
 ---
-# Trading Psychology
+# Market Psychology Review
 
-## The Six Most Costly Biases in Trading
+## The Six Most Costly Biases in Market Workflows
 
 **1. FOMO (Fear of Missing Out)**
-Entering a trade after the move has already happened because you cannot bear watching a profit opportunity pass. FOMO entries are always late, always at poor risk:reward.
-- Rule: If you missed the entry setup, the trade is gone. Never chase. The next setup is coming.
+Entering a position after the move has already happened because you cannot bear watching an opportunity pass. FOMO entries are often late and usually have poor risk:reward.
+- Review prompt: If the planned setup was missed, record it as a missed setup rather than converting it into an unplanned decision.
 
 **2. Anchoring**
 Anchoring to a previous price level and expecting the market to return there. "It was at ₹500 last month, it will come back." Markets do not owe you a return to any level.
-- Rule: Make trading decisions based on current price action, not where the price used to be.
+- Review prompt: Base the journal note on current market evidence, not where the price used to be.
 
 **3. Sunk Cost Fallacy**
-Holding a losing trade longer because you have already lost money on it. "I'm down ₹50,000 — I'll hold until it comes back." The market does not know or care about your entry price.
-- Rule: The relevant question is always "If I had no position, would I enter this trade right now?" If no, exit.
+Holding a losing position longer because you have already lost money on it. "I'm down ₹50,000 — I'll hold until it comes back." The market does not know or care about your entry price.
+- Review prompt: Ask, "If I had no position, would this setup still satisfy the plan?" Record the answer before changing the position.
 
 **4. Confirmation Bias**
-Seeking out information that confirms your existing position and ignoring signals that contradict it. Selectively reading news that validates your trade.
-- Rule: Before every trade, explicitly list the reasons it could fail. If you cannot articulate the bear case for your long, you have not thought it through.
+Seeking out information that confirms your existing position and ignoring signals that contradict it. Selectively reading news that validates your view.
+- Review prompt: Before acting on a setup, list the reasons it could fail and the opposite case for the thesis.
 
 **5. Overconfidence After a Winning Streak**
 A series of 5–6 wins causes traders to increase size significantly, often just before a drawdown period. Win streaks are statistical, not permanent.
-- Rule: Size increases only on a pre-defined schedule (e.g., after 20 trades with positive expectancy, not after a hot streak).
+- Review prompt: Compare sizing changes only against a pre-defined schedule, such as after a statistically meaningful sample with positive expectancy.
 
 **6. Loss Aversion**
 Cutting winners too early (locking in small gains) while letting losers run (hoping they recover). This creates a negative asymmetry: small wins, large losses.
-- Rule: Mechanically enforce the reward:risk ratio. If your SL is 20 points, your minimum target is 30–40 points. Do not exit at 10 points because you are nervous.
+- Review prompt: Compare realised exits against the planned reward:risk ratio and note whether emotion changed the outcome.
 
 ## Revenge Trading Prevention
 
@@ -40,56 +40,56 @@ Signs you are about to revenge trade:
 - You are increasing position size after a loss without a system reason
 - You are placing a trade in an instrument you do not usually trade
 
-**Mandatory cool-down rules:**
-- After a loss greater than 0.5% of capital in a single trade: 15-minute mandatory break
-- After 2 consecutive losses: 30-minute break, review both trades before continuing
-- After hitting daily loss limit: Stop trading for the day. This rule has no exceptions.
+**Cool-down criteria to model:**
+- After a loss greater than 0.5% of capital in a single position: 15-minute pause
+- After 2 consecutive losses: 30-minute pause and review both decisions before continuing
+- After hitting a daily loss limit: end the session in the model
 
 ## Journal Review Process
 
 A trading journal is the primary feedback loop for improvement.
 
 **Daily log (after every session):**
-- Entry time, instrument, direction, size
-- Planned SL and target
-- Actual SL and target hit (or exit reason)
+- Review time, instrument, bias/context, and size
+- Planned risk boundary and objective
+- Actual boundary/objective outcome or close reason
 - P&L
 - One sentence: "What did I do well / what would I change?"
 
 **Weekly review (Sunday evening):**
 - Win rate, average win, average loss
-- Were setups taken from the strategy playbook only?
-- Were any unplanned trades taken? Why?
-- What was the emotional state during sessions — is there a pattern between emotional state and poor trades?
+- Were setups drawn from the strategy playbook only?
+- Were any unplanned decisions made? Why?
+- What was the emotional state during sessions — is there a pattern between emotional state and poor outcomes?
 
 **Monthly review:**
 - Compare metrics to prior month
 - Identify the 2–3 setups with the highest expectancy
-- Identify the 2–3 setups that consistently lose — consider removing them
+- Identify the 2–3 setups that consistently lose and review whether they belong in the playbook
 - Review if position sizing is consistent
 
 ## Sizing Discipline
 
-The correct position size is determined before the trade, not during it.
+The planned position size is determined before the scenario, not during it.
 
 ```
-Risk per trade (₹) = Account capital × risk percentage (1–2%)
-Quantity = Risk per trade / (Entry price − Stop loss price)
+Risk per scenario (₹) = Account capital × risk percentage (1–2%)
+Quantity = Risk per scenario / (Entry price − Stop loss price)
 ```
 
-Never increase position size mid-trade because "it's working." Add to winners only at pre-defined levels (second entry signal) with the same risk framework applied.
+Journal any mid-position size increase and compare it with the pre-defined plan before treating it as valid process.
 
-## When to Stop Trading for the Day
+## When to End a Session
 
-**Hard stops (immediate):**
+**Hard stop criteria:**
 - Daily loss limit reached (e.g., 3% of capital)
-- Technical failure (internet, broker platform issue) — stop until confirmed resolved
+- Technical failure (internet, broker platform issue) until confirmed resolved
 - Physical impairment (illness, extreme fatigue, severe emotional disturbance)
 
-**Soft stops (take a break, evaluate):**
+**Soft stop criteria:**
 - 3 consecutive losses in the same session
-- Traded outside your defined setup twice
+- Worked outside your defined setup twice
 - Feeling strong emotions: excitement, anger, anxiety about a position
 - P&L anxiety is affecting your decision-making
 
-A useful rule: after hitting the soft stop, ask "Would I be comfortable showing my last 3 trades to a mentor?" If the answer is no, stop for the day.
+A useful review prompt: after hitting a soft stop, ask "Would I be comfortable showing my last 3 decisions to a mentor?" If the answer is no, end the session in the model.

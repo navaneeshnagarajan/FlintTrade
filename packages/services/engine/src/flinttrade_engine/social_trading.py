@@ -1,12 +1,12 @@
-"""Social trading — leaderboard, strategy sharing, copy trading foundation.
+"""Local strategy-profile library and account-workflow template foundation.
 
 Provides:
-- TraderProfile: dataclass representing a trader's public profile + metrics
-- SharedStrategy: dataclass representing a published/shared strategy
-- Leaderboard: ranks traders by various performance metrics
-- StrategyMarketplace: browse, publish, and copy shared strategies
+- TraderProfile: dataclass representing a local profile + metrics
+- SharedStrategy: dataclass representing a reusable strategy template
+- Leaderboard: ranks sample profiles by various performance metrics
+- StrategyMarketplace: browses and reuses local strategy templates
 
-This module is the foundation for social/copy trading in FlintTrade.
+This module is the foundation for local strategy-profile workflows in FlintTrade.
 No external dependencies beyond the standard library.
 """
 
@@ -53,7 +53,7 @@ VALID_STRATEGY_SORT: set[str] = {
 
 @dataclass
 class TraderProfile:
-    """Public profile of a trader on the leaderboard."""
+    """Local sample profile used in the profile ranking."""
 
     user_id: str
     display_name: str
@@ -70,7 +70,7 @@ class TraderProfile:
 
 @dataclass
 class SharedStrategy:
-    """A strategy published to the marketplace."""
+    """A reusable strategy template in the local library."""
 
     strategy_id: str
     creator_id: str
@@ -87,13 +87,13 @@ class SharedStrategy:
     created_at: str = ""
 
 
-# ── Leaderboard ──────────────────────────────────────────────────────────────
+# ── Profile Ranking ──────────────────────────────────────────────────────────
 
 
 class Leaderboard:
-    """Ranks traders by performance metrics.
+    """Ranks local sample profiles by performance metrics.
 
-    Stores trader profiles in-memory and provides ranked retrieval by
+    Stores profiles in-memory and provides ranked retrieval by
     any numeric metric on TraderProfile.
     """
 
@@ -103,11 +103,11 @@ class Leaderboard:
 
     @property
     def count(self) -> int:
-        """Number of profiles on the leaderboard."""
+        """Number of profiles in the ranking."""
         return len(self._profiles)
 
     def update_profile(self, profile: TraderProfile) -> None:
-        """Add or update a trader profile.
+        """Add or update a profile.
 
         Args:
             profile: TraderProfile to upsert.
@@ -129,7 +129,7 @@ class Leaderboard:
         metric: str = "total_return_pct",
         limit: int = 20,
     ) -> list[TraderProfile]:
-        """Return traders sorted by the given metric (descending).
+        """Return profiles sorted by the given metric (descending).
 
         Args:
             metric: Name of a numeric field on TraderProfile to sort by.
@@ -152,10 +152,10 @@ class Leaderboard:
         return profiles[:limit]
 
     def get_profile(self, user_id: str) -> TraderProfile | None:
-        """Retrieve a single trader profile by user_id.
+        """Retrieve a single profile by user_id.
 
         Args:
-            user_id: The trader's unique identifier.
+            user_id: The profile's unique identifier.
 
         Returns:
             TraderProfile if found, else None.
@@ -164,10 +164,10 @@ class Leaderboard:
             return self._profiles.get(user_id)
 
     def remove_profile(self, user_id: str) -> bool:
-        """Remove a trader profile from the leaderboard.
+        """Remove a profile from the ranking.
 
         Args:
-            user_id: The trader's unique identifier.
+            user_id: The profile's unique identifier.
 
         Returns:
             True if the profile was removed, False if it didn't exist.
@@ -179,14 +179,14 @@ class Leaderboard:
         return False
 
 
-# ── Strategy Marketplace ─────────────────────────────────────────────────────
+# ── Strategy Library ──────────────────────────────────────────────────────────
 
 
 class StrategyMarketplace:
-    """Browse, share, and copy strategies.
+    """Browse and reuse local strategy templates.
 
     Stores shared strategies in-memory and provides browsing, publishing,
-    and copy functionality.
+    and account-library add functionality.
     """
 
     def __init__(self) -> None:
@@ -272,13 +272,13 @@ class StrategyMarketplace:
             return self._strategies.get(strategy_id)
 
     def copy(self, strategy_id: str, user_id: str) -> dict[str, str]:
-        """Copy a strategy to a user's account.
+        """Add a strategy template to a user's account library.
 
-        Increments the strategy's follower_count and records the copy.
+        Increments the strategy's follower_count and records the library add.
 
         Args:
-            strategy_id: The strategy to copy.
-            user_id: The user copying the strategy.
+            strategy_id: The strategy template to add.
+            user_id: The user adding the strategy template.
 
         Returns:
             Dict with status and copy details.
@@ -297,15 +297,15 @@ class StrategyMarketplace:
             if strategy.creator_id == user_id:
                 raise ValueError("Cannot copy your own strategy")
 
-            # Track copies
+            # Track account-library adds
             if strategy_id not in self._copies:
                 self._copies[strategy_id] = []
 
             if user_id in self._copies[strategy_id]:
                 return {
-                    "status": "already_copied",
+                    "status": "already_added",
                     "strategy_id": strategy_id,
-                    "message": "You have already copied this strategy",
+                    "message": "You have already added this strategy",
                 }
 
             self._copies[strategy_id].append(user_id)
@@ -315,17 +315,17 @@ class StrategyMarketplace:
             "status": "success",
             "strategy_id": strategy_id,
             "strategy_name": strategy.name,
-            "message": f"Strategy '{strategy.name}' copied to your account",
+            "message": f"Strategy '{strategy.name}' added to your account",
         }
 
     def get_copies(self, strategy_id: str) -> list[str]:
-        """Get the list of user_ids who copied a strategy.
+        """Get the list of user_ids who added a strategy template.
 
         Args:
             strategy_id: The strategy to look up.
 
         Returns:
-            List of user_ids who copied this strategy.
+            List of user_ids who added this strategy template.
         """
         with self._lock:
             return list(self._copies.get(strategy_id, []))
@@ -351,7 +351,7 @@ class StrategyMarketplace:
 
 
 def seed_leaderboard() -> Leaderboard:
-    """Create a leaderboard seeded with 15 realistic Indian trader profiles.
+    """Create a profile ranking seeded with 15 realistic sample profiles.
 
     Returns:
         Leaderboard with pre-populated profiles.
@@ -458,7 +458,7 @@ def seed_leaderboard() -> Leaderboard:
 
 
 def seed_marketplace() -> StrategyMarketplace:
-    """Create a marketplace seeded with 10 realistic sample strategies.
+    """Create a local library seeded with 10 realistic sample strategies.
 
     Returns:
         StrategyMarketplace with pre-populated strategies.

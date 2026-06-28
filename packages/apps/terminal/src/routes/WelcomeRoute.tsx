@@ -592,9 +592,9 @@ export default function WelcomeRoute() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.62, ease: silkyEase, delay: 0.08 }}
                 >
-                  Open-source trading platform for Indian F&amp;O, commodities, and crypto —
-                  learning, investing, trading, automation, and AI research orbiting one core.
-                  One native app for macOS, Windows, and Linux.
+                  Open-source self-hosted market workflow software for local research,
+                  sandbox testing, automation, and AI diagnostics. One native app for
+                  macOS, Windows, and Linux.
                 </motion.p>
                 <div className="mx-auto grid max-w-xl gap-2 text-left sm:grid-cols-2">
                   {WELCOME_FEATURES.map((item, index) => (

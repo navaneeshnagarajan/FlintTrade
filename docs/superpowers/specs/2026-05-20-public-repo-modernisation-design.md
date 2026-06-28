@@ -20,9 +20,9 @@ Make FlintTrade's public surface read as a polished, contributor-ready open-sour
 |---|---|---|
 | Cleanup aggressiveness | **Comprehensive overhaul** | Repo is now public; first impression must be strong. Surgical pass leaves too many "looks unmaintained" signals. |
 | CLAUDE.md / AGENTS.md / PLAN.md (34 files total) | **Move to `.local/agent-context/` (untracked)** | Files remain useful for personal dev workflow on Nitro / Mac / Ubuntu, but stop shipping to the public repo. |
-| README audience | **Hybrid — layered** | Trader pitch on top fold, developer view on second fold. One README, two audiences, no audience-switching for visitors. |
+| README audience | **Software-first — layered** | Local operator summary on the top fold, developer view on the second fold. One README, two audiences, no promotional positioning. |
 | Per-package READMEs | **Generate tiny per-package READMEs** | After removing per-package CLAUDE.md/AGENTS.md, each `packages/<pkg>/` would be bare. A small auto-generated README keeps the package navigable on GitHub. |
-| FUNDING.yml | **Add with multiple platforms** | GitHub Sponsors + Buy Me a Coffee + Patreon. Project becomes financially supportable as it grows. |
+| Funding metadata | **Omit** | Keep public metadata focused on source code, setup, documentation, and contributor workflow. |
 
 ## 3. Six-parcel structure
 
@@ -49,13 +49,13 @@ Affects ~36 tracked files; reshapes the tree everything else writes into.
 
 ### Parcel 2 — README rewrite (parallel)
 
-**Top fold (trader pitch):**
+**Top fold (software project pitch):**
 - Project name + tagline (~12 words)
 - Badges row: License (AGPL-3.0), version, CI status, tests count, GitHub stars, last commit
 - 4 hero screenshots (already in `docs/screenshots/` — pick the strongest 4)
 - 5-minute Docker-Compose quickstart (3-4 commands max)
-- "What you can do with it" — 6-8 bullet feature highlights aimed at retail F&O / commodity / crypto traders
-- Supported brokers: 33 (link to full list in COMPATIBILITY.md)
+- "What the software includes" — 6-8 technical feature highlights for local workflows, integrations, data, safety, and developer tooling
+- Supported broker adapters: link to the software compatibility matrix
 
 **Second fold (developer view):**
 - Architecture diagram (mermaid)
@@ -103,7 +103,7 @@ docs/
 - `docs/REFERENCES.md` (currently a giant table of every absorbed repo — replace with a slimmer credits page; keep full version archived)
 
 **Content rules:**
-- `USER_GUIDE.md`: install → first connection → first paper trade → first live trade → workspace tour → screener / Lab / Automate / AI / Ditto walkthroughs
+- `USER_GUIDE.md`: install → first connection → sandbox order path → Live-mode safeguard verification → workspace tour → screener / Lab / Automate / AI / Ditto walkthroughs
 - `DEVELOPER_GUIDE.md`: repo layout → dev setup → test → build → adding a widget → adding a strategy → adding a broker adapter → security and compliance constraints
 - `API.md`: OpenAlgo passthrough + FlintTrade `/ft-api/v1/` endpoints, request / response examples
 - `ARCHITECTURE.md`: refreshed mermaid diagrams, package map, data flow, mode system, auth, WSGI prefix-strip explained
@@ -131,9 +131,9 @@ docs/
 **`.github/` audit + additions:**
 - `ISSUE_TEMPLATE/` — verify 3 templates exist (bug / feature / question); rewrite each for clarity if needed
 - `PULL_REQUEST_TEMPLATE.md` — checklist-style (title format, tests added, docs updated, conventional commit)
-- `FUNDING.yml` — multiple platforms (GitHub Sponsors `navaneeshnagarajan`, Buy Me a Coffee placeholder, Patreon placeholder; user fills handles)
+- Funding metadata — omitted; keep public metadata focused on code, setup, and contributor workflow
 - `CODEOWNERS` — verify after restructure; default everything to `@navaneeshnagarajan` until contributors emerge
-- Repo topics (set via `gh repo edit`): `trading-platform`, `openalgo`, `nse`, `mcx`, `options-trading`, `python`, `react`, `typescript`, `agpl-3-0`, `india`
+- Repo topics (set via `gh repo edit`): use only language, framework, runtime, and tooling topics such as `python`, `react`, `typescript`, `nextjs`, `rust`, `pyo3`, `tauri`, `vite`, `flask`, `mcp`, and `vercel`.
 
 **README badges** (top fold, plain Markdown):
 - License (shields.io)
@@ -210,14 +210,14 @@ Verify acceptance criteria → commit per parcel → push (on explicit user appr
 - [ ] Root `README.md` opens with a trader-facing pitch above the fold; developer view starts below ~screen 1.
 - [ ] `docs/` follows the new structure exactly (`USER_GUIDE.md`, `DEVELOPER_GUIDE.md`, `API.md`, `ARCHITECTURE.md`, `releases/`, etc.).
 - [ ] All stale docs archived to `.local/archive/docs-internal/` with `ARCHIVE_LOG.md` entry.
-- [ ] `.github/` has bug / feature / question issue templates, a checklist PR template, a populated `FUNDING.yml`, and a verified CODEOWNERS.
+- [ ] `.github/` has bug / feature / question issue templates, a checklist PR template, and a verified CODEOWNERS.
 - [ ] `scripts/setup-agent-context.sh` exists and works (smoke test: scaffolds CLAUDE.md and AGENTS.md to `.local/agent-context/` on a fresh clone).
 - [ ] `git status` clean after each parcel commit. Final push is held until explicit user approval.
 - [ ] No application code, tests, or runtime behaviour modified.
 
 ## 7. Open questions (none blocking)
 
-None as of writing. All three follow-up answers gathered before this spec was written (per-package READMEs, FUNDING.yml platforms, comprehensive scope).
+None as of writing. Follow-up answers gathered before this spec was written covered per-package READMEs and comprehensive cleanup scope.
 
 ## 8. Next steps
 

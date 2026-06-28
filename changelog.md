@@ -43,7 +43,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   (`flinttrade_gateway.reconciliation` + an engine-side runner persisting JSONL reports and
   emitting `RECONCILIATION_MISMATCH` audit events) compares broker-side state to FlintTrade's,
   surfaced in a Reconciliation widget.
-- **Autonomous trading agent — control plane** — `POST /api/v1/ai/agent/{start,stop,status}`
+- **AI agent control plane** — `POST /api/v1/ai/agent/{start,stop,status}`
   runs the LLM-driven analyse → signal → risk-check → execute loop as a background
   session, surfaced in the AI route's **Agent** panel (start form, live P&L / cycles /
   positions, "Stop & square off"). OFF by default (`ai.autonomous_agent.enabled`),
@@ -76,9 +76,9 @@ Versioning: [Semantic Versioning](https://semver.org/).
   (same `/v1/breadth/current` contract as the Market Breadth widget), with the demo
   badge retained whenever the data is sample.
 - Native **Upstox** and **Kotak Neo** broker adapter skeletons (gated, doc-grounded
-  capabilities) alongside Dhan, plus a **broker recommendation engine**
-  ("which broker for what") and `GET /api/v1/broker/recommendations` ranking brokers
-  per use-case (low-cost execution, market depth, options analytics, historical data,
+  capabilities) alongside Dhan, plus a **broker capability metadata engine**
+  and `GET /api/v1/broker/recommendations` filtering broker metadata per use case
+  (low-cost execution, market depth, options analytics, historical data,
   streaming, throughput, advanced orders).
 - AI panel routes `GET /api/v1/ai/sentiment/summary`, `…/ai/sentiment/tickers`, and
   `…/ai/regime` (previously 404) — wired to the sentiment and regime engines with
@@ -753,7 +753,7 @@ v2.0.0.4 parity baseline.
 
 ### Added — Features (Wave 29 — Skills + Swarm + Historical)
 - SkillRegistry: markdown skills with YAML frontmatter, on-demand loading, fuzzy search (absorbed from Vibe-Trading)
-- 10 starter AI skills: OpenAlgo API, option chain, straddle, risk, indicators, backtest, market hours, SEBI, FII/DII, Greeks
+- 10 starter AI skills: OpenAlgo API, option chain, straddle, risk, indicators, backtest, market hours, order safety, FII/DII, Greeks
 - SwarmExecutor: async DAG task executor with topological layering, cycle detection, event emission (absorbed from Vibe-Trading)
 - DataProvider Protocol: OpenAlgo, OpenChart (NSE free), yfinance (MCX) with fallback chain (absorbed from historify + openchart)
 - OHLCVNormaliser: IST conversion, column aliasing, intraday cutoff, data validation
@@ -761,7 +761,7 @@ v2.0.0.4 parity baseline.
 
 ### Added — Features (Waves 49-53 — Quality + Skills)
 - WidgetPicker search: filter 80 widgets by name/description, highlight matches, live count
-- 6 new workspace presets (12 total): Options Analysis, Sector View, Algo Trading, Portfolio Manager, Market Overview, Quick Scalper
+- 6 new workspace presets (12 total): Options Analysis, Sector View, Order Automation, Portfolio Manager, Market Overview, Quick Scalper
 - PermutationTester: statistical significance testing, Monte Carlo equity curve confidence bands
 - WalkForwardAnalyser: rolling/expanding window OOS validation, 6 metrics, robustness check
 - KeyboardShortcutsDialog: ? key opens reference, 15 shortcuts, platform-aware labels, searchable
@@ -789,7 +789,7 @@ v2.0.0.4 parity baseline.
 
 ### Added — Python Backends (Waves 39-42)
 - Earnings calendar: NIFTY 50 quarterly events, sample data generator, 3 Flask endpoints
-- Enhanced audit routes: paginated log, CSV export (100K row SEBI compliance), action stats
+- Enhanced audit routes: paginated log, large CSV export, action stats
 - Pivot calculator: 5 methods (Standard/Fibonacci/Woodie/Camarilla/DeMark)
 - Economic calendar: 26 event templates across 6 countries, cadence-based generation
 - Market breadth: McClellan Oscillator, breadth thrust, A/D line, sample data
@@ -800,7 +800,7 @@ v2.0.0.4 parity baseline.
 
 ### Added — Features (Wave 49 — Quality of Life)
 - WidgetPicker search: filter 80 widgets by name, highlight matches, live count
-- 6 new workspace presets (12 total): Options Analysis, Sector View, Algo Trading, Portfolio Manager, Market Overview, Quick Scalper
+- 6 new workspace presets (12 total): Options Analysis, Sector View, Order Automation, Portfolio Manager, Market Overview, Quick Scalper
 - PermutationTester: statistical significance testing, Monte Carlo equity curve bands
 - WalkForwardAnalyser: rolling/expanding window OOS validation, robustness check
 
@@ -1129,7 +1129,7 @@ Full repo audit + god component refactoring. Security hardened, performance opti
 - Unused deps (marked, react-responsive-carousel) moved to devDependencies
 
 ### Changed
-- SEBI compliance doc rewritten with full circular reference
+- Order-safety doc rewritten with local audit, rate-limit, and kill-switch notes
 - CONTRIBUTING.md rewritten with detailed commit guidelines
 - .gitignore cleaned up
 - Test counts: 979 Python + 36 Vitest = 1,015 total
@@ -1266,7 +1266,7 @@ These entries were shipped during the 0.1.0-alpha window (2026-03-19 / 2026-03-2
 ### Added — Initial Setup
 - Monorepo — 12 packages with per-package CLAUDE.md + AGENTS.md
 - CI/CD — GitHub Actions (pytest, ruff, secrets check)
-- SEBI compliance framework — rate limits, kill switch architecture, audit
+- Order-safety framework — rate limits, kill switch architecture, audit
 - Infrastructure — nginx, systemd, WireGuard, fail2ban, deploy scripts
 - Git-native bug tracking system
 - Documentation — OpenAlgo API reference, tools guide, machine configs

@@ -1,5 +1,5 @@
 /**
- * OpenClawWidget — control plane for OpenClaw autonomous trading agents.
+ * OpenClawWidget — control plane for OpenClaw AI agent sessions.
  *
  * Lists agents running on the EXTERNAL OpenClaw gateway, deploys new ones, and
  * stops running ones, via /api/v1/ai/openclaw/*. All data is real: when the

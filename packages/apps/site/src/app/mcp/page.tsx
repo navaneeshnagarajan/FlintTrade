@@ -27,7 +27,7 @@ export default function McpPage() {
         <h1>Docs MCP for FlintTrade contributors.</h1>
         <p>
           Use the hosted endpoint for public docs assistants or the local stdio command inside a cloned repo.
-          This MCP surface is read-only and intentionally separate from FlintTrade trading automation.
+          This MCP surface is read-only and intentionally separate from FlintTrade broker-workflow automation.
         </p>
 
         <div className="feature-grid">
@@ -43,7 +43,7 @@ export default function McpPage() {
           </article>
           <article className="feature-card">
             <LockKeyhole aria-hidden="true" />
-            <h3>No trading powers</h3>
+            <h3>No order powers</h3>
             <p>Broker auth, account state, funds, order IDs, and order placement are not registered here.</p>
           </article>
         </div>

@@ -11,7 +11,6 @@ import {
   PlayCircle,
   Search,
   ChevronRight,
-  ExternalLink,
   TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
@@ -30,7 +29,7 @@ import { motionConfig } from "@/lib/motion";
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "basics" | "glossary" | "strategies" | "paper" | "videos";
+type TabId = "basics" | "glossary" | "strategies" | "paper" | "resources";
 
 interface TabDef {
   id: TabId;
@@ -54,11 +53,11 @@ interface StrategyCard {
   detail: string;
 }
 
-interface VideoCard {
+interface ResourceCard {
   title: string;
-  channel: string;
+  source: string;
   topic: string;
-  url: string;
+  path: string;
 }
 
 interface BasicsSection {
@@ -77,7 +76,7 @@ const TABS: TabDef[] = [
   { id: "glossary",   label: "Glossary",          icon: GraduationCap, progress: 0  },
   { id: "strategies", label: "Strategy Library",  icon: BarChart3,    progress: 16 },
   { id: "paper",      label: "Paper Trading",     icon: TrendingUp,   progress: 0  },
-  { id: "videos",     label: "Video Hub",         icon: PlayCircle,   progress: 0  },
+  { id: "resources",  label: "Resource Hub",      icon: PlayCircle,   progress: 0  },
 ];
 
 const BASICS_SECTIONS: BasicsSection[] = [
@@ -117,11 +116,11 @@ const BASICS_SECTIONS: BasicsSection[] = [
       "Never invest money you cannot afford to lose. Use stop-losses to limit downside. Diversify across stocks and sectors. For F&O, understand margin requirements — you can lose more than your invested amount. Start with practice trading before using real money.",
   },
   {
-    title: "SEBI Regulations",
+    title: "Market Rules",
     readingTime: 2,
     difficulty: "Beginner",
     content:
-      "SEBI (Securities and Exchange Board of India) regulates Indian markets. For personal algo trading the practical requirements are a static IP for API access and your broker's order-rate limit (around 10 orders/second). FlintTrade is personal-use software that respects these operational limits — it makes no regulatory-compliance guarantee; you remain responsible for your own trading.",
+      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is personal-use software and does not make a regulatory-compliance guarantee.",
   },
 ];
 
@@ -155,13 +154,13 @@ const GLOSSARY: GlossaryEntry[] = [
 const STRATEGIES: StrategyCard[] = [
   {
     name: "EMA Crossover",    category: "Trend",          difficulty: "Beginner",
-    description: "Buy when fast EMA crosses above slow EMA, sell on reverse",
-    detail: "Commonly used pairs: 9/21 EMA for intraday, 50/200 EMA for positional. Avoid during sideways market — generates false signals. Works best on 15m+ timeframes for F&O.",
+    description: "Study fast/slow EMA crossover behaviour",
+    detail: "Commonly used pairs include 9/21 EMA and 50/200 EMA. Review crossover timing, sideways-market false signals, and timeframe sensitivity in sandbox analysis.",
   },
   {
     name: "RSI Reversal",     category: "Momentum",       difficulty: "Beginner",
-    description: "Buy below RSI 30, sell above RSI 70",
-    detail: "Use RSI(14) as default. Combine with price support/resistance for higher accuracy. In strong trends, RSI can stay overbought/oversold for extended periods — use with trend filter.",
+    description: "Study RSI overbought and oversold regimes",
+    detail: "Use RSI(14) as a default diagnostic. Compare RSI with price support/resistance and trend filters because strong trends can keep RSI elevated or depressed for extended periods.",
   },
   {
     name: "Supertrend",       category: "Trend",          difficulty: "Beginner",
@@ -170,58 +169,58 @@ const STRATEGIES: StrategyCard[] = [
   },
   {
     name: "Bollinger Squeeze",category: "Volatility",     difficulty: "Intermediate",
-    description: "Enter breakout when bands contract then expand",
-    detail: "Look for BB width at multi-month lows (squeeze). Breakout direction confirms trade. Use ATR to set stop-loss. Combine with RSI or MACD for directional bias before entry.",
+    description: "Study volatility compression before expansion",
+    detail: "Look for BB width at multi-month lows, then inspect how later expansion behaves in historical replay. Compare RSI, MACD, and ATR diagnostics before treating it as a sandbox hypothesis.",
   },
   {
     name: "MACD Signal",      category: "Momentum",       difficulty: "Intermediate",
-    description: "Trade MACD line crossing signal line",
-    detail: "Settings: 12/26/9 EMA. Crossover above zero line = stronger buy signal. Histogram divergence from price warns of reversals before they happen. Avoid in ranging markets.",
+    description: "Understand how MACD line and signal-line crossovers are interpreted",
+    detail: "Settings: 12/26/9 EMA. Crossovers, zero-line position, and histogram divergence are examples of momentum diagnostics. Use them for study and sandbox review, not as standalone instructions.",
   },
   {
     name: "Straddle Selling", category: "Options",        difficulty: "Advanced",
-    description: "Sell ATM CE + PE, profit from time decay if market stays in range",
-    detail: "Best on expiry week when theta decay accelerates. Adjust (hedge) if underlying moves >1.5% in one direction. Target: premium collected. Risk: unlimited if not hedged.",
+    description: "Study ATM CE + PE short-premium payoff shape and risk",
+    detail: "This concept shows how theta decay and range-bound assumptions affect a short-premium payoff. Review margin, hedging, and gap-risk behaviour in sandbox only; unhedged short options can carry open-ended loss.",
   },
   {
     name: "Iron Condor",      category: "Options",        difficulty: "Advanced",
-    description: "Sell OTM strangle + buy further OTM hedge — defined risk range strategy",
-    detail: "Sell 1 OTM CE + 1 OTM PE, buy 1 further OTM CE + 1 further OTM PE. Max profit = net premium. Max loss = spread width − premium. Target: 50% of max profit exit.",
+    description: "Study OTM short legs with further OTM hedges as a defined-risk payoff",
+    detail: "This concept combines two short OTM legs with further OTM hedges. Use the payoff view to inspect max gain, max loss, breakevens, and margin assumptions before any live-mode consideration.",
   },
   {
     name: "VWAP Revert",      category: "Mean Reversion", difficulty: "Intermediate",
-    description: "Short above VWAP, long below VWAP — mean reversion intraday",
-    detail: "Use intraday VWAP reset at 9:15. Enter within first 30 min when price deviates >0.5% from VWAP. Exit at VWAP. Stop: previous high/low. Only in liquid instruments.",
+    description: "Study VWAP deviation as a mean-reversion diagnostic",
+    detail: "Use intraday VWAP reset examples to compare price deviation, liquidity, and reversion assumptions in replay or sandbox mode. The lesson is a diagnostic pattern, not an entry rule.",
   },
   {
     name: "OBV Divergence",   category: "Volume",         difficulty: "Intermediate",
-    description: "Trade when OBV diverges from price — hidden supply/demand",
-    detail: "Bullish divergence: price makes lower low, OBV makes higher low → buy. Bearish divergence: price makes higher high, OBV makes lower high → sell. Confirm with volume spike.",
+    description: "Study when OBV diverges from price as a supply/demand clue",
+    detail: "Bullish and bearish divergence examples show how volume can disagree with price. Use them to annotate charts and backtests; require independent validation before any live workflow.",
   },
   {
     name: "ATR Breakout",     category: "Volatility",     difficulty: "Beginner",
-    description: "Enter when price moves > 1.5x ATR from previous close",
-    detail: "Calculate ATR(14) on daily chart. Set long trigger at Close + 1.5×ATR and short trigger at Close − 1.5×ATR. Trail stop at 1×ATR. Works well for opening range breakouts.",
+    description: "Study moves that exceed an ATR-based volatility band",
+    detail: "Calculate ATR(14) on historical data and compare price moves against volatility bands. This helps explain breakout tests, trail assumptions, and false-break behaviour in sandbox analysis.",
   },
   {
     name: "Donchian Channel", category: "Trend",          difficulty: "Beginner",
-    description: "Buy at 20-day high breakout, sell at 10-day low breakdown",
-    detail: "Classic turtle trading system. Use 20-day channel for entry, 10-day for exit. Add 55-day channel for major trend confirmation. Position size by ATR-based risk per trade.",
+    description: "Study channel breakout and breakdown concepts",
+    detail: "Classic channel systems use rolling highs/lows to model trend following. Review 20-day, 10-day, and 55-day channel examples in backtests and inspect drawdown before any live workflow.",
   },
   {
     name: "Wheel Strategy",   category: "Options",        difficulty: "Advanced",
-    description: "Sell CSP → get assigned → sell CC → repeat. Income generation.",
-    detail: "Step 1: Sell Cash-Secured Put at a strike you'd buy the stock. Step 2: If assigned, sell Covered Call at cost basis. Repeat. Best on high IV, liquid stocks you want to own.",
+    description: "Study cash-secured put and covered-call assignment workflow",
+    detail: "This concept explains the mechanics of cash-secured puts, assignment, and covered calls. It is included for payoff education and operational understanding, not as a recommendation.",
   },
 ];
 
-const VIDEOS: VideoCard[] = [
-  { title: "Options Trading for Beginners",    channel: "CA Rachana Ranade",  topic: "Options Basics",      url: "https://www.youtube.com/results?search_query=options+trading+beginners+india" },
-  { title: "Technical Analysis Full Course",   channel: "Trading Chanakya",   topic: "Charts & Indicators", url: "https://www.youtube.com/results?search_query=technical+analysis+full+course+india" },
-  { title: "NIFTY Intraday Strategy",          channel: "Power of Stocks",    topic: "Intraday",            url: "https://www.youtube.com/results?search_query=nifty+intraday+strategy" },
-  { title: "Mutual Fund Investing",            channel: "Groww",              topic: "Investing Basics",    url: "https://www.youtube.com/results?search_query=mutual+fund+investing+india+beginners" },
-  { title: "Option Greeks Explained",          channel: "Sensibull",          topic: "Options Advanced",    url: "https://www.youtube.com/results?search_query=option+greeks+explained+india" },
-  { title: "Risk Management in Trading",       channel: "Vivek Bajaj",        topic: "Risk",                url: "https://www.youtube.com/results?search_query=risk+management+trading+india" },
+const RESOURCES: ResourceCard[] = [
+  { title: "User Guide",            source: "Project docs", topic: "Setup",        path: "/docs/user-guide" },
+  { title: "Order Safety Notes",    source: "Project docs", topic: "Safety",       path: "/docs/order-safety" },
+  { title: "API Reference",         source: "Project docs", topic: "Integration",  path: "/docs/api" },
+  { title: "Compatibility Matrix",  source: "Project docs", topic: "Environment",  path: "/docs/compatibility" },
+  { title: "Architecture Overview", source: "Project docs", topic: "Design",       path: "/docs/architecture" },
+  { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "/docs/developer-guide" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -496,26 +495,21 @@ function PaperTradingTab() {
   );
 }
 
-function VideoHubTab() {
+function ResourceHubTab() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
-      {VIDEOS.map((v) => (
+      {RESOURCES.map((v) => (
         <a
           key={v.title}
-          href={v.url}
-          target="_blank"
-          rel="noopener noreferrer"
+          href={v.path}
           className="block"
         >
           <GlassCard className="rounded-lg p-4 hover:border-border-strong transition-colors duration-150 cursor-pointer">
             <div className="flex items-start gap-3">
-              <PlayCircle className="w-8 h-8 text-red-500 shrink-0 mt-0.5" />
+              <BookOpen className="w-8 h-8 text-accent shrink-0 mt-0.5" />
               <div className="min-w-0">
-                <h4 className="text-sm font-semibold text-text-primary flex items-center gap-1">
-                  {v.title}
-                  <ExternalLink className="w-3 h-3 text-text-muted" />
-                </h4>
-                <p className="text-xs text-text-muted">{v.channel}</p>
+                <h4 className="text-sm font-semibold text-text-primary">{v.title}</h4>
+                <p className="text-xs text-text-muted">{v.source}</p>
                 <Badge variant="outline" className="text-xs mt-1">{v.topic}</Badge>
               </div>
             </div>
@@ -627,7 +621,7 @@ export default function LearnRoute() {
   // Advanced: all sections
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["basics", "glossary", "paper"];
-    return ["basics", "glossary", "strategies", "paper", "videos"];
+    return ["basics", "glossary", "strategies", "paper", "resources"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
@@ -658,7 +652,7 @@ export default function LearnRoute() {
     glossary:   <GlossaryTab />,
     strategies: <StrategiesTab />,
     paper:      <PaperTradingTab />,
-    videos:     <VideoHubTab />,
+    resources:  <ResourceHubTab />,
   }), []);
 
   return (
@@ -673,8 +667,8 @@ export default function LearnRoute() {
               </h1>
               <p className="text-xxs text-text-muted">
                 {level === "beginner"
-                  ? "Learn the basics of trading — one lesson at a time"
-                  : "Market basics, strategies, and practice trading guides"}
+                  ? "Learn market basics one lesson at a time"
+                  : "Market concepts, sandbox workflows, and project resources"}
               </p>
             </div>
           </div>

@@ -42,7 +42,7 @@
     }
   },
   "compliance": {
-    "_comment": "Personal-use open-source defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records — leave empty.",
+    "_comment": "Legacy workspace section for personal-use safety defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records — leave empty.",
     "ai_disclosure_banner": true,
     "personal_use_mode": true,
     "static_ip": ""
@@ -50,7 +50,7 @@
   "initialized": true,
   "ai": {
     "autonomous_agent": {
-      "_comment": "The LLM-driven trading agent (AI route → Agent panel; /api/v1/ai/agent/*). OFF by default — it places real orders in live mode. Enabling it also requires granting the 'autonomous-trader' actor access in brokers.account_acls; every agent order still traverses the full gated execution path.",
+      "_comment": "The LLM-driven order-workflow agent (AI route → Agent panel; /api/v1/ai/agent/*). OFF by default — it can place real orders in live mode. Enabling it also requires granting the 'autonomous-trader' actor access in brokers.account_acls; every agent order still traverses the full gated execution path.",
       "enabled": false
     }
   },

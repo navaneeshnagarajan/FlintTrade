@@ -240,7 +240,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "news", name: "News Feed", icon: "Newspaper", category: "Utility", description: "Curated market news and announcements relevant to your watchlist" },
   { id: "ticker", name: "Ticker", icon: "TrendingUp", category: "Utility", description: "Horizontal scrolling ticker bar showing live prices for key indices" },
   { id: "aiadvisor", name: "AI Advisor", icon: "Bot", category: "Utility", description: "AI-powered trade assistant for strategy ideas, analysis, and Q&A" },
-  { id: "openclaw", name: "OpenClaw Agents", icon: "Bot", category: "Utility", description: "Deploy, monitor, and stop autonomous trading agents on the OpenClaw gateway" },
+  { id: "openclaw", name: "OpenClaw Agents", icon: "Bot", category: "Utility", description: "Deploy, monitor, and stop OpenClaw AI agent sessions" },
   { id: "aiteam", name: "AI Team", icon: "Users", category: "Utility", description: "Multi-agent consensus analysis — technical, fundamental, sentiment, and risk specialists vote on a symbol" },
   { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
   { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Pre-market gap scanner filtering by OI buildup, IV rank, and price action" },

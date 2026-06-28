@@ -1,8 +1,8 @@
 # AI
 
-> Local LLM client, RAG pipeline, multi-agent trading team, ML signal generation, and skill swarm.
+> Local LLM client, RAG pipeline, multi-agent diagnostics, ML signal generation, and skill swarm.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

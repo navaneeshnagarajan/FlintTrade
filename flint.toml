@@ -5,7 +5,7 @@
 [project]
 name = "FlintTrade"
 version = "v0.6.0-beta"
-description = "Open-source algorithmic and manual trading platform with native backend and optional OpenAlgo-compatible integration"
+description = "Open-source self-hosted market workflow workspace with native backend and optional OpenAlgo-compatible integration"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
 python_requires = ">=3.12,<3.14"
@@ -21,14 +21,14 @@ design-system = { path = "packages/core/design-system", lang = "typescript", des
 engine = { path = "packages/services/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }
 screener = { path = "packages/services/screener", lang = "python", description = "Market scanner, OI spurt, PCR, max pain, portfolio Greeks" }
 backtest = { path = "packages/services/backtest", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
-ai = { path = "packages/services/ai", lang = "python", description = "LLM chat, RAG, ML signals, autonomous trading, news sentiment" }
-ditto = { path = "packages/services/ditto", lang = "python", description = "Multi-broker, multi-account orchestration — in-process mirroring, trailing SL, margin calculator, risk manager (AlgoMirror patterns absorbed)" }
-automation = { path = "packages/services/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
+ai = { path = "packages/services/ai", lang = "python", description = "LLM chat, RAG, ML diagnostics, assistant workflows, news sentiment" }
+ditto = { path = "packages/services/ditto", lang = "python", description = "Multi-broker, multi-account orchestration interfaces, sizing rules, and risk manager" }
+automation = { path = "packages/services/automation", lang = "python", description = "ML pipeline, cron, notification, OpenClaw bridge, post-market analysis" }
 journal = { path = "packages/services/journal", lang = "python", description = "Trade journal, trade logging, execution analytics, and P&L tracking" }
 gateway = { path = "packages/integrations/gateway", lang = "python", description = "Direct broker connections, adapter pattern, encrypted credentials, WebSocket bridge" }
 webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "TradingView, ChartInk, custom webhooks, and flow builder" }
-terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — scalper, option chain, OI analysis, DOM, charts" }
-site = { path = "packages/apps/site", lang = "nextjs", description = "Docs, marketing, and MCP reference site" }
+terminal = { path = "packages/apps/terminal", lang = "react", description = "Terminal UI — order workflow, option-chain views, OI analysis, DOM, charts" }
+site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
 
 [groups]
 core = ["core", "data", "historical", "indicators", "ticks", "design-system"]
@@ -61,8 +61,8 @@ smart_orders_per_second = 2
 general_per_second = 50
 webhooks_per_minute = 100
 
-[sebi]
-# Self-imposed rate limit (not a SEBI mandate) to stay within broker throttles.
+[safety]
+# Self-imposed rate limit to stay within broker throttles.
 max_orders_per_second = 10
 audit_log_retention_years = 5
 kill_switch_mandatory = true
@@ -81,7 +81,7 @@ maintenance_window_start = "15:45"
 maintenance_window_end = "18:00"
 
 [exchanges]
-# All exchanges supported by OpenAlgo — FlintTrade must handle ALL of these.
+# Exchange segments known to the optional OpenAlgo-compatible integration path.
 # Index-only segments (NSE_INDEX, BSE_INDEX, MCX_INDEX, GLOBAL_INDEX) are
 # quote-only and reject orders at the safety layer.
 NSE = { name = "NSE Equity", hours = "09:15-15:30" }
@@ -106,13 +106,12 @@ mcx_end = "23:55"
 # Safe deploy window: after MCX close (11:55 PM) until 8:30 AM next day
 
 [exchanges.crypto]
-# Delta Exchange — supported by OpenAlgo for crypto derivatives
+# Delta Exchange — represented by OpenAlgo-compatible metadata when configured.
 DELTA = { name = "Delta Exchange (Crypto)", hours = "24/7", products = "BTC/ETH futures, perpetuals, options, trackers" }
-# Crypto trades 24/7 — deploy freeze is effectively always active if you hold crypto positions
-# INR settlement, FIU-India compliant, no 30% crypto tax (derivatives = speculative income)
+# 24/7 segments require operator-defined deploy-freeze handling.
 
 [brokers]
-# Full broker list supported by OpenAlgo (FlintTrade works with ALL of them).
+# Broker names represented by the OpenAlgo-compatible integration metadata.
 # Mirrors BROKER_CATALOG in packages/integrations/gateway/src/flinttrade_gateway/adapter.py — keep in sync
 # after every .local/external/openalgo refresh.
 supported = [

@@ -301,7 +301,7 @@ export default function FlowsSection() {
         <GlassCard className="p-6">
           <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">Flow Builder</h3>
           <p className="text-sm text-text-secondary leading-relaxed mb-4">
-            Build trading automations visually with a {TOTAL_NODE_COUNT}-node drag-and-drop flow builder.
+            Build broker-workflow automations visually with a {TOTAL_NODE_COUNT}-node drag-and-drop flow builder.
             Connect market data triggers, conditions, and order actions without writing code.
             Flows run server-side and persist across sessions.
           </p>

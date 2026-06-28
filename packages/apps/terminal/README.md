@@ -2,7 +2,7 @@
 
 > Single-page terminal — Dockview workspace with home widgets, tools, routes, and workspace presets.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** TypeScript + React 19
 

@@ -2,7 +2,7 @@
 
 > Trade journal service for entries, trade logging, execution-quality analytics, and realised P&L tracking.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

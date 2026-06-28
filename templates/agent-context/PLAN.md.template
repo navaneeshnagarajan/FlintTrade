@@ -169,7 +169,7 @@
 - [x] Portfolio Tracker — live useFunds + useHoldings, allocation bar
 - [x] Holdings view — TanStack Table with sort, P&L, avg cost
 - [x] Net Worth Dashboard — equity + cash breakdown
-- [x] Mutual Fund Explorer — SEBI categories, v0.2.0 live data
+- [x] Mutual Fund Explorer — fund categories, v0.2.0 live data
 - [x] SIP Calculator — compound interest formula + split bar
 - [x] Asset Quilt — CSS heatmap 7 asset classes × 6 years
 - [x] Sector Rotation — sortable multi-timeframe table
@@ -179,11 +179,11 @@
 
 ### /learn Route
 - [x] Create /learn route with lazy-loaded module
-- [x] Market Basics content — 6 articles (Stocks, F&O, MF, Index, Risk, SEBI)
+- [x] Market Basics content — 6 articles (Stocks, F&O, MF, Index, Risk, Market Rules)
 - [x] Glossary (searchable) — 24 terms A–V
 - [x] Strategy Library (browse 29+ strategies) — 12 strategies, 6 categories, difficulty badges
 - [x] Paper Trading guide — Dhan Sandbox step-by-step guide
-- [x] Video Hub (curated YouTube) — 6 curated education links
+- [x] Resource Hub — internal project documentation links
 
 ---
 
@@ -264,7 +264,7 @@
 - [x] CONTRIBUTING.md — test count 944, DEVLOG machine name fixed
 - [x] REPOS.md (root) — identical to docs/references/REPOS.md, already in sync
 - [x] docs/OPERATIONS_GUIDE.md — already clean
-- [x] docs/SEBI_COMPLIANCE.md — Options STT buy side, April 2026 rates updated
+- [x] docs/ORDER_SAFETY.md — order-safety notes and cost-model references updated
 - [x] docs/references/REPOS.md — already in sync with root
 - [x] docs/references/OPENALGO_API.md — ping POST, WS auth format, 4 endpoint paths fixed
 - [x] docs/machine-setup/QUICKSTART.md — already clean
@@ -353,7 +353,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 | 32 | Hyperopt Strategy Optimiser | — | ✅ Done (Wave 10-20) — hyperopt_strategy.py |
 | 33 | Bracket Orders | — | ✅ Done (Wave 10-20) — bracket_order.py |
 | 34 | Order Flow Inference | — | ✅ Done (Wave 10-20) — orderflow_inference.py |
-| 35 | Activity Log (SEBI Audit) | — | ✅ Done (Wave 10-20) — activity_log.py |
+| 35 | Activity Log (Local Audit) | — | ✅ Done (Wave 10-20) — activity_log.py |
 | 36 | Docker Production Config | — | ✅ Done (Wave 10-20) — multi-stage, uv, tini |
 
 ---
@@ -368,7 +368,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 - [x] Core: FlintTradeConfig (two-tier: .env + workspace.json)
 - [x] Engine: 5-layer safety system, order router, scheduler, strategy registry
 - [x] Engine: EMACrossover strategy, per-exchange market hours
-- [x] Data: SEBI audit logger (JSONL append-only), DuckDB storage, tick recorder
+- [x] Data: local audit logger (JSONL append-only), DuckDB storage, tick recorder
 - [x] Historical: downloader, free NSE data, DuckDB pipeline, expiry manager
 - [x] Screener: option chain, OI analysis, futures quadrant, Greeks, IV
 - [x] Backtest-engine: event-driven simulator, 12 templates, optimizer, metrics

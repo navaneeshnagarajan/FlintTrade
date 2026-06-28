@@ -47,7 +47,7 @@ Internet / VPN
               │  ├── credentials.db (Fernet enc)     │
               │  ├── flint.duckdb (analytics)        │
               │  ├── chroma/ (vector store)           │
-              │  ├── audit/ (JSONL — SEBI 5yr)       │
+              │  ├── audit/ (JSONL local archive)     │
               │  ├── logs/ (JSON structured logs)    │
               │  └── jwt_secret (auto-generated)     │
               └──────────────────────────────────────┘
@@ -184,7 +184,7 @@ structlog → JSON → VictoriaLogs → query via UI or Grafana
 **What's backed up:**
 ```
 ~/.flinttrade/          (auth.db, credentials.db, DuckDB, chroma, configs)
-~/.flinttrade/audit/    (SEBI 5-year audit trail)
+~/.flinttrade/audit/    (local audit trail)
 ~/.flinttrade/logs/     (structured JSON logs)
 /opt/flinttrade/.env    (environment config — encrypted at rest)
 ```

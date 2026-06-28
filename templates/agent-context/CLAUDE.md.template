@@ -40,14 +40,14 @@ See `docs/CI.md` for the per-commit checklist, hosted-runner cost model, defence
 
 ## What This Is
 
-Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
+Open-source self-hosted market workflow workspace for local data, analysis, automation, and broker-gateway testing.
 FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 18 package surfaces (13 Python + 3 apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
-Serves three personas from a single application:
-- **Trader** — Intraday F&O scalping, options analysis, real-time execution
-- **Investor** — Mutual funds, SIPs, portfolio tracking, net worth
-- **Beginner** — Guided learning, paper trading, market education
+Serves three workspace modes from a single application:
+- **Operator** — Local workflow setup, broker-gateway testing, and order-safety checks
+- **Researcher** — Portfolio tracking, sandbox analysis, and market-data review
+- **Learner** — Guided market concepts, sandbox practice, and glossary support
 
 One app. One port. Route-based separation. Widget-composable workspace.
 
@@ -163,7 +163,7 @@ Two-tier config. No exceptions.
 | Layer | File | What goes here |
 |---|---|---|
 | Infrastructure | `.env` | `OPENALGO_HOST`, `OPENALGO_PORT`, `OPENALGO_API_KEY`, `OPENALGO_WS_PORT` |
-| User preferences | `~/.flinttrade/workspace.json` | Storage paths, enabled modules, LLM config, Telegram, theme, SEBI settings |
+| User preferences | `~/.flinttrade/workspace.json` | Storage paths, enabled modules, LLM config, Telegram, theme, order-safety settings |
 
 - `.env.example` has ALL values blank (open-source rule)
 - Broker credentials are in OpenAlgo's own `.env` (managed by your OpenAlgo install — for the local-dev clone that's `.local/external/openalgo/.env`), never in FlintTrade
@@ -182,7 +182,7 @@ Two-tier config. No exceptions.
 | Package | Lang | Description |
 |---|---|---|
 | `core/core` | Py | Flask app, config, workspace, models, exceptions, JWT/auth; optional OpenAlgo client |
-| `core/data` | Py | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
+| `core/data` | Py | Tick recorder, local audit logger, trade logger, DuckDB storage |
 | `core/historical` | Py | OHLCV downloader, free data (OpenChart/yfinance), DuckDB pipeline, expiry manager |
 | `core/indicators` | Py | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) |
 | `core/ticks` | Rust/PyO3 | High-performance tick processing engine (Rust core with Python bindings via PyO3) |
@@ -229,7 +229,7 @@ Two-tier config. No exceptions.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
 - **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI.md` for the contract.
 - **Terminal:** ≈90 widgets (TSX, run the registry for the exact count) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
-- **AI Skills:** 30 markdown files under `packages/services/ai/skills/` covering trading, analysis, execution, compliance, options, psychology domains
+- **AI Skills:** markdown files under `packages/services/ai/skills/` covering market data, analysis, execution, safety, options, and psychology domains
 - **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies in `packages/services/engine/src/strategies/` (`ema_crossover`, `wheel_live`)
 - **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
 - **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation

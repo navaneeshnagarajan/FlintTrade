@@ -16,11 +16,11 @@ export type RiskFormValues = z.infer<typeof riskSchema>;
 
 export const RISK_HINTS = {
   maxPositionLots:
-    "Maximum total lots across all positions. SEBI recommends setting this to control exposure.",
+    "Maximum total lots across all positions. Use this to keep local exposure bounded.",
   mtmStoploss:
     "Auto square-off all positions when day MTM loss exceeds this amount (₹). Set to 0 to disable.",
   mtmTarget:
     "Auto square-off all positions when day MTM profit reaches this amount (₹). Set to 0 to disable.",
   maxOrdersPerMinute:
-    "Maximum orders per minute. SEBI rate limit is 10/sec = 600/min. Recommended: 50-100.",
+    "Maximum orders per minute. Keep this well below broker-side limits. Recommended: 50-100.",
 } as const;

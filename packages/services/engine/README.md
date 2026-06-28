@@ -2,7 +2,7 @@
 
 > Five-layer safety system, order router, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

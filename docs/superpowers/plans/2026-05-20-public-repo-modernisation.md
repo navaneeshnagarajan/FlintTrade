@@ -266,11 +266,11 @@ The next four parcels write or rewrite documentation. They are independent (diff
 >
 > **Required structure (in order):**
 >
-> 1. **H1 title + 12-word tagline** — name "FlintTrade", short pitch like "Open-source modular trading platform for Indian F&O, commodities, and crypto"
+> 1. **H1 title + 12-word tagline** — name "FlintTrade", short pitch like "Open-source self-hosted market workflow workspace"
 > 2. **Badges row** — License (AGPL-3.0, shields.io), version (from VERSION file, dynamic), CI status (`test.yml` workflow), current verification summary, GitHub stars, last-commit. Use shields.io URLs.
 > 3. **Hero screenshots** — 4 images using existing files under `docs/screenshots/`. Pick the strongest 4 from the repo (welcome, trade canvas, options chain / IV smile, and an analysis tool). Use HTML `<picture>` or markdown image grid, centred.
-> 4. **What it does** — 6-8 trader-facing bullets (intraday F&O scalping, multi-broker support, options analysis, paper trading mode, AI-assisted signals, custom strategies, automation flows, multi-account orchestration).
-> 5. **Supported brokers** — one-liner "32 brokers via the OpenAlgo gateway — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full list".
+> 4. **What it does** — 6-8 software-focused bullets covering the terminal app, backend services, gateway integration, safety model, data/simulation, and developer tooling.
+> 5. **Supported integrations** — one-liner linking to [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the software compatibility matrix.
 > 6. **Quickstart (5-min Docker)** — 3-4 commands max:
 >    ```bash
 >    git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -381,7 +381,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 >
 > 2. **`docs/USER_GUIDE.md`** (trader-facing)
 >    - Audience: someone who wants to use FlintTrade to trade
->    - Sections: Installation → First broker connection → First paper trade → First live trade → Workspace tour → Screener walkthrough → Strategy Lab walkthrough → Automation Hub walkthrough → AI Centre walkthrough → Ditto multi-account walkthrough → Settings reference
+>    - Sections: Installation → First broker connection → sandbox order path → Live-mode safeguard verification → Workspace tour → Screener walkthrough → Strategy Lab walkthrough → Automation Hub walkthrough → AI Centre walkthrough → Ditto multi-account walkthrough → Settings reference
 >    - Lots of screenshots from `docs/screenshots/`
 >    - End with "Troubleshooting" section
 >
@@ -445,7 +445,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 
 ```bash
 ls docs/
-# Expected: ARCHITECTURE.md API.md CI.md COMPATIBILITY.md DEVELOPER_GUIDE.md README.md SEBI_COMPLIANCE.md USER_GUIDE.md
+# Expected: ARCHITECTURE.md API.md CI.md COMPATIBILITY.md DEVELOPER_GUIDE.md ORDER_SAFETY.md README.md USER_GUIDE.md
 # Plus subfolders: assets/ releases/ screenshots/ setup/ superpowers/
 ```
 
@@ -531,7 +531,7 @@ grep -ic "security advisor" SECURITY.md                       # Expected: ≥1
 - Create or verify: `.github/ISSUE_TEMPLATE/question.md`
 - Create or verify: `.github/ISSUE_TEMPLATE/config.yml` (so the templates show up nicely in the New Issue UI)
 - Modify: `.github/PULL_REQUEST_TEMPLATE.md`
-- Create: `.github/FUNDING.yml`
+- Skip funding metadata for this personal-use open-source repository
 - Verify: `.github/CODEOWNERS`
 
 - [ ] **Step 1:** Dispatch a general-purpose subagent with this brief.
@@ -580,15 +580,9 @@ grep -ic "security advisor" SECURITY.md                       # Expected: ≥1
 >    - Screenshots (for UI changes)
 >    - Checklist: tests added/updated, docs updated, CHANGELOG entry, ruff clean, tsc clean, conventional commit, no personal info in commit messages
 >
-> 6. **`.github/FUNDING.yml`** — multi-platform sponsorship:
->    ```yaml
->    github: [navaneeshnagarajan]
->    buy_me_a_coffee: navaneeshvn
->    patreon: navaneeshvn
->    custom:
->      - https://razorpay.me/@flinttrade
->    ```
->    Use these handle names as placeholders. User will edit them later if the actual handles differ. (Keep `github:` line — user has not confirmed others, but the spec says multi-platform; user can null out unused lines after this PR.)
+> 6. **Funding metadata** — intentionally omitted for this personal-use open-source
+>    repository. Keep public project metadata focused on source code, setup,
+>    documentation, and contributor workflow.
 >
 > 7. **`.github/CODEOWNERS`** — verify current contents. Default rule should be `* @navaneeshnagarajan`. If anything else is in there, leave the additional rules as-is unless they reference now-moved files. Make sure no rule references CLAUDE.md / AGENTS.md / PLAN.md / docs/research/ / docs/status/ (all moved/archived in this session).
 >
@@ -607,7 +601,6 @@ grep -ic "security advisor" SECURITY.md                       # Expected: ≥1
 
 ```bash
 ls .github/ISSUE_TEMPLATE/   # Expected: bug_report.md feature_request.md question.md config.yml
-test -f .github/FUNDING.yml
 test -f .github/PULL_REQUEST_TEMPLATE.md
 grep "navaneeshnagarajan" .github/CODEOWNERS   # Expected: at least one match
 ```
@@ -639,7 +632,7 @@ git commit -m "docs(governance): refresh CONTRIBUTING + CoC + SECURITY for publi
 
 # Parcel 5 — .github/
 git add .github/
-git commit -m "feat(.github): bug/feature/question issue templates + PR checklist + FUNDING + CODEOWNERS"
+git commit -m "feat(.github): bug/feature/question issue templates + PR checklist + CODEOWNERS"
 ```
 
 ---
@@ -802,7 +795,7 @@ Open `CHANGELOG.md` and add an `[Unreleased]` entry summarising this modernisati
 
 ### Added
 - `.github/ISSUE_TEMPLATE/{bug_report,feature_request,question}.md` + `config.yml`.
-- `.github/FUNDING.yml` (GitHub Sponsors + Buy Me a Coffee + Patreon + custom).
+- Funding metadata intentionally omitted.
 - `.github/PULL_REQUEST_TEMPLATE.md` — checklist style.
 - `scripts/setup-agent-context.sh` — idempotent agent-context scaffolder.
 
@@ -877,7 +870,7 @@ head -100 README.md | grep -c "shields.io"   # Expected: ≥3 (badges)
 - [ ] docs/ follows new structure:
 ```bash
 ls docs/ | sort
-# Expected: API.md ARCHITECTURE.md CI.md COMPATIBILITY.md DEVELOPER_GUIDE.md README.md SEBI_COMPLIANCE.md USER_GUIDE.md assets releases screenshots setup superpowers
+# Expected: API.md ARCHITECTURE.md CI.md COMPATIBILITY.md DEVELOPER_GUIDE.md ORDER_SAFETY.md README.md USER_GUIDE.md assets releases screenshots setup superpowers
 ```
 
 - [ ] All stale docs archived to `.local/archive/docs-internal/`:
@@ -886,7 +879,7 @@ ls .local/archive/docs-internal/
 # Expected: COMPETITIVE_ANALYSIS.md REFERENCES-full.md research status superpowers-plans
 ```
 
-- [ ] `.github/` has issue templates + PR template + FUNDING + CODEOWNERS:
+- [ ] `.github/` has issue templates + PR template + CODEOWNERS:
 ```bash
 ls .github/
 ls .github/ISSUE_TEMPLATE/
@@ -933,7 +926,7 @@ git log origin/main..HEAD --oneline
 # - docs(readme): rewrite hybrid trader/developer layout for public release
 # - docs(restructure): split USER_GUIDE / DEVELOPER_GUIDE / API; rename CI; archive stale
 # - docs(governance): refresh CONTRIBUTING + CoC + SECURITY for public OSS contributors
-# - feat(.github): bug/feature/question issue templates + PR checklist + FUNDING + CODEOWNERS
+# - feat(.github): bug/feature/question issue templates + PR checklist + CODEOWNERS
 # - docs(packages): add per-package READMEs to all 16 packages
 # - docs(changelog): record public repo modernisation pass under [Unreleased]
 # (7 commits total)
@@ -971,7 +964,7 @@ Note: CI may not trigger because the changes are mostly `.md` files matched by `
 - [x] Risk mitigations — embedded in task notes (e.g., Task 1.6 addresses the "templates must travel with clone" risk)
 
 ### Placeholder scan
-- "user fills handles" in FUNDING.yml is a known acceptable placeholder (user-facing decision, not an agent task).
+- Funding metadata was intentionally omitted; no sponsorship handles are tracked.
 - All other code blocks, file contents, and commands are complete.
 
 ### Type consistency

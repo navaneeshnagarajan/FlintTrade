@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     default: 'FlintTrade',
     template: '%s | FlintTrade',
   },
-  description: 'Open-source modular trading platform for Indian F&O, commodities, and crypto.',
+  description: 'Open-source self-hosted market workflow workspace built with Python, React, TypeScript, and Rust.',
   metadataBase: new URL('https://flinttrade.dev'),
   icons: {
     icon: '/flinttrade/logo.svg',

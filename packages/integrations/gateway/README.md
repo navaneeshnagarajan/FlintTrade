@@ -2,7 +2,7 @@
 
 > FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, per-broker adapters for 32 brokers, an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter, not the primary path.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

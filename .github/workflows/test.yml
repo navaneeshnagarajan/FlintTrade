@@ -38,9 +38,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
 
 # Cancel earlier in-flight runs when a new commit lands on the same ref.
-# Stops the back-to-back-push amplification that was burning minutes —
-# multiple pushes within a few minutes used to all run to completion;
-# now only the latest does.
+# Back-to-back pushes only need the newest matrix; earlier runs are superseded.
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true

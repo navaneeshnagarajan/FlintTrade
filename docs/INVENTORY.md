@@ -40,7 +40,7 @@ everything below is in-repo work.
 | Smart routing suggestions | ✅ | Capability metadata + recommendation engine + Account-Manager UI |
 | — Dhan: rolling-options history + multi-level depth (L20) | ✅ | Encoded as routing capabilities (`options_history_*`, `depth_levels`) |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
-| — Kotak Neo: zero-brokerage execution | ✅ | `brokerage_free` + `low_cost_execution` use-case |
+| — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
 | Native adapters (Dhan/Upstox/Kotak Neo/IndMoney): identity, capabilities, order + **data** surfaces | 🟡 | Built to full doc-grounded parity; SDKs pinned in `brokers.lock` (dhanhq 2.2.0, upstox-python-sdk 2.27.0, neo-api-client 2.0.0 git; IndMoney REST-only). Dormant until live-credential testing |
 | Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | Built (full surface) against pinned SDKs; the only remaining blocker is live-credential testing — install the SDK, store credentials in the vault, verify against a live session. The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
@@ -102,7 +102,7 @@ everything below is in-repo work.
 | Item | Status | Notes |
 |---|---|---|
 | Automate pillar (webhooks / flow builder / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (TradingView/ChartInk webhooks, flow builder, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
-| Ditto multi-account mirror (copy-trading / margin / trailing SL / risk manager) | ✅ | `/ditto` route + backend `/ditto/*` (`operations_routes.py`); natively reimplemented AlgoMirror patterns |
+| Ditto multi-account mirror (account mirroring / margin / trailing SL / risk manager) | ✅ | `/ditto` route + backend `/ditto/*` (`operations_routes.py`); natively reimplemented AlgoMirror patterns |
 | Invest & Learn routes | ✅ | `/invest` (mutual funds / SIP / net worth) and `/learn` (guided learning) protected routes |
 
 ## Known backlog (built-but-unreachable / referenced-not-built / blocked)

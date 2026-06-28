@@ -1,7 +1,7 @@
 [project]
 name = "flinttrade-webhooks"
 version = "0.6.0-beta"
-description = "TradingView webhooks, ChartInk, custom webhooks, flow builder, Excel bridge, voice orders"
+description = "Webhook ingestion, custom workflow triggers, flow-builder integration, and spreadsheet bridge"
 requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",

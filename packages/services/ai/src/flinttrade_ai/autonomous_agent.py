@@ -1,8 +1,8 @@
-"""Autonomous trading agent.
+"""AI agent session controller.
 
 Single-agent loop that fetches market data, runs technical analysis, generates
-a BUY/SELL/HOLD signal via LLM reasoning, and executes via OpenAlgo — all
-with safety guardrails.
+a BUY/SELL/HOLD diagnostic via LLM reasoning, and executes through the gated
+order path only when explicitly enabled.
 
 Adapted from Agentic-Trader (marketcalls/Agentic-Trader):
 - Parallel data fetch pattern (asyncio.gather instead of threading)
@@ -263,12 +263,12 @@ class AgentState:
 
 
 # ---------------------------------------------------------------------------
-# AutonomousTrader
+# Agent session controller
 # ---------------------------------------------------------------------------
 
 
 class AutonomousTrader:
-    """Single-agent autonomous trading system.
+    """Single-agent order-workflow controller.
 
     Workflow per cycle:
     1. Safety pre-check (market hours, daily stop-loss, already squared off)

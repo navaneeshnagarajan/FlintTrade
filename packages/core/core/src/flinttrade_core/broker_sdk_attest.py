@@ -1,9 +1,9 @@
 """Broker SDK attestation.
 
 Native broker adapters that place live orders must run against the exact SDK
-version pinned in ``brokers.lock`` (SEBI algo-trading + broker static-IP regimes
-make "which SDK built this order" auditable). This module verifies the installed
-broker SDKs against those pins and exposes the result so the runtime can:
+version pinned in ``brokers.lock`` so the runtime can record which SDK built an
+order-capable request. This module verifies the installed broker SDKs against
+those pins and exposes the result so the runtime can:
 
 * log an honest attestation report at boot, and
 * halt orders for a broker whose SDK is missing or version-mismatched

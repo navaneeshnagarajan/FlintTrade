@@ -93,35 +93,36 @@ fi
 # Domain name for SSL
 read -rp "Domain name for SSL (leave blank for localhost): " DOMAIN_NAME
 
-# Generate secrets
+# Generate deployment secrets
 log "Generating secrets..."
 
-MASTER_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
-JWT_SECRET=$(head -c 48 /dev/urandom | base64 | tr -d '/+=' | head -c 48)
+MASTER_PASSWORD_VALUE=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
+JWT_SECRET_VALUE=$(head -c 48 /dev/urandom | base64 | tr -d '/+=' | head -c 48)
 GLITCHTIP_SECRET_KEY=$(head -c 50 /dev/urandom | base64 | tr -d '/+=' | head -c 50)
 GLITCHTIP_DB_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 
-# Write secrets to .env if not already set
-if ! grep -q "^MASTER_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null; then
-    echo "MASTER_PASSWORD=$MASTER_PASSWORD" >> "$INSTALL_DIR/.env"
+# Create user data directory for file-backed FlintTrade app secrets. docker-compose.yml
+# bind-mounts this directory into the FlintTrade container.
+FLINTTRADE_HOME="${FLINTTRADE_HOME:-$HOME/.flinttrade}"
+mkdir -p "$FLINTTRADE_HOME"
+chmod 700 "$FLINTTRADE_HOME"
+
+if [ ! -f "$FLINTTRADE_HOME/master_password" ]; then
+    echo "$MASTER_PASSWORD_VALUE" > "$FLINTTRADE_HOME/master_password"
+    chmod 600 "$FLINTTRADE_HOME/master_password"
 fi
-if ! grep -q "^JWT_SECRET=" "$INSTALL_DIR/.env" 2>/dev/null; then
-    echo "JWT_SECRET=$JWT_SECRET" >> "$INSTALL_DIR/.env"
+if [ ! -f "$FLINTTRADE_HOME/jwt_secret" ]; then
+    echo "$JWT_SECRET_VALUE" > "$FLINTTRADE_HOME/jwt_secret"
+    chmod 600 "$FLINTTRADE_HOME/jwt_secret"
 fi
+
+# Write monitoring-service secrets to .env if not already set.
 if ! grep -q "^GLITCHTIP_SECRET_KEY=" "$INSTALL_DIR/.env" 2>/dev/null; then
     echo "GLITCHTIP_SECRET_KEY=$GLITCHTIP_SECRET_KEY" >> "$INSTALL_DIR/.env"
 fi
 if ! grep -q "^GLITCHTIP_DB_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null; then
     echo "GLITCHTIP_DB_PASSWORD=$GLITCHTIP_DB_PASSWORD" >> "$INSTALL_DIR/.env"
 fi
-
-# Create user data directory
-mkdir -p "$HOME/.flinttrade"
-chmod 700 "$HOME/.flinttrade"
-
-# Store JWT secret for the application
-echo "$JWT_SECRET" > "$HOME/.flinttrade/jwt_secret"
-chmod 600 "$HOME/.flinttrade/jwt_secret"
 
 ok "Secrets generated and stored"
 

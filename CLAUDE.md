@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-FlintTrade is an open-source modular trading platform for Indian F&O, commodities, and crypto. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Tauri desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12,<3.14`, Node `>=22`. The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
+FlintTrade is an open-source self-hosted market workflow workspace. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Tauri desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12,<3.14`, Node `>=22`. The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
 
 Version: **v0.6.0-beta** (beta restructure; not production-ready). Python tooling is **uv** (workspace lockfile `uv.lock`); JS is **pnpm** (workspace lockfile `pnpm-lock.yaml`).
 

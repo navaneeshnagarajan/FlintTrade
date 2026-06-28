@@ -41,7 +41,7 @@ India's IT sector earns 60–80% of revenue in USD. DXY strength (USD appreciati
 
 Watch Infosys, TCS, Wipro, HCL Tech — the four largest determine Nifty IT index direction.
 
-**For trading:** When DXY is in a sustained uptrend (weekly chart) and rupee is weakening, IT sector ETF (Nifty IT) is a structural long trade.
+**Research lens:** When DXY is in a sustained uptrend on the weekly chart and the rupee is weakening, compare Nifty IT relative-strength scenarios in a sandbox before drawing conclusions.
 
 ## Gold and Related Sectors
 

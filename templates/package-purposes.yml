@@ -80,7 +80,7 @@ integrations/webhooks:
     - "src/flinttrade_webhooks/chartink.py — ChartInk scanner integration"
 services/ai:
   language: Python
-  purpose: "Local LLM client, RAG pipeline, multi-agent trading team, ML signal generation, and skill swarm."
+  purpose: "Local LLM client, RAG pipeline, multi-agent diagnostics, ML signal generation, and skill swarm."
   entry_points:
     - "src/flinttrade_ai/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)"
     - "src/flinttrade_ai/rag.py — ChromaDB-backed retrieval-augmented generation"

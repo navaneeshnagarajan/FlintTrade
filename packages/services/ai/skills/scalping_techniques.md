@@ -39,17 +39,17 @@ Use FlintTrade's depth widget (50-level DOM from OpenAlgo) to monitor stacking.
 
 - **Opening Range Breakout (ORB):** Mark the high/low of the first 5-minute candle. Enter on breakout with volume confirmation. Target = range size. SL = back inside the range.
 - **Inside bar breakout:** A narrow inside bar after a trend candle — enter the breakout direction. Tight SL (just below/above inside bar).
-- **VWAP bounce:** Price dips to VWAP and prints a bullish candle with above-average volume. Enter with SL below the wick. Target = 0.25% above VWAP.
-- **Micro double bottom/top:** Two equal lows (within 2–3 ticks) on the 1-min chart at a support level. Enter the breakout of the second low's high candle.
+- **VWAP bounce:** Price dips to VWAP and prints a bullish candle with above-average volume. Study a stop below the wick and a 0.25% VWAP-reversion objective.
+- **Micro double bottom/top:** Two equal lows (within 2–3 ticks) on the 1-min chart at a support level. Study the second candle's high as a breakout reference.
 
-## Scalper Risk Management Rules
+## Scalper Risk Management Study Rules
 
-- **Maximum SL:** 2–3 ticks (Nifty: ≤ 10 points per lot). If the trade requires a wider SL, it is not a scalp.
-- **Risk per trade:** 0.25% of capital maximum. Lower than swing trades — volume is higher.
-- **Daily loss limit:** 1.5% of capital. Hit this → stop for the day, no exceptions.
-- **Win rate target:** ≥ 55% with reward:risk of 1.5:1 minimum for the strategy to be positive expectancy.
-- **3 consecutive losses:** Pause for 15 minutes, review whether market conditions have changed.
-- **Never average:** Averaging a losing scalp converts a 3-tick loss into a 30-tick catastrophe.
+- **Maximum SL:** 2–3 ticks (Nifty: ≤ 10 points per lot) is a common study constraint for scalp-style systems.
+- **Risk per trade:** 0.25% of capital maximum in simulations. This is lower than swing examples because frequency is higher.
+- **Daily loss limit:** 1.5% of capital as a modelled circuit breaker.
+- **Win-rate hurdle:** Compare whether the tested setup can exceed 55% with reward:risk of 1.5:1 before considering it positive expectancy.
+- **3 consecutive losses:** Include a pause-and-review rule in the backtest to check whether market conditions changed.
+- **No averaging:** Model scalp losses as capped rather than averaged down.
 
 ## Spread Cost Analysis
 

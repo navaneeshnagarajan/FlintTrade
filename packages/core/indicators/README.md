@@ -2,7 +2,7 @@
 
 > 43 indicator functions across 7 modules — TA-Lib batch indicators, Numba-accelerated streaming variants, and Pine Script conversion.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python + Numba
 

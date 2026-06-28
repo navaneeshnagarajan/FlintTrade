@@ -24,9 +24,9 @@ Hedge dramatically reduces margin because SPAN recognises that the long option c
 
 | Position | Approx Margin |
 |----------|--------------|
-| Sell naked ATM Call | ₹95,000–1,10,000 |
-| Sell ATM Call + Buy OTM Call 100pts away (bear call spread) | ₹15,000–25,000 |
-| Sell ATM Put + Buy OTM Put 100pts away (bull put spread) | ₹15,000–25,000 |
+| Naked short ATM call | ₹95,000–1,10,000 |
+| Short ATM call + long OTM call 100pts away (bear call spread) | ₹15,000–25,000 |
+| Short ATM put + long OTM put 100pts away (bull put spread) | ₹15,000–25,000 |
 | Iron condor (both spreads) | ₹25,000–40,000 |
 | Short straddle (sell call + sell put) | ₹1,30,000–1,60,000 (combined) |
 | Short iron fly (straddle + wings) | ₹30,000–50,000 |

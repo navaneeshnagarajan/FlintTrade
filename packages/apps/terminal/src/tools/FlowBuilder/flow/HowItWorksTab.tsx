@@ -24,7 +24,7 @@ export function HowItWorksTab() {
             </div>
             <p className="text-xs text-text-secondary leading-relaxed">
               FlowBuilder is a visual no-code workflow engine for OpenAlgo. Connect nodes on a
-              drag-and-drop canvas to create trading automations — from simple TradingView webhooks
+              drag-and-drop canvas to create broker-workflow automations — from simple TradingView webhooks
               to complex multi-leg options strategies. Flows run on the FlintTrade Python backend
               against your connected broker via OpenAlgo.
             </p>

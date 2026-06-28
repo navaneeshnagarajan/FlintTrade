@@ -78,7 +78,7 @@ interface ModeStore {
 | `"live"` | LIVE | "Real money — orders are executed" |
 
 Never use "sandbox", "paper", or "demo" in user-facing UI. Use "practice" and "explore" exclusively.
-Exception: SEBI disclaimer text may reference "simulated trading."
+Exception: safety disclaimer text may reference "simulated trading."
 
 ---
 
@@ -228,11 +228,11 @@ User completes setup → logged in → lands in /trade. Never logged out after s
 
 ---
 
-## 8. SEBI Compliance
+## 8. Order Safety
 
 - Paper trading through OpenAlgo (broker gateway) is broker-integrated, not third-party — permissible
 - Add disclaimer in practice mode: "Virtual trading results are simulated and do not represent actual trading outcomes"
-- From 1 April 2026, algo orders need exchange-assigned Algo-ID — practice mode clearly marked "SIMULATED"
+- Broker order-tagging requirements remain live-mode only; practice mode is clearly marked "SIMULATED"
 
 ---
 

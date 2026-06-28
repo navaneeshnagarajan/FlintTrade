@@ -25,9 +25,9 @@ On the day of expiry, ATM options have the highest gamma of their entire life. T
 
 ## 0DTE Option Strategies
 
-**1. Expiry Day Straddle Sell (with defined risk)**
-- Time: Enter at 9:20–9:25 IST
-- Setup: Sell ATM straddle + buy wings 100–150 points away (iron butterfly)
+**1. Expiry Day Short Straddle Example (with defined risk)**
+- Time window example: 9:20–9:25 IST
+- Structure: short ATM straddle + long wings 100–150 points away (iron butterfly)
 - Profit: Net credit collected; max profit if Nifty pins near strike at 3:30
 - Exit: 50% of premium collected OR at 14:00 IST, whichever comes first
 

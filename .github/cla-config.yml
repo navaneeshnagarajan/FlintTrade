@@ -4,27 +4,22 @@
 # every commit on the PR must be GPG-signed with the fingerprint declared below.
 # CI gate `scripts/check-cla-gpg-binding.py` rejects the PR if commit signatures do not
 # match the declared CLA fingerprint. Sub-spec §9.3; acceptance gate #13.
+repo_owner: navaneeshnagarajan
 contributors:
   - github_username: navaneeshnagarajan
     signed_on: 2026-05-23
-    # Founder fills this with their real 40-char GPG fingerprint pre-wave-1. Until then
-    # check-cla-gpg-binding.py treats the founder as auto-attested (repo owner) and the
-    # cla-gpg-binding CI job only runs on EXTERNAL forks anyway.
-    gpg_fingerprint: "PLACEHOLDER_NAVANEESH_GPG_FINGERPRINT_40CHAR"
-    signed_artefact:
-      pr_url: "https://github.com/navaneeshnagarajan/flinttrade/pull/0"
-      commit_sha: "PLACEHOLDER_FOUNDER_INITIAL_COMMIT_SHA"
-      gpg_signature_b64: "PLACEHOLDER_BASE64_DETACHED_SIGNATURE_OF_CLA_TEXT"
-      cla_text_sha256: "PLACEHOLDER_SHA256_OF_CLA_MD_AT_TIME_OF_SIGNING"
+    # Repo-owner auto-attestation. External contributors must provide a
+    # fingerprinted signature record before merge.
+    gpg_fingerprint: ""
+    signed_artefact: {}
     notes: >-
-      founder; implicit signature via repo ownership but recorded explicitly for audit
-      + GPG fingerprint binding (Identity H8)
+      founder; recorded explicitly as repo-owner auto-attestation
 
 cla_text_url: "https://github.com/navaneeshnagarajan/flinttrade/blob/main/CLA.md"
 require_signature_on_first_pr: true
 allow_in_pr_comment: true            # contributors sign by commenting "I agree to the CLA"
 require_gpg_signed_commits: true     # H8: every PR commit must be GPG-signed
-require_signature_artefact: true     # H8: store detached signature of CLA text in the record
+require_signature_artefact: false    # founder record is auto-attested; external records should include artefacts
 
 # The bot blocks merge by setting a failing required check; branch protection prevents a
 # "merge anyway" override.

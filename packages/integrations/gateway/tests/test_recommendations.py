@@ -1,4 +1,4 @@
-"""Tests for the broker recommendation engine ("which broker for what")."""
+"""Tests for the broker capability metadata ranking engine."""
 
 from __future__ import annotations
 

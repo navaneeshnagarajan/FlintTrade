@@ -17,7 +17,7 @@ workflow YAML should read this once.
 |---|---|---|---|
 | `test.yml` | push to `main` / `dev`; non-draft PR | 7 Linux jobs (~70 minutes wall-clock) | The main quality gate. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
-| `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to `packages/apps/site/**`, `packages/core/design-system/**`, `docs/**`) | 1 Linux job | Typechecks, tests and builds the marketing site (Next.js). Skipped unless the site, design system, or docs change. |
+| `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and workflow files) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Skipped unless a site-relevant path changes. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | 1 macOS + 1 Windows | Catches slow-burn platform regressions before they accumulate. |
 | `refresh-vuln-snapshot.yml` | weekly cron (Sun 04:00 UTC); manual dispatch | 1 Linux job | Refreshes the offline OSV vuln snapshot used by `pip-audit-with-allowlist.py` and opens a PR for the founder to merge, keeping the snapshot inside its freshness window. |
 | `status-report.yml` | weekly cron (Mon 07:00 UTC); manual dispatch | 1 Linux job (~5 minutes) | Emits a repo-health snapshot artefact. |
@@ -165,30 +165,27 @@ same commit.
 
 ---
 
-## 7. CI policy & guardrails
+## 7. CI usage guardrails
 
 ### Why this section exists
 
 FlintTrade is a public, multi-contributor repository, so cross-platform
-coverage genuinely matters — but it must be paid for carefully. Early in
-the project a heavy CI footprint tripped GitHub's abuse / over-usage
-auto-flagging and **Actions was disabled account-wide**. The combination
-that caused it:
+coverage genuinely matters, but runner usage has to stay deliberate and
+bounded. The CI policy is designed around GitHub Actions budget and reliability
+best practices. The expensive pattern this repo avoids is:
 
 - **Daily** scheduled runs, on top of every push and pull request.
 - **Multi-platform matrices on the frequent triggers** — macOS runners
   are billed at **10x** the Linux minute rate and Windows at **2x**, so a
   single push fanned out into roughly **13x** the minutes of a
   Linux-only run.
-- **Jobs with no `timeout-minutes`**, which can each burn minutes up to
-  the six-hour runner default if they hang — the single clearest runaway
-  signal an abuse heuristic watches for.
-- A large parallel-job count, which the same heuristics also weigh.
+- **Jobs with no `timeout-minutes`**, which can each consume minutes up to
+  the six-hour runner default if they hang.
+- A large parallel-job count on frequent triggers.
 
-On a young account this looked like resource abuse and the platform shut
-Actions off. The fix was to right-size CI to GitHub's published best
-practices, and to add a guardrail so no future change — by a human or an
-agent — can quietly re-introduce the footprint that caused the flag.
+The fix is to keep frequent CI Linux-only, move cross-platform checks to weekly
+or manual triggers, require job timeouts, and add a guardrail so no future
+change quietly re-introduces the heavy footprint.
 
 ### The rules (enforced in CI)
 

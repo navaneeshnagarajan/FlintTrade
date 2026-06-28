@@ -29,9 +29,6 @@ OPENALGO_WS_PORT=${OPENALGO_WS_PORT:-8765}
 FLINTTRADE_PORT=${FLINTTRADE_PORT:-5100}
 FLINTTRADE_DEV=${FLINTTRADE_DEV:-0}
 
-# --- Gateway ---
-MASTER_PASSWORD=${MASTER_PASSWORD:-}
-
 # --- CORS ---
 CORS_ORIGINS=${CORS_ORIGINS:-http://127.0.0.1:5173}
 
@@ -44,8 +41,15 @@ export DOTENV_PATH="$ENV_FILE"
 echo "[start.sh] .env generated at $ENV_FILE"
 
 # ---------------------------------------------------------------------------
-# Generate JWT secret if not already present
+# Generate file-backed app secrets if not already present
 # ---------------------------------------------------------------------------
+MASTER_PASSWORD_FILE="/home/flinttrade/.flinttrade/master_password"
+if [ ! -f "$MASTER_PASSWORD_FILE" ]; then
+    python3 -c "import secrets; print(secrets.token_urlsafe(32))" > "$MASTER_PASSWORD_FILE"
+    chmod 600 "$MASTER_PASSWORD_FILE"
+    echo "[start.sh] Master password generated at $MASTER_PASSWORD_FILE"
+fi
+
 JWT_SECRET_FILE="/home/flinttrade/.flinttrade/jwt_secret"
 if [ ! -f "$JWT_SECRET_FILE" ]; then
     python3 -c "import secrets; print(secrets.token_urlsafe(48))" > "$JWT_SECRET_FILE"

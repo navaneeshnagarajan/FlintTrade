@@ -157,7 +157,13 @@ fi
 FLINTTRADE_DATA="$FLINTTRADE_HOME/.flinttrade"
 mkdir -p "$FLINTTRADE_DATA"
 
-# Generate JWT secret if not present
+# Generate file-backed app secrets if not present
+if [ ! -f "$FLINTTRADE_DATA/master_password" ]; then
+    head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32 > "$FLINTTRADE_DATA/master_password"
+    chmod 600 "$FLINTTRADE_DATA/master_password"
+    ok "Master password generated"
+fi
+
 if [ ! -f "$FLINTTRADE_DATA/jwt_secret" ]; then
     head -c 48 /dev/urandom | base64 | tr -d '/+=' | head -c 48 > "$FLINTTRADE_DATA/jwt_secret"
     chmod 600 "$FLINTTRADE_DATA/jwt_secret"

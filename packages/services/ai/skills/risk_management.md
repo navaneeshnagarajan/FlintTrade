@@ -1,14 +1,14 @@
 ---
 name: risk_management
 category: analysis
-description: Position sizing, stop-loss placement, portfolio risk limits for Indian F&O trading
+description: Position sizing, stop-loss placement, and portfolio risk-limit modelling for Indian F&O workflows
 ---
-# Risk Management for F&O Trading
+# Risk Management for F&O Workflows
 
 ## Position Sizing
 
 ### Percent Risk Model
-Risk a fixed percentage of capital per trade. Recommended: 1–2% per trade.
+Model a fixed percentage of capital per simulated position. A conservative study band is 1–2% per position.
 
 ```
 Quantity = (Account Capital × Risk%) / (Entry Price − Stop Loss Price)
@@ -19,14 +19,14 @@ Quantity = (1,000,000 × 0.01) / (500 − 480) = 10,000/20 = 500 shares.
 
 ### For Options
 Options can go to zero. Treat full premium paid as the maximum loss.
-Position size: risk at most 1% of capital per options trade.
+Example cap model: keep option premium exposure at or below 1% of simulated capital.
 ```
 Max options premium = Account Capital × 0.01
 ```
 
 ### Lot-Based Sizing (F&O)
 Nifty lot size = 75 | BankNifty lot size = 30 | Sensex lot size = 10
-Always trade in whole lots. Round down, never up.
+Lot-based simulations should use whole lots and round down when a model produces a fractional lot.
 
 ## Stop-Loss Placement
 
