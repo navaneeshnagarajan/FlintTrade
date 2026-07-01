@@ -33,6 +33,7 @@ jobs:
           DATE="$(date -u +%Y-%m-%d)"
           pip-audit --require-hashes -r requirements.lock \
             --format json --vulnerability-service osv \
+            --disable-pip --progress-spinner off --timeout 10 \
             --output "supply-chain/vuln-snapshot-${DATE}.json" || true
           # prune all but the newest two snapshots
           ls -1 supply-chain/vuln-snapshot-*.json | sort | head -n -2 | xargs -r git rm -f

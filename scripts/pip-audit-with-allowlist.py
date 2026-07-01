@@ -6,8 +6,8 @@ field; expired entries surface as fails so risk acceptance is reviewed quarterly
 not silently renewed.
 
 Security M8 — offline vuln-database fallback:
-  - OSV.dev reachable          → online path (`--vulnerability-service osv`)
-  - OSV.dev unreachable        → fall back to newest supply-chain/vuln-snapshot-*.json
+  - OSV.dev audit succeeds     → online path (`--vulnerability-service osv`)
+  - OSV.dev audit unavailable  → fall back to newest supply-chain/vuln-snapshot-*.json
   - snapshot missing or stale  → FAIL CLOSED (never silently pass un-audited)
 
 Sub-spec §3.1-§3.5; acceptance gates #3, #21.
@@ -31,16 +31,6 @@ MAX_SNAPSHOT_AGE_DAYS = 14
 BLOCKING_SEVERITIES = {"HIGH", "CRITICAL"}
 
 
-def _osv_reachable() -> bool:
-    import urllib.request
-
-    try:
-        urllib.request.urlopen("https://api.osv.dev/v1/vulns/", timeout=5)
-        return True
-    except Exception:
-        return False
-
-
 def _latest_snapshot() -> pathlib.Path | None:
     snaps = sorted(SNAPSHOT_DIR.glob("vuln-snapshot-*.json"))
     return snaps[-1] if snaps else None
@@ -51,7 +41,8 @@ def _run_online_audit() -> dict | None:
     try:
         proc = subprocess.run(
             ["pip-audit", "--require-hashes", "-r", str(LOCKFILE),
-             "--format", "json", "--vulnerability-service", "osv"],
+             "--format", "json", "--vulnerability-service", "osv",
+             "--disable-pip", "--progress-spinner", "off", "--timeout", "10"],
             capture_output=True, text=True, check=False,
         )
     except FileNotFoundError:
@@ -124,7 +115,9 @@ def _active_allowlist() -> set[tuple[str, str]]:
 
 
 def main() -> int:
-    report = _run_online_audit() if _osv_reachable() else _load_offline_snapshot()
+    report = _run_online_audit()
+    if report is None:
+        report = _load_offline_snapshot()
     if report is None:
         return 2
 
