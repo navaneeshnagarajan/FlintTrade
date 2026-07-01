@@ -1,4 +1,4 @@
-"""Kotak Neo native adapter (doc-grounded against neo-api-client v2).
+"""Kotak Neo native adapter (doc-grounded against the NEO v2 API shape).
 
 Implements the BrokerAdapter contract for Kotak Neo: the two-step MPIN+TOTP auth,
 the gated write surface (place/modify/cancel — every variety, including the
@@ -14,13 +14,14 @@ small facade (``KotakNeoClient``) that owns the ``NeoAPI`` handle and runs the
 itself only depends on the facade's dict interface, so it is fully mock-testable
 without the SDK.
 
-Auth (neo-api-client v2, ``Kotak-Neo/Kotak-neo-api-v2`` tag ``v2.0.1`` — no PyPI
-package): ``NeoAPI(environment='prod', access_token=None, neo_fin_key=None,
+Auth follows the public NEO v2 SDK shape:
+``NeoAPI(environment='prod', access_token=None, neo_fin_key=None,
 consumer_key=...)`` then ``totp_login(mobile_number, ucc, totp)`` mints a view
 token + session id and ``totp_validate(mpin)`` mints the trade token. The v1
 mobile+password / OTP ``session_2fa`` flow was removed in v2 — TOTP+MPIN is the
-only login. ``refresh`` is a full daily re-login. v2.0.1 added MCX trading and
-the MTF product.
+only login. ``refresh`` is a full daily re-login. The live SDK remains
+placeholder-gated in ``brokers.lock`` until upstream licensing is cleared; do
+not add a git-install pin or redistribution path without that evidence.
 
 Cost: Kotak Neo advertises **zero brokerage** on API order execution and a free
 API. The one documented exception is that a bracket order's square-off leg

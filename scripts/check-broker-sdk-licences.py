@@ -12,7 +12,7 @@ Fails on:
     disagrees with brokers.lock
 
 PLACEHOLDER entries (future-wave brokers not yet activated) are skipped — they are
-gated separately by scripts/check-brokers-lock.py.
+gated separately by scripts/check-brokers-lock.py and runtime SDK attestation.
 
 Sub-spec §7.4; acceptance gate #10.
 """
@@ -67,6 +67,16 @@ def _extract_metadata_licence(name: str) -> str | None:
     return _normalise_spdx(raw) or None
 
 
+def _is_placeholder_entry(entry: dict[str, object]) -> bool:
+    """True when an inactive broker wave has not populated its full SDK pin."""
+    fields = (
+        str(entry.get("version", "")),
+        str(entry.get("sha256", "")),
+        str(entry.get("licence", "")),
+    )
+    return any("PLACEHOLDER" in field.upper() for field in fields)
+
+
 def main() -> int:
     if not BROKERS_LOCK.exists():
         print(f"brokers.lock missing at {BROKERS_LOCK}", file=sys.stderr)
@@ -86,7 +96,7 @@ def main() -> int:
     for entry in data.get("broker", []):
         name = entry["name"]
         declared = (entry.get("licence", "") or "").strip()
-        if "PLACEHOLDER" in declared.upper() or not declared:
+        if _is_placeholder_entry(entry) or not declared:
             # future-wave broker not yet activated; check-brokers-lock.py gates these
             continue
         checked += 1

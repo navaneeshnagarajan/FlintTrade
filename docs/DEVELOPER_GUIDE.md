@@ -27,7 +27,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | Native broker adapter contract/routing, four founder-broker adapters (Dhan, Upstox, Kotak Neo, IndMoney) built to full parity, credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
+| `gateway` | Python | Native broker adapter contract/routing, founder-broker adapter code (Dhan active pin; Upstox/Kotak Neo placeholder-gated; IndMoney REST-only), credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |

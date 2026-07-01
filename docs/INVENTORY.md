@@ -6,13 +6,13 @@ untested or only partially wired**, or **(c) referenced but not built / blocked*
 It is a living document — update it in the same change that moves a feature
 between buckets.
 
-`v0.6.0-beta` is not production ready. The four founder-broker native adapters
-(Dhan / Upstox / Kotak Neo / IndMoney) are built to full doc-grounded parity, and
-`brokers.lock` carries real pins (dhanhq 2.2.0, upstox-python-sdk 2.27.0,
-neo-api-client 2.0.0 from git; IndMoney is REST-only with no SDK pin). The one
-remaining gate on native-broker **order execution** is live-credential testing
-(install the SDK, store credentials in the vault, verify against a live session);
-everything below is in-repo work.
+`v0.6.0-beta` is not production ready. The native adapter code for the four
+founder brokers (Dhan / Upstox / Kotak Neo / IndMoney) is present and
+mock-tested, but only Dhan currently carries an active SDK pin in
+`brokers.lock`. Upstox and Kotak Neo stay placeholder-pinned until their wave is
+approved with exact SDK hashes, licence evidence, and sandbox evidence; Kotak Neo
+is additionally blocked until the upstream SDK licensing is compatible or
+explicitly authorised. IndMoney is REST-only and has no SDK pin.
 
 ## Legend
 
@@ -41,8 +41,8 @@ everything below is in-repo work.
 | — Dhan: rolling-options history + multi-level depth (L20) | ✅ | Encoded as routing capabilities (`options_history_*`, `depth_levels`) |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
-| Native adapters (Dhan/Upstox/Kotak Neo/IndMoney): identity, capabilities, order + **data** surfaces | 🟡 | Built to full doc-grounded parity; SDKs pinned in `brokers.lock` (dhanhq 2.2.0, upstox-python-sdk 2.27.0, neo-api-client 2.0.0 git; IndMoney REST-only). Dormant until live-credential testing |
-| Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | Built (full surface) against pinned SDKs; the only remaining blocker is live-credential testing — install the SDK, store credentials in the vault, verify against a live session. The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested |
+| Native adapters (Dhan/Upstox/Kotak Neo/IndMoney): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan has the active `dhanhq` pin; Upstox/Kotak Neo are placeholder-pinned until exact SDK, licence, approval, and sandbox evidence are recorded; IndMoney is REST-only. |
+| Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Live native execution remains disabled unless the broker has an active attested pin plus vault credentials; Kotak Neo also needs upstream licence clearance before any pin or install guidance is carried. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 
 ## AI Agent
@@ -119,7 +119,7 @@ everything below is in-repo work.
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ⛔ | **Scaffold, intentionally NOT mounted** — `CredentialsRotator._do_refresh/_do_rotation` only record a timestamp (no real token refresh / key rotation); mounting it would surface a fake "rotated successfully". Real rotation needs per-broker re-auth wired against the native adapters' live broker sessions (pending live-credential testing). Tracked planned-but-not-built |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Adapters built to full parity against pinned SDKs (dhanhq 2.2.0, upstox-python-sdk 2.27.0, neo-api-client 2.0.0 git; IndMoney REST-only); remaining blocker is live-credential testing only |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan is the only active native SDK pin today; Upstox/Kotak Neo are deliberately placeholder-pinned until approval evidence is complete, and Kotak Neo is blocked on upstream licence clearance. |
 | n8n bridge (health / workflows / webhook trigger) | ✅ | Automate → "n8n Bridge" section (advanced skill tier) wires all five clients (health badge, activate/deactivate with surfaced failures, manual webhook trigger); honest offline + missing-API-key states; `N8N_HOST` is read by the bridge and documented with `N8N_API_KEY` in `.env.example` |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 

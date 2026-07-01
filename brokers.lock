@@ -11,25 +11,25 @@ notes = "wave 1 baseline; placeholder hash is refused until requirements.lock is
 
 [[broker]]
 name = "upstox-python-sdk"
-version = "2.27.0"
-sha256 = "d33ad0f04c9c7aa7c13d5b0046aa83d01fd4ed44fd0389346e2509ec429bf2e9"
-licence = "MIT"
-licence_source = "upstox-python LICENSE.txt (PyPI metadata agrees; sdist upstox_python_sdk-2.27.0.tar.gz)"
+version = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+licence = "PLACEHOLDER"
+licence_source = "activation pin not populated; capture wheel metadata when the wave opens"
 homepage = "https://github.com/upstox/upstox-python"
 sandbox_tested = ""
 approved_by = ""
-notes = "wave 2 pin (PyPI sdist, released 2026-05-13). Activation still requires: pip install upstox-python-sdk==2.27.0, vault credentials, then live sandbox verification before approval."
+notes = "wave 2 candidate only. Do not activate until the SDK version, hashes, licence source, sandbox test date, and approval are populated together."
 
 [[broker]]
 name = "neo-api-client"
-version = "2.0.0"
-sha256 = "9be484f08b11f02dd0481a3f02784debb07b9ca474638c82c92dd7fbf7b0b5f2"
-licence = "UNLICENSED"
-licence_source = "no licence file in the upstream repo at the pinned commit (verified 2026-06-12); contact Kotak before redistribution"
+version = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+licence = "PLACEHOLDER"
+licence_source = "upstream licence unresolved; do not pin, install, redistribute, or activate until Kotak publishes or grants a compatible licence"
 homepage = "https://github.com/Kotak-Neo/Kotak-neo-api-v2"
 sandbox_tested = ""
 approved_by = ""
-notes = "wave 3 pin. No PyPI release — install from git: pip install git+https://github.com/Kotak-Neo/Kotak-neo-api-v2@8cee5bda63bd9334f8501bb23b7f1d2945f93397 (setup.py reports 2.0.0; sha256 is of the GitHub archive tarball for that commit). Activation then needs vault credentials + live sandbox verification before approval."
+notes = "wave 3 blocked. The adapter and mapping remain doc-grounded and mock-tested, but no redistributable SDK pin is carried while upstream licensing is unresolved."
 
 # IndMoney (INDstocks) is a REST-only native with NO third-party SDK — there is
 # deliberately no [[broker]] pin for it. Its activation is gated by vault

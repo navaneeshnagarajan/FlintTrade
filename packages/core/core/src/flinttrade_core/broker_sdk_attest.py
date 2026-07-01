@@ -99,7 +99,7 @@ def attest_all(
         pinned = str(pin.get("version", "")).strip()
         if not name:
             continue
-        if not pinned or pinned == _PLACEHOLDER:
+        if not pinned or _PLACEHOLDER in pinned.upper():
             results.append(AttestationResult(name, pinned, None, STATUS_SKIPPED))
             continue
         installed = resolve(_DIST_NAMES.get(name, name))
