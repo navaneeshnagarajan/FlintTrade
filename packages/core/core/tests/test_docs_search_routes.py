@@ -75,6 +75,37 @@ def test_search_limit_applied(client):
 
 
 # ---------------------------------------------------------------------------
+# GET /v1/docs/document
+# ---------------------------------------------------------------------------
+
+
+def test_document_ok(client):
+    """200 with markdown content for an indexed docs-relative path."""
+    resp = client.get("/v1/docs/document?path=guide.md")
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["path"] == "guide.md"
+    assert body["title"] == "Order Placement"
+    assert "orderpad widget" in body["content"]
+
+
+@pytest.mark.parametrize("path", ["", "../secrets.md", "/etc/passwd", "guide.txt"])
+def test_document_rejects_invalid_paths(client, path):
+    """Document reader must not become an arbitrary filesystem read endpoint."""
+    resp = client.get(f"/v1/docs/document?path={path}")
+
+    assert resp.status_code == 400
+
+
+def test_document_not_found(client):
+    """Unknown markdown paths return 404 rather than a fake doc."""
+    resp = client.get("/v1/docs/document?path=missing.md")
+
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # GET /v1/docs/changelog
 # ---------------------------------------------------------------------------
 

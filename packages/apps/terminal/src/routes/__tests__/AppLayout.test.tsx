@@ -79,6 +79,16 @@ vi.mock("@/components/CommandPalette/CommandPalette", () => ({
     isOpen ? <div data-testid="command-palette" /> : null,
 }));
 
+vi.mock("@/components/DocsSearch/DocsSearch", () => ({
+  default: ({ isOpen, initialQuery }: { isOpen: boolean; initialQuery?: string }) =>
+    isOpen ? <div data-testid="docs-search">Docs search {initialQuery}</div> : null,
+}));
+
+vi.mock("@/components/Changelog/ChangelogViewer", () => ({
+  default: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="changelog-viewer">Changelog</div> : null,
+}));
+
 // useTradingStoreSync calls useFunds + usePositions internally; stub it so
 // those hooks don't need a real QueryClient when the outer test does supply one.
 vi.mock("@/hooks/useTradingStoreSync", () => ({
@@ -235,5 +245,39 @@ describe("AppLayout", () => {
     });
 
     expect(mockNavigate).toHaveBeenCalledWith("/lab");
+  });
+
+  it("opens docs search from the global shell event", () => {
+    renderApp();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:search-docs"));
+    });
+
+    expect(screen.getByTestId("docs-search")).toBeInTheDocument();
+  });
+
+  it("opens the changelog from the global shell event", () => {
+    renderApp();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:show-changelog"));
+    });
+
+    expect(screen.getByTestId("changelog-viewer")).toBeInTheDocument();
+  });
+
+  it("routes a selected docs search result into Learn", () => {
+    renderApp();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:openDoc", { detail: { path: "USER_GUIDE.md" } }),
+      );
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith("/learn", {
+      state: { selectedDocPath: "USER_GUIDE.md" },
+    });
   });
 });

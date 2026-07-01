@@ -16,7 +16,7 @@ import { useMemo, useCallback, useState } from "react";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 import { useThemeStore } from "@/stores/themeStore";
-import { useLayoutStore } from "@/stores/layoutStore";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +45,25 @@ export interface GroupedCommands {
 
 const RECENT_KEY = "flinttrade:recentCommands";
 const MAX_RECENT = 5;
+const BEGINNER_WIDGET_IDS = new Set([
+  "dashboard",
+  "chart",
+  "watchlist",
+  "orderpad",
+  "positions",
+]);
+const INTERMEDIATE_WIDGET_IDS = new Set([
+  ...BEGINNER_WIDGET_IDS,
+  "orders",
+  "ticker",
+  "depth",
+  "optionchain",
+  "greeks",
+  "pnl",
+  "riskdashboard",
+  "mtmmonitor",
+  "alerts",
+]);
 
 function loadRecentIds(): string[] {
   try {
@@ -86,7 +105,7 @@ export function useCommandRegistry() {
   const setTheme = useThemeStore((s) => s.setTheme);
   const setMode  = useThemeStore((s) => s.setMode);
   const mode     = useThemeStore((s) => s.mode);
-  const applyLayoutPreset = useLayoutStore((s) => s.applyPreset);
+  const tradeLevel = useSkillLevel("trade");
 
   const [recentIds, setRecentIds] = useState<string[]>(loadRecentIds);
 
@@ -94,7 +113,13 @@ export function useCommandRegistry() {
   // the theme store actions change identity (effectively: once per mount).
   const commands: Command[] = useMemo(() => {
     // ----- Widget commands (one per entry in widgetCatalog) -----
-    const widgetCommands: Command[] = widgetCatalog.map((w) => ({
+    const visibleWidgets = widgetCatalog.filter((widget) => {
+      if (tradeLevel === "advanced") return true;
+      if (tradeLevel === "intermediate") return INTERMEDIATE_WIDGET_IDS.has(widget.id);
+      return BEGINNER_WIDGET_IDS.has(widget.id);
+    });
+
+    const widgetCommands: Command[] = visibleWidgets.map((w) => ({
       id:          `widget:${w.id}`,
       title:       `Add ${w.name}`,
       description: `Open ${w.name} widget in the workspace`,
@@ -187,8 +212,10 @@ export function useCommandRegistry() {
       { id: "nav:automate", label: "Go to Automate", path: "/automate" },
       { id: "nav:ai",       label: "Go to AI",       path: "/ai" },
       { id: "nav:settings", label: "Go to Settings", path: "/settings" },
-      { id: "nav:admin",    label: "Go to Admin",    path: "/admin" },
     ];
+    if (import.meta.env.DEV) {
+      navEntries.push({ id: "nav:admin", label: "Go to Admin", path: "/admin" });
+    }
 
     const navigateCommands: Command[] = navEntries.map((entry) => ({
       id:       entry.id,
@@ -295,7 +322,11 @@ export function useCommandRegistry() {
       title:       `Apply layout: ${preset.name}`,
       description: preset.description,
       category:    "action" as CommandCategory,
-      action:      () => applyLayoutPreset(preset.id),
+      action:      () => {
+        window.dispatchEvent(
+          new CustomEvent("flinttrade:apply-layout", { detail: { presetId: preset.id } }),
+        );
+      },
     }));
 
     return [
@@ -306,7 +337,7 @@ export function useCommandRegistry() {
       ...layoutPresetCommands,
       ...themeCommands,
     ];
-  }, [setTheme, setMode, mode, applyLayoutPreset]);
+  }, [setTheme, setMode, mode, tradeLevel]);
 
   // ----- Derived: commands indexed by id -----
   const commandById = useMemo(() => {

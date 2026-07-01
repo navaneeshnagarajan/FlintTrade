@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -58,6 +59,12 @@ interface ResourceCard {
   source: string;
   topic: string;
   path: string;
+}
+
+interface SelectedDoc {
+  path: string;
+  title: string;
+  snippet?: string;
 }
 
 interface BasicsSection {
@@ -215,12 +222,12 @@ const STRATEGIES: StrategyCard[] = [
 ];
 
 const RESOURCES: ResourceCard[] = [
-  { title: "User Guide",            source: "Project docs", topic: "Setup",        path: "/docs/user-guide" },
-  { title: "Order Safety Notes",    source: "Project docs", topic: "Safety",       path: "/docs/order-safety" },
-  { title: "API Reference",         source: "Project docs", topic: "Integration",  path: "/docs/api" },
-  { title: "Compatibility Matrix",  source: "Project docs", topic: "Environment",  path: "/docs/compatibility" },
-  { title: "Architecture Overview", source: "Project docs", topic: "Design",       path: "/docs/architecture" },
-  { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "/docs/developer-guide" },
+  { title: "User Guide",            source: "Project docs", topic: "Setup",        path: "USER_GUIDE.md" },
+  { title: "Order Safety Notes",    source: "Project docs", topic: "Safety",       path: "ORDER_SAFETY.md" },
+  { title: "API Reference",         source: "Project docs", topic: "Integration",  path: "API.md" },
+  { title: "Compatibility Matrix",  source: "Project docs", topic: "Environment",  path: "COMPATIBILITY.md" },
+  { title: "Architecture Overview", source: "Project docs", topic: "Design",       path: "ARCHITECTURE.md" },
+  { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "DEVELOPER_GUIDE.md" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -231,6 +238,84 @@ function difficultyColor(d: "Beginner" | "Intermediate" | "Advanced"): string {
   if (d === "Beginner")     return "bg-bullish-bg text-profit border-0";
   if (d === "Intermediate") return "bg-atm-bg text-warning border-0";
   return "bg-bearish-bg text-loss border-0";
+}
+
+function titleFromDocPath(path: string): string {
+  return path
+    .replace(/\.[^.]+$/, "")
+    .split(/[/-]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getSelectedDoc(state: unknown): SelectedDoc | null {
+  if (!state || typeof state !== "object") return null;
+  const maybeDoc = (state as { selectedDoc?: unknown }).selectedDoc;
+  if (maybeDoc && typeof maybeDoc === "object") {
+    const doc = maybeDoc as { path?: unknown; title?: unknown; snippet?: unknown };
+    if (typeof doc.path === "string") {
+      return {
+        path: doc.path,
+        title: typeof doc.title === "string" ? doc.title : titleFromDocPath(doc.path),
+        snippet: typeof doc.snippet === "string" ? doc.snippet : undefined,
+      };
+    }
+  }
+
+  const path = (state as { selectedDocPath?: unknown }).selectedDocPath;
+  if (typeof path === "string") {
+    return { path, title: titleFromDocPath(path) };
+  }
+
+  return null;
+}
+
+async function fetchDocsDocument(path: string, signal?: AbortSignal): Promise<{ title: string; content: string }> {
+  const params = new URLSearchParams({ path });
+  const response = await fetch(`/ft-api/v1/docs/document?${params.toString()}`, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = (await response.json()) as { title?: unknown; content?: unknown };
+  if (typeof body.title !== "string" || typeof body.content !== "string") {
+    throw new Error("Unexpected docs response");
+  }
+  return { title: body.title, content: body.content };
+}
+
+function renderDocLine(line: string, key: number) {
+  if (/^#\s/.test(line)) {
+    return <h2 key={key} className="text-base font-semibold text-text-primary mt-3">{line.replace(/^#\s+/, "")}</h2>;
+  }
+  if (/^##\s/.test(line)) {
+    return <h3 key={key} className="text-sm font-semibold text-text-primary mt-3">{line.replace(/^##\s+/, "")}</h3>;
+  }
+  if (/^###\s/.test(line)) {
+    return (
+      <h4 key={key} className="text-xs font-semibold text-text-secondary uppercase tracking-wider mt-3">
+        {line.replace(/^###\s+/, "")}
+      </h4>
+    );
+  }
+  if (/^[-*]\s/.test(line)) {
+    return (
+      <li key={key} className="text-xs text-text-secondary leading-relaxed list-disc list-inside">
+        {line.replace(/^[-*]\s+/, "")}
+      </li>
+    );
+  }
+  if (/^\d+\.\s/.test(line)) {
+    return (
+      <li key={key} className="text-xs text-text-secondary leading-relaxed list-decimal list-inside">
+        {line.replace(/^\d+\.\s+/, "")}
+      </li>
+    );
+  }
+  if (line.trim() === "") return <div key={key} className="h-1" />;
+  return <p key={key} className="text-xs text-text-secondary leading-relaxed">{line}</p>;
+}
+
+function DocMarkdown({ content }: { content: string }) {
+  return <div className="space-y-1">{content.split(/\r?\n/).map(renderDocLine)}</div>;
 }
 
 // ---------------------------------------------------------------------------
@@ -495,14 +580,72 @@ function PaperTradingTab() {
   );
 }
 
-function ResourceHubTab() {
+function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
+  const [activeDoc, setActiveDoc] = useState<SelectedDoc | null>(selectedDoc);
+  const [docContent, setDocContent] = useState<{ title: string; content: string } | null>(null);
+  const [docLoading, setDocLoading] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedDoc) setActiveDoc(selectedDoc);
+  }, [selectedDoc]);
+
+  useEffect(() => {
+    if (!activeDoc) {
+      setDocContent(null);
+      setDocError(null);
+      setDocLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setDocLoading(true);
+    setDocError(null);
+    fetchDocsDocument(activeDoc.path, controller.signal)
+      .then((document) => setDocContent(document))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setDocContent(null);
+        setDocError("Could not load this document from the local backend.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setDocLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [activeDoc]);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
+      {activeDoc && (
+        <GlassCard className="rounded-lg p-4 border-accent/40 bg-accent/5 md:col-span-2">
+          <div className="flex items-start gap-3 mb-3">
+            <BookOpen className="w-8 h-8 text-accent shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <h4 className="text-sm font-semibold text-text-primary">{docContent?.title ?? activeDoc.title}</h4>
+              <p className="text-xs text-text-muted mt-0.5">
+                {activeDoc.snippet ?? "Selected from documentation search"}
+              </p>
+              <p className="mt-2 font-mono text-[10px] text-text-muted/70 truncate">
+                docs/{activeDoc.path}
+              </p>
+            </div>
+          </div>
+          {docLoading && <p className="text-xs text-text-muted">Loading document...</p>}
+          {docError && <p role="alert" className="text-xs text-loss">{docError}</p>}
+          {docContent && (
+            <article className="max-h-[38rem] overflow-y-auto rounded-md border border-border-default bg-surface-base/70 p-4">
+              <DocMarkdown content={docContent.content} />
+            </article>
+          )}
+        </GlassCard>
+      )}
       {RESOURCES.map((v) => (
-        <a
+        <button
+          type="button"
           key={v.title}
-          href={v.path}
-          className="block"
+          onClick={() => setActiveDoc({ path: v.path, title: v.title, snippet: v.source })}
+          className="block text-left"
         >
           <GlassCard className="rounded-lg p-4 hover:border-border-strong transition-colors duration-150 cursor-pointer">
             <div className="flex items-start gap-3">
@@ -514,7 +657,7 @@ function ResourceHubTab() {
               </div>
             </div>
           </GlassCard>
-        </a>
+        </button>
       ))}
     </div>
   );
@@ -611,16 +754,26 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
 export default function LearnRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("learn", "daysActive"); }, []);
 
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabId>("basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const level = useSkillLevel("learn");
+  const selectedDoc = useMemo(() => getSelectedDoc(location.state), [location.state]);
+
+  useEffect(() => {
+    if (selectedDoc) setActiveTab("resources");
+  }, [selectedDoc]);
 
   // Density adaptation — beginner sees fewer sidebar items
   // Beginner: basics + glossary prominently (guided lesson list)
   // Intermediate: all sections
   // Advanced: all sections
   const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["basics", "glossary", "paper"];
+    if (level === "beginner") {
+      return selectedDoc
+        ? ["basics", "glossary", "paper", "resources"]
+        : ["basics", "glossary", "paper"];
+    }
     return ["basics", "glossary", "strategies", "paper", "resources"];
   })();
 
@@ -652,8 +805,8 @@ export default function LearnRoute() {
     glossary:   <GlossaryTab />,
     strategies: <StrategiesTab />,
     paper:      <PaperTradingTab />,
-    resources:  <ResourceHubTab />,
-  }), []);
+    resources:  <ResourceHubTab selectedDoc={selectedDoc} />,
+  }), [selectedDoc]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">

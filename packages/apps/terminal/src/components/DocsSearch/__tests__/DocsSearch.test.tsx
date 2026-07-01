@@ -255,6 +255,21 @@ describe("DocsSearch", () => {
         WAIT_OPTS,
       );
     });
+
+    it("wires aria-activedescendant to the active result row", async () => {
+      mockFetchResults();
+      render(<DocsSearch {...defaultProps} />);
+      const input = screen.getByRole("combobox");
+      fireEvent.change(input, { target: { value: "order" } });
+
+      await waitFor(
+        () => expect(screen.getByText("Order Placement Guide")).toBeInTheDocument(),
+        WAIT_OPTS,
+      );
+
+      expect(input).toHaveAttribute("aria-activedescendant", "docs-result-0");
+      expect(document.getElementById("docs-result-0")).toHaveAttribute("role", "option");
+    });
   });
 });
 

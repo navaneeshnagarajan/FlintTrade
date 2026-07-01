@@ -52,6 +52,7 @@ import ModeSelectRoute from "@/routes/ModeSelectRoute";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
+import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -80,6 +81,7 @@ interface SetupProgress {
   trading: Partial<TradingDefaultsFormValues> | null;
   risk: Partial<RiskFormValues> | null;
   mode: AppMode | null;
+  displayName: string;
   /** 0..6 — the step index the user is currently viewing. */
   currentStep: number;
 }
@@ -115,6 +117,7 @@ const setupProgressSchema = z.object({
     })
     .nullable(),
   mode: appModeEnum.nullable(),
+  displayName: z.string().optional().default(""),
   currentStep: z.number().int().min(0).max(6),
 }) satisfies z.ZodType<SetupProgress>;
 
@@ -127,6 +130,7 @@ const EMPTY_PROGRESS: SetupProgress = {
   trading: null,
   risk: null,
   mode: null,
+  displayName: "",
   currentStep: 0,
 };
 
@@ -320,6 +324,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
         <Input
           id="sa-username"
           autoFocus
+          autoComplete="username"
           placeholder="e.g. alice"
           aria-label="Choose a username"
           {...register("username")}
@@ -335,6 +340,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
         <Input
           id="sa-email"
           type="email"
+          autoComplete="email"
           placeholder="you@example.com"
           aria-label="Enter your email address"
           {...register("email")}
@@ -352,6 +358,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
           <Input
             id="sa-password"
             type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
             placeholder="Strong password"
             aria-label="Create a strong password"
             className="pr-10"
@@ -398,6 +405,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
           <Input
             id="sa-confirm-password"
             type="password"
+            autoComplete="new-password"
             placeholder="Re-enter password"
             aria-label="Confirm your password"
             {...register("confirmPassword")}
@@ -416,6 +424,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
           id="sa-pin"
           type="password"
           inputMode="numeric"
+          autoComplete="new-password"
           maxLength={6}
           placeholder="••••••"
           aria-label="Create a 6-digit PIN (optional)"
@@ -435,6 +444,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
             id="sa-confirm-pin"
             type="password"
             inputMode="numeric"
+            autoComplete="new-password"
             maxLength={6}
             placeholder="••••••"
             aria-label="Re-enter your 6-digit PIN"
@@ -574,6 +584,7 @@ function TotpDisplay({
           <Input
             type="password"
             autoFocus
+            autoComplete="current-password"
             placeholder="Your password"
             value={escapePassword}
             onChange={(e) => setEscapePassword(e.target.value)}
@@ -849,6 +860,7 @@ export default function SetupAccountRoute() {
     initialProgress.trading,
   );
   const [risk, setRisk] = useState<Partial<RiskFormValues> | null>(initialProgress.risk);
+  const [displayName, setDisplayName] = useState(initialProgress.displayName);
 
   // Persist on every state change so reloads / navigations never lose entries.
   // Keyed off explicit `accountCreated` — never derived from secondary fields
@@ -864,9 +876,10 @@ export default function SetupAccountRoute() {
       trading,
       risk,
       mode: null,
+      displayName,
       currentStep,
     });
-  }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, accountCreated]);
+  }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, displayName, accountCreated]);
 
   // No auto-wipe based on authStatus. Progress is cleared only by an explicit
   // user action: "Finish setup" on the final step or the "Start over" button
@@ -883,13 +896,14 @@ export default function SetupAccountRoute() {
     setConnection(null);
     setTrading(null);
     setRisk(null);
+    setDisplayName("");
   }
 
   // ---------------------------------------------------------------------------
   // Step handlers — each advances currentStep; the effect above persists.
   // ---------------------------------------------------------------------------
 
-  function handleAccountComplete(_values: AccountFormValues, uri: string, codes: string[]) {
+  function handleAccountComplete(values: AccountFormValues, uri: string, codes: string[]) {
     // Persist synchronously so a reload before the effect fires still lands on step 1.
     saveProgress({
       accountCreated: true,
@@ -900,11 +914,13 @@ export default function SetupAccountRoute() {
       trading: null,
       risk: null,
       mode: null,
+      displayName: values.username,
       currentStep: 1,
     });
     setAccountCreated(true);
     setTotpUri(uri);
     setBackupCodes(codes);
+    setDisplayName(values.username);
     setCurrentStep(1);
   }
 
@@ -928,6 +944,7 @@ export default function SetupAccountRoute() {
     setConnection(null);
     setTrading(null);
     setRisk(null);
+    setDisplayName("");
     setCurrentStep(0);
     useAuthStore.getState().setSetupRequired();
     navigate("/welcome", { replace: true });
@@ -955,6 +972,14 @@ export default function SetupAccountRoute() {
 
   function handleModeSelect(mode: AppMode) {
     setMode(mode);
+    persistSetupChoices({
+      persona: persona ?? "trader",
+      connection,
+      tradingDefaults: trading,
+      riskLimits: risk,
+      name: displayName || "Trader",
+      interests: [],
+    });
     // Setup finished — clear persisted progress and route to sign-in.
     clearProgress();
     navigate("/welcome", { replace: true });

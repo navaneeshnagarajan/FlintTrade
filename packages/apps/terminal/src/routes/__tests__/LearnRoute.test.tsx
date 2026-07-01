@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 // Mock framer-motion to avoid animation issues in tests
 vi.mock("framer-motion", () => ({
@@ -44,14 +45,22 @@ vi.mock("@/lib/tourDefinitions", () => ({
 
 import LearnRoute from "../LearnRoute";
 
+function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["initialEntries"] = ["/learn"]) {
+  return render(
+    <MemoryRouter initialEntries={initialEntries}>
+      <LearnRoute />
+    </MemoryRouter>,
+  );
+}
+
 describe("LearnRoute", () => {
   it("renders the Learning Center heading", () => {
-    render(<LearnRoute />);
+    renderLearnRoute();
     expect(screen.getByText("Learning Center")).toBeInTheDocument();
   });
 
   it("has sidebar sections for all tabs at advanced level", () => {
-    render(<LearnRoute />);
+    renderLearnRoute();
     expect(screen.getByText("Market Basics")).toBeInTheDocument();
     expect(screen.getByText("Glossary")).toBeInTheDocument();
     expect(screen.getByText("Strategy Library")).toBeInTheDocument();
@@ -60,8 +69,39 @@ describe("LearnRoute", () => {
   });
 
   it("shows Market Basics content by default", () => {
-    render(<LearnRoute />);
+    renderLearnRoute();
     // Market Basics tab content includes the first section title
     expect(screen.getByText("What are Stocks?")).toBeInTheDocument();
+  });
+
+  it("loads and renders a selected documentation result", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          title: "User Guide",
+          content: "# User Guide\n\n- Configure your workspace\n\nRead the setup flow.",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    renderLearnRoute([
+      {
+        pathname: "/learn",
+        state: {
+          selectedDoc: {
+            path: "USER_GUIDE.md",
+            title: "User Guide",
+            snippet: "Selected from search",
+          },
+        },
+      },
+    ]);
+
+    await waitFor(() => expect(screen.getByText("Configure your workspace")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/ft-api/v1/docs/document?path=USER_GUIDE.md",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 });

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
+
+const mockSearchDocs = vi.hoisted(() => vi.fn());
 
 // Mock framer-motion for AnimatedTabs
 vi.mock("framer-motion", () => ({
@@ -18,6 +20,10 @@ vi.mock("framer-motion", () => ({
 
 vi.mock("@/services/api", () => ({
   searchSymbol: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/components/DocsSearch/DocsSearch", () => ({
+  searchDocs: mockSearchDocs,
 }));
 
 vi.mock("jotai", () => ({
@@ -48,6 +54,7 @@ vi.mock("@/layout/widgetFactory", () => ({
 }));
 
 import CommandPalette from "../CommandPalette";
+import { searchSymbol } from "@/services/api";
 
 const wrapper = ({ children }: { children: React.ReactNode }) =>
   createElement(
@@ -67,7 +74,11 @@ function renderPalette(isOpen = true) {
 }
 
 describe("CommandPalette — tabbed", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSearchDocs.mockResolvedValue([]);
+    vi.mocked(searchSymbol).mockResolvedValue([]);
+  });
 
   it("renders 4 tabs: Symbols, Commands, Widgets, Ask AI", () => {
     renderPalette();
@@ -137,5 +148,105 @@ describe("CommandPalette — tabbed", () => {
     expect(screen.getByText("Select")).toBeInTheDocument();
     expect(screen.getByText("Switch tab")).toBeInTheDocument();
     expect(screen.getByText("Close")).toBeInTheDocument();
+  });
+
+  it("selects the active command when Enter is pressed", async () => {
+    const { onClose } = renderPalette();
+    const input = screen.getByRole("combobox");
+    let detail: unknown;
+    const listener = vi.fn((event: Event) => {
+      detail = (event as CustomEvent).detail;
+    });
+    window.addEventListener("flinttrade:navigate", listener);
+
+    fireEvent.change(input, { target: { value: "/go to settings" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /go to settings/i })).toBeInTheDocument();
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(detail).toEqual({ path: "/settings" });
+    expect(onClose).toHaveBeenCalledOnce();
+
+    window.removeEventListener("flinttrade:navigate", listener);
+  });
+
+  it("selects the active widget when Enter is pressed", async () => {
+    const { onClose } = renderPalette();
+    const input = screen.getByRole("combobox");
+    let detail: unknown;
+    const listener = vi.fn((event: Event) => {
+      detail = (event as CustomEvent).detail;
+    });
+    window.addEventListener("flinttrade:addWidget", listener);
+
+    fireEvent.change(input, { target: { value: "#chart" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /add chart/i })).toBeInTheDocument();
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(detail).toEqual({ widgetId: "chart" });
+    expect(onClose).toHaveBeenCalledOnce();
+
+    window.removeEventListener("flinttrade:addWidget", listener);
+  });
+
+  it("selects the active docs result when Enter is pressed", async () => {
+    const { onClose } = renderPalette();
+    const input = screen.getByRole("combobox");
+    mockSearchDocs.mockResolvedValue([
+      {
+        path: "USER_GUIDE.md",
+        title: "User Guide",
+        snippet: "Workspace setup",
+        score: 0.8,
+      },
+    ]);
+    let detail: unknown;
+    const listener = vi.fn((event: Event) => {
+      detail = (event as CustomEvent).detail;
+    });
+    window.addEventListener("flinttrade:openDoc", listener);
+
+    fireEvent.change(input, { target: { value: "?user guide" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /user guide/i })).toBeInTheDocument();
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(detail).toEqual({ path: "USER_GUIDE.md" });
+    expect(onClose).toHaveBeenCalledOnce();
+
+    window.removeEventListener("flinttrade:openDoc", listener);
+  });
+
+  it("opens the active symbol chart when Enter is pressed", async () => {
+    const { onClose } = renderPalette();
+    const input = screen.getByRole("combobox");
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "RELIANCE", exchange: "NSE" }]);
+    let detail: unknown;
+    const listener = vi.fn((event: Event) => {
+      detail = (event as CustomEvent).detail;
+    });
+    window.addEventListener("flinttrade:addWidget", listener);
+
+    fireEvent.change(input, { target: { value: "RELIANCE" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /reliance/i })).toBeInTheDocument();
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(detail).toEqual({
+      widgetId: "chart",
+      props: { symbol: "RELIANCE", exchange: "NSE" },
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+
+    window.removeEventListener("flinttrade:addWidget", listener);
   });
 });

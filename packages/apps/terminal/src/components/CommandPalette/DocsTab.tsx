@@ -15,6 +15,7 @@ interface DocsTabProps {
   activeIndex: number;
   onClose: () => void;
   onActiveIndexChange: (index: number) => void;
+  onActiveDocChange?: (result: DocSearchResult | null) => void;
 }
 
 export function DocsTab({
@@ -22,6 +23,7 @@ export function DocsTab({
   activeIndex,
   onClose,
   onActiveIndexChange,
+  onActiveDocChange,
 }: DocsTabProps) {
   const [results, setResults] = useState<DocSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -52,6 +54,10 @@ export function DocsTab({
       onActiveIndexChange(results.length - 1);
     }
   }, [activeIndex, results.length, onActiveIndexChange]);
+
+  useEffect(() => {
+    onActiveDocChange?.(results[activeIndex] ?? null);
+  }, [activeIndex, results, onActiveDocChange]);
 
   function handleSelect(result: DocSearchResult) {
     window.dispatchEvent(

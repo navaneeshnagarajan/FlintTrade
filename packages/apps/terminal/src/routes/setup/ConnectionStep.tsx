@@ -162,6 +162,7 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
           <Input
             id="apiKey"
             type="password"
+            autoComplete="off"
             placeholder="Your gateway API key"
             aria-label="OpenAlgo-compatible API key"
             className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"

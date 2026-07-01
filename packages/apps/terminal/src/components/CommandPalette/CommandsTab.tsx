@@ -17,9 +17,17 @@ interface CommandsTabProps {
   activeIndex: number;
   onSelect: (cmd: Command) => void;
   onActiveIndexChange: (index: number) => void;
+  onActiveCommandChange?: (cmd: Command | null) => void;
 }
 
-export function CommandsTab({ commands, query, activeIndex, onSelect, onActiveIndexChange }: CommandsTabProps) {
+export function CommandsTab({
+  commands,
+  query,
+  activeIndex,
+  onSelect,
+  onActiveIndexChange,
+  onActiveCommandChange,
+}: CommandsTabProps) {
   const filtered = useMemo(() => {
     if (!query) return commands;
     const q = query.toLowerCase();
@@ -36,6 +44,10 @@ export function CommandsTab({ commands, query, activeIndex, onSelect, onActiveIn
       onActiveIndexChange(filtered.length - 1);
     }
   }, [activeIndex, filtered.length, onActiveIndexChange]);
+
+  useEffect(() => {
+    onActiveCommandChange?.(filtered[activeIndex] ?? null);
+  }, [activeIndex, filtered, onActiveCommandChange]);
 
   if (filtered.length === 0) {
     return (

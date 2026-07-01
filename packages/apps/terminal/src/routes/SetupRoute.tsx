@@ -15,18 +15,11 @@ import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
-import { useConnectionStore } from "@/stores/connectionStore";
-import { useSettingsStore } from "@/stores/settingsStore";
-import { useLayoutStore } from "@/stores/layoutStore";
-import { useSkillStore } from "@/stores/skillStore";
-import type { SkillLevel, Domain } from "@/types/skill";
-
 import { ModeSelection } from "./setup/ModeSelection";
 import type { SetupMode } from "./setup/ModeSelection";
 import { StepIndicator } from "./setup/StepIndicator";
 import { ConnectionStep } from "./setup/ConnectionStep";
 import type { ConnectionFormValues } from "./setup/ConnectionStep";
-import { deriveWsUrl } from "./setup/ConnectionStep";
 import { PersonaPicker, ExperiencePicker, InterestPicker, NameInput } from "./setup/PersonaStep";
 import type { Persona, ExperienceLevel } from "./setup/PersonaStep";
 import { TradingStep } from "./setup/TradingStep";
@@ -34,7 +27,8 @@ import type { TradingDefaultsFormValues } from "./setup/TradingStep";
 import { RiskStep } from "./setup/RiskStep";
 import type { RiskFormValues } from "./setup/RiskStep";
 import { LlmStep } from "./setup/LlmStep";
-import { LayoutPreview, DoneScreen, getPresetName, mapWizardPreset } from "./setup/ReviewStep";
+import { LayoutPreview, DoneScreen } from "./setup/ReviewStep";
+import { persistSetupChoices } from "./setup/applySetupChoices";
 
 // ---------------------------------------------------------------------------
 // Wizard state
@@ -77,51 +71,6 @@ function stepsForMode(mode: SetupMode): string[] {
   return ADVANCED_STEPS;
 }
 
-function personaRoute(persona: Persona): string {
-  if (persona === "investor") return "/invest";
-  if (persona === "beginner") return "/learn";
-  return "/trade";
-}
-
-function mapExperience(level: ExperienceLevel | null): "beginner" | "intermediate" | "pro" | "custom" {
-  if (level === "new") return "beginner";
-  if (level === "professional") return "pro";
-  return "intermediate";
-}
-
-/**
- * Maps wizard persona + experience to skillStore levels.
- * Returns globalLevel and optional per-domain overrides.
- */
-function deriveSkillLevels(
-  persona: Persona,
-  experience: ExperienceLevel | null,
-): { globalLevel: SkillLevel; overrides: Partial<Record<Domain, SkillLevel>> } {
-  if (persona === "beginner") {
-    return { globalLevel: "beginner", overrides: {} };
-  }
-  if (persona === "trader") {
-    if (experience === "new" || experience === null) {
-      return { globalLevel: "beginner", overrides: {} };
-    }
-    if (experience === "intermediate") {
-      return { globalLevel: "intermediate", overrides: {} };
-    }
-    // professional
-    return { globalLevel: "advanced", overrides: {} };
-  }
-  // investor
-  if (experience === "new" || experience === null) {
-    return { globalLevel: "beginner", overrides: { invest: "intermediate" } };
-  }
-  // intermediate investor
-  if (experience === "intermediate") {
-    return { globalLevel: "intermediate", overrides: {} };
-  }
-  // professional investor
-  return { globalLevel: "intermediate", overrides: { invest: "advanced" } };
-}
-
 // ---------------------------------------------------------------------------
 // Main SetupRoute
 // ---------------------------------------------------------------------------
@@ -134,69 +83,17 @@ export default function SetupRoute() {
 
   function applyAndNavigate(w: WizardState) {
     const persona = w.persona ?? "trader";
+    const destination = persistSetupChoices({
+      persona,
+      experience: w.experience,
+      connection: w.connection,
+      tradingDefaults: w.tradingDefaults,
+      riskLimits: w.riskLimits,
+      name: w.name,
+      interests: w.interests,
+    });
 
-    if (w.connection) {
-      const wsUrl = deriveWsUrl(w.connection.host, w.connection.wsPort);
-      useConnectionStore.getState().setConfig({
-        host: w.connection.host,
-        apiKey: w.connection.apiKey,
-        wsUrl,
-      });
-
-      // Persist to backend so server-side calls (scheduler, RAG, admin)
-      // use the same key without requiring an .env edit + restart.
-      // Fire-and-forget — UI flow must not block on network.
-      void fetch("/ft-api/v1/config/openalgo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_key: w.connection.apiKey,
-          host: w.connection.host,
-          ws_port: w.connection.wsPort,
-        }),
-      }).catch((err) => {
-        console.warn("[setup] failed to persist connection to backend:", err);
-      });
-    }
-
-    useSettingsStore.getState().setPersona(persona);
-    useSettingsStore.getState().setName(w.name || "Trader");
-    useSettingsStore.getState().setInterests(w.interests);
-    useSettingsStore.getState().setExperience(mapExperience(w.experience));
-
-    // Wire persona + experience into the adaptive skill layer
-    const { globalLevel, overrides } = deriveSkillLevels(persona, w.experience);
-    useSkillStore.getState().setGlobalLevel(globalLevel);
-    for (const [domain, level] of Object.entries(overrides) as [Domain, SkillLevel][]) {
-      useSkillStore.getState().setRouteOverride(domain, level);
-    }
-
-    if (w.tradingDefaults) {
-      useSettingsStore.getState().setTradingDefaults({
-        defaultExchange: w.tradingDefaults.defaultExchange,
-        defaultProduct: w.tradingDefaults.defaultProduct,
-        defaultQty: w.tradingDefaults.defaultQty,
-      });
-    }
-
-    if (w.riskLimits) {
-      useSettingsStore.getState().setRiskLimits(w.riskLimits);
-    }
-
-    // Derive and apply the actual workspace preset before navigating.
-    const wizardPreset = getPresetName(w.experience ?? "intermediate", w.interests);
-    const actualPresetId = mapWizardPreset(wizardPreset);
-    const api = useLayoutStore.getState().dockviewApi;
-    if (api) {
-      useLayoutStore.getState().applyPreset(actualPresetId);
-    } else {
-      const activeTabId = useLayoutStore.getState().activeTabId;
-      useLayoutStore.getState().saveTabLayout(activeTabId, {
-        __pendingPreset: actualPresetId,
-      } as unknown as Record<string, unknown>);
-    }
-
-    navigate(personaRoute(persona));
+    navigate(destination);
   }
 
   function toggleInterest(id: string) {

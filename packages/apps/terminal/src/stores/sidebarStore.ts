@@ -43,7 +43,7 @@ export interface SidebarState {
 // Default items
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ITEMS: SidebarItem[] = [
+const BASE_DEFAULT_ITEMS: SidebarItem[] = [
   { id: "home",      label: "Home",      icon: "Home",          route: "/home",     type: "route" },
   { id: "trade",     label: "Trade",     icon: "TrendingUp",    route: "/trade",    type: "route" },
   { id: "invest",    label: "Invest",    icon: "Wallet",        route: "/invest",   type: "route" },
@@ -58,16 +58,25 @@ const DEFAULT_ITEMS: SidebarItem[] = [
   { id: "settings",  label: "Settings",  icon: "Settings",      route: "/settings", type: "route" },
 ];
 
+const DEFAULT_ITEMS: SidebarItem[] = import.meta.env.DEV
+  ? BASE_DEFAULT_ITEMS
+  : BASE_DEFAULT_ITEMS.filter((item) => item.id !== "admin");
+
+function isSidebarItemAllowed(item: SidebarItem): boolean {
+  return import.meta.env.DEV || item.id !== "admin";
+}
+
 function reconcileSidebarItems(persistedItems: SidebarItem[] | undefined): SidebarItem[] {
   if (!persistedItems || persistedItems.length === 0) return DEFAULT_ITEMS;
 
   const defaultsById = new Map(DEFAULT_ITEMS.map((item) => [item.id, item]));
   const seenIds = new Set<string>();
-  const reconciled = persistedItems.map((item) => {
+  const reconciled = persistedItems.flatMap((item) => {
+    if (!isSidebarItemAllowed(item)) return [];
     const defaultItem = defaultsById.get(item.id);
-    if (!defaultItem) return item;
+    if (!defaultItem) return [item];
     seenIds.add(item.id);
-    return defaultItem;
+    return [defaultItem];
   });
 
   for (const item of DEFAULT_ITEMS) {
@@ -113,7 +122,7 @@ const persistedStore = persist(storeImpl, {
   // Only persist user preferences, not transient hover state
   partialize: (state) => ({
     mode: state.mode,
-    items: state.items,
+    items: state.items.filter(isSidebarItemAllowed),
   }),
   // Merge persisted items with new defaults so additions in future versions
   // are picked up without a full reset

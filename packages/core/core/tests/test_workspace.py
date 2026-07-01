@@ -69,6 +69,32 @@ class TestWorkspaceInit:
         ws = Workspace(home_dir=tmp_path / "empty")
         assert not ws.is_initialized
 
+    def test_cli_provision_master_password_creates_hardened_file(self, tmp_path):
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.secure_file import assert_hardened
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+
+        assert _provision_master_password(ws) is True
+        password_file = ws.workspace_dir / "master_password"
+        assert password_file.read_text(encoding="utf-8").strip()
+        ok, reason = assert_hardened(password_file)
+        assert ok, reason
+
+    def test_cli_provision_master_password_never_overwrites_existing_secret(self, tmp_path):
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        password_file = ws.workspace_dir / "master_password"
+        password_file.write_text("operator-owned-secret", encoding="utf-8")
+
+        assert _provision_master_password(ws) is False
+        assert password_file.read_text(encoding="utf-8") == "operator-owned-secret"
+
 
 class TestWorkspaceLoadSave:
     """Test load/save/get/set operations."""
@@ -110,6 +136,15 @@ class TestWorkspaceLoadSave:
         # fast_data_dir should be an absolute path (~ expanded)
         assert ws.fast_data_dir.is_absolute()
         assert "~" not in str(ws.fast_data_dir)
+
+    def test_explicit_home_keeps_default_storage_inside_workspace(self, tmp_path):
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+
+        assert ws.fast_data_dir == (tmp_path / "ws" / "data").resolve()
+        assert ws.archive_dir == (tmp_path / "ws" / "archive").resolve()
 
     def test_ensure_directories(self, tmp_path):
         from flinttrade_core.workspace import Workspace

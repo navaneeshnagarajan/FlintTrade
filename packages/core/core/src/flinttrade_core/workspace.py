@@ -100,6 +100,11 @@ class Workspace:
     """
 
     def __init__(self, home_dir: Path | None = None) -> None:
+        self._uses_explicit_home = bool(
+            home_dir is not None
+            or os.environ.get("FLINTTRADE_HOME")
+            or os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+        )
         if home_dir is not None or os.environ.get("FLINTTRADE_HOME"):
             self._home = (home_dir or _default_home()).expanduser().resolve()
         else:
@@ -123,14 +128,14 @@ class Workspace:
     @property
     def fast_data_dir(self) -> Path:
         raw = self.get("storage.fast", "~/.flinttrade/data")
-        if os.environ.get("FLINTTRADE_WORKSPACE_DIR") and raw.startswith("~/.flinttrade/"):
+        if self._uses_explicit_home and raw.startswith("~/.flinttrade/"):
             return (self._home / raw.removeprefix("~/.flinttrade/")).resolve()
         return Path(raw).expanduser().resolve()
 
     @property
     def archive_dir(self) -> Path:
         raw = self.get("storage.archive", "~/.flinttrade/archive")
-        if os.environ.get("FLINTTRADE_WORKSPACE_DIR") and raw.startswith("~/.flinttrade/"):
+        if self._uses_explicit_home and raw.startswith("~/.flinttrade/"):
             return (self._home / raw.removeprefix("~/.flinttrade/")).resolve()
         return Path(raw).expanduser().resolve()
 

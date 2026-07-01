@@ -333,11 +333,11 @@ export default function WelcomeRoute() {
       timers.push(setTimeout(() => setStep((current) => (current < nextStep ? nextStep : current)), ms));
     };
 
-    schedule(1, 1000);
-    schedule(2, 2200);
-    schedule(3, 3200);
-    schedule(4, 4200);
-    schedule(5, 5000);
+    schedule(1, 90);
+    schedule(2, 210);
+    schedule(3, 360);
+    schedule(4, 480);
+    schedule(5, 620);
 
     return () => timers.forEach(clearTimeout);
   }, []);
@@ -527,10 +527,10 @@ export default function WelcomeRoute() {
             {step >= 3 && (
               <motion.div
                 className="space-y-3"
-                initial={{ opacity: 0, y: 14, filter: "blur(8px)" }}
+                initial={{ opacity: 0, y: 10, filter: "blur(2px)" }}
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.78, ease: silkyEase }}
+                transition={{ duration: 0.34, ease: silkyEase }}
               >
                 <h2
                   className="font-heading text-5xl font-bold leading-none text-text-primary drop-shadow-[0_0_36px_rgba(34,197,94,0.16)] sm:text-7xl"
@@ -541,9 +541,9 @@ export default function WelcomeRoute() {
                       key={`${char}-${index}`}
                       aria-hidden="true"
                       className="welcome-char"
-                      initial={{ opacity: 0, y: 18, scale: 0.98, filter: "blur(5px)" }}
+                      initial={{ opacity: 0, y: 10, scale: 0.99, filter: "blur(2px)" }}
                       animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-                      transition={{ duration: 0.52, ease: silkyEase, delay: 0.08 + index * 0.045 }}
+                      transition={{ duration: 0.24, ease: silkyEase, delay: 0.02 + index * 0.012 }}
                     >
                       {char}
                     </motion.span>
@@ -553,9 +553,9 @@ export default function WelcomeRoute() {
                 {step >= 4 && (
                   <motion.div
                     className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1"
-                    initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+                    initial={{ opacity: 0, y: 8, filter: "blur(2px)" }}
                     animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                    transition={{ duration: 0.68, ease: silkyEase }}
+                    transition={{ duration: 0.28, ease: silkyEase }}
                   >
                     {SLOGAN.map((word, index) => (
                       <motion.span
@@ -563,7 +563,7 @@ export default function WelcomeRoute() {
                         className={cn("font-sans text-sm font-medium tracking-wide sm:text-lg", word.color)}
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5, ease: silkyEase, delay: index * 0.055 }}
+                        transition={{ duration: 0.24, ease: silkyEase, delay: index * 0.02 }}
                       >
                         {word.text}
                         {index < SLOGAN.length - 1 && (
@@ -581,16 +581,16 @@ export default function WelcomeRoute() {
             {step >= 5 && (
               <motion.div
                 className="mx-auto max-w-2xl space-y-5"
-                initial={{ opacity: 0, y: 20, scale: 0.985, filter: "blur(8px)" }}
+                initial={{ opacity: 0, y: 12, scale: 0.99, filter: "blur(2px)" }}
                 animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.82, ease: silkyEase }}
+                transition={{ duration: 0.34, ease: silkyEase }}
               >
                 <motion.p
                   className="mx-auto max-w-xl text-sm leading-relaxed text-text-secondary sm:text-base"
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.62, ease: silkyEase, delay: 0.08 }}
+                  transition={{ duration: 0.26, ease: silkyEase, delay: 0.04 }}
                 >
                   Open-source self-hosted trading software for local research, sandbox
                   testing, manual orders, automation, and AI-assisted workflows. One
@@ -603,7 +603,7 @@ export default function WelcomeRoute() {
                       className="rounded-lg border border-border-default/70 bg-surface-card/55 px-3 py-2 text-xs text-text-secondary shadow-lg shadow-black/10 backdrop-blur-xl"
                       initial={{ opacity: 0, y: 14, scale: 0.98 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ duration: 0.58, ease: silkyEase, delay: 0.2 + index * 0.07 }}
+                      transition={{ duration: 0.28, ease: silkyEase, delay: 0.06 + index * 0.025 }}
                     >
                       <span className="mr-2 text-accent" aria-hidden="true">•</span>
                       {item}
@@ -618,10 +618,10 @@ export default function WelcomeRoute() {
             {step >= 5 && (
               <motion.div
                 className="flex flex-col items-center gap-3"
-                initial={{ opacity: 0, y: 18, scale: 0.985, filter: "blur(8px)" }}
+                initial={{ opacity: 0, y: 10, scale: 0.99, filter: "blur(2px)" }}
                 animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.78, ease: silkyEase, delay: 0.22 }}
+                transition={{ duration: 0.3, ease: silkyEase, delay: 0.08 }}
               >
                 {showSetupActions ? (
                   <>

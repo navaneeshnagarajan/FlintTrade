@@ -10,9 +10,17 @@ interface WidgetsTabProps {
   activeIndex: number;
   onSelect: (cmd: Command) => void;
   onActiveIndexChange: (index: number) => void;
+  onActiveWidgetChange?: (cmd: Command | null) => void;
 }
 
-export function WidgetsTab({ widgets, query, activeIndex, onSelect, onActiveIndexChange }: WidgetsTabProps) {
+export function WidgetsTab({
+  widgets,
+  query,
+  activeIndex,
+  onSelect,
+  onActiveIndexChange,
+  onActiveWidgetChange,
+}: WidgetsTabProps) {
   const filtered = useMemo(() => {
     if (!query) return widgets;
     const q = query.replace(/^#\s*/, "").toLowerCase();
@@ -28,6 +36,10 @@ export function WidgetsTab({ widgets, query, activeIndex, onSelect, onActiveInde
       onActiveIndexChange(filtered.length - 1);
     }
   }, [activeIndex, filtered.length, onActiveIndexChange]);
+
+  useEffect(() => {
+    onActiveWidgetChange?.(filtered[activeIndex] ?? null);
+  }, [activeIndex, filtered, onActiveWidgetChange]);
 
   if (filtered.length === 0) {
     return (

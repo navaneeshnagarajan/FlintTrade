@@ -50,13 +50,29 @@ describe("ModeIndicator", () => {
       expect(screen.getByText("EXPLORE")).toBeInTheDocument();
     });
 
-    it("is a static div, not a button (no toggle)", () => {
+    it("switches to Practice when clicked", () => {
       resetStore("explore");
       render(<ModeIndicator />);
 
-      const pill = screen.getByText("EXPLORE").closest("div");
-      expect(pill).toBeInTheDocument();
-      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /explore mode active/i }));
+
+      expect(useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("routes demo users to setup instead of switching to API-backed Practice", () => {
+      resetStore("explore");
+      useAuthStore.setState({ token: "demo-user" });
+      const listener = vi.fn();
+      window.addEventListener("flinttrade:navigate", listener);
+      render(<ModeIndicator />);
+
+      fireEvent.click(screen.getByRole("button", { name: /explore mode active/i }));
+
+      expect(useModeStore.getState().mode).toBe("explore");
+      expect(listener).toHaveBeenCalledTimes(1);
+      const event = listener.mock.calls[0]?.[0] as CustomEvent<{ path?: string }>;
+      expect(event.detail.path).toBe("/setup");
+      window.removeEventListener("flinttrade:navigate", listener);
     });
 
     it("has the correct aria-label", () => {
@@ -64,7 +80,7 @@ describe("ModeIndicator", () => {
       render(<ModeIndicator />);
 
       expect(
-        screen.getByLabelText("Explore mode — sample data only"),
+        screen.getByLabelText(/explore mode active/i),
       ).toBeInTheDocument();
     });
   });

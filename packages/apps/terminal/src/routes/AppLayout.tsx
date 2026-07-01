@@ -14,8 +14,12 @@ import { useNotificationFeed } from "@/components/NotificationCentre/useNotifica
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
 import CommandPalette from "@/components/CommandPalette/CommandPalette";
+import DocsSearch, { type DocSearchResult } from "@/components/DocsSearch/DocsSearch";
+import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useLayoutStore } from "@/stores/layoutStore";
+import { DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
 import { Button } from "@/components/ui/button";
@@ -38,6 +42,17 @@ const ROUTE_TITLES: Record<string, string> = {
 };
 
 type NavigationEventDetail = string | { path?: unknown };
+type TradeForwardEventName =
+  | "flinttrade:addWidget"
+  | "flinttrade:open-tool"
+  | "flinttrade:apply-layout"
+  | "flinttrade:export-layout"
+  | "flinttrade:reset-layout";
+
+interface PendingTradeEvent {
+  name: TradeForwardEventName;
+  detail?: unknown;
+}
 
 function getNavigationPath(detail: NavigationEventDetail): string | null {
   if (typeof detail === "string") return detail;
@@ -45,6 +60,38 @@ function getNavigationPath(detail: NavigationEventDetail): string | null {
     return detail.path;
   }
   return null;
+}
+
+function getCustomEventDetail(event: Event): unknown {
+  return (event as CustomEvent<unknown>).detail;
+}
+
+function getPresetId(detail: unknown): string | null {
+  if (detail && typeof detail === "object" && typeof (detail as { presetId?: unknown }).presetId === "string") {
+    return (detail as { presetId: string }).presetId;
+  }
+  return null;
+}
+
+function getToolId(detail: unknown): string | null {
+  if (detail && typeof detail === "object" && typeof (detail as { toolId?: unknown }).toolId === "string") {
+    return (detail as { toolId: string }).toolId;
+  }
+  return null;
+}
+
+function downloadJson(filename: string, data: unknown): void {
+  if (typeof document === "undefined" || typeof URL === "undefined" || !URL.createObjectURL) return;
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
@@ -98,6 +145,8 @@ export default function AppLayout() {
   useNotificationFeed(); // Feed real connection/mode/order events into the Notification Centre
   const location = useLocation();
   const navigate = useNavigate();
+  const pendingTradeEventRef = useRef<PendingTradeEvent | null>(null);
+  const dockviewApi = useLayoutStore((s) => s.dockviewApi);
 
   // Route focus management — move keyboard focus to <main> on every route change.
   // This ensures screen-reader users and keyboard-only users land at the new
@@ -156,8 +205,13 @@ export default function AppLayout() {
 
   // Keyboard shortcuts dialog — opened by `?` key or programmatically.
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showDocsSearch, setShowDocsSearch] = useState(false);
+  const [docsInitialQuery, setDocsInitialQuery] = useState("");
+  const [showChangelog, setShowChangelog] = useState(false);
   const handleShowShortcuts = useCallback(() => setShowShortcuts(true), []);
   const handleCloseShortcuts = useCallback(() => setShowShortcuts(false), []);
+  const handleCloseDocsSearch = useCallback(() => setShowDocsSearch(false), []);
+  const handleCloseChangelog = useCallback(() => setShowChangelog(false), []);
 
   // Command palette — owned by shared chrome so search works on every app route.
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
@@ -173,6 +227,141 @@ export default function AppLayout() {
       window.removeEventListener("flinttrade:open-command-palette", handleOpenCommandPalette);
     };
   }, [handleOpenCommandPalette]);
+
+  const executeTradeWorkspaceAction = useCallback((pending: PendingTradeEvent) => {
+    if (pending.name === "flinttrade:apply-layout") {
+      const presetId = getPresetId(pending.detail);
+      if (presetId) useLayoutStore.getState().applyPreset(presetId);
+      return;
+    }
+
+    if (pending.name === "flinttrade:export-layout") {
+      const api = useLayoutStore.getState().dockviewApi;
+      if (!api) return;
+      const activeTabId = useLayoutStore.getState().activeTabId;
+      downloadJson(`flinttrade-layout-${activeTabId}.json`, api.toJSON());
+      return;
+    }
+
+    if (pending.name === "flinttrade:reset-layout") {
+      useLayoutStore.getState().applyPreset(DEFAULT_PRESET_ID);
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent(pending.name, { detail: pending.detail }));
+  }, []);
+
+  const routeOrRunTradeWorkspaceAction = useCallback(
+    (pending: PendingTradeEvent) => {
+      pendingTradeEventRef.current = pending;
+      if (location.pathname !== "/trade") {
+        navigate("/trade");
+        return;
+      }
+      if (dockviewApi) {
+        pendingTradeEventRef.current = null;
+        window.setTimeout(() => executeTradeWorkspaceAction(pending), 0);
+      }
+    },
+    [dockviewApi, executeTradeWorkspaceAction, location.pathname, navigate],
+  );
+
+  useEffect(() => {
+    if (location.pathname !== "/trade" || !dockviewApi || !pendingTradeEventRef.current) return;
+    const pending = pendingTradeEventRef.current;
+    pendingTradeEventRef.current = null;
+    const timer = window.setTimeout(() => executeTradeWorkspaceAction(pending), 0);
+    return () => window.clearTimeout(timer);
+  }, [dockviewApi, executeTradeWorkspaceAction, location.pathname]);
+
+  useEffect(() => {
+    function handleTradeOnlyEvent(event: Event) {
+      const detail = getCustomEventDetail(event);
+      if (event.type === "flinttrade:open-tool" && getToolId(detail) === "settings") {
+        navigate("/settings");
+        return;
+      }
+      if (location.pathname === "/trade" && dockviewApi) return;
+      pendingTradeEventRef.current = {
+        name: event.type as TradeForwardEventName,
+        detail,
+      };
+      if (location.pathname !== "/trade") navigate("/trade");
+    }
+
+    window.addEventListener("flinttrade:addWidget", handleTradeOnlyEvent);
+    window.addEventListener("flinttrade:open-tool", handleTradeOnlyEvent);
+    return () => {
+      window.removeEventListener("flinttrade:addWidget", handleTradeOnlyEvent);
+      window.removeEventListener("flinttrade:open-tool", handleTradeOnlyEvent);
+    };
+  }, [dockviewApi, location.pathname, navigate]);
+
+  useEffect(() => {
+    function handleApplyLayout(event: Event) {
+      routeOrRunTradeWorkspaceAction({
+        name: "flinttrade:apply-layout",
+        detail: getCustomEventDetail(event),
+      });
+    }
+    function handleExportLayout() {
+      routeOrRunTradeWorkspaceAction({ name: "flinttrade:export-layout" });
+    }
+    function handleResetLayout() {
+      routeOrRunTradeWorkspaceAction({ name: "flinttrade:reset-layout" });
+    }
+    async function handleFullscreen() {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch {
+        // Browsers can deny fullscreen outside direct user activation.
+      }
+    }
+    function handleSearchDocs() {
+      setDocsInitialQuery("");
+      setShowDocsSearch(true);
+    }
+    function handleShowChangelog() {
+      setShowChangelog(true);
+    }
+    function handleOpenDoc(event: Event) {
+      const detail = getCustomEventDetail(event);
+      const path = detail && typeof detail === "object"
+        ? (detail as { path?: unknown }).path
+        : null;
+      if (typeof path === "string") {
+        navigate("/learn", { state: { selectedDocPath: path } });
+      }
+    }
+
+    window.addEventListener("flinttrade:apply-layout", handleApplyLayout);
+    window.addEventListener("flinttrade:export-layout", handleExportLayout);
+    window.addEventListener("flinttrade:reset-layout", handleResetLayout);
+    window.addEventListener("flinttrade:toggle-fullscreen", handleFullscreen);
+    window.addEventListener("flinttrade:search-docs", handleSearchDocs);
+    window.addEventListener("flinttrade:show-changelog", handleShowChangelog);
+    window.addEventListener("flinttrade:openDoc", handleOpenDoc);
+    return () => {
+      window.removeEventListener("flinttrade:apply-layout", handleApplyLayout);
+      window.removeEventListener("flinttrade:export-layout", handleExportLayout);
+      window.removeEventListener("flinttrade:reset-layout", handleResetLayout);
+      window.removeEventListener("flinttrade:toggle-fullscreen", handleFullscreen);
+      window.removeEventListener("flinttrade:search-docs", handleSearchDocs);
+      window.removeEventListener("flinttrade:show-changelog", handleShowChangelog);
+      window.removeEventListener("flinttrade:openDoc", handleOpenDoc);
+    };
+  }, [navigate, routeOrRunTradeWorkspaceAction]);
+
+  const handleSelectDoc = useCallback(
+    (result: DocSearchResult) => {
+      navigate("/learn", { state: { selectedDoc: result } });
+    },
+    [navigate],
+  );
 
   // Global keyboard shortcuts listener.
   useGlobalKeys({
@@ -299,6 +488,16 @@ export default function AppLayout() {
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}
         onClose={handleCloseShortcuts}
+      />
+      <DocsSearch
+        isOpen={showDocsSearch}
+        onClose={handleCloseDocsSearch}
+        initialQuery={docsInitialQuery}
+        onSelectDoc={handleSelectDoc}
+      />
+      <ChangelogViewer
+        isOpen={showChangelog}
+        onClose={handleCloseChangelog}
       />
       <CommandPalette
         isOpen={cmdPaletteOpen}

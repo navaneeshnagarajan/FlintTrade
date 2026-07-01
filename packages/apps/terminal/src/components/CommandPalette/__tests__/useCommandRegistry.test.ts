@@ -8,16 +8,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 
-const mockApplyPreset = vi.fn();
-
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ setTheme: vi.fn(), setMode: vi.fn(), mode: "dark" }),
-}));
-
-vi.mock("@/stores/layoutStore", () => ({
-  useLayoutStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ applyPreset: mockApplyPreset }),
 }));
 
 import { useCommandRegistry } from "../useCommandRegistry";
@@ -31,14 +24,19 @@ describe("useCommandRegistry — layout preset commands", () => {
     expect(layoutCmds.every((c) => c.category === "action")).toBe(true);
   });
 
-  it("includes the Options Scalper layout and applies it on action", () => {
+  it("includes the Options Scalper layout and dispatches its apply action", () => {
     const { result } = renderHook(() => useCommandRegistry());
     const cmd = result.current.commands.find((c) => c.id === "layout:options-scalper");
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:apply-layout", listener);
     expect(cmd).toBeDefined();
     expect(cmd?.title).toBe("Apply layout: Options Scalper");
 
     cmd?.action();
-    expect(mockApplyPreset).toHaveBeenCalledWith("options-scalper");
+    expect(listener).toHaveBeenCalledTimes(1);
+    const event = listener.mock.calls[0]?.[0] as CustomEvent<{ presetId?: string }>;
+    expect(event.detail.presetId).toBe("options-scalper");
+    window.removeEventListener("flinttrade:apply-layout", listener);
   });
 
   it("layout commands are discoverable by preset name via search", () => {

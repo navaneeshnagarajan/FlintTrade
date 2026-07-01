@@ -50,6 +50,14 @@ export default defineConfig({
       "plotly.js": "plotly.js-dist-min",
     },
   },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Vite's dependency optimiser otherwise asks esbuild to downlevel modern
+      // ESM dependencies to its older default browser baseline, which breaks
+      // prebundling for @floating-ui and plotly.js on newer dependency graphs.
+      target: "es2022",
+    },
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

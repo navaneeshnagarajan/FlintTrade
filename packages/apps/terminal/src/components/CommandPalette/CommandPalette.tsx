@@ -19,6 +19,7 @@ import { AITab } from "./AITab";
 import { DocsTab } from "./DocsTab";
 import { useCommandRegistry } from "./useCommandRegistry";
 import type { Command } from "./useCommandRegistry";
+import type { DocSearchResult } from "@/components/DocsSearch/DocsSearch";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -34,6 +35,7 @@ interface CommandPaletteProps {
 // ---------------------------------------------------------------------------
 
 type PaletteTab = "symbols" | "commands" | "widgets" | "ai" | "docs";
+type ActiveSymbol = { symbol: string; exchange: string };
 
 function detectTab(query: string): PaletteTab | null {
   if (query.startsWith("/")) return "commands";
@@ -60,6 +62,10 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<PaletteTab>("symbols");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [activeCommand, setActiveCommand] = useState<Command | null>(null);
+  const [activeWidget, setActiveWidget] = useState<Command | null>(null);
+  const [activeDoc, setActiveDoc] = useState<DocSearchResult | null>(null);
+  const [activeSymbol, setActiveSymbol] = useState<ActiveSymbol | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Reset state on open
@@ -68,6 +74,10 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
       setQuery("");
       setActiveTab("symbols");
       setActiveIndex(0);
+      setActiveCommand(null);
+      setActiveWidget(null);
+      setActiveDoc(null);
+      setActiveSymbol(null);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [isOpen]);
@@ -80,36 +90,37 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
       setActiveTab(detected);
       setActiveIndex(0);
     }
+    setActiveCommand(null);
+    setActiveWidget(null);
+    setActiveDoc(null);
+    setActiveSymbol(null);
   }, []);
 
-  // Keyboard navigation
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActiveIndex((p) => p + 1); // tabs clamp via onActiveIndexChange
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveIndex((p) => Math.max(0, p - 1));
-        return;
-      }
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const tabs: PaletteTab[] = ["symbols", "commands", "widgets", "ai", "docs"];
-        const idx = tabs.indexOf(activeTab);
-        setActiveTab(tabs[(idx + (e.shiftKey ? -1 + tabs.length : 1)) % tabs.length]);
-        setActiveIndex(0);
-      }
-    },
-    [onClose, activeTab],
-  );
+  const handleActiveCommandChange = useCallback((cmd: Command | null) => {
+    setActiveCommand((previous) => (
+      previous?.id === cmd?.id ? previous : cmd
+    ));
+  }, []);
+
+  const handleActiveWidgetChange = useCallback((cmd: Command | null) => {
+    setActiveWidget((previous) => (
+      previous?.id === cmd?.id ? previous : cmd
+    ));
+  }, []);
+
+  const handleActiveDocChange = useCallback((doc: DocSearchResult | null) => {
+    setActiveDoc((previous) => (
+      previous?.path === doc?.path ? previous : doc
+    ));
+  }, []);
+
+  const handleActiveSymbolChange = useCallback((symbol: ActiveSymbol | null) => {
+    setActiveSymbol((previous) => (
+      previous?.symbol === symbol?.symbol && previous?.exchange === symbol?.exchange
+        ? previous
+        : symbol
+    ));
+  }, []);
 
   // Execute command + close
   const handleCommandSelect = useCallback(
@@ -118,6 +129,16 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
       onClose();
     },
     [executeCommand, onClose],
+  );
+
+  const handleDocSelect = useCallback(
+    (result: DocSearchResult) => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:openDoc", { detail: { path: result.path } }),
+      );
+      onClose();
+    },
+    [onClose],
   );
 
   // Symbol quick actions
@@ -143,6 +164,68 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
     [onClose],
   );
 
+  // Keyboard navigation
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((p) => p + 1); // tabs clamp via onActiveIndexChange
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((p) => Math.max(0, p - 1));
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const tabs: PaletteTab[] = ["symbols", "commands", "widgets", "ai", "docs"];
+        const idx = tabs.indexOf(activeTab);
+        setActiveTab(tabs[(idx + (e.shiftKey ? -1 + tabs.length : 1)) % tabs.length]);
+        setActiveIndex(0);
+        return;
+      }
+      if (e.key === "Enter") {
+        if (activeTab === "commands" && activeCommand) {
+          e.preventDefault();
+          handleCommandSelect(activeCommand);
+          return;
+        }
+        if (activeTab === "widgets" && activeWidget) {
+          e.preventDefault();
+          handleCommandSelect(activeWidget);
+          return;
+        }
+        if (activeTab === "docs" && activeDoc) {
+          e.preventDefault();
+          handleDocSelect(activeDoc);
+          return;
+        }
+        if (activeTab === "symbols" && activeSymbol) {
+          e.preventDefault();
+          handleSymbolSelect(activeSymbol.symbol, activeSymbol.exchange, "chart");
+          return;
+        }
+      }
+    },
+    [
+      onClose,
+      activeTab,
+      activeCommand,
+      activeWidget,
+      activeDoc,
+      activeSymbol,
+      handleCommandSelect,
+      handleDocSelect,
+      handleSymbolSelect,
+    ],
+  );
+
   const tabQuery = stripPrefix(query, activeTab);
 
   const tabs: TabItem[] = [
@@ -155,6 +238,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           activeIndex={activeIndex}
           onSelectSymbol={handleSymbolSelect}
           onActiveIndexChange={setActiveIndex}
+          onActiveSymbolChange={activeTab === "symbols" ? handleActiveSymbolChange : undefined}
         />
       ),
     },
@@ -168,6 +252,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           activeIndex={activeIndex}
           onSelect={handleCommandSelect}
           onActiveIndexChange={setActiveIndex}
+          onActiveCommandChange={activeTab === "commands" ? handleActiveCommandChange : undefined}
         />
       ),
     },
@@ -181,6 +266,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           activeIndex={activeIndex}
           onSelect={handleCommandSelect}
           onActiveIndexChange={setActiveIndex}
+          onActiveWidgetChange={activeTab === "widgets" ? handleActiveWidgetChange : undefined}
         />
       ),
     },
@@ -203,6 +289,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           activeIndex={activeIndex}
           onClose={onClose}
           onActiveIndexChange={setActiveIndex}
+          onActiveDocChange={activeTab === "docs" ? handleActiveDocChange : undefined}
         />
       ),
     },

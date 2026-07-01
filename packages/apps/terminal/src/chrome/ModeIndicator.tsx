@@ -4,7 +4,8 @@
  * Replaces both SandboxToggle and ModePill with a single component.
  *
  * Behaviour per mode:
- *   Explore  → Grey "EXPLORE" pill (static, not clickable — mode change requires setup)
+ *   Explore  → Grey "EXPLORE" button. Real users switch to Practice; demo
+ *              users are sent to setup so sample mode does not hit live APIs.
  *   Practice → Amber "PRACTICE" button. Clicking toggles to Live (requires PIN).
  *   Live     → Green "LIVE" button. Clicking toggles to Practice (instant, no dialog).
  *
@@ -44,21 +45,6 @@ export default function ModeIndicator() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [toggleError, setToggleError] = useState("");
-
-  // ── Explore: static pill, no interaction ────────────────────────────────
-  if (mode === "explore") {
-    return (
-      <div
-        aria-label="Explore mode — sample data only"
-        className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 select-none"
-      >
-        <Compass size={11} aria-hidden="true" />
-        EXPLORE
-      </div>
-    );
-  }
-
-  // ── Practice ↔ Live toggle ──────────────────────────────────────────────
 
   const handleToggle = useCallback(async () => {
     if (mode === "live") {
@@ -145,6 +131,37 @@ export default function ModeIndicator() {
     setPin("");
     setPinError("");
   }, []);
+
+  const handleExploreClick = useCallback(() => {
+    if (token === "demo-user") {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:navigate", { detail: { path: "/setup" } }),
+      );
+      return;
+    }
+    setMode("practice");
+  }, [setMode, token]);
+
+  // ── Explore → Practice ──────────────────────────────────────────────────
+  if (mode === "explore") {
+    return (
+      <button
+        type="button"
+        onClick={handleExploreClick}
+        aria-label={
+          token === "demo-user"
+            ? "Explore mode active — sample data only. Click to set up Practice mode."
+            : "Explore mode active — sample data only. Click to switch to Practice mode."
+        }
+        className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary transition-colors"
+      >
+        <Compass size={11} aria-hidden="true" />
+        EXPLORE
+      </button>
+    );
+  }
+
+  // ── Practice ↔ Live toggle ──────────────────────────────────────────────
 
   if (mode === "practice") {
     return (

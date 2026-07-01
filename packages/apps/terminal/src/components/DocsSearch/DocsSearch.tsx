@@ -123,6 +123,7 @@ function highlightSnippet(snippet: string, query: string): React.ReactNode {
 // ---------------------------------------------------------------------------
 
 interface ResultItemProps {
+  id: string;
   result: DocSearchResult;
   isActive: boolean;
   query: string;
@@ -131,6 +132,7 @@ interface ResultItemProps {
 }
 
 function ResultItem({
+  id,
   result,
   isActive,
   query,
@@ -139,6 +141,7 @@ function ResultItem({
 }: ResultItemProps) {
   return (
     <li
+      id={id}
       role="option"
       aria-selected={isActive}
       onClick={() => onSelect(result)}
@@ -379,6 +382,7 @@ export default function DocsSearch({
               {results.map((result, i) => (
                 <ResultItem
                   key={`${result.path}-${i}`}
+                  id={`docs-result-${i}`}
                   result={result}
                   isActive={i === activeIndex}
                   query={query}

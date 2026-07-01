@@ -10,6 +10,7 @@ Blueprint prefix: /v1/docs
 
 Endpoints:
     GET /v1/docs/search?q=<query>&limit=10   — full-text search
+    GET /v1/docs/document?path=<path>         — read one indexed markdown doc
     GET /v1/docs/changelog                    — raw changelog.md content
 """
 
@@ -236,6 +237,15 @@ class DocsIndex:
 
         return results
 
+    def get_document(self, path: str) -> _DocEntry | None:
+        """Return an indexed markdown document by docs-relative path."""
+        normalised = path.strip().replace("\\", "/")
+        with self._lock:
+            for entry in self._docs:
+                if entry.path == normalised:
+                    return entry
+        return None
+
     @property
     def doc_count(self) -> int:
         """Number of documents currently in the index."""
@@ -405,6 +415,30 @@ def search_docs() -> Any:
             "total": len(results),
         }
     )
+
+
+@docs_search_bp.route("/document", methods=["GET"])
+def get_document() -> Any:
+    """Read one docs markdown file by its docs-relative path.
+
+    The route only serves files already indexed under ``docs/``. This keeps the
+    frontend doc reader useful while avoiding arbitrary filesystem reads.
+    """
+    _ensure_built()
+
+    path = request.args.get("path", "").strip()
+    if not path:
+        return jsonify({"status": "error", "message": "Missing 'path' query parameter"}), 400
+
+    candidate = Path(path.replace("\\", "/"))
+    if candidate.is_absolute() or ".." in candidate.parts or candidate.suffix.lower() != ".md":
+        return jsonify({"status": "error", "message": "Invalid docs path"}), 400
+
+    entry = _index.get_document(str(candidate))
+    if entry is None:
+        return jsonify({"status": "error", "message": "Document not found"}), 404
+
+    return jsonify({"path": entry.path, "title": entry.title, "content": entry.body})
 
 
 @docs_search_bp.route("/changelog", methods=["GET"])

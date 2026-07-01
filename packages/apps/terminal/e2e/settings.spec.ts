@@ -6,8 +6,8 @@
  *   - A left sidebar <nav aria-label="Settings sections"> listing all sections
  *   - A scrollable content area for the active section
  *
- * Section IDs are defined in settingsConfig.ts. The sidebar buttons use
- * aria-current="page" for the active entry.
+ * Section IDs are defined in settingsConfig.ts. The sidebar buttons are
+ * vertical tabs using aria-selected for the active entry.
  *
  * Verifies:
  *   - /settings loads and shows the settings sidebar
@@ -39,7 +39,7 @@ test.describe('Settings page', () => {
   test('sidebar contains expected sections', async ({ page }) => {
     const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
-    for (const label of ['General', 'Appearance', 'API Connection', 'Skill & Experience', 'About']) {
+    for (const label of ['General', 'Appearance', 'Broker Gateway', 'Skill & Experience', 'About']) {
       await expect(sidebar.getByText(label, { exact: true })).toBeVisible();
     }
   });
@@ -48,17 +48,16 @@ test.describe('Settings page', () => {
     const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
     await sidebar.getByText('Appearance', { exact: true }).click();
 
-    // The active button gets aria-current="page"
-    const activeBtn = sidebar.getByRole('button', { name: 'Appearance' });
-    await expect(activeBtn).toHaveAttribute('aria-current', 'page');
+    const activeTab = sidebar.getByRole('tab', { name: 'Appearance' });
+    await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
   test('clicking "Skill & Experience" section activates it', async ({ page }) => {
     const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
     await sidebar.getByText('Skill & Experience', { exact: true }).click();
 
-    const activeBtn = sidebar.getByRole('button', { name: 'Skill & Experience' });
-    await expect(activeBtn).toHaveAttribute('aria-current', 'page');
+    const activeTab = sidebar.getByRole('tab', { name: 'Skill & Experience' });
+    await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
   test('back button is present in settings header', async ({ page }) => {
@@ -67,14 +66,14 @@ test.describe('Settings page', () => {
     await expect(backBtn).toBeVisible();
   });
 
-  test('deep-link /settings#api activates API Connection section', async ({ page }) => {
+  test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
     await page.goto('/settings#api');
     await page
       .getByRole('navigation', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
 
     const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
-    const activeBtn = sidebar.getByRole('button', { name: 'API Connection' });
-    await expect(activeBtn).toHaveAttribute('aria-current', 'page');
+    const activeTab = sidebar.getByRole('tab', { name: 'Broker Gateway' });
+    await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 });

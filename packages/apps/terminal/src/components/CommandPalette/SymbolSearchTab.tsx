@@ -14,6 +14,7 @@ interface SymbolSearchTabProps {
     action: "chart" | "buy" | "sell" | "ai",
   ) => void;
   onActiveIndexChange: (index: number) => void;
+  onActiveSymbolChange?: (symbol: { symbol: string; exchange: string } | null) => void;
 }
 
 function SymbolPrice({
@@ -53,6 +54,7 @@ export function SymbolSearchTab({
   activeIndex,
   onSelectSymbol,
   onActiveIndexChange,
+  onActiveSymbolChange,
 }: SymbolSearchTabProps) {
   const { results, isLoading } = useSymbolSearch(query);
 
@@ -62,6 +64,13 @@ export function SymbolSearchTab({
       onActiveIndexChange(results.length - 1);
     }
   }, [activeIndex, results.length, onActiveIndexChange]);
+
+  useEffect(() => {
+    const active = results[activeIndex];
+    onActiveSymbolChange?.(
+      active ? { symbol: active.symbol, exchange: active.exchange } : null,
+    );
+  }, [activeIndex, results, onActiveSymbolChange]);
 
   if (!query || query.length < 2) {
     return (
