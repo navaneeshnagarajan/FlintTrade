@@ -17,6 +17,8 @@ import pytest
 # Per-broker credential variables — mirror every name referenced in the broker adapter
 # sub-specs (`<BROKER>_<FIELD>`).
 BROKER_CREDENTIAL_ENV_VARS = (
+    # OpenAlgo bridge path
+    "OPENALGO_API_KEY",
     # Dhan (wave 1)
     "DHAN_ACCESS_TOKEN", "DHAN_API_KEY", "DHAN_API_SECRET", "DHAN_CLIENT_ID",
     "DHAN_PARTNER_ID", "DHAN_PARTNER_SECRET", "DHAN_TOKEN",

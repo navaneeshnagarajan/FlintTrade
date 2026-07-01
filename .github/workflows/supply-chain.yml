@@ -50,6 +50,7 @@ permissions:
 # credential var is explicitly emptied so a leaked higher-scope secret cannot inherit.
 env:
   FLINTTRADE_CI: "1"
+  OPENALGO_API_KEY: ""
   DHAN_ACCESS_TOKEN: ""
   DHAN_API_KEY: ""
   DHAN_API_SECRET: ""

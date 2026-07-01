@@ -3,8 +3,8 @@
 # without dragging audit-only tools into the application dependency graph (sub-spec §12.2).
 #
 # Regenerate the hashed lock after editing this file:
-#   uv pip compile --generate-hashes supply-chain/audit-tooling.in \
-#       -o supply-chain/audit-tooling.lock
+#   uv pip compile --generate-hashes --no-strip-extras --python-version 3.12 \
+#       supply-chain/audit-tooling.in -o supply-chain/audit-tooling.lock
 #
 # pyyaml is pinned to the SAME version the runtime lock carries so the two
 # hash-verified install steps in broker-sdk-licences / transitive-licences /
