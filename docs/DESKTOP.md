@@ -1,13 +1,28 @@
 # FlintTrade Desktop
 
 FlintTrade ships as a **native desktop application** for Linux, Windows, and
-macOS. The app bundles the FlintTrade backend and the React terminal into a
-single installable package — there is no separate server to run and **no `.env`
-to configure**. Install it, launch it, trade.
+macOS. Install it, launch it, then start in Explore or Practice mode.
+
+The app bundles the FlintTrade backend and the React terminal into a single
+installable package — there is no separate server to run and **no `.env` to
+configure**.
 
 - **macOS** — `.dmg` (drag-to-install) and `.app` — Apple Silicon (arm64) and Intel (x64)
 - **Windows** — `.msi` and `.exe` (NSIS) installer — x64
 - **Linux** — `.deb`, `.rpm`, and `.AppImage` — x64 and arm64
+
+## Download or build
+
+The public website links to this guide from the homepage and primary
+navigation. Start here when you want to run FlintTrade as an end-user desktop
+app rather than as a contributor checkout.
+
+1. Open the [GitHub Releases](https://github.com/navaneeshnagarajan/FlintTrade/releases) page.
+2. Pick the latest release that has an installer for your operating system.
+3. If the current beta release has no installer asset for your OS yet, build it
+   locally with the commands in [Building locally](#building-locally).
+4. Launch FlintTrade and complete the in-app Setup flow. You do not need a
+   `.env` file for desktop use.
 
 ---
 

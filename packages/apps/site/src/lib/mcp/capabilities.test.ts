@@ -16,6 +16,7 @@ describe('docs index generation', () => {
   it('contains root docs, package READMEs, setup docs, and release docs', () => {
     expect(docsIndex.docs.some((doc) => doc.sourcePath === 'docs/README.md')).toBe(true);
     expect(docsIndex.docs.some((doc) => doc.sourcePath === 'disclaimer.md')).toBe(true);
+    expect(docsIndex.docs.some((doc) => doc.sourcePath === 'docs/DESKTOP.md')).toBe(true);
     expect(docsIndex.docs.some((doc) => doc.sourcePath.startsWith('docs/setup/'))).toBe(true);
     expect(docsIndex.docs.some((doc) => doc.sourcePath.startsWith('docs/releases/'))).toBe(true);
     expect(docsIndex.packages.some((pkg) => pkg.sourcePath === 'packages/apps/terminal/README.md')).toBe(true);
@@ -60,6 +61,20 @@ describe('docs index generation', () => {
     expect(pageSource).toContain('adapters stay behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>82</strong>');
     expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
+  });
+
+  it('keeps the desktop app install path visible on the website', () => {
+    const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const headerSource = readFileSync(resolve(process.cwd(), 'src/components/site-header.tsx'), 'utf8');
+    const footerSource = readFileSync(resolve(process.cwd(), 'src/components/site-footer.tsx'), 'utf8');
+    const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
+
+    expect(pageSource).toContain('href="/docs/desktop"');
+    expect(pageSource).toContain('Install desktop app');
+    expect(headerSource).toContain("href: '/docs/desktop'");
+    expect(footerSource).toContain('href="/docs/desktop"');
+    expect(desktopDoc?.content).toContain('GitHub Releases');
+    expect(desktopDoc?.content).toContain('Launch FlintTrade and complete the in-app Setup flow');
   });
 });
 

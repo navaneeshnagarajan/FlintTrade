@@ -1,5 +1,5 @@
 import { LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, Cable, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, Cable, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 
@@ -28,6 +28,7 @@ const featureCards = [
 ];
 
 const docsCards = [
+  { href: '/docs/desktop', label: 'Desktop App', copy: 'Install FlintTrade on macOS, Windows, or Linux, then configure everything in the app.' },
   { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect optional integrations, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
@@ -47,6 +48,24 @@ const welcomeFeatures = [
   'Explore, Practice, and Live safety modes',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
+] as const;
+
+const desktopInstallOptions = [
+  {
+    platform: 'macOS',
+    artefacts: '.dmg or .app',
+    instruction: 'Open the image, drag FlintTrade to Applications, then right-click Open on the first launch if the build is unsigned.',
+  },
+  {
+    platform: 'Windows',
+    artefacts: '.exe or .msi',
+    instruction: 'Run the installer, launch FlintTrade from Start, and use the in-app Setup flow instead of editing environment files.',
+  },
+  {
+    platform: 'Linux',
+    artefacts: '.deb, .rpm, or .AppImage',
+    instruction: 'Install with your package manager or mark the AppImage executable, then launch the local desktop app.',
+  },
 ] as const;
 
 // Eight debris particles; offsets/delays are nth-child CSS in globals.css.
@@ -107,6 +126,13 @@ export default function HomePage() {
           </div>
           <div className="hero-actions">
             <Link
+              className="button primary"
+              href="/docs/desktop"
+              aria-label="Open FlintTrade desktop app install instructions"
+            >
+              Install desktop app <Download aria-hidden="true" size={17} />
+            </Link>
+            <Link
               className="button shimmer"
               href="/demo-app/welcome"
               target="_blank"
@@ -157,6 +183,39 @@ export default function HomePage() {
             <strong>AGPL</strong>
             <span>Network-use source sharing keeps the self-hosted stack accountable.</span>
           </div>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="section-heading">
+          <h2>Install the desktop app first.</h2>
+          <p>
+            FlintTrade is built as a native desktop app for macOS, Windows, and Linux. Use a release
+            installer when one is attached, or build locally from source while the beta desktop
+            release assets are being prepared.
+          </p>
+          <div className="section-actions">
+            <Link className="button primary" href="/docs/desktop">
+              Desktop install guide <ArrowRight aria-hidden="true" size={17} />
+            </Link>
+            <Link
+              className="button secondary"
+              href="https://github.com/navaneeshnagarajan/FlintTrade/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              GitHub releases <ExternalLink aria-hidden="true" size={17} />
+            </Link>
+          </div>
+        </div>
+        <div className="install-grid">
+          {desktopInstallOptions.map((option) => (
+            <article className="install-card" key={option.platform}>
+              <strong>{option.platform}</strong>
+              <span>{option.artefacts}</span>
+              <p>{option.instruction}</p>
+            </article>
+          ))}
         </div>
       </section>
 

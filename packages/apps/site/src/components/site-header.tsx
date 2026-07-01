@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 const navItems = [
+  { href: '/docs/desktop', label: 'Desktop App' },
   { href: '/demo-app/welcome', label: 'Sandbox Demo', newWindow: true },
   { href: '/docs', label: 'Docs' },
   { href: '/api-reference', label: 'API' },

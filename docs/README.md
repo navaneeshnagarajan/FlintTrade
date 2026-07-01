@@ -37,6 +37,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 | [readme.md](../readme.md) | Everyone | Repository landing page. |
 | [disclaimer.md](../disclaimer.md) | Everyone | Beta-stage, no-advice, trading-risk, and user-responsibility notice. |
 | [INVENTORY.md](INVENTORY.md) | Everyone / Contributor | Build-status inventory — what is (a) built & working, (b) built but untested, (c) referenced but not built. |
+| [DESKTOP.md](DESKTOP.md) | User / Operator | End-user desktop app install, uninstall, configuration, and local build guide. |
 | [USER_GUIDE.md](USER_GUIDE.md) | User / Operator | Install, configure local integrations, and walk through every workspace. |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Contributor | Repo layout, dev environment, tests, build, how to add a widget / strategy / broker. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Contributor | Component diagrams, data flow, mode system, package dependency graph. |
@@ -55,6 +56,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 ### For users and operators
 
 - **[User Guide](USER_GUIDE.md)** — installation, optional broker connection, sandbox workflow, Live-mode safeguard verification, workspace tour, settings reference, and troubleshooting.
+- **[Desktop App](DESKTOP.md)** — native app download, install, uninstall, workspace configuration, and local build instructions.
 - **[Disclaimer](../disclaimer.md)** — required reading before connecting a broker, switching to Live mode, or enabling order-capable automation.
 - **[API reference](API.md)** — only relevant if you want to script against FlintTrade from outside.
 - **[Compatibility matrix](COMPATIBILITY.md)** — broker adapters, exchange segments, operating systems, and Python / Node versions.

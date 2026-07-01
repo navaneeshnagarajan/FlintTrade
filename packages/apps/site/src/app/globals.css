@@ -717,6 +717,14 @@ kbd {
   animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
 }
 
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
 .button {
   display: inline-flex;
   min-height: 44px;
@@ -901,6 +909,44 @@ kbd {
 
 .feature-card p {
   margin: 0;
+  color: var(--site-muted);
+  line-height: 1.6;
+}
+
+.install-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.install-card {
+  border: 1px solid var(--site-line);
+  border-radius: var(--site-radius);
+  background: var(--site-panel);
+  padding: 22px;
+  text-align: left;
+  backdrop-filter: blur(18px);
+}
+
+.install-card strong,
+.install-card span {
+  display: block;
+}
+
+.install-card strong {
+  color: var(--site-foreground);
+  font-size: 20px;
+}
+
+.install-card span {
+  margin-top: 8px;
+  color: var(--site-accent-2);
+  font-family: var(--font-geist-mono), "Geist Mono", monospace;
+  font-size: 13px;
+}
+
+.install-card p {
+  margin: 14px 0 0;
   color: var(--site-muted);
   line-height: 1.6;
 }
@@ -1120,6 +1166,7 @@ kbd {
   }
 
   .feature-grid,
+  .install-grid,
   .metric-rail {
     grid-template-columns: 1fr 1fr;
   }
@@ -1155,6 +1202,7 @@ kbd {
   }
 
   .feature-grid,
+  .install-grid,
   .metric-rail,
   .package-row {
     grid-template-columns: 1fr;
