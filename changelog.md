@@ -43,7 +43,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   (`flinttrade_gateway.reconciliation` + an engine-side runner persisting JSONL reports and
   emitting `RECONCILIATION_MISMATCH` audit events) compares broker-side state to FlintTrade's,
   surfaced in a Reconciliation widget.
-- **AI agent control plane** — `POST /api/v1/ai/agent/{start,stop,status}`
+- **Autonomous trading agent — control plane** — `POST /api/v1/ai/agent/{start,stop,status}`
   runs the LLM-driven analyse → signal → risk-check → execute loop as a background
   session, surfaced in the AI route's **Agent** panel (start form, live P&L / cycles /
   positions, "Stop & square off"). OFF by default (`ai.autonomous_agent.enabled`),
@@ -76,7 +76,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   (same `/v1/breadth/current` contract as the Market Breadth widget), with the demo
   badge retained whenever the data is sample.
 - Native **Upstox** and **Kotak Neo** broker adapter skeletons (gated, doc-grounded
-  capabilities) alongside Dhan, plus a **broker capability metadata engine**
+  capabilities) alongside Dhan, plus a **broker capability recommender**
   and `GET /api/v1/broker/recommendations` filtering broker metadata per use case
   (low-cost execution, market depth, options analytics, historical data,
   streaming, throughput, advanced orders).

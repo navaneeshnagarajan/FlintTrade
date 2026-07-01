@@ -9,7 +9,7 @@ const areas = [
   {
     icon: Braces,
     title: 'REST endpoints',
-    copy: 'OpenAlgo passthrough routes and FlintTrade /ft-api/v1 endpoints share one reference path.',
+    copy: 'FlintTrade /ft-api/v1 endpoints and optional OpenAlgo-compatible bridge routes share one reference path.',
   },
   {
     icon: Radio,

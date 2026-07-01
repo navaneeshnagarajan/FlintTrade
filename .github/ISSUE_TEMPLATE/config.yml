@@ -3,6 +3,6 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/navaneeshnagarajan/FlintTrade/security/advisories/new
     about: Report security issues privately via GitHub Security Advisories — never in public issues.
-  - name: GitHub Discussions
-    url: https://github.com/navaneeshnagarajan/FlintTrade/discussions
-    about: Ask development questions, discuss setup, or propose project improvements.
+  - name: Usage or development question
+    url: https://github.com/navaneeshnagarajan/FlintTrade/issues/new?template=question.md
+    about: Ask a focused setup, usage, or contributor question with the question template.

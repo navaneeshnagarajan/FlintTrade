@@ -40,14 +40,14 @@ See `docs/CI.md` for the per-commit checklist, hosted-runner cost model, defence
 
 ## What This Is
 
-Open-source self-hosted market workflow workspace for local data, analysis, automation, and broker-gateway testing.
+Open-source self-hosted trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
 FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 18 package surfaces (13 Python + 3 apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
-Serves three workspace modes from a single application:
-- **Operator** — Local workflow setup, broker-gateway testing, and order-safety checks
-- **Researcher** — Portfolio tracking, sandbox analysis, and market-data review
-- **Learner** — Guided market concepts, sandbox practice, and glossary support
+Serves three trading-software modes from a single application:
+- **Trader** — Manual order workflows, intraday tools, options analysis, and Live-mode safeguards
+- **Automator** — Strategy development, sandbox testing, broker-gateway testing, and AI-assisted workflows
+- **Learner** — Guided market concepts, paper trading, and glossary support
 
 One app. One port. Route-based separation. Widget-composable workspace.
 
@@ -229,7 +229,7 @@ Two-tier config. No exceptions.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
 - **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI.md` for the contract.
 - **Terminal:** ≈90 widgets (TSX, run the registry for the exact count) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
-- **AI Skills:** markdown files under `packages/services/ai/skills/` covering market data, analysis, execution, safety, options, and psychology domains
+- **AI Skills:** markdown files under `packages/services/ai/skills/` covering trading, market data, analysis, execution, safety, options, and psychology domains
 - **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies in `packages/services/engine/src/strategies/` (`ema_crossover`, `wheel_live`)
 - **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
 - **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation

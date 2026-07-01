@@ -1,15 +1,17 @@
 # FlintTrade Documentation
 
 Welcome to the FlintTrade documentation. FlintTrade is a beta-stage,
-open-source, self-hosted market workflow workspace with its own backend, native
+open-source, self-hosted trading workstation with its own backend, native
 sandbox, broker-gateway contracts, and an optional OpenAlgo-compatible bridge.
-The repository is a Python, React, TypeScript, and Rust monorepo for local
-software development, integration testing, and contributor learning.
-FlintTrade is AGPL-3.0 licensed and is not production ready.
+It supports local manual trading workflows, algorithmic strategy development,
+automation, AI-assisted analysis, and sandbox practice. The repository is a
+Python, React, TypeScript, and Rust monorepo for local software development,
+integration testing, and contributor learning. FlintTrade is AGPL-3.0 licensed
+and is not production ready.
 
 This folder is the single source of truth for everything outside the source
 code itself. If you are reading FlintTrade for the first time, start with the
-[User Guide](USER_GUIDE.md) to run it locally or the
+[User Guide](USER_GUIDE.md) to run it locally as trading software or the
 [Developer Guide](DEVELOPER_GUIDE.md) to extend it. Everything else here is
 reference material you reach for when a specific question arises.
 

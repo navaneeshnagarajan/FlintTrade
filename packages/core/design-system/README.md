@@ -2,7 +2,7 @@
 
 > Shared FlintTrade design tokens, brand primitives, layer scale, motion contracts, and React UI components.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** TypeScript + React 19
 

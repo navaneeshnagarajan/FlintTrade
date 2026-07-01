@@ -2,7 +2,7 @@
 
 > OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, and expiry-tracker for derivatives.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

@@ -508,7 +508,7 @@ ensure the running user has write access.
 
 ### Where to get help
 
-- **GitHub Discussions** — for usage questions and ideas.
+- **Question issue template** — for focused usage questions and setup help.
 - **GitHub Issues** — for bugs and feature requests (use the templates in
   `.github/ISSUE_TEMPLATE/`).
 - **security.md** — for security issues (private disclosure via GitHub

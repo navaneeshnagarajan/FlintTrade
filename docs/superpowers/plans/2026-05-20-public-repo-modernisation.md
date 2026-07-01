@@ -266,7 +266,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 >
 > **Required structure (in order):**
 >
-> 1. **H1 title + 12-word tagline** — name "FlintTrade", short pitch like "Open-source self-hosted market workflow workspace"
+> 1. **H1 title + 12-word tagline** — name "FlintTrade", short pitch like "Open-source self-hosted trading software"
 > 2. **Badges row** — License (AGPL-3.0, shields.io), version (from VERSION file, dynamic), CI status (`test.yml` workflow), current verification summary, GitHub stars, last-commit. Use shields.io URLs.
 > 3. **Hero screenshots** — 4 images using existing files under `docs/screenshots/`. Pick the strongest 4 from the repo (welcome, trade canvas, options chain / IV smile, and an analysis tool). Use HTML `<picture>` or markdown image grid, centred.
 > 4. **What it does** — 6-8 software-focused bullets covering the terminal app, backend services, gateway integration, safety model, data/simulation, and developer tooling.
@@ -284,7 +284,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 > 9. **Three CTAs** — "Try it" → quickstart anchor, "Build with it" → docs/DEVELOPER_GUIDE.md, "Contribute" → CONTRIBUTING.md.
 > 10. **Visual divider** — `---`
 > 11. **Project documentation grid** — 2x3 table linking USER_GUIDE / DEVELOPER_GUIDE / ARCHITECTURE / API / CHANGELOG / SECURITY (each in `docs/`).
-> 12. **Community** — GitHub Discussions, Issues, contributing pointer. No personal email / Discord unless user asks.
+> 12. **Community** — GitHub Issues, question template, contributing pointer. No personal email / Discord unless user asks.
 > 13. **Credits** — OpenAlgo (Rajandran R / marketcalls), OpenClaw, and "215 absorbed reference repos — see docs/REFERENCES.md".
 > 14. **License + Code of Conduct + Contributing** footer — three short paragraphs with links.
 >
@@ -559,16 +559,16 @@ grep -ic "security advisor" SECURITY.md                       # Expected: ≥1
 >
 > 3. **`.github/ISSUE_TEMPLATE/question.md`** — front-matter with `labels: question`. Sections: Question. What I tried. What docs I've checked.
 >
-> 4. **`.github/ISSUE_TEMPLATE/config.yml`** — disable blank issues, link contact_links to Discussions (if you have Discussions enabled) and SECURITY.md for security issues. Use this exact format:
+> 4. **`.github/ISSUE_TEMPLATE/config.yml`** — disable blank issues, link contact_links to the question template and SECURITY.md for security issues. Use this exact format:
 >    ```yaml
 >    blank_issues_enabled: false
 >    contact_links:
 >      - name: Security vulnerability
 >        url: https://github.com/navaneeshnagarajan/FlintTrade/security/advisories/new
 >        about: Report security issues privately via GitHub Security Advisories.
->      - name: GitHub Discussions
->        url: https://github.com/navaneeshnagarajan/FlintTrade/discussions
->        about: Ask questions and discuss FlintTrade with the community.
+>      - name: Usage or development question
+>        url: https://github.com/navaneeshnagarajan/FlintTrade/issues/new?template=question.md
+>        about: Ask a focused setup, usage, or contributor question with the question template.
 >    ```
 >
 > 5. **`.github/PULL_REQUEST_TEMPLATE.md`** — Checklist-style:

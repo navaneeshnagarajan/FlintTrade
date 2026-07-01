@@ -6,7 +6,7 @@
 
 ## What This Is
 
-Open-source self-hosted market workflow workspace for local data, analysis, automation, and broker-gateway testing.
+Open-source self-hosted trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
 FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 18 package surfaces (13 Python + 3 apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-beta
 

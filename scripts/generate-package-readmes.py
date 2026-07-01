@@ -90,7 +90,7 @@ def render_readme(pkg_name: str, info: dict[str, object]) -> str:
 
 > {purpose}
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** {language}
 

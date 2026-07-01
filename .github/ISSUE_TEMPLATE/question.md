@@ -22,4 +22,4 @@ Why you're asking — what you're trying to build or understand.
 
 ---
 
-**Note:** For broader discussions or showing off your setup, consider [GitHub Discussions](https://github.com/navaneeshnagarajan/FlintTrade/discussions) instead.
+**Note:** Please keep public questions focused on FlintTrade setup, usage, documentation, or contributor workflows. Do not include credentials, account identifiers, order identifiers, hostnames, or personal IP addresses.

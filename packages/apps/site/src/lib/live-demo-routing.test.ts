@@ -7,7 +7,7 @@ function readSiteFile(relativePath: string): string {
   return readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
 }
 
-describe('site live demo routing', () => {
+describe('site sandbox demo routing', () => {
   it('opens the generated terminal app directly instead of embedding it in an iframe', () => {
     const homePage = readSiteFile('src/app/page.tsx');
     const siteHeader = readSiteFile('src/components/site-header.tsx');

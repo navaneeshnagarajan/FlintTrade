@@ -417,29 +417,37 @@ Engine routes that bypass the core order proxy use
 
 The five most-used endpoints, with cURL.
 
-### 7.1 Place an order
+### 7.1 Exercise the practice order path
+
+This example is for a locally issued **Practice-mode** FlintTrade session JWT.
+It routes to FlintTrade's native sandbox and does not send an order to OpenAlgo
+or any broker. Do not use the OpenAlgo passthrough endpoint as an example for
+live broker execution. Live manual, automated, and agent-driven order workflows
+use the same FlintTrade order proxy after a Live-mode JWT, safety gate, account
+ACL check, and broker-router dispatch.
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/v1/placeorder \
-  -H "X-API-KEY: $OPENALGO_API_KEY" \
+curl -X POST http://127.0.0.1:5100/api/v1/orders/place \
+  -H "Authorization: Bearer $FLINTTRADE_PRACTICE_JWT" \
   -H "Content-Type: application/json" \
   -d '{
-    "strategy": "Flint",
-    "symbol": "NIFTY28MAY24850CE",
-    "exchange": "NFO",
+    "symbol": "NIFTY",
+    "exchange": "NSE",
     "action": "BUY",
-    "quantity": "50",
-    "pricetype": "MARKET",
-    "product": "MIS"
+    "quantity": 50,
+    "price": 0,
+    "product": "MIS",
+    "order_type": "MARKET"
   }'
 ```
 
-Successful response:
+Sandbox response shape:
 
 ```json
 {
   "status": "success",
-  "orderid": "240520000001234"
+  "order_id": "sandbox-...",
+  "message": "Practice order filled by sandbox"
 }
 ```
 

@@ -592,9 +592,9 @@ export default function WelcomeRoute() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.62, ease: silkyEase, delay: 0.08 }}
                 >
-                  Open-source self-hosted market workflow software for local research,
-                  sandbox testing, automation, and AI diagnostics. One native app for
-                  macOS, Windows, and Linux.
+                  Open-source self-hosted trading software for local research, sandbox
+                  testing, manual orders, automation, and AI-assisted workflows. One
+                  native app for macOS, Windows, and Linux.
                 </motion.p>
                 <div className="mx-auto grid max-w-xl gap-2 text-left sm:grid-cols-2">
                   {WELCOME_FEATURES.map((item, index) => (

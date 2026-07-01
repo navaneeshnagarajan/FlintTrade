@@ -64,7 +64,7 @@ Affects ~36 tracked files; reshapes the tree everything else writes into.
 - Three CTAs: "Try it" → quickstart, "Build with it" → DEVELOPER_GUIDE, "Contribute" → CONTRIBUTING
 
 **Footer:**
-- Community links: GitHub Discussions, Issues, (optional Discord/Slack if you want)
+- Community links: GitHub Issues, question template, contributing pointer
 - Project docs grid: USER_GUIDE / DEVELOPER_GUIDE / ARCHITECTURE / API / CHANGELOG / SECURITY
 - Credits: OpenAlgo, OpenClaw, and the ~215 absorbed reference repos (link to docs/REFERENCES.md)
 - License + Code of Conduct + Contributing pointers

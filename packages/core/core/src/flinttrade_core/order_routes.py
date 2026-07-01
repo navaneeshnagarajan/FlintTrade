@@ -6,8 +6,8 @@ reads the ``mode`` claim from the *server-issued JWT* (not from any
 client-controlled header) and routes accordingly:
 
 - ``explore``  → 403 — no orders permitted in demo mode
-- ``practice`` → SandboxEngine (paper trading, no real money)
-- ``live``     → OpenAlgo REST API (real broker, real money)
+- ``practice`` → SandboxEngine (paper trading, no broker write)
+- ``live``     → gated BrokerRouter execution for supported writes; fail closed otherwise
 
 The ``mode`` claim is set at login/PIN-verify time and cannot be forged
 without the JWT secret.  The legacy ``X-FlintTrade-Mode`` header is still
@@ -22,7 +22,7 @@ Architecture::
              → order_routes.py (reads JWT ``mode`` claim)
              → explore  → 403
              → practice → SandboxEngine.place_order(...)
-             → live     → httpx → OpenAlgo /api/v1/<endpoint>
+             → live     → SafetySystem/gate_order → BrokerRouter
 
 Blueprint prefix: ``/v1/orders``
 """
@@ -1162,8 +1162,8 @@ def _decode_request_payload() -> dict[str, Any] | None:
 def place_order_routed(broker: str) -> tuple[Any, int]:
     """Place a LIVE order through the safety-gated, selector-bound router (G5).
 
-    Unlike the legacy ``/place`` endpoint (which forwards straight to OpenAlgo),
-    this path mints a selector-bound :class:`RequestContext`, gates the order
+    Like the default live ``/place`` endpoint, this path mints a
+    selector-bound :class:`RequestContext`, gates the order
     through ``gate_order`` (binding the order to the caller, mode, adapter, and
     account), and dispatches via the app's :class:`BrokerRouter` — which
     ACL-checks the account and re-verifies the one-shot SafetyContext before any
@@ -1309,8 +1309,8 @@ def options_order() -> tuple[Any, int]:
     """Place a single-leg options order — maps to OpenAlgo ``optionsorder``.
 
     Routes a generic single-leg options order through the FT safety proxy
-    so that explore and practice modes are blocked by the mode gate before
-    any real-money order can reach OpenAlgo. Added 2026-05-19 to close the
+    so that explore and practice modes are handled before
+    any live-capable route can reach a broker adapter. Added 2026-05-19 to close the
     gap flagged by the Codex stop-gate review (options orders were briefly
     falling through to OpenAlgo direct, bypassing the mode gate).
 
@@ -1334,7 +1334,7 @@ def options_multi_order() -> tuple[Any, int]:
 
     Like :func:`options_order` but for multi-leg payloads (spreads,
     straddles, condors written as a legs array). Same safety-proxy
-    semantics — mode gate applied before forwarding to OpenAlgo.
+    semantics — mode gate applied before any live-capable broker route.
 
     Request headers:
         X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``

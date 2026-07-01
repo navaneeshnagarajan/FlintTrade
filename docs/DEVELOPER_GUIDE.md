@@ -425,7 +425,7 @@ stores and you guarantee a bug.
 
 ## 12. Where to ask for help
 
-- **GitHub Discussions** — usage questions, design discussions, ideas.
+- **Question issue template** — focused usage questions, design questions, and ideas.
 - **GitHub Issues** — bug reports, feature requests.
 - **GitHub Security Advisories (private)** — security disclosures.
 

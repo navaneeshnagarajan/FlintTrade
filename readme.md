@@ -1,9 +1,10 @@
 # FlintTrade
 
-FlintTrade is an AGPL-3.0, self-hosted software project for local market
-workflow experiments. The repository is a Python, React, TypeScript, and Rust
-monorepo with a Flask backend, Dockview terminal, broker-gateway integration
-layer, sandbox mode, data services, and developer documentation.
+FlintTrade is an AGPL-3.0, self-hosted trading software project for local
+manual, automated, algorithmic, and AI-assisted workflows. The repository is a
+Python, React, TypeScript, and Rust monorepo with a Flask backend, Dockview
+terminal, broker-gateway integration layer, sandbox mode, data services, and
+developer documentation.
 
 ## Beta disclaimer
 
@@ -181,8 +182,7 @@ and 1 Rust/PyO3 tick engine.
 
 ## Community
 
-- [GitHub Discussions](https://github.com/navaneeshnagarajan/FlintTrade/discussions) — questions, ideas, show-and-tell.
-- [GitHub Issues](https://github.com/navaneeshnagarajan/FlintTrade/issues) — bug reports and feature requests.
+- [GitHub Issues](https://github.com/navaneeshnagarajan/FlintTrade/issues) — bug reports, feature requests, and usage questions via the repository templates.
 - [contributing.md](contributing.md) — how to propose changes, run tests, and open a PR.
 
 ## Independence & attribution

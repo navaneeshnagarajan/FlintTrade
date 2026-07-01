@@ -1,6 +1,6 @@
 # Contributing to FlintTrade
 
-FlintTrade is an AGPL-3.0, open-source financial-market software project with a native broker-gateway contract, a local sandbox, and optional OpenAlgo-compatible integrations. The repository is built in the open so developers can inspect, test, and improve the code together.
+FlintTrade is an AGPL-3.0, open-source self-hosted trading software project with a native broker-gateway contract, a local sandbox, and optional OpenAlgo-compatible integrations. The repository is built in the open so developers can inspect, test, and improve the code together.
 
 Whether you're fixing a typo, shipping a new broker adapter, translating the UI into Hindi, or rewriting an entire widget — you're welcome here. This guide tells you everything you need to start.
 
@@ -254,7 +254,7 @@ We use GitHub issue templates. Pick the one that fits:
 
 - [`.github/ISSUE_TEMPLATE/bug_report.md`](.github/ISSUE_TEMPLATE/bug_report.md) — something broken.
 - [`.github/ISSUE_TEMPLATE/feature_request.md`](.github/ISSUE_TEMPLATE/feature_request.md) — something missing.
-- Questions and discussion: please use [GitHub Discussions](https://github.com/navaneeshnagarajan/FlintTrade/discussions) rather than the issue tracker.
+- [`.github/ISSUE_TEMPLATE/question.md`](.github/ISSUE_TEMPLATE/question.md) — usage or development questions.
 
 When reporting a bug, please include OS and version, Python and Node versions, the exact error message, and steps to reproduce. Please **never** include API keys, broker account names, fund balances, order IDs, personal IP addresses, or hostnames.
 
@@ -270,6 +270,6 @@ What AGPL-3.0 means in practice:
 - **Network-use clause.** If you run a modified version of FlintTrade as a network service (a hosted SaaS, an API, a multi-tenant platform), you must offer the modified source code to every user of that service. This is the key difference between AGPL and GPL.
 - **No warranty.** The software is provided as-is. See the full [`LICENSE`](LICENSE) for the legal text.
 
-If AGPL-3.0 doesn't work for your use case, please open a discussion before forking — we're open to talking, but we cannot relicense contributed code without contributor consent.
+If AGPL-3.0 doesn't work for your use case, please open a question issue before forking — we're open to talking, but we cannot relicense contributed code without contributor consent.
 
 Thank you for being here. Every commit, every issue, every translation, every README improvement makes FlintTrade better for the next person who walks in.

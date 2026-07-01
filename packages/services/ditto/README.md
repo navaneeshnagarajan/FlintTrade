@@ -2,7 +2,7 @@
 
 > Multi-account orchestration: position mirror, margin calculator, trailing stop-loss, and risk manager (AlgoMirror patterns absorbed in-process).
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 

@@ -682,7 +682,7 @@ async function main() {
     '',
     `Version: ${versionInfo.versionTag}`,
     '',
-    'Open-source self-hosted market workflow workspace built with Python, React, TypeScript, and Rust.',
+    'Open-source self-hosted trading software built with Python, React, TypeScript, and Rust.',
     '',
     '## Core docs',
     ...docs.map((doc) => `- [${doc.title}](/docs/${doc.slug === 'index' ? '' : doc.slug}): ${doc.description}`),

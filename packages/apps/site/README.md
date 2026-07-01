@@ -2,7 +2,7 @@
 
 > Next.js + Fumadocs public website, generated documentation, contribution pages, llms files, and read-only docs MCP.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source financial-market software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** TypeScript + React 19
 

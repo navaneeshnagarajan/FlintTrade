@@ -11,8 +11,8 @@ export const metadata: Metadata = {
     default: 'FlintTrade',
     template: '%s | FlintTrade',
   },
-  description: 'Open-source self-hosted market workflow workspace built with Python, React, TypeScript, and Rust.',
-  metadataBase: new URL('https://flinttrade.dev'),
+  description: 'Open-source self-hosted trading software built with Python, React, TypeScript, and Rust.',
+  metadataBase: new URL('https://flinttrade.vercel.app'),
   icons: {
     icon: '/flinttrade/logo.svg',
   },

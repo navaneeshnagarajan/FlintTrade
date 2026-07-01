@@ -56,8 +56,8 @@ describe('docs index generation', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 
     expect(pageSource).toContain('<strong>95</strong>');
-    expect(pageSource).toContain('Native broker contract and routing are scaffolded');
-    expect(pageSource).toContain('Dhan direct adapter is gated');
+    expect(pageSource).toContain('Native broker contract and routing are safety-gated');
+    expect(pageSource).toContain('adapters stay behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>82</strong>');
     expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
   });

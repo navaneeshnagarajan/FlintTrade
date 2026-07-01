@@ -30,7 +30,7 @@ const featureCards = [
 const docsCards = [
   { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect optional integrations, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
-  { href: '/docs/disclaimer', label: 'Alpha Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
+  { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
   { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and optional OpenAlgo passthrough.' },
 ];
 
@@ -93,9 +93,9 @@ export default function HomePage() {
             ))}
           </div>
           <p>
-            Open-source self-hosted market workflow software for local research, sandbox
-            testing, automation, and AI diagnostics. One native app for macOS, Windows,
-            and Linux.
+            Open-source self-hosted trading software for local research, sandbox
+            testing, manual orders, automation, and AI-assisted workflows. One native
+            app for macOS, Windows, and Linux.
           </p>
           <p className="hero-disclaimer">
             v0.6.0-beta is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
@@ -111,9 +111,9 @@ export default function HomePage() {
               href="/demo-app/welcome"
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Open the FlintTrade live demo in a new window"
+              aria-label="Open the FlintTrade sandbox demo in a new window"
             >
-              Try live demo <ExternalLink aria-hidden="true" size={17} />
+              Open sandbox demo <ExternalLink aria-hidden="true" size={17} />
             </Link>
             <Link className="button primary" href="/docs">
               Read the docs <ArrowRight aria-hidden="true" size={17} />
@@ -143,7 +143,7 @@ export default function HomePage() {
         <div className="metric-rail" aria-label="Project facts">
           <div>
             <strong>Gateway</strong>
-            <span>Native broker contract and routing are scaffolded; Dhan direct adapter is gated pending SDK attestation.</span>
+            <span>Native broker contract and routing are safety-gated; adapters stay behind credential, ACL, and SDK checks.</span>
           </div>
           <div>
             <strong>17</strong>

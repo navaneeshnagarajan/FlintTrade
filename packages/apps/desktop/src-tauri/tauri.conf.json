@@ -29,8 +29,8 @@
     "active": true,
     "targets": "all",
     "category": "Finance",
-    "shortDescription": "Open-source self-hosted market workflow workspace.",
-    "longDescription": "FlintTrade is an open-source, native-first market workflow workspace. The desktop app bundles the FlintTrade backend and terminal into a single installable application — no separate server to run.",
+    "shortDescription": "Open-source self-hosted trading software.",
+    "longDescription": "FlintTrade is open-source, native-first trading software for manual, automated, algorithmic, and AI-assisted workflows. The desktop app bundles the FlintTrade backend and terminal into a single installable application — no separate server to run.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
