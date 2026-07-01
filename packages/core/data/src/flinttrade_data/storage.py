@@ -10,13 +10,29 @@ import csv
 import io
 import logging
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
 logger = logging.getLogger("flinttrade.data.storage")
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _normalise_ts(value: Any) -> Any:
+    """Store aware timestamps as naive UTC for DuckDB TIMESTAMP columns."""
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _ist_date_window(start_date: str, end_date: str) -> tuple[datetime, datetime]:
+    """Convert inclusive IST date strings to UTC-naive storage bounds."""
+    start = datetime.combine(date.fromisoformat(start_date), time.min, tzinfo=IST)
+    end = datetime.combine(date.fromisoformat(end_date), time.min, tzinfo=IST) + timedelta(days=1)
+    return _normalise_ts(start), _normalise_ts(end)
+
 
 def _default_db_path() -> str:
     """Resolve DuckDB path: env override > workspace > fallback."""
@@ -201,7 +217,7 @@ class StorageManager:
                (ts, symbol, exchange, mode, ltp, open, high, low, close,
                 volume, bid, ask, oi, prev_close, depth_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [ts, symbol, exchange, mode, ltp, open_, high, low, close,
+            [_normalise_ts(ts), symbol, exchange, mode, ltp, open_, high, low, close,
              volume, bid, ask, oi, prev_close, depth_json],
         )
 
@@ -218,6 +234,10 @@ class StorageManager:
         if not rows:
             return
         conn = self.connection
+        normalised_rows = [
+            (_normalise_ts(row[0]), *row[1:])
+            for row in rows
+        ]
         conn.execute("BEGIN TRANSACTION")
         try:
             conn.executemany(
@@ -225,7 +245,7 @@ class StorageManager:
                    (ts, symbol, exchange, mode, ltp, open, high, low, close,
                     volume, bid, ask, oi, prev_close, depth_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                rows,
+                normalised_rows,
             )
             conn.execute("COMMIT")
         except Exception:
@@ -242,7 +262,7 @@ class StorageManager:
         """
         if days_to_keep <= 0:
             return 0
-        cutoff = datetime.now() - timedelta(days=days_to_keep)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_to_keep)
         conn = self.connection
         before = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
         conn.execute("DELETE FROM ticks WHERE ts < ?", [cutoff])
@@ -257,27 +277,29 @@ class StorageManager:
         end_date: str,
     ) -> list[dict[str, Any]]:
         """Query ticks by symbol, exchange, and date range (YYYY-MM-DD strings)."""
+        start, end = _ist_date_window(start_date, end_date)
         result = self.connection.execute(
             """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
                       volume, bid, ask, oi, prev_close, depth_json
                FROM ticks
                WHERE symbol = ? AND exchange = ?
-                 AND ts >= ? AND ts < ?::DATE + INTERVAL '1 day'
+                 AND ts >= ? AND ts < ?
                ORDER BY ts""",
-            [symbol, exchange, start_date, end_date],
+            [symbol, exchange, start, end],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
     def get_ticks_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all ticks for a given date."""
+        start, end = _ist_date_window(trade_date, trade_date)
         result = self.connection.execute(
             """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
                       volume, bid, ask, oi, prev_close, depth_json
                FROM ticks
-               WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
+               WHERE ts >= ? AND ts < ?
                ORDER BY ts""",
-            [trade_date, trade_date],
+            [start, end],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
@@ -310,7 +332,7 @@ class StorageManager:
                (ts, orderid, symbol, exchange, action, quantity, price,
                 product, strategy, entry_price, exit_price, pnl, slippage, fees)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [ts, orderid, symbol, exchange, action, quantity, price,
+            [_normalise_ts(ts), orderid, symbol, exchange, action, quantity, price,
              product, strategy, entry_price, exit_price, pnl, slippage, fees],
         )
 
@@ -318,27 +340,29 @@ class StorageManager:
         self, strategy: str, start_date: str, end_date: str,
     ) -> list[dict[str, Any]]:
         """Get trades filtered by strategy and date range."""
+        start, end = _ist_date_window(start_date, end_date)
         result = self.connection.execute(
             """SELECT ts, orderid, symbol, exchange, action, quantity, price,
                       product, strategy, entry_price, exit_price, pnl, slippage, fees
                FROM trades
                WHERE strategy = ?
-                 AND ts >= ? AND ts < ?::DATE + INTERVAL '1 day'
+                 AND ts >= ? AND ts < ?
                ORDER BY ts""",
-            [strategy, start_date, end_date],
+            [strategy, start, end],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
     def get_trades_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all trades for a given date."""
+        start, end = _ist_date_window(trade_date, trade_date)
         result = self.connection.execute(
             """SELECT ts, orderid, symbol, exchange, action, quantity, price,
                       product, strategy, entry_price, exit_price, pnl, slippage, fees
                FROM trades
-               WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
+               WHERE ts >= ? AND ts < ?
                ORDER BY ts""",
-            [trade_date, trade_date],
+            [start, end],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
@@ -355,13 +379,14 @@ class StorageManager:
             history-window queries (e.g. the performance dashboard) where no
             single strategy is specified.
         """
+        start, end = _ist_date_window(start_date, end_date)
         result = self.connection.execute(
             """SELECT ts, orderid, symbol, exchange, action, quantity, price,
                       product, strategy, entry_price, exit_price, pnl, slippage, fees
                FROM trades
-               WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
+               WHERE ts >= ? AND ts < ?
                ORDER BY ts""",
-            [start_date, end_date],
+            [start, end],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]

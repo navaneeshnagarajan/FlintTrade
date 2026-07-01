@@ -49,21 +49,32 @@ GENERIC_SUFFIXES = ("_TOKEN", "_API_KEY", "_API_SECRET",
                     "_ACCESS_TOKEN", "_REFRESH_TOKEN", "_MPIN", "_TOTP")
 
 
-@pytest.mark.skipif(not os.environ.get("FLINTTRADE_CI"),
-                    reason="local dev — credentials expected")
-def test_no_broker_tokens_set_in_ci():
-    leaked = [k for k in BROKER_CREDENTIAL_ENV_VARS if os.environ.get(k)]
+def _ci_env_snapshot(pytestconfig: pytest.Config) -> dict[str, str]:
+    return getattr(pytestconfig, "_flinttrade_ci_env_at_start", dict(os.environ))
+
+
+def _ci_env_value(env: dict[str, str], key: str) -> str:
+    """Return the CI baseline value before any test fixture mutates os.environ."""
+    return env.get(key, "").strip()
+
+
+def test_no_broker_tokens_set_in_ci(pytestconfig: pytest.Config):
+    env = _ci_env_snapshot(pytestconfig)
+    if not env.get("FLINTTRADE_CI"):
+        pytest.skip("local dev — credentials expected")
+    leaked = [k for k in BROKER_CREDENTIAL_ENV_VARS if _ci_env_value(env, k)]
     assert not leaked, f"broker credentials unexpectedly set in CI: {leaked}"
 
 
-@pytest.mark.skipif(not os.environ.get("FLINTTRADE_CI"),
-                    reason="local dev — credentials expected")
-def test_no_suffix_match_broker_envvars_set_in_ci():
+def test_no_suffix_match_broker_envvars_set_in_ci(pytestconfig: pytest.Config):
     """Generic safety net: catch new-broker credential vars not yet enumerated."""
+    env = _ci_env_snapshot(pytestconfig)
+    if not env.get("FLINTTRADE_CI"):
+        pytest.skip("local dev — credentials expected")
     suspicious = [
-        k for k in os.environ
+        k for k in env
         if any(k.upper().endswith(s) for s in GENERIC_SUFFIXES)
-        and os.environ.get(k)
+        and _ci_env_value(env, k)
         and not k.startswith(("GITHUB_", "RUNNER_", "ACTIONS_"))  # exclude CI infra
     ]
     assert not suspicious, (

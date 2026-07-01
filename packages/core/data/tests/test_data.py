@@ -175,6 +175,24 @@ class TestStorageManager:
         assert len(trades) == 1
         storage.close()
 
+    def test_get_trades_by_date_uses_ist_window_for_aware_timestamps(self):
+        storage = self._make_storage()
+        ts = datetime(2026, 3, 17, 0, 10, 0, tzinfo=IST)
+        storage.insert_trade(
+            ts=ts, orderid="ORD-MIDNIGHT", symbol="TCS", exchange="NSE",
+            action="BUY", quantity=1, price=3500.0, strategy="Flint",
+        )
+
+        raw_ts = storage.connection.execute(
+            "SELECT ts FROM trades WHERE orderid = 'ORD-MIDNIGHT'"
+        ).fetchone()[0]
+        assert raw_ts == datetime(2026, 3, 16, 18, 40, 0)
+
+        trades = storage.get_trades_by_date("2026-03-17")
+        assert [trade["orderid"] for trade in trades] == ["ORD-MIDNIGHT"]
+        assert storage.get_trades_by_date("2026-03-16") == []
+        storage.close()
+
     def test_upsert_daily_summary(self):
         storage = self._make_storage()
         d = date(2026, 3, 16)

@@ -34,6 +34,11 @@ import tempfile
 from pathlib import Path
 
 
+def pytest_configure(config) -> None:
+    """Snapshot CI env before collection-time test imports mutate os.environ."""
+    config._flinttrade_ci_env_at_start = dict(os.environ)
+
+
 _REPO_ROOT = Path(__file__).resolve().parent
 _PY_PACKAGE_SRCS = [
     "packages/core/core/src",
