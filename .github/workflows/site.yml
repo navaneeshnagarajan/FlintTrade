@@ -45,12 +45,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir packages/apps/site run typecheck
       - run: pnpm --dir packages/apps/site run test
