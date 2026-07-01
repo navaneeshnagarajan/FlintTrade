@@ -147,7 +147,7 @@ ok "Containers started"
 log "Waiting for services to become healthy..."
 retries=0
 max_retries=30
-until $COMPOSE_CMD ps --format '{{.Status}}' flinttrade-backend 2>/dev/null | grep -q "healthy"; do
+until $COMPOSE_CMD ps --format '{{.Status}}' flinttrade 2>/dev/null | grep -q "healthy"; do
     retries=$((retries + 1))
     if [ "$retries" -ge "$max_retries" ]; then
         warn "FlintTrade did not become healthy within expected time. Check logs: $COMPOSE_CMD logs flinttrade"

@@ -31,10 +31,21 @@ jobs:
       - name: Capture fresh OSV-backed report
         run: |
           DATE="$(date -u +%Y-%m-%d)"
+          set +e
           pip-audit --require-hashes -r requirements.lock \
             --format json --vulnerability-service osv \
             --disable-pip --progress-spinner off --timeout 10 \
-            --output "supply-chain/vuln-snapshot-${DATE}.json" || true
+            --output "supply-chain/vuln-snapshot-${DATE}.json"
+          status=$?
+          set -e
+          if [ ! -s "supply-chain/vuln-snapshot-${DATE}.json" ]; then
+            echo "pip-audit did not write a usable snapshot" >&2
+            exit 1
+          fi
+          if [ "$status" -gt 1 ]; then
+            echo "pip-audit failed with status $status before producing a trustworthy report" >&2
+            exit "$status"
+          fi
           # prune all but the newest two snapshots
           ls -1 supply-chain/vuln-snapshot-*.json | sort | head -n -2 | xargs -r git rm -f
       - name: Open PR with refreshed snapshot

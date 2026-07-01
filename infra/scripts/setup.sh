@@ -180,10 +180,9 @@ header "Workspace"
 
 WORKSPACE_DIR="${FLINTTRADE_HOME:-$HOME/.flinttrade}"
 cd "$FLINTTRADE_DIR"
-python3 -m packages.core.src.cli init 2>/dev/null && ok "Workspace initialized: $WORKSPACE_DIR" || {
-    mkdir -p "$WORKSPACE_DIR" 2>/dev/null || true
-    ok "Workspace directory created: $WORKSPACE_DIR"
-}
+PYTHONPATH="$FLINTTRADE_DIR/packages/core/core/src:${PYTHONPATH:-}" \
+    python3 -m flinttrade_core.cli init --provision-master-password >/dev/null
+ok "Workspace initialized: $WORKSPACE_DIR"
 
 # ------------------------------------------------------------------
 # 9. Run tests

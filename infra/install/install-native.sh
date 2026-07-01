@@ -155,11 +155,10 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     log "Created minimal server fallback .env for systemd EnvironmentFile"
 fi
 
-# Create user data directory
-FLINTTRADE_HOME="/home/$FLINTTRADE_USER"
-if [ "$FLINTTRADE_USER" = "flinttrade" ]; then
-    FLINTTRADE_HOME="$INSTALL_DIR"
-fi
+# Create user data directory. The service explicitly runs with
+# FLINTTRADE_HOME=$INSTALL_DIR, so generate secrets in the same place for every
+# supported FLINTTRADE_USER value.
+FLINTTRADE_HOME="$INSTALL_DIR"
 FLINTTRADE_DATA="$FLINTTRADE_HOME/.flinttrade"
 mkdir -p "$FLINTTRADE_DATA"
 
@@ -261,16 +260,14 @@ ok "Nginx configured"
 # ── Step 7: Install systemd units ─────────────────────────────────────
 log "Installing systemd services..."
 
-# OpenAlgo service
-#
-# OpenAlgo is an external prerequisite. The unit below assumes the
-# local-dev clone at $INSTALL_DIR/.local/external/openalgo created by
-# scripts/setup-test-deps.sh. For production, install OpenAlgo to its
-# own directory and adjust WorkingDirectory + ExecStart + ReadWritePaths
-# accordingly (or do not install this unit at all and run OpenAlgo via
-# its own systemd unit / process manager).
+INSTALL_OPENALGO_SERVICE="${INSTALL_OPENALGO_SERVICE:-0}"
 OPENALGO_DIR="${OPENALGO_DIR:-$INSTALL_DIR/.local/external/openalgo}"
-tee /etc/systemd/system/flinttrade-openalgo.service >/dev/null <<UNIT_EOF
+
+if [ "$INSTALL_OPENALGO_SERVICE" = "1" ]; then
+    if [ ! -d "$OPENALGO_DIR" ]; then
+        die "INSTALL_OPENALGO_SERVICE=1 but OPENALGO_DIR does not exist: $OPENALGO_DIR"
+    fi
+    tee /etc/systemd/system/flinttrade-openalgo.service >/dev/null <<UNIT_EOF
 [Unit]
 Description=FlintTrade OpenAlgo Gateway (external dependency)
 After=network.target
@@ -295,19 +292,28 @@ PrivateTmp=true
 [Install]
 WantedBy=flinttrade.target
 UNIT_EOF
+    OPENALGO_TARGET_WANTS="Wants=flinttrade-openalgo.service"
+    OPENALGO_TARGET_AFTER="After=flinttrade-openalgo.service flinttrade-backend.service"
+else
+    OPENALGO_TARGET_WANTS=""
+    OPENALGO_TARGET_AFTER="After=flinttrade-backend.service"
+    log "Skipping flinttrade-openalgo.service; configure OpenAlgo in Settings -> Broker Gateway or set INSTALL_OPENALGO_SERVICE=1"
+fi
 
 # FlintTrade backend service
 tee /etc/systemd/system/flinttrade-backend.service >/dev/null <<UNIT_EOF
 [Unit]
 Description=FlintTrade Backend
-After=network.target flinttrade-openalgo.service
+After=network.target
 
 [Service]
 Type=simple
 User=$FLINTTRADE_USER
 Group=$FLINTTRADE_USER
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$VENV_DIR/bin/python -m packages.core.src.app
+Environment=FLINTTRADE_HOME=$INSTALL_DIR
+Environment=PYTHONPATH=$INSTALL_DIR/packages/core/core/src
+ExecStart=$VENV_DIR/bin/python -m flinttrade_core.app
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=$INSTALL_DIR/.env
@@ -327,8 +333,9 @@ UNIT_EOF
 tee /etc/systemd/system/flinttrade.target >/dev/null <<UNIT_EOF
 [Unit]
 Description=FlintTrade Application
-Requires=flinttrade-openalgo.service flinttrade-backend.service
-After=flinttrade-openalgo.service flinttrade-backend.service
+Requires=flinttrade-backend.service
+$OPENALGO_TARGET_WANTS
+$OPENALGO_TARGET_AFTER
 
 [Install]
 WantedBy=multi-user.target
@@ -336,7 +343,9 @@ UNIT_EOF
 
 systemctl daemon-reload
 systemctl enable flinttrade.target
-systemctl enable flinttrade-openalgo.service
+if [ "$INSTALL_OPENALGO_SERVICE" = "1" ]; then
+    systemctl enable flinttrade-openalgo.service
+fi
 systemctl enable flinttrade-backend.service
 systemctl start flinttrade.target
 

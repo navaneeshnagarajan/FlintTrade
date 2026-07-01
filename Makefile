@@ -103,6 +103,7 @@ dev: ## Start terminal dev server + FlintTrade backend
 	@echo "  OpenAlgo:  optional integration, configure in Settings when needed"
 	@echo ""
 	@mkdir -p .local/dev-logs
+	@PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.cli init --provision-master-password >/dev/null
 	@set -e; \
 	  PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.app > .local/dev-logs/backend.log 2>&1 & \
 	  backend_pid="$$!"; \
@@ -158,12 +159,14 @@ desktop-backend: ## Freeze the backend into a Tauri sidecar (current OS/arch)
 
 desktop-build: ## Build native desktop installers for this OS (frontend + sidecar + bundle)
 	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
-	@cd packages/apps/desktop && pnpm install && pnpm tauri build
+	@pnpm install --frozen-lockfile
+	@cd packages/apps/desktop && pnpm tauri build
 	@echo -e "$(GREEN)✓ Installers under packages/apps/desktop/src-tauri/target/release/bundle/$(RESET)"
 
 desktop-dev: ## Run the desktop app in dev mode (builds the sidecar first)
 	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
-	@cd packages/apps/desktop && pnpm install && pnpm tauri dev
+	@pnpm install --frozen-lockfile
+	@cd packages/apps/desktop && pnpm tauri dev
 
 # ======================================================================
 # Maintenance

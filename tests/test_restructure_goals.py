@@ -231,6 +231,74 @@ def test_server_installer_keeps_openalgo_config_in_ui() -> None:
     assert "Settings -> Broker Gateway" in docker_installer
 
 
+def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -> None:
+    """Server installers should not point systemd at retired package paths or require OpenAlgo."""
+    installer = (ROOT / "infra" / "install" / "install-native.sh").read_text(encoding="utf-8")
+    systemd_unit = (ROOT / "infra" / "systemd" / "flinttrade.service").read_text(encoding="utf-8")
+    docker_installer = (ROOT / "infra" / "install" / "install-docker.sh").read_text(encoding="utf-8")
+
+    assert "-m flinttrade_core.app" in installer
+    assert "packages.core.src.app" not in installer
+    assert "flinttrade_core.app:app" in systemd_unit
+    assert "packages.core.src.app:app" not in systemd_unit
+    assert "Environment=FLINTTRADE_HOME=$INSTALL_DIR" in installer
+    assert "Environment=FLINTTRADE_HOME=/opt/flinttrade" in systemd_unit
+    assert 'FLINTTRADE_HOME="/home/$FLINTTRADE_USER"' not in installer
+    assert "INSTALL_OPENALGO_SERVICE" in installer
+    assert "Requires=flinttrade-backend.service" in installer
+    assert "Requires=flinttrade-openalgo.service" not in installer
+    assert "ps --format '{{.Status}}' flinttrade " in docker_installer
+    assert "ps --format '{{.Status}}' flinttrade-backend" not in docker_installer
+
+
+def test_desktop_release_workflow_is_tagged_and_fail_closed() -> None:
+    """Desktop release CI should run on tags and fail if installers are missing."""
+    workflow = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
+    vuln_refresh = (ROOT / ".github" / "workflows" / "refresh-vuln-snapshot.yml").read_text(encoding="utf-8")
+
+    assert "tags:" in workflow
+    assert "- 'v*'" in workflow
+    assert "Verify release tag matches package version" in workflow
+    assert "DESKTOP_VERSION" in workflow
+    assert "TAURI_VERSION" in workflow
+    assert "Release version mismatch" in workflow
+    assert "uv sync --frozen --extra desktop" in workflow
+    assert 'if-no-files-found: error' in workflow
+    assert 'fail_on_unmatched_files: true' in workflow
+    assert "No installers were produced" in workflow
+    assert "--output \"supply-chain/vuln-snapshot-${DATE}.json\" || true" not in vuln_refresh
+    assert "pip-audit did not write a usable snapshot" in vuln_refresh
+    assert "exit 1" in vuln_refresh
+    assert "pip-audit failed with status" in vuln_refresh
+
+
+def test_release_versions_are_aligned() -> None:
+    """Release tags, package metadata, and desktop installer metadata should agree."""
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    root_package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    desktop_package = json.loads((ROOT / "packages" / "apps" / "desktop" / "package.json").read_text(encoding="utf-8"))
+    tauri_config = json.loads(
+        (ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"),
+    )
+
+    assert version.startswith("v")
+    bare_version = version.removeprefix("v")
+    assert root_package["version"] == bare_version
+    assert desktop_package["version"] == bare_version
+    assert tauri_config["version"] == bare_version
+
+
+def test_current_beta_release_note_exists() -> None:
+    """The current VERSION should have matching per-version release notes."""
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    release_note = ROOT / "docs" / "releases" / f"{version}.md"
+
+    assert release_note.exists()
+    text = release_note.read_text(encoding="utf-8")
+    assert version in text
+    assert "not production ready" in text
+
+
 def test_workspace_example_documents_ui_owned_openalgo_config() -> None:
     """workspace.example.json should describe OpenAlgo as UI/workspace config."""
     workspace_example = (ROOT / "workspace.example.json").read_text(encoding="utf-8")

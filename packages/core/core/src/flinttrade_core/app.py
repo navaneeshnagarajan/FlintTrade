@@ -2415,7 +2415,7 @@ class FlintTradeApp:
 
         self._stop_event = asyncio.Event()
 
-        logger.info("FlintTradeApp initialised — v%s", self.version)
+        logger.info("FlintTradeApp initialised — %s", self.version)
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
@@ -2612,14 +2612,14 @@ class FlintTradeApp:
                     else "unknown"
                 )
                 logger.info(
-                    "FlintTrade v%s started — OpenAlgo %s REACHABLE, authenticated (broker: %s)",
+                    "FlintTrade %s started — OpenAlgo %s REACHABLE, authenticated (broker: %s)",
                     self.version, self.settings.openalgo_host, broker,
                 )
             except OpenAlgoAuthError as exc:
                 # Server responded but rejected the API key — reachable,
                 # auth failed.  Don't confuse users with "UNREACHABLE".
                 logger.warning(
-                    "FlintTrade v%s started — OpenAlgo %s REACHABLE but AUTH FAILED "
+                    "FlintTrade %s started — OpenAlgo %s REACHABLE but AUTH FAILED "
                     "(status %d): %s. Configure the API key in /setup or ~/.flinttrade/workspace.json.",
                     self.version,
                     self.settings.openalgo_host,
@@ -2628,7 +2628,7 @@ class FlintTradeApp:
                 )
             except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
                 logger.warning(
-                    "FlintTrade v%s started — OpenAlgo %s UNREACHABLE (%s: %s). "
+                    "FlintTrade %s started — OpenAlgo %s UNREACHABLE (%s: %s). "
                     "Start OpenAlgo on that host/port and FlintTrade will reconnect on next call.",
                     self.version,
                     self.settings.openalgo_host,
@@ -2639,7 +2639,7 @@ class FlintTradeApp:
             # Any other unexpected error — log full class + message so we
             # don't pretend we know what happened.
             logger.warning(
-                "FlintTrade v%s started — OpenAlgo %s verification failed (%s: %s).",
+                "FlintTrade %s started — OpenAlgo %s verification failed (%s: %s).",
                 self.version,
                 self.settings.openalgo_host,
                 type(exc).__name__,
@@ -2680,7 +2680,7 @@ class FlintTradeApp:
         # Close audit logger
         self.audit.close()
 
-        logger.info("FlintTrade v%s stopped", self.version)
+        logger.info("FlintTrade %s stopped", self.version)
 
         self._stop_event.set()
 

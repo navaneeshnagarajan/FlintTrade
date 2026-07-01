@@ -32,7 +32,9 @@ WorkingDirectory=/opt/flinttrade
 Environment=OPENBLAS_NUM_THREADS=2
 Environment=OMP_NUM_THREADS=2
 Environment=FLINTTRADE_DEV=0
+Environment=FLINTTRADE_HOME=/opt/flinttrade
 Environment=FLINTTRADE_PORT=5100
+Environment=PYTHONPATH=/opt/flinttrade/packages/core/core/src
 EnvironmentFile=/opt/flinttrade/.env
 
 # Gunicorn with eventlet — single worker for WebSocket compatibility
@@ -44,7 +46,7 @@ ExecStart=/opt/flinttrade/.venv/bin/gunicorn \
     --graceful-timeout 30 \
     --access-logfile - \
     --error-logfile - \
-    'packages.core.src.app:app'
+    'flinttrade_core.app:app'
 
 # Restart policy — always restart with a brief cooldown
 Restart=always
