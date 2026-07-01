@@ -25,7 +25,7 @@ ml = [
     "scikit-learn>=1.4",
     "scipy>=1.12",
 ]
-scraping = ["crawl4ai>=0.4"]
+scraping = ["crawl4ai>=0.9.0"]
 
 [build-system]
 requires = ["hatchling"]
