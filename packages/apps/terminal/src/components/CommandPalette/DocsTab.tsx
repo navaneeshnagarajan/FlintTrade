@@ -5,7 +5,7 @@
  * /ft-api/v1/docs/search and renders inline results within the palette.
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { searchDocs, type DocSearchResult } from "@/components/DocsSearch/DocsSearch";
@@ -55,7 +55,7 @@ export function DocsTab({
     }
   }, [activeIndex, results.length, onActiveIndexChange]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onActiveDocChange?.(results[activeIndex] ?? null);
   }, [activeIndex, results, onActiveDocChange]);
 
