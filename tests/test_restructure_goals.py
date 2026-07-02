@@ -266,11 +266,15 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "Release version mismatch" in workflow
     assert "Release tag $RELEASE_TAG points at $TAG_COMMIT" in workflow
     assert "not this workflow run's commit $GITHUB_SHA" in workflow
+    assert "runner: macos-15-intel" in workflow
+    assert "runner: macos-13" not in workflow
     assert "BUNDLE_ARGS+=(--bundles nsis)" in workflow
     assert "WiX/MSI rejects beta SemVer" in workflow
     assert "uv sync --frozen --extra desktop" in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
+    assert 'prerelease: true' in workflow
+    assert 'overwrite_files: true' in workflow
     assert "No installers were produced" in workflow
     assert "--output \"supply-chain/vuln-snapshot-${DATE}.json\" || true" not in vuln_refresh
     assert "pip-audit did not write a usable snapshot" in vuln_refresh

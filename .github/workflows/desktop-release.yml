@@ -43,7 +43,7 @@ jobs:
             runner: macos-14
             target: aarch64-apple-darwin
           - label: macos-x64
-            runner: macos-13
+            runner: macos-15-intel
             target: x86_64-apple-darwin
           - label: windows-x64
             runner: windows-latest
@@ -215,4 +215,6 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: dist-installers/*
           draft: true
+          prerelease: true
+          overwrite_files: true
           fail_on_unmatched_files: true
