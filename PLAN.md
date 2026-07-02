@@ -8,9 +8,9 @@
 
 ---
 
-## Current state — v0.6.0-beta
+## Current state — v0.6.0-beta.1
 
-- **Version:** `v0.6.0-beta` (beta restructure; not production-ready — see `disclaimer.md`).
+- **Version:** `v0.6.0-beta.1` (beta restructure; not production-ready — see `disclaimer.md`).
 - **Structure:** fat-core 4-way nest under `packages/` — 18 surfaces:
   - `core/` → core, data, historical, indicators (Python) · ticks (Rust/PyO3) · design-system (TS)
   - `services/` → engine, screener, backtest, ai, ditto, automation, journal (Python)
@@ -124,7 +124,7 @@ The **inverse** diff (registered routes with no SPA caller) was classified per c
 
 ## Future / someday (post-v0.6.x)
 
-Mobile app (`/v0.7.0`; the native **desktop** app already shipped in v0.6.0-beta — see Current state), Unsloth QLoRA fine-tuning, social/copy trading (`social_trading.py` is a labelled foundation), blue-green deployment, additional second-wave brokers (Angel One, Fyers, XTS-shared set, Groww, ICICI Breeze, Paytm Money, Sharekhan) on demand/contribution.
+Mobile app (`/v0.7.0`; the native **desktop** app already shipped in v0.6.0-beta.1 — see Current state), Unsloth QLoRA fine-tuning, social/copy trading (`social_trading.py` is a labelled foundation), blue-green deployment, additional second-wave brokers (Angel One, Fyers, XTS-shared set, Groww, ICICI Breeze, Paytm Money, Sharekhan) on demand/contribution.
 
 ---
 

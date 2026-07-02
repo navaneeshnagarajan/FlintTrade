@@ -38,6 +38,7 @@ import { SAMPLE_GREEKS_SURFACE_DATA } from "./sampleData";
 import type { GreeksSurfaceExpiry, GreeksSurfacePoint } from "./sampleData";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -588,7 +589,7 @@ function GreeksSurfaceWidget() {
           <FeatureTeaser
             status="preview"
             featureName="Greeks Surface"
-            version="v0.6.0"
+            version={APP_VERSION_TAG}
           >
             {surfaceContent}
           </FeatureTeaser>

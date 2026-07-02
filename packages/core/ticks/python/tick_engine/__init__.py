@@ -31,4 +31,4 @@ Example
 from tick_engine.tick_engine import Bar, SimulationResult, TickSimulator, Trade
 
 __all__ = ["Bar", "SimulationResult", "TickSimulator", "Trade"]
-__version__ = "0.1.0"
+__version__ = "0.6.0-beta.1"

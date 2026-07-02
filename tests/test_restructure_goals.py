@@ -255,6 +255,7 @@ def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -
 def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     """Desktop release CI should be manual and fail if installers are missing."""
     workflow = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
+    desktop_docs = (ROOT / "docs" / "DESKTOP.md").read_text(encoding="utf-8")
     vuln_refresh = (ROOT / ".github" / "workflows" / "refresh-vuln-snapshot.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
@@ -282,6 +283,11 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "pip-audit did not write a usable snapshot" in vuln_refresh
     assert "exit 1" in vuln_refresh
     assert "pip-audit failed with status" in vuln_refresh
+    assert "`v0.6.0-beta.1` to publish draft release assets" in desktop_docs
+    assert "macOS x64 (`macos-15-intel`)" in desktop_docs
+    assert "macOS x64 (`macos-13`)" not in desktop_docs
+    assert "### Windows (`.exe`)" in desktop_docs
+    assert "does not publish\n  MSI assets" in desktop_docs
 
 
 def test_release_versions_are_aligned() -> None:
@@ -300,6 +306,20 @@ def test_release_versions_are_aligned() -> None:
     assert tauri_config["version"] == bare_version
     for pyproject in sorted(ROOT.glob("packages/*/*/pyproject.toml")):
         assert f'version = "{bare_version}"' in pyproject.read_text(encoding="utf-8"), pyproject
+
+
+def test_version_consistency_guard_passes() -> None:
+    """The broad version-consistency guard should cover every publishable surface."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check-version-consistency.py")],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout
 
 
 def test_current_beta_release_note_exists() -> None:

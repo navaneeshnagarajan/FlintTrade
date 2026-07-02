@@ -46,8 +46,8 @@ from Setup and Settings — no `.env` file or browser dev server required.
 
 | OS | Packages | Architectures |
 |---|---|---|
-| macOS | `.dmg`, `.app` | Apple Silicon (arm64) + Intel (x64) |
-| Windows | `.msi`, `.exe` (NSIS) | x64 |
+| macOS | `.dmg` | Apple Silicon (arm64) + Intel (x64) |
+| Windows | `.exe` (NSIS) | x64 |
 | Linux | `.deb`, `.rpm`, `.AppImage` | x64 + arm64 |
 
 Download an installer from the repository releases page, or build it yourself:

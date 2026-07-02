@@ -20,6 +20,7 @@ import { SAMPLE_GEX_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import type { Data, Layout } from "plotly.js";
 
 // ---------------------------------------------------------------------------
@@ -387,7 +388,7 @@ function GEXWidget() {
           <FeatureTeaser
             status="preview"
             featureName="GEX Dashboard"
-            version="v0.3.0"
+            version={APP_VERSION_TAG}
           >
             {chartContent}
           </FeatureTeaser>

@@ -26,6 +26,7 @@ import { SAMPLE_IV_SMILE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import type { Data, Layout } from "plotly.js";
 
 // ---------------------------------------------------------------------------
@@ -310,7 +311,7 @@ function IVSmileWidget() {
           <FeatureTeaser
             status="preview"
             featureName="IV Smile"
-            version="v0.3.0"
+            version={APP_VERSION_TAG}
           >
             {chartContent}
           </FeatureTeaser>

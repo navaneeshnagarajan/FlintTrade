@@ -17,6 +17,7 @@ import { SAMPLE_STRADDLE_PNL_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { StraddleLeg } from "@/types/api";
 import type { Data, Layout } from "plotly.js";
@@ -344,7 +345,7 @@ function StraddlePnLWidget() {
               <FeatureTeaser
                 status="in_dev"
                 featureName="Straddle P&L Simulator"
-                version="v0.3.0"
+                version={APP_VERSION_TAG}
               >
                 {chart}
               </FeatureTeaser>

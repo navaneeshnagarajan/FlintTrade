@@ -83,9 +83,10 @@ const releaseDocs = [
   ['docs/releases/v0.6.0-beta.1.md', 'releases/v0.6.0-beta.1', 'Releases', 'FlintTrade v0.6.0-beta.1 release notes'],
   ['docs/releases/v0.6.0-beta.md', 'releases/v0.6.0-beta', 'Releases', 'FlintTrade v0.6.0 beta release notes'],
   ['docs/releases/v0.6.0-alpha.md', 'releases/v0.6.0-alpha', 'Releases', 'FlintTrade v0.6.0 alpha release notes'],
-  ['docs/releases/v0.5.1.md', 'releases/v0.5.1', 'Releases', 'FlintTrade v0.5.1 release notes'],
   ['docs/releases/v0.5.2-dev.md', 'releases/v0.5.2-dev', 'Releases', 'FlintTrade v0.5.2 development notes'],
+  ['docs/releases/v0.5.1.md', 'releases/v0.5.1', 'Releases', 'FlintTrade v0.5.1 release notes'],
 ];
+const releasePages = releaseDocs.map(([, slug]) => slug.replace(/^releases\//, ''));
 
 const manualDocs = [
   {
@@ -641,7 +642,7 @@ async function main() {
     path.join(contentRoot, 'releases', 'meta.json'),
     JSON.stringify({
       title: 'Releases',
-      pages: ['v0.6.0-alpha', 'v0.5.2-dev', 'v0.5.1'],
+      pages: releasePages,
     }, null, 2),
   );
 

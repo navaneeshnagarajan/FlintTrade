@@ -42,7 +42,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
 
 # ======================================================================
 # Setup
@@ -147,7 +147,7 @@ endif
 # ======================================================================
 # Native desktop app (Tauri 2 shell + PyInstaller backend sidecar)
 # ======================================================================
-# Produces installable packages (.dmg/.app, .msi/.exe, .deb/.rpm/.AppImage).
+# Produces installable packages (.dmg, .exe, .deb/.rpm/.AppImage).
 # Each target builds for the CURRENT OS/arch; the full cross-platform matrix is
 # produced by .github/workflows/desktop-release.yml. See docs/DESKTOP.md.
 
@@ -207,6 +207,8 @@ docker-build: ## Rebuild Docker images
 
 full-check: ## Run full health check (tests + lint + typecheck)
 	@echo -e "$(CYAN)=== FlintTrade Health Check ===$(RESET)"
+	@echo -e "$(YELLOW)--- Version Consistency ---$(RESET)"
+	@$(PYTHON) scripts/check-version-consistency.py
 	@echo -e "$(YELLOW)--- Python Tests ---$(RESET)"
 	@set -o pipefail; $(PYTHON) -m pytest packages/integrations/gateway/tests/ packages/core/core/tests/ packages/services/screener/tests/ packages/services/engine/tests/ -q --no-header --import-mode=importlib 2>&1 | tail -3
 	@echo -e "$(YELLOW)--- Ruff Lint ---$(RESET)"
@@ -218,6 +220,9 @@ full-check: ## Run full health check (tests + lint + typecheck)
 
 audit: ## Check repo absorption status
 	@$(PYTHON) scripts/audit_repos.py
+
+version-check: ## Verify all release-version metadata is aligned
+	@$(PYTHON) scripts/check-version-consistency.py
 
 sync-check: ## Check upstream drift on external test-deps under .local/external/
 	@echo -e "$(CYAN)=== External Test-Deps Sync Check ===$(RESET)"

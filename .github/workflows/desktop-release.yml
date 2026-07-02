@@ -3,7 +3,7 @@ name: Desktop Release
 # Builds the native FlintTrade desktop installers for every supported OS /
 # architecture and (on a version tag) attaches them to a GitHub Release.
 #
-#   • macOS    — .dmg + .app           (arm64 + Intel x64)
+#   • macOS    — .dmg                  (arm64 + Intel x64)
 #   • Windows  — .exe (NSIS)           (x64)
 #   • Linux    — .deb + .rpm + .AppImage (x64 + arm64)
 #

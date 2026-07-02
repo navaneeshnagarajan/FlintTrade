@@ -1,8 +1,11 @@
 # FlintTrade on Windows
 
+> FlintTrade `v0.6.0-beta.1` is not production ready; use Explore and Practice
+> modes before connecting any live broker workflow.
+
 ## Option A — Native Desktop (Recommended)
 
-1. Download the `.msi` or `.exe` installer from the release page.
+1. Download the `.exe` installer from the release page.
 2. Install FlintTrade like any other Windows app.
 3. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
    in the app; no `.env` file is required.

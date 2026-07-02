@@ -27,6 +27,7 @@ import { SAMPLE_OI_PROFILE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { useModeStore } from "@/stores/modeStore";
 import { getHistory } from "@/services/api";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
@@ -397,7 +398,7 @@ function OIProfileWidget() {
             <FeatureTeaser
               status="in_dev"
               featureName="OI Profile"
-              version="v0.3.0"
+              version={APP_VERSION_TAG}
             >
               {chart}
             </FeatureTeaser>

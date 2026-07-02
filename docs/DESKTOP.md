@@ -7,8 +7,8 @@ The app bundles the FlintTrade backend and the React terminal into a single
 installable package — there is no separate server to run and **no `.env` to
 configure**.
 
-- **macOS** — `.dmg` (drag-to-install) and `.app` — Apple Silicon (arm64) and Intel (x64)
-- **Windows** — `.msi` and `.exe` (NSIS) installer — x64
+- **macOS** — `.dmg` (drag-to-install) — Apple Silicon (arm64) and Intel (x64)
+- **Windows** — `.exe` (NSIS) installer — x64
 - **Linux** — `.deb`, `.rpm`, and `.AppImage` — x64 and arm64
 
 ## Download or build
@@ -98,9 +98,10 @@ environment variable.
 - The build is unsigned by default; on first launch use **right-click → Open**
   (or **System Settings → Privacy & Security → Open Anyway**).
 
-### Windows (`.msi` / `.exe`)
-- **Install:** run the installer (`.exe` NSIS recommended; `.msi` for managed
-  deployments). Installs per-machine by default.
+### Windows (`.exe`)
+- **Install:** run the NSIS `.exe` installer. The beta release does not publish
+  MSI assets because WiX requires numeric product versions and rejects
+  prerelease SemVer like `0.6.0-beta.1`.
 - **Uninstall:** **Settings → Apps → Installed apps → FlintTrade → Uninstall**,
   or **Control Panel → Programs and Features**. To also remove data: delete
   `%APPDATA%\flinttrade\`.
@@ -161,8 +162,8 @@ installers to a GitHub Release.
 
 - **Trigger:** run the workflow manually
   (**Actions → Desktop Release → Run workflow**), optionally entering a tag like
-  `v0.6.0` to publish draft release assets.
-- **Matrix:** macOS arm64 (`macos-14`), macOS x64 (`macos-13`), Windows x64,
+  `v0.6.0-beta.1` to publish draft release assets.
+- **Matrix:** macOS arm64 (`macos-14`), macOS x64 (`macos-15-intel`), Windows x64,
   Linux x64 (`ubuntu-22.04`), Linux arm64 (`ubuntu-22.04-arm`).
 - Each job freezes the backend, bundles the Tauri app, and uploads the
   per-platform installers as workflow artifacts and, when a release tag is

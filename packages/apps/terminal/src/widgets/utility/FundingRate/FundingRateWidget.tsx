@@ -23,6 +23,7 @@ import { SAMPLE_FUNDING_RATES } from "./sampleData";
 import { useCountdown } from "./useCountdown";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -348,7 +349,7 @@ function FundingRateWidget() {
           <FeatureTeaser
             status="preview"
             featureName="Funding Rates"
-            version="v0.6.0"
+            version={APP_VERSION_TAG}
           >
             {tableContent}
           </FeatureTeaser>

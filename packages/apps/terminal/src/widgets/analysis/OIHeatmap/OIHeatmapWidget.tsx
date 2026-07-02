@@ -25,6 +25,7 @@ import { RefreshCw, AlertCircle, Loader2, TrendingUp, TrendingDown } from "lucid
 import { getOptionChain, getExpiry } from "@/services/api";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { FeatureTeaser } from "@/components/teasers";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { isMarketHours } from "@/lib/market";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type {
@@ -622,7 +623,7 @@ function OIHeatmapWidget() {
         isConnected ? (
           <>{heatmapGrid}<ColourLegend /></>
         ) : (
-          <FeatureTeaser status="in_dev" featureName="OI Heatmap" version="v0.3.0">
+          <FeatureTeaser status="in_dev" featureName="OI Heatmap" version={APP_VERSION_TAG}>
             {heatmapGrid}
             <ColourLegend />
           </FeatureTeaser>

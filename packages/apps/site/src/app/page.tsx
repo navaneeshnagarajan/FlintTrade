@@ -53,12 +53,12 @@ const welcomeFeatures = [
 const desktopInstallOptions = [
   {
     platform: 'macOS',
-    artefacts: '.dmg or .app',
+    artefacts: '.dmg',
     instruction: 'Open the image, drag FlintTrade to Applications, then right-click Open on the first launch if the build is unsigned.',
   },
   {
     platform: 'Windows',
-    artefacts: '.exe or .msi',
+    artefacts: '.exe',
     instruction: 'Run the installer, launch FlintTrade from Start, and use the in-app Setup flow instead of editing environment files.',
   },
   {

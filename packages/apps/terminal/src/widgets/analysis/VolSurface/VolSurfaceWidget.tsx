@@ -17,6 +17,7 @@ import { SAMPLE_VOL_SURFACE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Data, Layout } from "plotly.js";
 
@@ -223,7 +224,7 @@ function VolSurfaceWidget() {
           <FeatureTeaser
             status="preview"
             featureName="Volatility Surface"
-            version="v0.3.0"
+            version={APP_VERSION_TAG}
           >
             {chartContent}
           </FeatureTeaser>
