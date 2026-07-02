@@ -29,6 +29,12 @@ getrandom = "0.2"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
+[patch.crates-io]
+# Temporary until plist publishes a release that accepts quick-xml >=0.41.0.
+# The vendored source is plist 1.9.0 with only the quick-xml dependency bumped
+# to clear RUSTSEC-2026-0194 in the Tauri desktop lockfile.
+plist = { path = "../../../../supply-chain/vendor/plist-1.9.0" }
+
 [profile.release]
 panic = "abort"     # smaller binary; we never unwind across the FFI boundary
 codegen-units = 1

@@ -111,6 +111,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
   the current beta note; desktop release dispatch rejects stale tags; and
   Supply Chain CI audits the desktop Rust lockfile with expiring reviewed
   warning allowlist entries.
+- The desktop Tauri lockfile no longer carries the vulnerable `quick-xml`
+  `0.39.x` line (`RUSTSEC-2026-0194`); `plist` 1.9.0 is temporarily vendored
+  with only its `quick-xml` dependency bumped to the patched `0.41.x` floor
+  until upstream publishes a compatible release.
 - AI memory retrieval survives a wedged ChromaDB vector index — chromadb 1.5.9's Rust
   core can permanently lose an `add()`'s embedding write under rapid collection churn
   (upstream chroma-core/chroma#7032: every later vector query raises "Error finding id"

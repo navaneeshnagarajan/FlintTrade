@@ -320,6 +320,18 @@ def test_supply_chain_covers_desktop_rust_lockfile() -> None:
     workflow = (ROOT / ".github" / "workflows" / "supply-chain.yml").read_text(encoding="utf-8")
     cargo_allowlist = (ROOT / "supply-chain" / "cargo-audit-allowlist.yml").read_text(encoding="utf-8")
     cargo_script = (ROOT / "scripts" / "cargo-audit-with-allowlist.py").read_text(encoding="utf-8")
+    desktop_manifest = (ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "Cargo.toml").read_text(
+        encoding="utf-8",
+    )
+    desktop_lock = (ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "Cargo.lock").read_text(
+        encoding="utf-8",
+    )
+    vendored_plist_manifest = (ROOT / "supply-chain" / "vendor" / "plist-1.9.0" / "Cargo.toml").read_text(
+        encoding="utf-8",
+    )
+    vendored_plist_note = (ROOT / "supply-chain" / "vendor" / "plist-1.9.0" / "FLINTTRADE_PATCH.md").read_text(
+        encoding="utf-8",
+    )
 
     assert "scripts/cargo-audit-with-allowlist.py" in workflow
     assert "--manifest-dir packages/core/ticks" in workflow
@@ -329,6 +341,12 @@ def test_supply_chain_covers_desktop_rust_lockfile() -> None:
     assert "glib" in cargo_allowlist
     assert "expires:" in cargo_allowlist
     assert "Vulnerabilities are never suppressed" in cargo_script
+    assert "RUSTSEC-2026-0194" not in cargo_allowlist
+    assert 'plist = { path = "../../../../supply-chain/vendor/plist-1.9.0" }' in desktop_manifest
+    assert '[dependencies.quick_xml]\nversion = "0.41.0"' in vendored_plist_manifest
+    assert "RUSTSEC-2026-0194" in vendored_plist_note
+    assert 'name = "quick-xml"\nversion = "0.41.0"' in desktop_lock
+    assert 'name = "quick-xml"\nversion = "0.39.4"' not in desktop_lock
 
 
 def test_workspace_example_documents_ui_owned_openalgo_config() -> None:
