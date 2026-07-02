@@ -264,6 +264,8 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "DESKTOP_VERSION" in workflow
     assert "TAURI_VERSION" in workflow
     assert "Release version mismatch" in workflow
+    assert "Release tag $RELEASE_TAG points at $TAG_COMMIT" in workflow
+    assert "not this workflow run's commit $GITHUB_SHA" in workflow
     assert "uv sync --frozen --extra desktop" in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
@@ -288,17 +290,39 @@ def test_release_versions_are_aligned() -> None:
     assert root_package["version"] == bare_version
     assert desktop_package["version"] == bare_version
     assert tauri_config["version"] == bare_version
+    for pyproject in sorted(ROOT.glob("packages/*/*/pyproject.toml")):
+        assert f'version = "{bare_version}"' in pyproject.read_text(encoding="utf-8"), pyproject
 
 
 def test_current_beta_release_note_exists() -> None:
     """The current VERSION should have matching per-version release notes."""
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     release_note = ROOT / "docs" / "releases" / f"{version}.md"
+    site_generator = (ROOT / "packages" / "apps" / "site" / "scripts" / "generate-content.mjs").read_text(
+        encoding="utf-8",
+    )
 
     assert release_note.exists()
     text = release_note.read_text(encoding="utf-8")
     assert version in text
     assert "not production ready" in text
+    assert f"docs/releases/{version}.md" in site_generator
+
+
+def test_supply_chain_covers_desktop_rust_lockfile() -> None:
+    """Rust audit CI should cover the desktop installer lockfile as well as ticks."""
+    workflow = (ROOT / ".github" / "workflows" / "supply-chain.yml").read_text(encoding="utf-8")
+    cargo_allowlist = (ROOT / "supply-chain" / "cargo-audit-allowlist.yml").read_text(encoding="utf-8")
+    cargo_script = (ROOT / "scripts" / "cargo-audit-with-allowlist.py").read_text(encoding="utf-8")
+
+    assert "scripts/cargo-audit-with-allowlist.py" in workflow
+    assert "--manifest-dir packages/core/ticks" in workflow
+    assert "--manifest-dir packages/apps/desktop/src-tauri" in workflow
+    assert "packages/apps/desktop/src-tauri/cargo-audit-report.json" in workflow
+    assert "RUSTSEC-2024-0429" in cargo_allowlist
+    assert "glib" in cargo_allowlist
+    assert "expires:" in cargo_allowlist
+    assert "Vulnerabilities are never suppressed" in cargo_script
 
 
 def test_workspace_example_documents_ui_owned_openalgo_config() -> None:

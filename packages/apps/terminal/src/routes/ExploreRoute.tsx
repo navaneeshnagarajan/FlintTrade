@@ -543,7 +543,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: "[aria-label='Explore navigation']",
     title: "Navigation & Setup",
     description:
-      "Use Settings to connect FlintTrade's broker gateway or an OpenAlgo-compatible server. When you're ready, click Get Started to run the setup wizard.",
+      "Use the setup wizard to connect FlintTrade's broker gateway or an OpenAlgo-compatible server. Settings keeps those connections editable later.",
     placement: "bottom",
   },
   {
@@ -635,7 +635,7 @@ export default function ExploreRoute() {
               type="button"
               size="sm"
               className="text-xs"
-              onClick={() => navigate("/setup")}
+              onClick={() => navigate("/setup-account")}
             >
               Get Started
               <ArrowRight className="size-3.5" aria-hidden="true" />
@@ -739,7 +739,7 @@ export default function ExploreRoute() {
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <Button
                     type="button"
-                    onClick={() => navigate("/setup")}
+                    onClick={() => navigate("/setup-account")}
                     className="sm:min-w-44"
                   >
                     Set Up Workspace
@@ -750,7 +750,7 @@ export default function ExploreRoute() {
                     className="border-border-default text-text-primary hover:bg-surface-hover sm:min-w-44"
                     asChild
                   >
-                    <Link to="/settings">
+                    <Link to="/setup-account">
                       Connect Gateway
                     </Link>
                   </Button>

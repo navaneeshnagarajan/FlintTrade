@@ -1,0 +1,91 @@
+# cargo-audit warning allowlist.
+#
+# Vulnerabilities are never suppressed by scripts/cargo-audit-with-allowlist.py.
+# Warning-class advisories must carry a reason, owner, and expiry so the desktop
+# Tauri stack remains visible while upstream dependency movement is tracked.
+allowlist:
+  - advisory: RUSTSEC-2024-0413
+    package: atk
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0416
+    package: atk-sys
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0412
+    package: gdk
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0418
+    package: gdk-sys
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0411
+    package: gdkwayland-sys
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0417
+    package: gdkx11
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0414
+    package: gdkx11-sys
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0415
+    package: gtk
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0420
+    package: gtk-sys
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0419
+    package: gtk3-macros
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0370
+    package: proc-macro-error
+    reason: "Transitive through glib-macros/gtk3-macros in Tauri's gtk-rs 0.18 stack."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2025-0081
+    package: unic-char-property
+    reason: "Transitive through Tauri's urlpattern dependency; no direct FlintTrade use."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2025-0075
+    package: unic-char-range
+    reason: "Transitive through Tauri's urlpattern dependency; no direct FlintTrade use."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2025-0080
+    package: unic-common
+    reason: "Transitive through Tauri's urlpattern dependency; no direct FlintTrade use."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2025-0100
+    package: unic-ucd-ident
+    reason: "Transitive through Tauri's urlpattern dependency; no direct FlintTrade use."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2025-0098
+    package: unic-ucd-version
+    reason: "Transitive through Tauri's urlpattern dependency; no direct FlintTrade use."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"
+  - advisory: RUSTSEC-2024-0429
+    package: glib
+    reason: "Tauri 2.11.2 Linux GTK/WebKit stack pins gtk 0.18, which requires glib 0.18; Dependabot reports no compatible glib 0.20 update path."
+    accepted_by: "navaneesh"
+    expires: "2026-10-31"

@@ -970,9 +970,9 @@ export default function SetupAccountRoute() {
     setCurrentStep(6);
   }
 
-  function handleModeSelect(mode: AppMode) {
+  function handleModeSelect(mode: AppMode, liveSessionToken?: string) {
     setMode(mode);
-    persistSetupChoices({
+    const landingRoute = persistSetupChoices({
       persona: persona ?? "trader",
       connection,
       tradingDefaults: trading,
@@ -980,6 +980,12 @@ export default function SetupAccountRoute() {
       name: displayName || "Trader",
       interests: [],
     });
+    if (mode === "live" && liveSessionToken) {
+      useAuthStore.getState().setLoggedIn(liveSessionToken, displayName || "Trader", "");
+      clearProgress();
+      navigate(landingRoute, { replace: true });
+      return;
+    }
     // Setup finished — clear persisted progress and route to sign-in.
     clearProgress();
     navigate("/welcome", { replace: true });

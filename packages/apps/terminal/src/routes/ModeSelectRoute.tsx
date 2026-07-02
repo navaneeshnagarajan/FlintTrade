@@ -2,7 +2,7 @@
  * ModeSelectRoute — mode picker shown during the login flow.
  *
  * Presents three cards: Explore / Practice / Live.
- * Selecting "Live" requires a 6-digit PIN before calling onSelect.
+ * Selecting "Live" verifies the 6-digit PIN before calling onSelect.
  * Not a standalone route — used as a step inside WelcomeRoute.
  */
 
@@ -17,7 +17,7 @@ import type { AppMode } from "@/stores/modeStore";
 // ---------------------------------------------------------------------------
 
 interface ModeSelectRouteProps {
-  onSelect: (mode: AppMode) => void;
+  onSelect: (mode: AppMode, liveSessionToken?: string) => void;
 }
 
 interface ModeCardConfig {
@@ -80,16 +80,43 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
   const [selected, setSelected] = useState<AppMode>("explore");
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (selected === "live") {
-      if (pin.length !== 6) {
+      if (pin.length !== 6 || /\D/.test(pin)) {
         setPinError("Please enter your 6-digit PIN.");
         return;
       }
-      // PIN verification is handled server-side on the actual mode-switch call.
-      // Here we just pass it along with the selection.
-      setPinError("");
+      setIsVerifyingPin(true);
+      try {
+        const res = await fetch("/ft-api/v1/auth/pin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        });
+        if (!res.ok) {
+          setPinError("Incorrect PIN. Try again.");
+          return;
+        }
+        const body = (await res.json()) as {
+          data?: { token?: string };
+          token?: string;
+        };
+        const liveSessionToken = body?.data?.token ?? body?.token;
+        if (!liveSessionToken) {
+          setPinError("Server did not return a live session token — try again.");
+          return;
+        }
+        setPinError("");
+        onSelect(selected, liveSessionToken);
+        return;
+      } catch {
+        setPinError("Could not verify PIN — check connection.");
+        return;
+      } finally {
+        setIsVerifyingPin(false);
+      }
     }
     onSelect(selected);
   };
@@ -188,7 +215,9 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
                   placeholder="6-digit PIN"
                   aria-label="Enter your 6-digit PIN to enable Live mode"
                   className="text-center font-mono text-lg tracking-widest max-w-48"
-                  onKeyDown={(e) => e.key === "Enter" && handleContinue()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleContinue();
+                  }}
                   autoFocus
                 />
               </div>
@@ -205,12 +234,12 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
 
         {/* Continue button */}
         <Button
-          onClick={handleContinue}
-          disabled={selected === "live" && pin.length !== 6}
+          onClick={() => void handleContinue()}
+          disabled={isVerifyingPin || (selected === "live" && pin.length !== 6)}
           className="w-full"
           size="lg"
         >
-          Continue with {MODE_CARDS.find((c) => c.id === selected)?.label}
+          {isVerifyingPin ? "Verifying PIN..." : `Continue with ${MODE_CARDS.find((c) => c.id === selected)?.label}`}
         </Button>
       </div>
     </div>

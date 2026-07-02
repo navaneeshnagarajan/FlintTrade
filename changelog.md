@@ -104,6 +104,13 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Final `v0.6.0-beta.1` app audit fixes: Live setup now verifies the PIN and
+  stores the live-unlocked session token before entering Live mode; normal
+  password and 2FA login clears stale Live UI state; Explore onboarding CTAs
+  route first-time users to account setup; the site release catalogue includes
+  the current beta note; desktop release dispatch rejects stale tags; and
+  Supply Chain CI audits the desktop Rust lockfile with expiring reviewed
+  warning allowlist entries.
 - AI memory retrieval survives a wedged ChromaDB vector index — chromadb 1.5.9's Rust
   core can permanently lose an `add()`'s embedding write under rapid collection churn
   (upstream chroma-core/chroma#7032: every later vector query raises "Error finding id"

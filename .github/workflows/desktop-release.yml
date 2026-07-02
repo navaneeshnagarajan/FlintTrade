@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish under (e.g. v0.6.0-desktop). Leave blank to only upload build artifacts.'
+        description: 'Release tag to publish under (e.g. v0.6.0-beta.1). Leave blank to only upload build artifacts.'
         required: false
         default: ''
 
@@ -76,6 +76,13 @@ jobs:
           if [[ -z "$RELEASE_TAG" ]]; then
             echo "No release tag supplied; building workflow artifacts only."
             exit 0
+          fi
+
+          TAG_COMMIT="$(git rev-parse "$RELEASE_TAG^{commit}" 2>/dev/null || true)"
+          if [[ -n "$TAG_COMMIT" && "$TAG_COMMIT" != "$GITHUB_SHA" ]]; then
+            echo "Release tag $RELEASE_TAG points at $TAG_COMMIT, not this workflow run's commit $GITHUB_SHA." >&2
+            echo "Create a fresh tag on the current main head before publishing installers." >&2
+            exit 1
           fi
 
           VERSION="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' package.json | head -n 1)"

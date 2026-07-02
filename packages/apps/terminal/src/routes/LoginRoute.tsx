@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Lock, KeyRound, ShieldCheck, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
 
 interface LoginRouteProps {
   onSuccess: () => void;
@@ -40,6 +41,9 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
           data.data.username,
           data.data.expires_at,
         );
+        if (useModeStore.getState().mode === "live") {
+          useModeStore.getState().setMode("explore");
+        }
         onSuccess();
       } else {
         setError(data.message || "Invalid credentials.");
@@ -67,6 +71,7 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
           useAuthStore.getState().username || "user",
           "",
         );
+        useModeStore.getState().setMode("live");
         onSuccess();
       } else {
         setError(data.message || "Invalid PIN.");

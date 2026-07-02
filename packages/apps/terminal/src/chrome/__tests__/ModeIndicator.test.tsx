@@ -59,7 +59,7 @@ describe("ModeIndicator", () => {
       expect(useModeStore.getState().mode).toBe("practice");
     });
 
-    it("routes demo users to setup instead of switching to API-backed Practice", () => {
+    it("routes demo users to account setup instead of switching to API-backed Practice", () => {
       resetStore("explore");
       useAuthStore.setState({ token: "demo-user" });
       const listener = vi.fn();
@@ -71,7 +71,7 @@ describe("ModeIndicator", () => {
       expect(useModeStore.getState().mode).toBe("explore");
       expect(listener).toHaveBeenCalledTimes(1);
       const event = listener.mock.calls[0]?.[0] as CustomEvent<{ path?: string }>;
-      expect(event.detail.path).toBe("/setup");
+      expect(event.detail.path).toBe("/setup-account");
       window.removeEventListener("flinttrade:navigate", listener);
     });
 

@@ -128,12 +128,17 @@ jobs:
           toolchain: stable    # cargo-audit 0.22.x needs a newer compiler than tick-engine's pinned MSRV.
           rustflags: ""
       - run: cargo install cargo-audit --locked --version 0.22.2
-      - name: cargo audit
-        working-directory: packages/core/ticks
-        run: cargo +stable audit --deny warnings --json > cargo-audit-report.json
+      - name: cargo audit (tick engine)
+        run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/core/ticks --report packages/core/ticks/cargo-audit-report.json
+      - name: cargo audit (desktop app)
+        run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/apps/desktop/src-tauri --report packages/apps/desktop/src-tauri/cargo-audit-report.json
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: cargo-audit-report, path: packages/core/ticks/cargo-audit-report.json }
+        with:
+          name: cargo-audit-reports
+          path: |
+            packages/core/ticks/cargo-audit-report.json
+            packages/apps/desktop/src-tauri/cargo-audit-report.json
 
   node-audit:
     name: Node audit (pnpm audit)

@@ -6,7 +6,7 @@ untested or only partially wired**, or **(c) referenced but not built / blocked*
 It is a living document — update it in the same change that moves a feature
 between buckets.
 
-`v0.6.0-beta` is not production ready. The native adapter code for the four
+`v0.6.0-beta.1` is not production ready. The native adapter code for the four
 founder brokers (Dhan / Upstox / Kotak Neo / IndMoney) is present and
 mock-tested, but only Dhan currently carries an active SDK pin in
 `brokers.lock`. Upstox and Kotak Neo stay placeholder-pinned until their wave is

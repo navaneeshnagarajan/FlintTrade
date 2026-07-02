@@ -173,6 +173,15 @@ describe("ExploreRoute", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/home");
   });
 
+  it("routes first-time workspace CTAs to account setup instead of protected app pages", () => {
+    renderExplore();
+
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/setup-account");
+    expect(screen.getByRole("link", { name: /connect gateway/i })).toHaveAttribute("href", "/setup-account");
+  });
+
   it("shows all six module preview cards", () => {
     renderExplore();
 
