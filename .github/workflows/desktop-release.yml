@@ -4,7 +4,7 @@ name: Desktop Release
 # architecture and (on a version tag) attaches them to a GitHub Release.
 #
 #   • macOS    — .dmg + .app           (arm64 + Intel x64)
-#   • Windows  — .msi + .exe (NSIS)    (x64)
+#   • Windows  — .exe (NSIS)           (x64)
 #   • Linux    — .deb + .rpm + .AppImage (x64 + arm64)
 #
 # Each job freezes the Python backend into a sidecar (PyInstaller), then bundles
@@ -168,7 +168,15 @@ jobs:
 
       # --- Bundle the Tauri desktop app ----------------------------------
       - name: Build desktop installers
-        run: pnpm --filter @flinttrade/desktop tauri build --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          BUNDLE_ARGS=()
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            # WiX/MSI rejects beta SemVer like 0.6.0-beta.1; NSIS produces the
+            # Windows .exe installer without flattening the public version.
+            BUNDLE_ARGS+=(--bundles nsis)
+          fi
+          pnpm --filter @flinttrade/desktop tauri build --target ${{ matrix.target }} "${BUNDLE_ARGS[@]}"
 
       # --- Collect installers --------------------------------------------
       - name: Stage installers

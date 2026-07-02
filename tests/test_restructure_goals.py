@@ -266,6 +266,8 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "Release version mismatch" in workflow
     assert "Release tag $RELEASE_TAG points at $TAG_COMMIT" in workflow
     assert "not this workflow run's commit $GITHUB_SHA" in workflow
+    assert "BUNDLE_ARGS+=(--bundles nsis)" in workflow
+    assert "WiX/MSI rejects beta SemVer" in workflow
     assert "uv sync --frozen --extra desktop" in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
