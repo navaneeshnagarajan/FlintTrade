@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -347,6 +348,20 @@ def test_supply_chain_covers_desktop_rust_lockfile() -> None:
     assert "RUSTSEC-2026-0194" in vendored_plist_note
     assert 'name = "quick-xml"\nversion = "0.41.0"' in desktop_lock
     assert 'name = "quick-xml"\nversion = "0.39.4"' not in desktop_lock
+
+
+def test_dependency_provenance_gate_accepts_repo_local_cargo_patches() -> None:
+    """Cargo target paths are not dependency sources; repo-local patches are allowed."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check-no-git-deps.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "dependency provenance OK" in result.stdout
 
 
 def test_workspace_example_documents_ui_owned_openalgo_config() -> None:
