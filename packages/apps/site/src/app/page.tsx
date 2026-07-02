@@ -190,9 +190,9 @@ export default function HomePage() {
         <div className="section-heading">
           <h2>Install the desktop app first.</h2>
           <p>
-            FlintTrade is built as a native desktop app for macOS, Windows, and Linux. Use a release
-            installer when one is attached, or build locally from source while the beta desktop
-            release assets are being prepared.
+            FlintTrade is built as a native desktop app for macOS, Windows, and Linux. Download the
+            current beta installer from GitHub releases, or build locally from source when
+            developing the app.
           </p>
           <div className="section-actions">
             <Link className="button primary" href="/docs/desktop">
