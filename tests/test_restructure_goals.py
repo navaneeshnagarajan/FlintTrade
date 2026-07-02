@@ -251,13 +251,15 @@ def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -
     assert "ps --format '{{.Status}}' flinttrade-backend" not in docker_installer
 
 
-def test_desktop_release_workflow_is_tagged_and_fail_closed() -> None:
-    """Desktop release CI should run on tags and fail if installers are missing."""
+def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
+    """Desktop release CI should be manual and fail if installers are missing."""
     workflow = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
     vuln_refresh = (ROOT / ".github" / "workflows" / "refresh-vuln-snapshot.yml").read_text(encoding="utf-8")
 
-    assert "tags:" in workflow
-    assert "- 'v*'" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "description: 'Release tag to publish under" in workflow
+    assert "push:" not in workflow
+    assert "tags:" not in workflow
     assert "Verify release tag matches package version" in workflow
     assert "DESKTOP_VERSION" in workflow
     assert "TAURI_VERSION" in workflow
