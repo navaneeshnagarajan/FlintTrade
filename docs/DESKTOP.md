@@ -186,6 +186,7 @@ See the [Tauri signing guide](https://tauri.app/distribute/sign/).
 - **Port in use:** the app always asks the OS for a free port (`--port 0`), so a
   running `make start` backend on 5100 does not conflict.
 - **AI / ML features unavailable:** heavy ML stacks (PyTorch, ChromaDB, scikit-
-  learn) are intentionally excluded from the desktop bundle to keep the
-  installer small. Those features degrade gracefully; run from source
-  (`make dev`) for the full ML surface.
+  learn) are intentionally excluded from the desktop bundle and default
+  workspace lock to keep installers small and avoid unresolved optional-tooling
+  advisories. Those features degrade gracefully; install the reviewed AI
+  libraries in your local environment before enabling them.

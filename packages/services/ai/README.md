@@ -9,7 +9,7 @@
 ## Public surface
 
 - `src/flinttrade_ai/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)`
-- `src/flinttrade_ai/rag.py — ChromaDB-backed retrieval-augmented generation`
+- `src/flinttrade_ai/rag.py — optional ChromaDB-backed retrieval-augmented generation`
 - `src/flinttrade_ai/multi_agent.py — analyst chain + risk debate + ensemble selector`
 - `src/flinttrade_ai/advisor.py — production advisor surface for the AI Centre route`
 
@@ -26,6 +26,12 @@ uv pip install -e packages/services/ai
 If you only want to use the package in isolation, the package's `pyproject.toml`,
 `Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
 root workspace.
+
+RAG storage, local sentence-transformer embeddings, and Crawl4AI scraping are
+loaded only when those features are enabled and their libraries are installed in
+the local environment. They are intentionally not locked into the default
+workspace install, so the trading terminal and backend do not inherit unresolved
+upstream advisories from optional AI tooling.
 
 ## Tests
 

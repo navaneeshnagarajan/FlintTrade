@@ -1,6 +1,4 @@
 # flint-ai dependencies
-chromadb>=0.5
-sentence-transformers>=3.0
 lightgbm>=4.0
 catboost>=1.2
 joblib>=1.3

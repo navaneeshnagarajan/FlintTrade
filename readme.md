@@ -158,7 +158,7 @@ and 1 Rust/PyO3 tick engine.
 | Frontend | React 19, TypeScript 5 (strict), Tailwind CSS v4, Dockview v5, shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
 | Backend | Python 3.12, Flask, httpx (async), pydantic, DuckDB, structlog |
 | Data | TA-Lib (batch indicators), Numba (streaming), Rust/PyO3 (tick engine), QuestDB (future) |
-| AI | LM Studio (local LLM), ChromaDB (vector store), LightGBM (signals), MCP bridge |
+| AI | LM Studio (local LLM), optional ChromaDB vector store, LightGBM (signals), MCP bridge |
 
 ### Three ways in
 

@@ -155,7 +155,7 @@ def check_pip_deps() -> list[RepoStatus]:
     results: list[RepoStatus] = []
 
     key_deps = [
-        "flask", "httpx", "pydantic", "duckdb", "chromadb",
+        "flask", "httpx", "pydantic", "duckdb",
         "lightgbm", "ruff", "pytest",
     ]
 
