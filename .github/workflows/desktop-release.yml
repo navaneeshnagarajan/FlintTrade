@@ -147,6 +147,8 @@ jobs:
       # --- Python backend deps + PyInstaller -----------------------------
       - name: Install Python dependencies
         run: |
+          # Desktop packaging excludes the optional numba/llvmlite ML stack;
+          # macOS Intel has no compatible llvmlite wheel and must not build it.
           uv sync --frozen --extra desktop
 
       # --- Frontend deps + build -----------------------------------------
