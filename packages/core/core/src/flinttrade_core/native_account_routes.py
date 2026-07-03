@@ -137,6 +137,59 @@ def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, A
     return results
 
 
+def _do_connect(
+    adapter_id: str,
+    account_id: str,
+    label: str,
+    credentials: dict[str, Any],
+    is_primary: bool,
+) -> tuple[dict[str, Any], int]:
+    """Store creds → register + ACL → rebuild router → login → session.
+
+    The shared connect transaction used by both the direct-credential POST and
+    the OAuth callback. Returns ``(response_body, http_status)``. Fail-closed at
+    each stage.
+    """
+    store = current_app.config.get("CREDENTIAL_STORE")
+    registry = current_app.config.get("REGISTRY")
+    if store is None or registry is None:
+        return {"status": "error", "message": "Credential store or registry unavailable."}, 503
+
+    try:
+        store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to store native credentials for %s:%s", adapter_id, account_id)
+        return {"status": "error", "message": f"Could not store credentials: {exc}"}, 500
+
+    actor_id = _operator_actor_id()
+    try:
+        _register_selector_in_workspace(adapter_id, account_id, actor_id, is_primary)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to register selector %s:%s in workspace", adapter_id, account_id)
+        return {"status": "error", "message": f"Could not register broker selector: {exc}"}, 500
+
+    login_results = _activate_after_credentials(adapter_id, account_id)
+    selector = f"{adapter_id}:{account_id}"
+    login_state = login_results.get(selector, "not-activated")
+    session_status = _session_status(registry, adapter_id, account_id)
+    connected = session_status["has_session"]
+    return {
+        "status": "success" if connected else "error",
+        "data": {
+            "adapter_id": adapter_id,
+            "account_id": account_id,
+            "connected": connected,
+            "login": login_state,
+            "session": session_status,
+        },
+        "message": (
+            f"{adapter_id} account {account_id} connected."
+            if connected
+            else f"Credentials stored but login did not establish a session: {login_state}"
+        ),
+    }, (200 if connected else 502)
+
+
 @native_accounts_bp.route("/accounts", methods=["POST"])
 def connect_native_account() -> Any:
     """Connect a native broker: store creds, register, activate, log in.
@@ -160,48 +213,155 @@ def connect_native_account() -> Any:
     if not isinstance(credentials, dict) or not credentials:
         return jsonify({"status": "error", "message": "credentials (a non-empty object) is required."}), 400
 
-    store = current_app.config.get("CREDENTIAL_STORE")
-    registry = current_app.config.get("REGISTRY")
-    if store is None or registry is None:
-        return jsonify({"status": "error", "message": "Credential store or registry unavailable."}), 503
+    body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
+    return jsonify(body_out), code
 
-    # 1. Persist credentials (encrypted) under the composite selector.
-    try:
-        store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to store native credentials for %s:%s", adapter_id, account_id)
-        return jsonify({"status": "error", "message": f"Could not store credentials: {exc}"}), 500
 
-    # 2. Register the selector + ACL the operator in workspace.json.
-    actor_id = _operator_actor_id()
-    try:
-        _register_selector_in_workspace(adapter_id, account_id, actor_id, is_primary)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to register selector %s:%s in workspace", adapter_id, account_id)
-        return jsonify({"status": "error", "message": f"Could not register broker selector: {exc}"}), 500
+# ---------------------------------------------------------------------------
+# OAuth redirect flow (Upstox, and any native with an oauth_redirect auth flow).
+# The operator opens the broker's authorisation dialog; the broker redirects the
+# browser back to our loopback callback with a single-use ``code``, which the
+# adapter's login() exchanges for an access token. The app's api_secret is held
+# only transiently in the in-memory pending store for the exchange.
+# ---------------------------------------------------------------------------
 
-    # 3 + 4. Rebuild the router (activates the native) and log it in.
-    login_results = _activate_after_credentials(adapter_id, account_id)
-    selector = f"{adapter_id}:{account_id}"
-    login_state = login_results.get(selector, "not-activated")
-    session_status = _session_status(registry, adapter_id, account_id)
+_OAUTH_PENDING: dict[str, dict[str, Any]] = {}
+_OAUTH_TTL_SECONDS = 600.0
 
-    connected = session_status["has_session"]
-    return jsonify({
-        "status": "success" if connected else "error",
-        "data": {
-            "adapter_id": adapter_id,
-            "account_id": account_id,
-            "connected": connected,
-            "login": login_state,
-            "session": session_status,
-        },
-        "message": (
-            f"{adapter_id} account {account_id} connected."
-            if connected
-            else f"Credentials stored but login did not establish a session: {login_state}"
-        ),
-    }), (200 if connected else 502)
+
+def _default_oauth_redirect_uri() -> str:
+    """The loopback redirect URI the operator registers in the broker app.
+
+    Defaults to this backend's own callback on 127.0.0.1:5100. Overridable via
+    ``FLINTTRADE_OAUTH_REDIRECT_URI`` for non-default ports / the desktop shell.
+    """
+    import os  # noqa: PLC0415
+
+    return os.environ.get(
+        "FLINTTRADE_OAUTH_REDIRECT_URI",
+        "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+    )
+
+
+def _purge_expired_oauth() -> None:
+    import time  # noqa: PLC0415
+
+    now = time.time()
+    for state in [s for s, v in _OAUTH_PENDING.items() if now - v.get("ts", 0) > _OAUTH_TTL_SECONDS]:
+        _OAUTH_PENDING.pop(state, None)
+
+
+@native_accounts_bp.route("/oauth/start", methods=["POST"])
+def native_oauth_start() -> Any:
+    """Begin an OAuth connect: return the broker authorisation URL.
+
+    Body: ``{adapter_id, account_id, api_key, api_secret, label?, is_primary?}``.
+    Stores the app secret + account transiently keyed by a CSRF ``state``; the
+    operator opens ``auth_url`` and approves; the broker redirects to our
+    callback with the ``code``.
+    """
+    import secrets  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    adapter_id = str(body.get("adapter_id", "")).strip().lower()
+    account_id = str(body.get("account_id", "")).strip()
+    api_key = str(body.get("api_key", "")).strip()
+    api_secret = str(body.get("api_secret", "")).strip()
+
+    if adapter_id not in _NATIVE_BROKER_IDS:
+        return jsonify({"status": "error", "message": f"'{adapter_id}' is not a native broker."}), 400
+    if not (account_id and api_key and api_secret):
+        return jsonify({
+            "status": "error",
+            "message": "account_id, api_key and api_secret are required.",
+        }), 400
+
+    native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
+    # The adapter class exposes build_login_url even when dormant — resolve from
+    # the class so OAuth start works before the native is activated.
+    from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES  # noqa: PLC0415
+
+    adapter_cls = NATIVE_ADAPTER_CLASSES.get(adapter_id)
+    builder = getattr(native_adapters.get(adapter_id), "build_login_url", None) or getattr(
+        adapter_cls, "build_login_url", None
+    )
+    if builder is None:
+        return jsonify({
+            "status": "error",
+            "message": f"{adapter_id} does not support an OAuth redirect flow.",
+        }), 400
+
+    redirect_uri = _default_oauth_redirect_uri()
+    state = secrets.token_urlsafe(24)
+    _purge_expired_oauth()
+    _OAUTH_PENDING[state] = {
+        "adapter_id": adapter_id,
+        "account_id": account_id,
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "redirect_uri": redirect_uri,
+        "label": str(body.get("label") or adapter_id),
+        "is_primary": bool(body.get("is_primary", False)),
+        "ts": time.time(),
+    }
+    auth_url = builder(api_key, redirect_uri, state)
+    return jsonify({"status": "success", "data": {"auth_url": auth_url, "state": state, "redirect_uri": redirect_uri}})
+
+
+@native_accounts_bp.route("/oauth/callback", methods=["GET"])
+def native_oauth_callback() -> Any:
+    """Broker OAuth redirect target: exchange the code and connect the account.
+
+    Query: ``?code=<single-use>&state=<csrf>``. Looks up the pending app
+    secret/account by ``state``, runs the connect transaction with
+    ``{code, api_key, api_secret, redirect_uri}`` (the adapter's login()
+    exchanges the code for an access token), and returns a small HTML result the
+    operator sees in the redirected tab.
+    """
+    code = request.args.get("code", "")
+    state = request.args.get("state", "")
+    _purge_expired_oauth()
+    pending = _OAUTH_PENDING.pop(state, None)
+    if pending is None:
+        return _oauth_result_html("Login link expired or invalid — start again from FlintTrade.", ok=False), 400
+    if not code:
+        # The broker can redirect with an error instead of a code.
+        err = request.args.get("error_description") or request.args.get("error") or "no authorisation code"
+        return _oauth_result_html(f"Broker did not return an authorisation code: {err}", ok=False), 400
+
+    adapter_id = pending["adapter_id"]
+    account_id = pending["account_id"]
+    credentials = {
+        "code": code,
+        "api_key": pending["api_key"],
+        "api_secret": pending["api_secret"],
+        "client_id": pending["api_key"],
+        "redirect_uri": pending["redirect_uri"],
+    }
+    body_out, http_code = _do_connect(
+        adapter_id, account_id, pending["label"], credentials, pending["is_primary"]
+    )
+    connected = bool(body_out.get("data", {}).get("connected"))
+    msg = (
+        f"{adapter_id} account {account_id} connected — you can close this tab and return to FlintTrade."
+        if connected
+        else f"Login failed: {body_out.get('message')}"
+    )
+    return _oauth_result_html(msg, ok=connected), (200 if connected else 502)
+
+
+def _oauth_result_html(message: str, ok: bool) -> str:
+    colour = "#22c55e" if ok else "#ef4444"
+    safe = message.replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        "<!doctype html><meta charset='utf-8'><title>FlintTrade — broker login</title>"
+        "<body style='font-family:system-ui,sans-serif;background:#0a0a0f;color:#e5e7eb;"
+        "display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
+        f"<div style='max-width:32rem;padding:2rem;text-align:center'>"
+        f"<div style='font-size:2rem;color:{colour}'>{'✓' if ok else '✕'}</div>"
+        f"<p style='font-size:1rem;line-height:1.5'>{safe}</p></div></body>"
+    )
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/login", methods=["POST"])

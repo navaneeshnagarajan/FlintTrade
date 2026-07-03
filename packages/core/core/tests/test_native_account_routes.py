@@ -16,6 +16,12 @@ import pytest
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    # Other test modules set OPENALGO_API_KEY / FLINTTRADE_API_KEY via os.environ
+    # directly (not monkeypatch), so the value leaks into this xdist worker and
+    # makes require_auth demand a key. Unset them so these routes run in the
+    # default no-key loopback-allowance mode deterministically.
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     (tmp_path / "master_password").write_text("native-routes-test-pw", encoding="utf-8")
     from flinttrade_core.app import create_flask_app
 
@@ -102,6 +108,33 @@ def test_list_and_remove_native_account(client):
     assert "indmoney:INDTEST02" not in brokers.get("registered", [])
     with pytest.raises(Exception):
         app.config["REGISTRY"].get_session_for("indmoney", "INDTEST02")
+
+
+def test_oauth_start_returns_auth_url_and_state(client):
+    c, _app, _tmp = client
+    resp = c.post(
+        "/api/v1/native/oauth/start",
+        json={"adapter_id": "upstox", "account_id": "UPXTEST", "api_key": "APIKEY", "api_secret": "SECRET"},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()["data"]
+    assert "api.upstox.com/v2/login/authorization/dialog" in data["auth_url"]
+    assert "client_id=APIKEY" in data["auth_url"]
+    assert data["state"] in data["auth_url"]
+    assert data["redirect_uri"].endswith("/api/v1/native/oauth/callback")
+
+
+def test_oauth_start_requires_api_key_and_secret(client):
+    c, _app, _tmp = client
+    resp = c.post("/api/v1/native/oauth/start", json={"adapter_id": "upstox", "account_id": "X"})
+    assert resp.status_code == 400
+
+
+def test_oauth_callback_rejects_unknown_state(client):
+    c, _app, _tmp = client
+    resp = c.get("/api/v1/native/oauth/callback?code=abc&state=nonexistent")
+    assert resp.status_code == 400
+    assert "expired or invalid" in resp.get_data(as_text=True)
 
 
 def test_relogin_replays_stored_credentials(client):
