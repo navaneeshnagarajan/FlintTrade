@@ -115,16 +115,14 @@ def _is_safe_account_id(account_id: str) -> bool:
     return 0 < len(account_id) <= 80 and all(ch in _ACCOUNT_ID_CHARS for ch in account_id)
 
 
-def _public_connect_body(body: dict[str, Any]) -> dict[str, Any]:
+def _public_connect_body(code: int) -> dict[str, Any]:
     """Return only the direct-connect fields consumed by the desktop UI."""
-    data = body.get("data") if isinstance(body.get("data"), dict) else {}
-    connected = bool(data.get("connected"))
-    login = str(data.get("login") or "")
+    connected = code == 200
     return {
         "status": "success" if connected else "error",
         "data": {
             "connected": connected,
-            "login": login if connected else "failed",
+            "login": "ok" if connected else "failed",
         },
         "message": (
             "Native broker account connected."
@@ -440,8 +438,8 @@ def connect_native_account() -> Any:
     if not isinstance(credentials, dict) or not credentials:
         return jsonify({"status": "error", "message": "credentials (a non-empty object) is required."}), 400
 
-    body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
-    return jsonify(_public_connect_body(body_out)), code
+    _body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
+    return jsonify(_public_connect_body(code)), code
 
 
 # ---------------------------------------------------------------------------
