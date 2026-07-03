@@ -13,6 +13,7 @@ vi.mock("@/services/ftApi.native", () => ({
   connectNativeAccount: vi.fn(),
   oauthStartNativeAccount: vi.fn(),
   removeNativeAccount: vi.fn(),
+  reloginNativeAccount: vi.fn(),
 }));
 
 import {
@@ -20,6 +21,7 @@ import {
   listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
+  reloginNativeAccount,
 } from "@/services/ftApi.native";
 import { BrokersSection } from "../BrokersSection";
 
@@ -129,5 +131,57 @@ describe("BrokersSection", () => {
       ),
     );
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("api.upstox.com"), "_blank", "noopener");
+  });
+});
+
+describe("BrokersSection — re-authentication (G5/G7)", () => {
+  const STALE_ACCOUNT = {
+    adapter_id: "dhan",
+    account_id: "1234567890",
+    label: "Dhan",
+    has_session: false,
+    needs_relogin: true,
+    login_error: "login-failed: Dhan login requires an access_token",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
+    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([STALE_ACCOUNT]);
+  });
+
+  it("shows the needs-fresh-login state with the actionable reason", async () => {
+    renderSection();
+    await waitFor(() => expect(screen.getByText(/needs fresh login/i)).toBeInTheDocument());
+    expect(screen.getByText(/login-failed: Dhan login requires an access_token/i)).toBeInTheDocument();
+  });
+
+  it("one-click re-authenticate replays the stored credentials", async () => {
+    (reloginNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ has_session: true });
+    renderSection();
+    await waitFor(() => expect(screen.getByLabelText(/re-authenticate dhan/i)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText(/re-authenticate dhan/i));
+    await waitFor(() =>
+      expect(reloginNativeAccount).toHaveBeenCalledWith("dhan", "1234567890"),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/re-authenticated/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("prefills the connect form when the stored material is stale", async () => {
+    (reloginNativeAccount as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("Re-login did not establish a session — enter fresh credentials."),
+    );
+    renderSection();
+    await waitFor(() => expect(screen.getByLabelText(/re-authenticate dhan/i)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText(/re-authenticate dhan/i));
+    await waitFor(() =>
+      expect(screen.getByText(/enter fresh credentials below/i)).toBeInTheDocument(),
+    );
+    // Broker + account id are prefilled so the operator only types the fresh secret.
+    expect((screen.getByLabelText(/account id/i) as HTMLInputElement).value).toBe("1234567890");
   });
 });

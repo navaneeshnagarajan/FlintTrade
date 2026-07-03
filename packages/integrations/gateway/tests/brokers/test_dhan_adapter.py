@@ -701,3 +701,19 @@ async def test_stream_depth_requires_factory_and_valid_level() -> None:
     with pytest.raises(BrokerError, match="depth level"):
         async for _ in adapter.stream_depth(session, level=7):
             pass  # pragma: no cover
+
+
+# ---------------------------------------------------------------------------
+# G7 — replayable-credential payload
+# ---------------------------------------------------------------------------
+
+
+def test_replay_credentials_drops_totp_and_keeps_minted_token() -> None:
+    from flinttrade_gateway.brokers._base import Session
+
+    adapter = DhanAdapter(client_factory=lambda _s: object())
+    session = Session(access_token="minted-24h", expires_at=9e9, account_id="111", adapter_id="dhan")
+    replay = adapter.replay_credentials(
+        {"client_id": "111", "pin": "1234", "totp": "000111"}, session
+    )
+    assert replay == {"client_id": "111", "pin": "1234", "access_token": "minted-24h"}

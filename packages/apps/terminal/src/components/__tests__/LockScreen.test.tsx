@@ -12,21 +12,25 @@ import "@testing-library/jest-dom";
 // Mocks — both stores, so the test can drive the current UI mode
 // ---------------------------------------------------------------------------
 
-const setLoggedIn = vi.fn();
+// vi.hoisted so the mock factory (hoisted above imports) can build its state
+// object eagerly — the factory now references setLoggedIn at mock time, not
+// lazily inside the selector.
+const { setLoggedIn } = vi.hoisted(() => ({ setLoggedIn: vi.fn() }));
 let currentMode: "explore" | "practice" | "live" = "practice";
 
-vi.mock("@/stores/authStore", () => ({
-  useAuthStore: (selector: (s: {
-    username: string;
-    setLoggedOut: () => void;
-    setLoggedIn: () => void;
-  }) => unknown) =>
-    selector({
-      username: "testuser",
-      setLoggedOut: vi.fn(),
-      setLoggedIn,
-    }),
-}));
+vi.mock("@/stores/authStore", () => {
+  const state = {
+    username: "testuser",
+    token: "current-session-jwt",
+    setLoggedOut: vi.fn(),
+    setLoggedIn,
+  };
+  // modeAuth.unlockWithPin reads the session token via getState() — the PIN
+  // unlock is session-bound (policy D6), so the mock must expose it.
+  const useAuthStore = (selector: (s: typeof state) => unknown) => selector(state);
+  useAuthStore.getState = () => state;
+  return { useAuthStore };
+});
 
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) =>

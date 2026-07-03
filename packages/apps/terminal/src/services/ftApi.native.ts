@@ -38,6 +38,10 @@ export interface NativeAccount {
   is_primary?: boolean;
   has_session?: boolean;
   expires_at?: number | null;
+  /** Set when the last credential replay failed — the stored material is
+   * stale/single-use and the operator must re-authenticate (G7). */
+  needs_relogin?: boolean;
+  login_error?: string | null;
 }
 
 interface ApiEnvelope<T> {
@@ -94,4 +98,31 @@ export async function oauthStartNativeAccount(input: {
 
 export async function removeNativeAccount(adapterId: string, accountId: string): Promise<void> {
   await del(`native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}`);
+}
+
+export interface ReloginResult {
+  has_session: boolean;
+  expires_at?: number | null;
+  login?: string;
+}
+
+/**
+ * Re-authenticate a connected account (daily re-auth / expired token, G5).
+ * Omit `credentials` to replay the stored (replayable) material; pass fresh
+ * credentials when the stored ones are stale (e.g. a new TOTP or token).
+ */
+export async function reloginNativeAccount(
+  adapterId: string,
+  accountId: string,
+  credentials?: Record<string, string>,
+): Promise<ReloginResult> {
+  const r = await post<ApiEnvelope<{ session: ReloginResult; login?: string }>>(
+    `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/login`,
+    credentials ? { credentials } : {},
+  );
+  const session = r.data?.session;
+  if (!session?.has_session) {
+    throw new Error(r.message || "Re-login did not establish a session — enter fresh credentials.");
+  }
+  return session;
 }

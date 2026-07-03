@@ -6,6 +6,8 @@
  *   2. addAccount makes a POST with correct body
  *   3. removeAccount makes a DELETE with encoded account ID
  *   4. Error responses throw with the server error message
+ *   5. The operator session JWT is attached when present (backend G9 guard
+ *      rejects gateway management writes without it)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
@@ -15,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 // ---------------------------------------------------------------------------
 
 import { gatewayApi } from "../gatewayApi";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,7 +58,7 @@ describe("gatewayApi", () => {
 
     const result = await gatewayApi.listBrokers();
 
-    expect(fetchSpy).toHaveBeenCalledWith("/ft-api/v1/brokers");
+    expect(fetchSpy).toHaveBeenCalledWith("/ft-api/v1/brokers", { headers: {} });
     expect(result).toEqual(brokers);
   });
 
@@ -87,7 +90,19 @@ describe("gatewayApi", () => {
 
     const url = fetchSpy.mock.calls[0][0] as string;
     expect(url).toBe("/ft-api/v1/accounts/acc%2Fspecial%26id");
-    expect(fetchSpy.mock.calls[0][1]).toEqual({ method: "DELETE" });
+    expect(fetchSpy.mock.calls[0][1]).toEqual({ method: "DELETE", headers: {} });
+  });
+
+  it("attaches the session JWT on writes (backend G9 write guard)", async () => {
+    useAuthStore.setState({ token: "jwt-abc" });
+    try {
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ account: {} }));
+      await gatewayApi.addAccount("zerodha", "Main", { api_key: "k" });
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer jwt-abc");
+    } finally {
+      useAuthStore.setState({ token: null });
+    }
   });
 
   it("throws with server error message on non-OK response", async () => {

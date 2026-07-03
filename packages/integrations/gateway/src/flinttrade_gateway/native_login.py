@@ -29,6 +29,7 @@ async def establish_native_session(
     credentials: dict[str, Any],
     adapter_id: str,
     account_id: str,
+    credential_store: Any | None = None,
 ) -> Any:
     """Log a native adapter in and register its session under the selector.
 
@@ -42,6 +43,14 @@ async def establish_native_session(
             ``login`` docstring).
         adapter_id: The bare adapter name (e.g. ``"dhan"``).
         account_id: The account within that adapter (e.g. the client id).
+        credential_store: Optional ``CredentialStore``. When supplied AND the
+            adapter exposes ``replay_credentials`` (Dhan/Upstox/Kotak Neo), the
+            vault payload is rewritten with the REPLAYABLE material after a
+            successful login (G7): single-use artefacts (OAuth ``code``,
+            30-second TOTP) are swapped for the minted ``access_token`` where
+            one exists, so the next boot reconnects instead of replaying a
+            dead credential. Best-effort — a write-back failure is logged and
+            never fails the live session.
 
     Returns:
         The live adapter-layer ``Session`` (also registered in ``registry``).
@@ -60,6 +69,24 @@ async def establish_native_session(
         account_id,
         getattr(session, "expires_at", None),
     )
+    replay = getattr(adapter, "replay_credentials", None)
+    if credential_store is not None and callable(replay):
+        try:
+            replayable = replay(dict(credentials), session)
+            if isinstance(replayable, dict) and replayable != credentials:
+                credential_store.update_credentials_for(adapter_id, account_id, replayable)
+                logger.info(
+                    "Vault payload for %s:%s rewritten with replayable material (G7)",
+                    adapter_id,
+                    account_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - write-back must never fail the live session
+            logger.warning(
+                "Replayable-credential write-back failed for %s:%s: %s",
+                adapter_id,
+                account_id,
+                exc,
+            )
     return session
 
 
@@ -106,7 +133,10 @@ async def establish_native_sessions(
             results[selector] = f"no-credentials: {exc}"
             continue
         try:
-            await establish_native_session(adapter, registry, credentials, adapter_id, account_id)
+            await establish_native_session(
+                adapter, registry, credentials, adapter_id, account_id,
+                credential_store=credential_store,
+            )
             results[selector] = "ok"
         except Exception as exc:  # noqa: BLE001 - per-selector isolation
             logger.warning("Native login failed for %s: %s", selector, exc)

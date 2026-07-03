@@ -551,3 +551,18 @@ async def test_order_stream_without_factory_raises():
     with pytest.raises(NotImplementedError, match="order_feed_factory"):
         async for _ in adapter.order_stream(session):  # pragma: no cover - never yields
             pass
+
+
+# ---------------------------------------------------------------------------
+# G7 — replayable-credential payload
+# ---------------------------------------------------------------------------
+
+
+def test_replay_credentials_drops_the_one_time_totp_only() -> None:
+    from flinttrade_gateway.brokers._base import Session
+
+    adapter = KotakNeoAdapter(client_factory=lambda _s: object())
+    session = Session(access_token="UCC1", expires_at=9e9, account_id="UCC1", adapter_id="kotakneo")
+    creds = {"consumer_key": "CK", "mobile_number": "9", "ucc": "UCC1", "mpin": "111111", "totp": "000111"}
+    replay = adapter.replay_credentials(creds, session)
+    assert replay == {"consumer_key": "CK", "mobile_number": "9", "ucc": "UCC1", "mpin": "111111"}

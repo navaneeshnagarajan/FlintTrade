@@ -534,6 +534,19 @@ class UpstoxAdapter(BrokerAdapter):
             extra={"client": client},
         )
 
+    def replay_credentials(self, credentials: dict, session: Session) -> dict:
+        """The replayable vault payload after a successful login (G7).
+
+        An OAuth ``code`` is single-use — the token endpoint rejects a replay,
+        so a boot-time re-login with the stored code fails every time. Swap it
+        for the exchanged ``access_token`` (valid until ~03:30 IST next day);
+        keep ``api_key``/``api_secret`` so a fresh OAuth round only needs the
+        operator's re-approval.
+        """
+        replayable = {k: v for k, v in credentials.items() if k != "code"}
+        replayable["access_token"] = session.access_token
+        return replayable
+
     async def refresh(self, session: Session) -> Session:
         # Upstox tokens are single-day (expire ~03:30 IST next day, no refresh
         # token) — a fresh login() is required at expiry.

@@ -11,7 +11,15 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, XCircle, Loader2, Trash2, ExternalLink } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Trash2,
+  ExternalLink,
+  AlertTriangle,
+  RefreshCw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +37,7 @@ import {
   connectNativeAccount,
   oauthStartNativeAccount,
   removeNativeAccount,
+  reloginNativeAccount,
   type NativeAuthMethod,
 } from "@/services/ftApi.native";
 
@@ -114,6 +123,32 @@ export function BrokersSection() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
   });
 
+  const reloginMutation = useMutation({
+    // Replay the stored (replayable) material first — a one-click morning
+    // re-auth for accounts whose vault token is still valid (G5).
+    mutationFn: (sel: { adapter: string; account: string }) => reloginNativeAccount(sel.adapter, sel.account),
+    onSuccess: (_r, sel) => {
+      setError("");
+      setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
+      qc.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+    },
+    onError: (e: unknown, sel) => {
+      // Stored material is stale (single-use TOTP/OAuth code, expired token) —
+      // prefill the connect form so the operator only enters what's missing.
+      setSelectedBroker(sel.adapter);
+      const first = brokers.find((b) => b.adapter_id === sel.adapter)?.auth_methods[0]?.id ?? "";
+      setSelectedMethodId(first);
+      setFields({});
+      setAccountId(sel.account);
+      setNotice("");
+      setError(
+        e instanceof Error
+          ? `${e.message} Enter fresh credentials below to re-authenticate.`
+          : "Re-login failed — enter fresh credentials below.",
+      );
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div>
@@ -139,6 +174,8 @@ export function BrokersSection() {
                 <div className="flex items-center gap-3">
                   {a.has_session ? (
                     <CheckCircle2 className="size-4 text-profit" aria-hidden="true" />
+                  ) : a.needs_relogin ? (
+                    <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
                   ) : (
                     <XCircle className="size-4 text-loss" aria-hidden="true" />
                   )}
@@ -149,19 +186,42 @@ export function BrokersSection() {
                     <div className="text-xs text-text-muted">
                       {a.adapter_id}
                       {a.is_primary ? " · primary" : ""}
-                      {a.has_session ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}` : " · no live session"}
+                      {a.has_session
+                        ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
+                        : a.needs_relogin
+                          ? " · needs fresh login"
+                          : " · no live session"}
                     </div>
+                    {!a.has_session && a.needs_relogin && a.login_error && (
+                      <div className="text-xxs text-warning mt-0.5">{a.login_error}</div>
+                    )}
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Disconnect ${a.adapter_id} ${a.account_id}`}
-                  onClick={() => removeMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
-                  disabled={removeMutation.isPending}
-                >
-                  <Trash2 className="size-4" aria-hidden="true" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  {!a.has_session && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Re-authenticate ${a.adapter_id} ${a.account_id}`}
+                      onClick={() => reloginMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                      disabled={reloginMutation.isPending}
+                    >
+                      <RefreshCw
+                        className={`size-4 ${reloginMutation.isPending ? "animate-spin" : ""}`}
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Disconnect ${a.adapter_id} ${a.account_id}`}
+                    onClick={() => removeMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                    disabled={removeMutation.isPending}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
@@ -239,22 +299,24 @@ export function BrokersSection() {
               </div>
             ))}
 
-            {error && (
-              <div role="alert" className="text-sm text-loss flex items-center gap-2">
-                <XCircle className="size-4 shrink-0" aria-hidden="true" />{error}
-              </div>
-            )}
-            {notice && (
-              <div role="status" className="text-sm text-profit flex items-center gap-2">
-                {method.kind === "oauth" ? <ExternalLink className="size-4 shrink-0" aria-hidden="true" /> : <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />}
-                {notice}
-              </div>
-            )}
-
             <Button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending} className="w-full sm:w-auto">
               {connectMutation.isPending && <Loader2 className="size-4 mr-2 animate-spin" aria-hidden="true" />}
               {method.kind === "oauth" ? `Log in with ${broker?.display_name}` : "Connect"}
             </Button>
+          </div>
+        )}
+
+        {/* Shared feedback — visible for connect AND re-authenticate actions,
+            so a relogin result shows even before a broker is picked. */}
+        {error && (
+          <div role="alert" className="text-sm text-loss flex items-center gap-2">
+            <XCircle className="size-4 shrink-0" aria-hidden="true" />{error}
+          </div>
+        )}
+        {notice && (
+          <div role="status" className="text-sm text-profit flex items-center gap-2">
+            {method?.kind === "oauth" ? <ExternalLink className="size-4 shrink-0" aria-hidden="true" /> : <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />}
+            {notice}
           </div>
         )}
       </div>

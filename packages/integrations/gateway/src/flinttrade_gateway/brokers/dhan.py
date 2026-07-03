@@ -282,6 +282,18 @@ class DhanAdapter(BrokerAdapter):
             extra={"client": client, "client_id": client_id},
         )
 
+    def replay_credentials(self, credentials: dict, session: Session) -> dict:
+        """The replayable vault payload after a successful login (G7).
+
+        A pasted TOTP is a 30-second one-time code — replaying it at the next
+        boot is guaranteed to fail. Swap it for the minted 24h ``access_token``
+        (restart-within-validity reconnects cleanly); keep ``client_id`` and
+        ``pin`` so a UI-assisted re-auth only needs a fresh TOTP.
+        """
+        replayable = {k: v for k, v in credentials.items() if k != "totp"}
+        replayable["access_token"] = session.access_token
+        return replayable
+
     async def refresh(self, session: Session) -> Session:
         # Dhan access tokens are long-lived (manual 24h renewal); nothing to do
         # until expiry, at which point a fresh login() is required.

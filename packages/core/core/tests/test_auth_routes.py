@@ -20,6 +20,17 @@ def client(tmp_path):
             yield c, svc
 
 
+def _session_headers() -> dict[str, str]:
+    """A valid session JWT — /v1/auth/pin is session-bound (policy D6): the
+    PIN is a re-auth factor, never a session-minting factor."""
+    from flinttrade_core.auth_routes import _create_token
+
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {_create_token('nav', mode='explore')}",
+    }
+
+
 class TestSetupEndpoint:
     def test_setup_creates_account(self, client):
         c, svc = client
@@ -106,7 +117,7 @@ class TestPinEndpoint:
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers={"Content-Type": "application/json"})
+                       headers=_session_headers())
         assert resp.status_code == 200
 
     def test_pin_verify_wrong(self, client):
@@ -116,7 +127,7 @@ class TestPinEndpoint:
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
         resp = c.post("/v1/auth/pin", json={"pin": "000000"},
-                       headers={"Content-Type": "application/json"})
+                       headers=_session_headers())
         assert resp.status_code == 401
 
     def test_pin_response_includes_new_token(self, client):
@@ -132,7 +143,7 @@ class TestPinEndpoint:
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers={"Content-Type": "application/json"})
+                       headers=_session_headers())
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert isinstance(data.get("token"), str)
@@ -154,7 +165,7 @@ class TestModeSwitchEndpoint:
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
         pin_resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                          headers={"Content-Type": "application/json"})
+                          headers=_session_headers())
         return pin_resp.get_json()["data"]["token"]
 
     def test_downgrade_to_practice_returns_fresh_token(self, client):
@@ -330,7 +341,7 @@ class TestPinModeParameter:
         c, _ = client
         self._setup(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers={"Content-Type": "application/json"})
+                      headers=_session_headers())
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "live"
@@ -340,7 +351,7 @@ class TestPinModeParameter:
         c, _ = client
         self._setup(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "practice"},
-                      headers={"Content-Type": "application/json"})
+                      headers=_session_headers())
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "practice"
@@ -350,7 +361,7 @@ class TestPinModeParameter:
         c, _ = client
         self._setup(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "explore"},
-                      headers={"Content-Type": "application/json"})
+                      headers=_session_headers())
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "explore"
@@ -360,14 +371,14 @@ class TestPinModeParameter:
         c, _ = client
         self._setup(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "bogus"},
-                      headers={"Content-Type": "application/json"})
+                      headers=_session_headers())
         assert resp.status_code == 400
 
     def test_pin_wrong_pin_still_401_with_mode(self, client):
         c, _ = client
         self._setup(c)
         resp = c.post("/v1/auth/pin", json={"pin": "000000", "mode": "practice"},
-                      headers={"Content-Type": "application/json"})
+                      headers=_session_headers())
         assert resp.status_code == 401
 
 
@@ -417,3 +428,45 @@ class TestRateLimitRegistration:
                 f"Auth view '{required}' is missing the @_rate_limit decorator — "
                 "every public auth endpoint must be rate-limited."
             )
+
+
+class TestPinIsSessionBound:
+    """Policy D6 (Phase 1 review): the PIN is a RE-AUTH factor, never a
+    session-minting factor — /v1/auth/pin without a valid session JWT is 401
+    even with the correct PIN, so the daily password+TOTP login (the JWT's
+    next-08:00-IST expiry) can never be sidestepped by a low-entropy PIN."""
+
+    def _setup(self, c):
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_correct_pin_without_session_is_rejected(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 401
+        assert "sign in with password" in resp.get_json()["message"].lower()
+
+    def test_correct_pin_with_garbage_session_is_rejected(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                      headers={"Content-Type": "application/json",
+                               "Authorization": "Bearer not-a-jwt"})
+        assert resp.status_code == 401
+
+    def test_correct_pin_with_revoked_session_is_rejected(self, client):
+        c, _ = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_token, _revoke_jti, decode_token
+
+        token = _create_token("nav", mode="explore")
+        payload = decode_token(token)
+        _revoke_jti(payload["jti"], float(payload["exp"]))
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                      headers={"Content-Type": "application/json",
+                               "Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401

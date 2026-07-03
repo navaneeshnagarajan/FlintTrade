@@ -377,6 +377,18 @@ class KotakNeoAdapter(BrokerAdapter):
             extra={"client": client},
         )
 
+    def replay_credentials(self, credentials: dict, session: Session) -> dict:
+        """The replayable vault payload after a successful login (G7).
+
+        The NEO 2FA consumes a live 30-second TOTP and yields SDK-internal
+        session state that cannot be rehydrated from a stored token, so there
+        is nothing minted to write back — just drop the one-time ``totp`` so a
+        boot-time replay fails with the clear "requires 'totp'" message
+        (surfaced as needs-fresh-login) instead of silently replaying a stale
+        code at the broker.
+        """
+        return {k: v for k, v in credentials.items() if k != "totp"}
+
     async def refresh(self, session: Session) -> Session:
         # NEO tokens are single-day (daily MPIN+TOTP cycle, no refresh token) —
         # a fresh login() is required at expiry.

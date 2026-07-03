@@ -2,8 +2,13 @@
  * FlintTrade Gateway REST API client.
  * Targets /ft-api/v1, proxied via /ft-api in dev (see vite.config.ts).
  * Handles broker account management, OAuth flows, OTP authentication.
+ *
+ * All requests attach the shared auth context via {@link buildHeaders} — the
+ * backend's G9 guard requires the operator's session JWT on every gateway
+ * management write (accounts, credentials, OAuth start, rate-limit config).
  */
 
+import { buildHeaders } from "@/services/ftApi.helpers";
 import type { BrokerInfo, BrokerAccount, OAuthStartResponse } from "@/types/broker";
 
 const BASE = "/ft-api/v1";
@@ -15,7 +20,7 @@ async function extractErrorMessage(res: Response): Promise<string> {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await fetch(`${BASE}${path}`, { headers: buildHeaders(false) });
   if (!res.ok) {
     const msg = await extractErrorMessage(res);
     throw new Error(`Gateway: ${msg}`);
@@ -26,7 +31,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -37,7 +42,7 @@ async function post<T>(path: string, body?: object): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}${path}`, { method: "DELETE", headers: buildHeaders(false) });
   if (!res.ok) {
     const msg = await extractErrorMessage(res);
     throw new Error(`Gateway: ${msg}`);
@@ -48,7 +53,7 @@ async function del<T>(path: string): Promise<T> {
 async function put<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {

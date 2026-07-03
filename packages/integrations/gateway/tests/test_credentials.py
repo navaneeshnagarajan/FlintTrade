@@ -254,3 +254,22 @@ class TestOverwrite:
         store.store("acc1", "zerodha", "L", {"k": "v2"}, is_primary=True)
         accounts = store.list_accounts()
         assert accounts[0]["is_primary"] is True
+
+
+class TestUpdateCredentialsFor:
+    """G7 — the write-back API swaps the payload without touching metadata."""
+
+    def test_update_replaces_payload_and_preserves_metadata(self, store: CredentialStore) -> None:
+        store.store("111", "dhan", "My Dhan", {"pin": "1234", "totp": "000111"},
+                    is_primary=True, adapter_id="dhan")
+        store.update_credentials_for("dhan", "111", {"pin": "1234", "access_token": "minted"})
+
+        creds = store.retrieve_for("dhan", "111")
+        assert creds == {"pin": "1234", "access_token": "minted"}
+        row = next(r for r in store.list_accounts() if r["account_id"] == "111")
+        assert row["label"] == "My Dhan"
+        assert bool(row["is_primary"]) is True
+
+    def test_update_missing_selector_raises(self, store: CredentialStore) -> None:
+        with pytest.raises(CredentialError):
+            store.update_credentials_for("dhan", "nope", {"access_token": "x"})

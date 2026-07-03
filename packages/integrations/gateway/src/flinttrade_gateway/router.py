@@ -183,6 +183,7 @@ class BrokerRouter:
         consume_gate: Callable[[str], bool] | None = None,
         config: RoutingConfig | None = None,
         rate_limiter: Any | None = None,
+        algo_tag_guard: Any | None = None,
     ) -> None:
         self._adapters = adapters
         self._session_provider = session_provider
@@ -198,6 +199,14 @@ class BrokerRouter:
         # the gate (after verify + gate-consume), so it can only delay a dispatch,
         # never bypass safety. None → no throttle (unchanged behaviour).
         self._rate_limiter = rate_limiter
+        # Optional algo-tag guard (flinttrade_engine.algo_tag_guard.AlgoTagGuard).
+        # For adapters advertising ``capabilities.algo_tag_required`` it relays
+        # the operator's broker-registered algo_id onto the dispatch session and
+        # enforces the per-(broker, exchange) per-second algo-order ceiling.
+        # Below the gate like the rate limiter — it can only tag or refuse a
+        # dispatch, never bypass safety. None → no tagging (the adapters'
+        # retail-default algo ids apply unchanged).
+        self._algo_tag_guard = algo_tag_guard
 
     @property
     def rate_limiter(self) -> Any | None:
@@ -211,6 +220,34 @@ class BrokerRouter:
     async def _throttle(self, adapter_id: str, kind: str) -> None:
         if self._rate_limiter is not None:
             await self._rate_limiter.acquire(adapter_id, kind)
+
+    def _algo_tag(self, adapter_id: str, session: Session, order: Any) -> None:
+        """Relay the configured algo_id and count this write for algo-tag brokers.
+
+        Applies only when a guard is wired AND the resolved adapter advertises
+        ``capabilities.algo_tag_required`` AND the guard holds a config for this
+        broker — an operator without an exchange-registered algo keeps the
+        adapter/mapping retail defaults. Runs after ``_verify_safety`` (below
+        the gate) so it can only stamp or refuse a verified dispatch.
+
+        Raises:
+            flinttrade_engine.algo_tag_guard.AlgoTagLimitError: When the
+                per-(broker, exchange) per-second algo-order ceiling would be
+                breached — the dispatch is refused before the broker can flag
+                the account.
+        """
+        guard = self._algo_tag_guard
+        if guard is None:
+            return
+        caps = getattr(self._adapters[adapter_id], "capabilities", None)
+        if not getattr(caps, "algo_tag_required", False):
+            return
+        if guard.algo_id_for(adapter_id) is None:
+            return
+        exchange = getattr(order, "exchange", None)
+        if exchange is None and isinstance(order, Mapping):
+            exchange = order.get("exchange")
+        session.algo_id = guard.tag_order(adapter_id, str(exchange or ""))
 
     # ------------------------------------------------------------------
     # Resolution (contract §13.2)
@@ -287,6 +324,7 @@ class BrokerRouter:
         if session.is_read_only:
             raise SafetyBypassError(f"session {account_id!r} is read-only")
         self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        self._algo_tag(adapter_id, session, order)
         await self._throttle(adapter_id, "order")
         return await self._adapters[adapter_id].place_order(session, order, _router_token=_ROUTER_TOKEN)
 
@@ -316,6 +354,7 @@ class BrokerRouter:
         if session.is_read_only:
             raise SafetyBypassError(f"session {account_id!r} is read-only")
         self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        self._algo_tag(adapter_id, session, order)
         await self._throttle(adapter_id, "order")
         return await self._adapters[adapter_id].modify_order(
             session, order_id, changes, _router_token=_ROUTER_TOKEN
@@ -366,6 +405,7 @@ class BrokerRouter:
                 raise SafetyBypassError(
                     f"cancel extras not covered by the signed cancel fingerprint: {mismatched}"
                 )
+        self._algo_tag(adapter_id, session, order)
         await self._throttle(adapter_id, "order")
         return await self._adapters[adapter_id].cancel_order(
             session, order_id, **dict(extras or {}), _router_token=_ROUTER_TOKEN
@@ -432,6 +472,7 @@ class BrokerRouter:
         if session.is_read_only:
             raise SafetyBypassError(f"session {account_id!r} is read-only")
         self._verify_safety(request_ctx, payload, safety_ctx, adapter_id, account_id)
+        self._algo_tag(adapter_id, session, payload)
         await self._throttle(adapter_id, "order")
         return await dispatch(self._adapters[adapter_id], session, payload)
 

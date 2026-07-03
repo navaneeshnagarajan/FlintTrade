@@ -341,3 +341,37 @@ def test_authorise_default_actor_trust_on_first_use() -> None:
     assert router._session_provider(ctx, "openalgo", "default") is not None
     # A second, different actor is NOT auto-claimed (TOFU is one-shot per selector).
     assert router.authorise_default_actor("someone-else") is None
+
+
+def test_build_broker_router_builds_algo_tag_guard_from_config() -> None:
+    """workspace brokers.algo_tags builds an engine AlgoTagGuard on the router
+    (G10 — algo-id relay + per-exchange per-second ceiling for algo_tag_required
+    natives). Without the block the router stays untagged (retail defaults)."""
+    from flinttrade_engine.algo_tag_guard import AlgoTagGuard
+
+    brokers = {
+        **default_workspace_config()["brokers"],
+        "algo_tags": {"dhan": {"algo_id": "ALGO-REG-1", "max_orders_per_sec": 8}},
+    }
+    router = build_broker_router(BrokerRegistry(), brokers)
+    guard = router._algo_tag_guard
+    assert isinstance(guard, AlgoTagGuard)
+    assert guard.algo_id_for("dhan") == "ALGO-REG-1"
+
+    untagged = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+    assert untagged._algo_tag_guard is None
+
+
+@pytest.mark.unit
+def test_build_broker_router_malformed_algo_tags_fails_closed() -> None:
+    """A malformed algo_tags entry raises (→ configure_broker_router leaves
+    BROKER_ROUTER None, orders 503) rather than silently dispatching untagged —
+    the safe direction for a compliance control."""
+    base = default_workspace_config()["brokers"]
+    for bad in (
+        {"dhan": {"algo_id": "", "max_orders_per_sec": 8}},
+        {"dhan": {"algo_id": "A", "max_orders_per_sec": 0}},
+        {"dhan": "not-an-object"},
+    ):
+        with pytest.raises(ValueError):
+            build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad})

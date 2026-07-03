@@ -23,6 +23,18 @@ def _f(name: str, label: str, *, secret: bool = False, required: bool = True, he
     return {"name": name, "label": label, "secret": secret, "required": required, "help": help_}
 
 
+# Proper display names for the connect UI. The adapter ids are lower-case
+# identifiers ("kotakneo", "indmoney") whose .capitalize() forms read wrong —
+# and the bridge catalogue's Kotak entry is "kotak" (BROKER_CATALOG aliases the
+# native "kotakneo"), so this map is the native UI's naming source of truth.
+NATIVE_DISPLAY_NAMES: dict[str, str] = {
+    "dhan": "Dhan",
+    "upstox": "Upstox",
+    "kotakneo": "Kotak Neo",
+    "indmoney": "INDmoney",
+}
+
+
 # broker_id -> list of auth methods. Only methods the native adapter actually
 # supports today are listed as connectable; read-only/out-of-band methods
 # (Upstox extended/analytics/app-based/MCP, Dhan partner OAuth) are documented in

@@ -403,6 +403,7 @@ def _dispatch_live_order(
     from pydantic import ValidationError  # noqa: PLC0415
 
     from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import (  # noqa: PLC0415
         SafetyConfig,
@@ -525,6 +526,15 @@ def _dispatch_live_order(
                 "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
             ),
         }), 503
+    except AlgoTagLimitError as exc:
+        # The router's algo-tag guard refused the dispatch: the operator's
+        # per-(broker, exchange) per-second algo-order ceiling would be breached.
+        # A throttle refusal, not a safety bypass — map to 429 so callers retry.
+        logger.warning(
+            "Live order refused by algo-tag guard | action=%s adapter=%s account=%s: %s",
+            ft_action, adapter_id, account_id, exc,
+        )
+        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 429
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
         # Gated-skeleton adapters (e.g. Dhan) raise NotImplementedError for
         # un-built order paths; an adapter raises UnsupportedCapabilityError for

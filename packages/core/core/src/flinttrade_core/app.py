@@ -800,9 +800,38 @@ def build_broker_router(
     except Exception as exc:  # pragma: no cover - a bad limit must not brick routing
         logger.warning("Broker rate limiter not built (%s); dispatch will be unthrottled", exc)
 
+    # Algo-tag guard (SEBI algo-id relay + per-(broker, exchange) per-second
+    # algo-order ceiling) for adapters advertising ``algo_tag_required``
+    # (Dhan/IndMoney). Built only when the operator configured their
+    # broker-registered algo ids in workspace.json
+    # ``brokers.algo_tags[broker_id].{algo_id, max_orders_per_sec}``; without
+    # config the adapters' retail-default algo ids apply unchanged. Unlike the
+    # rate limiter this is a compliance control, so a malformed entry raises —
+    # configure_broker_router then leaves BROKER_ROUTER None (orders 503) rather
+    # than silently dispatching untagged.
+    algo_tag_guard = None
+    algo_tags_cfg = brokers_config.get("algo_tags", {}) if isinstance(brokers_config, dict) else {}
+    if algo_tags_cfg:
+        from flinttrade_engine.algo_tag_guard import AlgoTagConfig, AlgoTagGuard  # noqa: PLC0415
+
+        tag_configs: dict[str, AlgoTagConfig] = {}
+        for broker_id, spec in algo_tags_cfg.items():
+            if not isinstance(spec, dict):
+                raise ValueError(f"brokers.algo_tags[{broker_id!r}] must be an object")
+            algo_id = str(spec.get("algo_id", "")).strip()
+            max_per_sec = int(spec.get("max_orders_per_sec", 0) or 0)
+            if not algo_id or max_per_sec <= 0:
+                raise ValueError(
+                    f"brokers.algo_tags[{broker_id!r}] needs a non-empty algo_id "
+                    "and a positive max_orders_per_sec"
+                )
+            tag_configs[str(broker_id)] = AlgoTagConfig(algo_id=algo_id, max_orders_per_sec=max_per_sec)
+        algo_tag_guard = AlgoTagGuard(tag_configs)
+        logger.info("Algo-tag guard active for: %s", ", ".join(sorted(tag_configs)))
+
     return BrokerRouter(
         resolved_adapters, session_provider, consume_gate=gate.consume, config=config,
-        rate_limiter=rate_limiter,
+        rate_limiter=rate_limiter, algo_tag_guard=algo_tag_guard,
     )
 
 
@@ -897,9 +926,15 @@ def _reestablish_native_sessions(app: Flask) -> dict[str, Any]:
     try:
         brokers_cfg = _read_workspace_brokers() or {}
         selectors = [str(s) for s in (brokers_cfg.get("registered") or [])]
-        return asyncio.run(
+        results = asyncio.run(
             establish_native_sessions(native_adapters, registry, credential_store, selectors)
         )
+        # G7 — surface per-selector login outcomes so the accounts list can say
+        # "needs fresh login: <reason>" instead of a bare red "no live session".
+        # Merged (not replaced) so a boot result survives later partial reruns.
+        status: dict[str, Any] = app.config.setdefault("NATIVE_SESSION_STATUS", {})
+        status.update(results)
+        return results
     except Exception as exc:  # noqa: BLE001 - session establishment must never brick boot/route
         logger.warning("Native session re-establishment failed: %s", exc)
         return {}
@@ -1242,9 +1277,24 @@ def create_flask_app(
     # Register gateway blueprint (mounts at /v1/)
     app.register_blueprint(gateway_bp)
 
+    # G9 — broker-management write guard: every POST/PUT/DELETE on the gateway
+    # blueprint (accounts, credential capture, OAuth start, rate-limit config)
+    # must carry a valid operator session JWT. The gateway package cannot
+    # import core's JWT machinery, so the guard is injected here.
+    from .auth_routes import require_operator_session  # noqa: PLC0415
+    app.config["BROKER_MGMT_WRITE_GUARD"] = require_operator_session
+
     # Native broker account capture + activation (Phase 1 G4) — /api/v1/native/*
     from .native_account_routes import native_accounts_bp  # noqa: PLC0415
     app.register_blueprint(native_accounts_bp)
+
+    # Daily broker session refresh (Phase 1 G5) — rotator + 08:05 IST jobs +
+    # /admin/credentials/rotation/* admin routes. The scheduler is created
+    # unstarted; _run_flask_server starts it on the serve path only.
+    from .native_rotation import configure_session_rotation  # noqa: PLC0415
+    rotation_bp = configure_session_rotation(app)
+    if rotation_bp is not None:
+        app.register_blueprint(rotation_bp)
 
     # Register analysis blueprint (/api/v1/gex, /api/v1/volsurface, etc.)
     from flinttrade_screener.analysis_routes import analysis_bp  # noqa: PLC0415
@@ -2348,6 +2398,16 @@ def _run_flask_server(app: Flask, port: int = 5100) -> None:
     thread = threading.Thread(target=_run, name="flinttrade-api", daemon=True)
     thread.start()
     logger.info("FlintTrade API server started on http://127.0.0.1:%d", port)
+
+    # Arm the daily session-refresh jobs (G5) — started here, on the serve path
+    # only, so create_flask_app stays side-effect-light for tests.
+    rotation_scheduler = app.config.get("ROTATION_SCHEDULER")
+    if rotation_scheduler is not None and not getattr(rotation_scheduler, "running", False):
+        try:
+            rotation_scheduler.start()
+            logger.info("Native session-refresh scheduler started (08:05 IST daily)")
+        except Exception as exc:  # noqa: BLE001 - rotation must never block serving
+            logger.warning("Session-refresh scheduler failed to start: %s", exc)
 
 
 class FlintTradeApp:

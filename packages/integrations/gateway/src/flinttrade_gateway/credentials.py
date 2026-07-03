@@ -283,6 +283,50 @@ class CredentialStore:
             )
             conn.commit()
 
+    def update_credentials_for(
+        self, adapter_id: str, account_id: str, credentials: dict[str, Any]
+    ) -> None:
+        """Re-encrypt and replace ONLY the credential payload for a selector.
+
+        The write-back half of reconnect realism (G7): after a successful
+        ``login()`` the vault swaps single-use artefacts (an OAuth ``code``, a
+        30-second TOTP) for the minted, replayable material (the live
+        ``access_token``) — without touching the row's broker, label,
+        ``is_primary``, or ``created_at``. A fresh salt is generated per write,
+        matching the per-row random-salt design.
+
+        Args:
+            adapter_id: The routing adapter (e.g. ``"upstox"``).
+            account_id: The account within that adapter.
+            credentials: The replayable credential dict to persist.
+
+        Raises:
+            CredentialError: If no matching row exists or encryption fails.
+        """
+        try:
+            payload: bytes = json.dumps(credentials).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise CredentialError(f"Cannot serialise credentials: {exc}") from exc
+
+        salt: bytes = os.urandom(_SALT_BYTES)
+        fernet: Fernet = self._derive_key(salt)
+        try:
+            encrypted: bytes = fernet.encrypt(payload)
+        except Exception as exc:  # pragma: no cover
+            raise CredentialError(f"Encryption failed: {exc}") from exc
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE accounts SET salt = ?, encrypted_creds = ? "
+                "WHERE adapter_id = ? AND account_id = ?",
+                (salt, encrypted, adapter_id, account_id),
+            )
+            conn.commit()
+        if cursor.rowcount == 0:
+            raise CredentialError(
+                f"Account not found for selector {adapter_id!r}:{account_id!r}"
+            )
+
     def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
         """Decrypt and return credentials by composite ``(adapter_id, account_id)``.
 

@@ -100,6 +100,20 @@ def test_routed_order_safety_bypass_returns_403() -> None:
     assert "refused" in resp.get_json()["message"].lower()
 
 
+def test_routed_order_algo_tag_limit_returns_429() -> None:
+    """The router's algo-tag guard refusing a dispatch (per-exchange per-second
+    algo ceiling, G10) maps to 429 — a throttle refusal callers should retry,
+    not a 403 safety bypass and not a 500."""
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError
+
+    router = MagicMock()
+    router.place_order = AsyncMock(side_effect=AlgoTagLimitError("dhan/NSE algo ceiling reached"))
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+    assert resp.status_code == 429
+    assert "refused" in resp.get_json()["message"].lower()
+
+
 def test_routed_order_broker_not_found_returns_503() -> None:
     router = MagicMock()
     router.place_order = AsyncMock(side_effect=BrokerNotFoundError("no session for openalgo:default"))

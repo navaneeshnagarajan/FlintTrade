@@ -76,9 +76,16 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
     setIsLoading(true);
     setError("");
     try {
+      // Session-bound PIN unlock (policy D6): the backend requires the current
+      // session JWT alongside the PIN. With no (or an expired) token the 401's
+      // message tells the operator to do the full password+TOTP login — which
+      // is exactly the daily re-auth requirement.
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const sessionToken = useAuthStore.getState().token;
+      if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
       const resp = await fetch("/ft-api/v1/auth/pin", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ pin }),
       });
       const data = await resp.json();

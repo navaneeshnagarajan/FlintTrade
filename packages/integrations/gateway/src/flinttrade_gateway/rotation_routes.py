@@ -6,21 +6,14 @@ Routes:
 - ``POST /admin/credentials/rotation/{broker}/schedule``
 - ``POST /admin/credentials/rotation/{broker}/rotate-now``
 
-STATUS — INTENTIONALLY NOT REGISTERED (planned, not built).
-``create_flask_app()`` deliberately does NOT mount this blueprint, because the
-rotation engine it binds to (:class:`CredentialsRotator`) is still a SCAFFOLD:
-``_do_refresh`` / ``_do_rotation`` only record a timestamp and report success —
-they do not perform a real token refresh or API-key rotation (see the in-source
-notes there). Real rotation requires per-broker re-auth, which for the native
-Dhan/Upstox/Kotak adapters needs their (currently absent) SDKs.
+MOUNTED since Phase 1 G5: ``create_flask_app`` builds a
+:class:`CredentialsRotator` over core's ``NativeSessionRefresher`` — a REAL
+``refresh_token`` hook that renews (Dhan ``RenewToken``) or replays vault
+credentials per selector and raises on failure, so ``rotate-now`` reports an
+honest per-broker result rather than the scaffold-era fake success. The core
+factory adds a G9 write guard (operator session JWT) before mounting.
 
-Mounting these routes now would surface a "Rotate now" that reports success
-while rotating nothing — a fake affordance the no-stale-screens rule forbids.
-Wire this (and an Account Manager UI) only once the rotator performs a genuine
-rotation; until then it is tracked as planned-but-not-built in PLAN.md /
-docs/INVENTORY.md.
-
-Usage (once the rotator is real)::
+Usage::
 
     from flinttrade_gateway.rotation_routes import create_rotation_blueprint
     app.register_blueprint(create_rotation_blueprint(rotator))

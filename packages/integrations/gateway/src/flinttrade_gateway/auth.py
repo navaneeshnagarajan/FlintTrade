@@ -28,6 +28,29 @@ logger = logging.getLogger("flinttrade.gateway.auth")
 
 gateway_bp = Blueprint("gateway", __name__, url_prefix="/v1")
 
+
+@gateway_bp.before_request
+def _guard_management_writes() -> Any | None:
+    """Require the operator's app session on every management write (G9).
+
+    Every POST/PUT/DELETE on this blueprint mutates broker accounts,
+    credentials, or gateway config — none of which an arbitrary local process
+    should be able to do just because it can reach 127.0.0.1. The guard
+    callable is injected by the core app factory via
+    ``app.config["BROKER_MGMT_WRITE_GUARD"]`` (the gateway package cannot
+    import core's JWT machinery without inverting the dependency); when the
+    blueprint is mounted without one (standalone unit tests) writes behave as
+    before. The OAuth callback is a browser-redirect GET protected by its
+    one-shot ``state`` token, so it is naturally exempt.
+    """
+    if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+        return None
+    guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
+    if guard is None:
+        return None
+    return guard()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -15,8 +15,12 @@
  *   - `unlockWithPin` → POST /v1/auth/pin : PIN re-authentication. Defaults to
  *     Live (the explicit arm-real-money gesture); pass a non-live `mode` for a
  *     mode-preserving idle unlock that must NOT silently escalate to Live.
+ *     Session-bound (policy D6): the backend requires the CURRENT session JWT
+ *     alongside the PIN — a PIN alone can never mint a session, so the daily
+ *     password+TOTP login stays mandatory after the token's 08:00 IST expiry.
  */
 
+import { useAuthStore } from "@/stores/authStore";
 import type { AppMode } from "@/stores/modeStore";
 
 const FT_API = "/ft-api/v1";
@@ -72,9 +76,15 @@ export async function unlockWithPin(
   pin: string,
   mode: AppMode = "live",
 ): Promise<UnlockResult> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // Session-bound PIN unlock (policy D6): the backend 401s without the current
+  // session JWT, so a PIN alone can never arm Live.
+  const sessionToken = useAuthStore.getState().token;
+  if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
+
   const res = await fetch(`${FT_API}/auth/pin`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ pin, mode }),
   });
   const body = (await res.json()) as ModeTokenResponse;

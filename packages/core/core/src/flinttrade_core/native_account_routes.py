@@ -15,10 +15,14 @@ The interactive counterpart to the boot-time credential-replay login step
   4. Run the native adapter's ``login()`` and register the resulting session,
      so the selector is immediately live.
 
-These routes rely on the loopback allowance for local desktop capture; when a
-session JWT is present its ``sub`` is used as the ACL actor so the right
+Reads rely on the loopback allowance for local desktop capture; WRITES
+(connect/relogin/remove/OAuth start) additionally require a valid session JWT
+(G9 — any local process can reach 127.0.0.1, but only the operator's
+authenticated app session may mutate broker registration, ACLs, and the
+credential vault). The JWT's ``sub`` doubles as the ACL actor so the right
 operator principal is authorised (falls back to the single-operator account
-username otherwise). Broker-management auth hardening is tracked as G9.
+username otherwise). The OAuth callback is a browser redirect GET protected by
+its one-shot ``state`` token, so the write guard does not apply to it.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .native_auth_methods import NATIVE_AUTH_METHODS
+from .native_auth_methods import NATIVE_AUTH_METHODS, NATIVE_DISPLAY_NAMES
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.native_accounts")
@@ -39,6 +43,21 @@ logger = logging.getLogger("flinttrade.native_accounts")
 _NATIVE_BROKER_IDS = {"dhan", "upstox", "kotakneo", "indmoney"}
 
 native_accounts_bp = Blueprint("native_accounts", __name__, url_prefix="/api/v1/native")
+
+
+@native_accounts_bp.before_request
+def _guard_account_writes() -> Any | None:
+    """Require a valid session JWT on every account-management write (G9).
+
+    GETs (list/brokers/read + the state-token-protected OAuth callback) keep
+    the loopback allowance; POST/DELETE/PUT/PATCH mutate broker registration,
+    ACLs, or the vault and must come from the operator's app session.
+    """
+    if request.method in ("POST", "DELETE", "PUT", "PATCH"):
+        from .auth_routes import require_operator_session  # noqa: PLC0415
+
+        return require_operator_session()
+    return None
 
 
 def _operator_actor_id() -> str:
@@ -200,7 +219,11 @@ def list_native_brokers() -> Any:
     flagged so the UI masks them.
     """
     brokers = [
-        {"adapter_id": bid, "display_name": bid.capitalize(), "auth_methods": methods}
+        {
+            "adapter_id": bid,
+            "display_name": NATIVE_DISPLAY_NAMES.get(bid, bid.capitalize()),
+            "auth_methods": methods,
+        }
         for bid, methods in NATIVE_AUTH_METHODS.items()
     ]
     return jsonify({"status": "success", "data": {"brokers": brokers}})
@@ -427,6 +450,7 @@ def list_native_accounts() -> Any:
     except Exception as exc:  # noqa: BLE001
         return jsonify({"status": "error", "message": f"Could not list accounts: {exc}"}), 500
 
+    login_status: dict[str, Any] = current_app.config.get("NATIVE_SESSION_STATUS") or {}
     accounts = []
     for row in rows:
         adapter_id = str(row.get("adapter_id") or row.get("broker") or "")
@@ -441,6 +465,13 @@ def list_native_accounts() -> Any:
         }
         if registry is not None:
             entry.update(_session_status(registry, adapter_id, account_id))
+        # G7 — a sessionless selector whose last replay attempt failed needs a
+        # FRESH login (stale/single-use credentials), not just "no session".
+        if not entry.get("has_session"):
+            last = str(login_status.get(f"{adapter_id}:{account_id}") or "")
+            if last and last != "ok":
+                entry["needs_relogin"] = True
+                entry["login_error"] = last
         accounts.append(entry)
     return jsonify({"status": "success", "data": {"accounts": accounts}})
 

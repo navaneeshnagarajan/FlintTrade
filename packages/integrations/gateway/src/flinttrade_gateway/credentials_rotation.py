@@ -52,15 +52,15 @@ class RotationResult:
 class CredentialsRotator:
     """Rotate broker API credentials on a schedule.
 
-    SCAFFOLD — not yet a real rotation engine. The scheduling, status-tracking,
-    and route surface are complete and tested, but ``_do_refresh`` /
-    ``_do_rotation`` currently only record a timestamp; they do NOT perform a
-    genuine token refresh or API-key rotation (each calls a broker hook only if
-    the credentials manager exposes one, which ``CredentialStore`` does not).
-    For this reason the ``rotation_routes`` blueprint is intentionally left
-    unmounted (see its module docstring) so it can't present a fake "rotated
-    successfully". Implementing real rotation needs per-broker re-auth — for the
-    native adapters, their (currently absent) SDKs.
+    The rotator delegates the actual work to its credentials manager:
+    ``_do_refresh`` calls ``manager.refresh_token(broker)`` when the manager
+    exposes it, and reports failure when that hook raises. Since Phase 1 G5
+    the core factory wires ``flinttrade_core.native_rotation
+    .NativeSessionRefresher`` as the manager — a REAL per-selector refresh
+    (Dhan renew-in-place, vault-credential replay for the rest) — and mounts
+    ``rotation_routes`` over it. With a manager that lacks the hook (e.g. a
+    bare ``CredentialStore``) a refresh degrades to a recorded timestamp, so
+    only wire these routes with a real refresher.
 
     Some brokers (e.g. Zerodha, Angel) require daily re-authentication to
     refresh the access token.  This class manages automatic token refreshes

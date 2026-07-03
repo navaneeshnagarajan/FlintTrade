@@ -866,3 +866,21 @@ async def test_reconcile_clean_on_empty_state():
     report = await adapter.reconcile(session)
     assert report.adapter_id == "upstox"
     assert report.clean and report.error == ""
+
+
+# ---------------------------------------------------------------------------
+# G7 — replayable-credential payload
+# ---------------------------------------------------------------------------
+
+
+def test_replay_credentials_drops_oauth_code_and_keeps_exchanged_token() -> None:
+    from flinttrade_gateway.brokers._base import Session
+
+    adapter = UpstoxAdapter(client_factory=lambda _s: object())
+    session = Session(access_token="exchanged", expires_at=9e9, account_id="U1", adapter_id="upstox")
+    replay = adapter.replay_credentials(
+        {"api_key": "K", "api_secret": "S", "code": "single-use", "redirect_uri": "http://cb"}, session
+    )
+    assert "code" not in replay
+    assert replay["access_token"] == "exchanged"
+    assert replay["api_key"] == "K" and replay["api_secret"] == "S"

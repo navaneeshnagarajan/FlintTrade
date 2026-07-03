@@ -373,6 +373,40 @@ def decode_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def require_operator_session() -> tuple[Any, int] | None:
+    """Guard broker-account-management writes with a valid session JWT (G9).
+
+    The loopback allowance is enough for reads, but account-management WRITES
+    (connect/remove/re-auth/set-primary/credential capture — they mutate broker
+    registration, ACLs, and the encrypted credential vault) must come from the
+    operator's authenticated app session, not just any process that can reach
+    127.0.0.1. Any valid, unrevoked FlintTrade JWT qualifies — the mode claim
+    does not matter, because connecting a broker from an Explore or Practice
+    session is legitimate.
+
+    Returns:
+        ``None`` when authorised, or a ``(response, status)`` pair the caller
+        should return (401 with an actionable message).
+    """
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return jsonify({
+            "status": "error",
+            "message": "Broker account management requires a logged-in session — sign in first.",
+        }), 401
+    try:
+        decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — sign in again to manage broker accounts.",
+        }), 401
+    return None
+
+
 @auth_bp.route("/status", methods=["GET"])
 @_rate_limit("30 per minute")
 def auth_status() -> tuple[Any, int]:
@@ -552,13 +586,37 @@ def auth_pin_verify() -> tuple[Any, int]:
     WITHOUT silently escalating the session to Live (Phase 1 fix for the
     A4 divergence: an idle Practice session unlocking with a PIN previously
     received a live-unlocked JWT under a Practice UI; design D2,
-    ``.local/specs/auth-phase1/DESIGN_LOG.md``). Non-live targets mint
+    ``.local/specs/auth-phase1/DESIGN_LOG.md``).  Non-live targets mint
     ``live_mode_unlocked: false`` — strictly less privilege from the same
     PIN verification.
+
+    Session-bound (Phase 1 policy decision D6): the PIN is a RE-AUTH factor,
+    never a session-minting factor — the request must carry a valid,
+    unrevoked session JWT (any mode). Without it, a low-entropy PIN alone
+    would arm Live for anything that can reach 127.0.0.1, and a session
+    that expired overnight could sidestep the daily password+TOTP re-auth
+    (the JWT's next-08:00-IST expiry is exactly that freshness bound).
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    auth_header = request.headers.get("Authorization", "")
+    session_token = auth_header.removeprefix("Bearer ").strip()
+    if not session_token:
+        session_token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not session_token:
+        return jsonify({
+            "status": "error",
+            "message": "PIN unlock requires an active session — sign in with password and TOTP first.",
+        }), 401
+    try:
+        decode_token(session_token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired — sign in with password and TOTP, then use the PIN.",
+        }), 401
 
     body = request.get_json(silent=True) or {}
     pin = str(body.get("pin", ""))
