@@ -806,6 +806,105 @@ def build_broker_router(
     )
 
 
+def configure_broker_router(
+    app: Flask,
+    registry: Any,
+    credential_store: Any,
+    openalgo_client: Any,
+) -> None:
+    """Build (or rebuild) the BrokerRouter and store it + friends on app.config.
+
+    Extracted from ``create_flask_app`` so it can be re-invoked at runtime after
+    the credential vault or the ``brokers.registered``/``account_acls`` config
+    changes (an interactive "connect native broker" action) — rebuilding
+    re-reads the vault + config, so a native that just gained credentials
+    activates. Best-effort: a malformed brokers block must NOT brick the app;
+    on failure ``BROKER_ROUTER`` is left ``None`` so the gated order path returns
+    a clear 503 rather than dispatching, and the rest of the app stays up.
+    """
+    app.config["BROKER_ROUTER"] = None
+    # Smart routing stays disabled when the brokers block fails to parse —
+    # the smart-route endpoint reads this and fails closed with a clear 403.
+    app.config["SMART_ROUTING"] = {}
+    # Active native adapters (broker_id -> adapter) + the reconciliation targets
+    # provider the engine runner polls (contract §14.2). Reset on every rebuild
+    # so a removed native drops out of both routing and reconciliation.
+    app.config["NATIVE_ADAPTERS"] = {}
+    app.config["RECONCILE_TARGETS"] = None
+    try:
+        from .workspace_migrations import default_workspace_config  # noqa: PLC0415
+        from flinttrade_engine.local_state_provider import JournalLocalStateProvider  # noqa: PLC0415
+
+        _brokers_cfg = _read_workspace_brokers()
+        _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
+        app.config["SMART_ROUTING"] = dict(_effective_brokers.get("smart_routing") or {})
+        _native_attest_ok, _native_has_credentials = _native_activation_checks(credential_store)
+        # Expose the OpenAlgo client so sync analysis routes (the screener) can
+        # fetch a real option chain through the functional bridge adapter rather
+        # than always falling back to sample data.
+        app.config["OPENALGO_CLIENT"] = openalgo_client
+        # Journal-backed local-state provider threaded into every native adapter
+        # (contract §14): the flinttrade-side mirror reconcile() diffs broker
+        # state against. Resolves lazily from app.config so the shared trade
+        # store (created later in the factory) is picked up.
+        _local_state_provider = JournalLocalStateProvider(
+            storage_provider=lambda: app.config.get("TRADE_STORAGE"),
+            lock_provider=lambda: app.config.get("TRADE_STORAGE_LOCK"),
+        )
+        _native_adapters: dict[str, Any] = app.config["NATIVE_ADAPTERS"]
+        app.config["BROKER_ROUTER"] = build_broker_router(
+            registry,
+            _effective_brokers,
+            openalgo_client=openalgo_client,
+            native_attest_ok=_native_attest_ok,
+            native_has_credentials=_native_has_credentials,
+            native_adapter_kwargs=lambda _broker_id: {"local_state_provider": _local_state_provider},
+            on_native_activated=_native_adapters.update,
+        )
+        app.config["RECONCILE_TARGETS"] = _build_reconcile_targets_provider(
+            registry,
+            _native_adapters,
+            [str(s) for s in (_effective_brokers.get("registered") or [])],
+        )
+        if _brokers_cfg is not None:
+            _snapshot_brokers_bak(_brokers_cfg)
+    except Exception as exc:
+        logger.critical(
+            "BrokerRouter not built — workspace.json brokers routing is invalid: %s. "
+            "Order routing is unavailable until you fix brokers.routing; the rest of "
+            "the app is up. Last known-good config: ~/.flinttrade/workspace.brokers.bak.json",
+            exc,
+        )
+
+
+def _reestablish_native_sessions(app: Flask) -> dict[str, Any]:
+    """Log in every active native selector whose credentials are in the vault.
+
+    Runs the credential-replay login step (G3) for the natives that
+    ``configure_broker_router`` just activated. Sync wrapper around the async
+    ``establish_native_sessions`` — safe to call from the factory and from a
+    Flask route (both run outside an event loop). Never raises.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from flinttrade_gateway.native_login import establish_native_sessions  # noqa: PLC0415
+
+    native_adapters = app.config.get("NATIVE_ADAPTERS") or {}
+    registry = app.config.get("REGISTRY")
+    credential_store = app.config.get("CREDENTIAL_STORE")
+    if not native_adapters or registry is None or credential_store is None:
+        return {}
+    try:
+        brokers_cfg = _read_workspace_brokers() or {}
+        selectors = [str(s) for s in (brokers_cfg.get("registered") or [])]
+        return asyncio.run(
+            establish_native_sessions(native_adapters, registry, credential_store, selectors)
+        )
+    except Exception as exc:  # noqa: BLE001 - session establishment must never brick boot/route
+        logger.warning("Native session re-establishment failed: %s", exc)
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Flask API server — FlintTrade-specific endpoints (port 5100)
 # ---------------------------------------------------------------------------
@@ -1129,66 +1228,23 @@ def create_flask_app(
     # log loudly and leave BROKER_ROUTER as None so the gated order path returns
     # a clear 503 rather than dispatching. A successfully-parsed config is
     # snapshotted to workspace.brokers.bak.json for operator rollback (§13.3).
-    app.config["BROKER_ROUTER"] = None
-    # Smart routing stays disabled when the brokers block fails to parse —
-    # the smart-route endpoint reads this and fails closed with a clear 403.
-    app.config["SMART_ROUTING"] = {}
-    # Active native adapters (broker_id -> adapter) + the reconciliation
-    # targets provider the engine runner polls (contract §14.2). Defaults to
-    # "no natives, no targets" so a failed router build disables reconciliation
-    # alongside routing rather than erroring.
-    app.config["NATIVE_ADAPTERS"] = {}
-    app.config["RECONCILE_TARGETS"] = None
-    try:
-        from .workspace_migrations import default_workspace_config  # noqa: PLC0415
-        from flinttrade_engine.local_state_provider import JournalLocalStateProvider  # noqa: PLC0415
-
-        _brokers_cfg = _read_workspace_brokers()
-        _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
-        app.config["SMART_ROUTING"] = dict(_effective_brokers.get("smart_routing") or {})
-        _native_attest_ok, _native_has_credentials = _native_activation_checks(credential_store)
-        # Expose the OpenAlgo client so sync analysis routes (the screener) can
-        # fetch a real option chain through the functional bridge adapter rather
-        # than always falling back to sample data.
-        app.config["OPENALGO_CLIENT"] = client
-        # Journal-backed local-state provider threaded into every native
-        # adapter (contract §14): the flinttrade-side mirror reconcile() diffs
-        # broker state against. Handles resolve lazily from app.config so the
-        # shared trade store (created later in this factory) is picked up.
-        _local_state_provider = JournalLocalStateProvider(
-            storage_provider=lambda: app.config.get("TRADE_STORAGE"),
-            lock_provider=lambda: app.config.get("TRADE_STORAGE_LOCK"),
-        )
-        _native_adapters: dict[str, Any] = app.config["NATIVE_ADAPTERS"]
-        app.config["BROKER_ROUTER"] = build_broker_router(
-            registry,
-            _effective_brokers,
-            openalgo_client=client,
-            native_attest_ok=_native_attest_ok,
-            native_has_credentials=_native_has_credentials,
-            native_adapter_kwargs=lambda _broker_id: {"local_state_provider": _local_state_provider},
-            on_native_activated=_native_adapters.update,
-        )
-        app.config["RECONCILE_TARGETS"] = _build_reconcile_targets_provider(
-            registry,
-            _native_adapters,
-            [str(s) for s in (_effective_brokers.get("registered") or [])],
-        )
-        if _brokers_cfg is not None:
-            _snapshot_brokers_bak(_brokers_cfg)
-    except Exception as exc:
-        logger.critical(
-            "BrokerRouter not built — workspace.json brokers routing is invalid: %s. "
-            "Order routing is unavailable until you fix brokers.routing; the rest of "
-            "the app is up. Last known-good config: ~/.flinttrade/workspace.brokers.bak.json",
-            exc,
-        )
+    configure_broker_router(app, registry, credential_store, client)
+    # Re-establish native sessions for any selector whose credentials are
+    # already in the vault (a restart after the operator connected a broker
+    # earlier). First boot with an empty vault is a no-op. Best-effort — a
+    # broker whose token expired overnight just stays sessionless until the
+    # operator re-authenticates.
+    _reestablish_native_sessions(app)
 
     # Store RAG instance
     app.config["RAG"] = rag
 
     # Register gateway blueprint (mounts at /v1/)
     app.register_blueprint(gateway_bp)
+
+    # Native broker account capture + activation (Phase 1 G4) — /api/v1/native/*
+    from .native_account_routes import native_accounts_bp  # noqa: PLC0415
+    app.register_blueprint(native_accounts_bp)
 
     # Register analysis blueprint (/api/v1/gex, /api/v1/volsurface, etc.)
     from flinttrade_screener.analysis_routes import analysis_bp  # noqa: PLC0415
