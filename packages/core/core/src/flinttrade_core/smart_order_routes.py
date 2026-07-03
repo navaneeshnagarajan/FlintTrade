@@ -50,6 +50,8 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from .rate_limiter import rate_limit
+
 logger = logging.getLogger("flinttrade.core.smart_order_routes")
 
 smart_order_bp = Blueprint("smart_orders", __name__, url_prefix="/api/v1/orders")
@@ -411,6 +413,7 @@ _VALID_ACTION = {"BUY", "SELL"}
 
 
 @smart_order_bp.route("/smart-route", methods=["POST"])
+@rate_limit("smart_orders", user_rate=2, global_rate=20)
 def start_smart_route() -> tuple[Any, int]:
     """Start a smart-routed order as a background job.
 

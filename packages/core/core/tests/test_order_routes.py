@@ -88,6 +88,23 @@ def flask_app(monkeypatch_module):
     return app
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter(flask_app):
+    """Refill the order-route token buckets before each test.
+
+    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10).
+    ``flask_app`` is module-scoped, so its single RateLimiter accumulates state
+    across every test in this file — dozens of order POSTs share one bucket
+    keyed by the test client's remote_addr and would 429 after the 10-token
+    burst. Production keys per operator and never fires 10 orders/s from a UI;
+    tests just need a clean bucket per case.
+    """
+    limiter = flask_app.config.get("RATE_LIMITER")
+    if limiter is not None:
+        limiter.reset()
+    yield
+
+
 @pytest.fixture()
 def client(flask_app):
     """Flask test client that sends the API key header by default."""
@@ -302,6 +319,61 @@ class TestMissingOrInvalidMode:
 # ---------------------------------------------------------------------------
 # 3. Practice mode — routes to SandboxEngine
 # ---------------------------------------------------------------------------
+
+
+class TestOrderRateLimiting:
+    """Phase 1 G10 — the reachable order path enforces a per-second rate limit.
+
+    SEBI-derived requirement: per-second order rate limiting before broker
+    submission on every order path. The ``orders`` bucket is 10/s per user
+    (100/s global). This test proves the limiter is actually wired to the core
+    ``/orders/place`` route and fires a 429 once the burst is exhausted — the
+    exact property that silently regressed for the login limiter (whose tests
+    skip because the decoration didn't fire). The ``_reset_rate_limiter``
+    autouse fixture gives this test a full burst to start from.
+    """
+
+    def test_place_order_429s_after_the_per_second_burst(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-RL",
+            "status": "COMPLETE",
+            "message": "Paper order filled",
+        }
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        statuses = [
+            client.post(
+                "/api/v1/orders/place",
+                json=_SAMPLE_ORDER_BODY,
+                headers=_auth_headers(mode="practice"),
+            ).status_code
+            for _ in range(20)
+        ]
+
+        # The 10-token burst lets the first orders through (200), then the
+        # limiter must start returning 429 — proof it is wired and enforcing.
+        assert 429 in statuses, (
+            f"order rate limit never fired across 20 rapid posts: {statuses}"
+        )
+        # Everything that was NOT rate-limited reached the sandbox and filled.
+        assert all(s in (200, 429) for s in statuses), statuses
+        assert statuses[0] == 200, "the very first order must not be throttled"
+
+    def test_reset_gives_a_fresh_burst(self, flask_app, client):
+        """After reset (the autouse fixture), the first order is never 429 —
+        confirms the bucket genuinely refills between test cases rather than the
+        previous test's exhaustion leaking through the module-scoped app.
+        """
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {"order_id": "SB-1", "status": "COMPLETE"}
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="practice"),
+        )
+        assert resp.status_code == 200
 
 
 class TestPracticeMode:

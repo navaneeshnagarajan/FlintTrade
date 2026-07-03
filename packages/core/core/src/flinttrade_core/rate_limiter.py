@@ -359,6 +359,18 @@ class RateLimiter:
             "global_rate": cfg.global_rate if cfg else self._default_global_rate,
         }
 
+    def reset(self) -> None:
+        """Clear all per-user and global token buckets (refills to full).
+
+        Endpoint configs and user overrides are preserved — only the live
+        bucket state is dropped, so the next request for any key starts with a
+        full burst. Used by tests that reuse a module-scoped app across many
+        rapid requests; not called on the production request path.
+        """
+        with self._lock:
+            self._user_buckets.clear()
+            self._global_buckets.clear()
+
     def set_limit(self, endpoint: str, user_rate: int, global_rate: int) -> None:
         """Override rate limits for a specific endpoint.
 

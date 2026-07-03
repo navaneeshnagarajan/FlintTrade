@@ -1055,12 +1055,12 @@ def create_flask_app(
     )
     app.config["LIMITER"] = limiter
 
-    # Custom token-bucket rate limiter — finer-grained per-(user, endpoint)
-    # control. Consumed via the ``@rate_limit("endpoint", user_rate, global_rate)``
-    # decorator from ``flinttrade_core.rate_limiter``. Applied to order,
-    # bracket, strategy-start, and webhook routes to enforce the documented
-    # caps: orders 10/s per user (100/s global), smart orders 2/s (20/s),
-    # webhooks 5/s (50/s).
+    # Custom token-bucket rate limiter — HTTP-layer DoS / fat-finger guard
+    # (429) via ``@rate_limit``; the SEBI per-second broker-submission cap is
+    # enforced below the gate by ``BrokerRouter._throttle``, which every gated
+    # order traverses. Applied to the core order routes + smart-route start +
+    # engine basket/split/bracket + strategy-start (orders 10/s user, 100/s
+    # global; smart_orders 2/s, 20/s). Webhooks use WebhookReceiver's limiter.
     from .rate_limiter import RateLimiter as _RateLimiter  # noqa: PLC0415
     _rate_limiter = _RateLimiter(global_rate=100, per_user_rate=10)
     _rate_limiter.set_limit("orders", user_rate=10, global_rate=100)
