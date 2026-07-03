@@ -548,3 +548,41 @@ class TestSetupMintsSession:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {data['token']}"},
         )
         assert w.status_code != 401
+
+
+class TestModeSwitchRejectsResetToken:
+    """Re-audit fix #8: /v1/auth/mode must not mint a fresh session token from a
+    reset token — that would launder email-possession into a full session that
+    then satisfies the G9 write guard and the D6 PIN unlock."""
+
+    def _setup(self, c):
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_reset_token_cannot_downgrade_mode(self, client):
+        c, _ = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+
+        reset = _create_reset_token("nav")
+        resp = c.post(
+            "/v1/auth/mode", json={"mode": "practice"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
+        assert resp.status_code == 401
+        assert "full login session" in resp.get_json()["message"].lower()
+
+    def test_session_token_can_still_downgrade(self, client):
+        c, _ = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("nav", mode="live", live_mode_unlocked=True)
+        resp = c.post(
+            "/v1/auth/mode", json={"mode": "practice"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["mode"] == "practice"

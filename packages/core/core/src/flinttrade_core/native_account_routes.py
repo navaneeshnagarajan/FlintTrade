@@ -130,6 +130,32 @@ def _register_selector_in_workspace(
     tmp.replace(path)
 
 
+def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> None:
+    """Remove the native selector from brokers.registered / account_acls / default.
+
+    The inverse of :func:`_register_selector_in_workspace`; used by the remove
+    route and by the failed-NEW-connect rollback so a connect that never
+    established a session does not leave an orphaned selector behind. No-op if
+    there is no workspace.json.
+    """
+    selector = f"{adapter_id}:{account_id}"
+    path = workspace_dir() / "workspace.json"
+    if not path.exists():
+        return
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    brokers = data.get("brokers", {})
+    if selector in brokers.get("registered", []):
+        brokers["registered"].remove(selector)
+    brokers.get("account_acls", {}).get(adapter_id, {}).pop(account_id, None)
+    if brokers.get("execution", {}).get("default") == selector:
+        brokers["execution"]["default"] = ""
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    tmp.replace(path)
+
+
 def _schedule_refresh_job(adapter_id: str, *, remove: bool = False) -> None:
     """Add or remove the broker's daily 08:05 IST refresh job on the rotator.
 
@@ -164,7 +190,12 @@ def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str
 
 
 def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, Any]:
-    """Rebuild the router and log the native in; return its login result."""
+    """Rebuild the router and log the native in; return its login result.
+
+    ``verify=True``: this is an interactive operator action (connect / daily
+    re-auth), so probe the freshly-established session against the broker — a
+    dead token must report ``needs_relogin`` here, not a false "connected".
+    """
     from .app import _reestablish_native_sessions, configure_broker_router  # noqa: PLC0415
 
     app = current_app._get_current_object()  # type: ignore[attr-defined]
@@ -174,7 +205,7 @@ def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, A
         app.config.get("CREDENTIAL_STORE"),
         app.config.get("CLIENT"),
     )
-    results = _reestablish_native_sessions(app)
+    results = _reestablish_native_sessions(app, verify=True)
     return results
 
 
@@ -195,6 +226,15 @@ def _do_connect(
     registry = current_app.config.get("REGISTRY")
     if store is None or registry is None:
         return {"status": "error", "message": "Credential store or registry unavailable."}, 503
+
+    # Capture the prior vault row (if this account already existed) BEFORE the
+    # overwrite, so a failed RE-connect can restore the previously-good
+    # credentials rather than leaving them clobbered by the bad ones.
+    try:
+        prior_credentials: dict[str, Any] | None = store.retrieve_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001 - no prior row → this is a brand-new account
+        prior_credentials = None
+    is_new_account = prior_credentials is None
 
     try:
         store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
@@ -219,15 +259,27 @@ def _do_connect(
         # the already-running rotator (configure_session_rotation only scheduled
         # brokers present at boot). Idempotent (replace_existing).
         _schedule_refresh_job(adapter_id)
-    else:
-        # A failed connect must not leave replayable garbage in the vault — a
+    elif is_new_account:
+        # A failed BRAND-NEW connect must not leave replayable garbage — a
         # single-use OAuth code or a stale TOTP would otherwise be retried
-        # (always failing) on every boot. Purge the just-stored row so the
-        # selector is cleanly sessionless rather than dead-credential'd.
+        # (always failing) on every boot. Purge the just-stored row AND drop the
+        # selector we just registered so nothing orphaned is left behind.
         try:
             store.remove(account_id)
         except Exception:  # noqa: BLE001 - best effort; nothing to clean up
             pass
+        try:
+            _deregister_selector_in_workspace(adapter_id, account_id)
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        # A failed RE-connect of an existing account must not destroy the
+        # previously-good credentials the store.store() overwrite just replaced.
+        # Restore them (the selector was already registered — leave it).
+        try:
+            store.update_credentials_for(adapter_id, account_id, prior_credentials)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not restore prior credentials for %s:%s", adapter_id, account_id)
     return {
         "status": "success" if connected else "error",
         "data": {
@@ -589,20 +641,7 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
 
     # Deregister the selector from workspace.json.
     try:
-        selector = f"{adapter_id}:{account_id}"
-        path = workspace_dir() / "workspace.json"
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        brokers = data.get("brokers", {})
-        if selector in brokers.get("registered", []):
-            brokers["registered"].remove(selector)
-        brokers.get("account_acls", {}).get(adapter_id, {}).pop(account_id, None)
-        if brokers.get("execution", {}).get("default") == selector:
-            brokers["execution"]["default"] = ""
-        tmp = path.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        tmp.replace(path)
+        _deregister_selector_in_workspace(adapter_id, account_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Selector deregister failed for %s:%s: %s", adapter_id, account_id, exc)
 

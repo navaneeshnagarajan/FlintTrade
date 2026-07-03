@@ -62,7 +62,6 @@ export async function listNativeAccounts(): Promise<NativeAccount[]> {
 export interface ConnectResult {
   connected: boolean;
   login: string;
-  message?: string;
 }
 
 export async function connectNativeAccount(input: {

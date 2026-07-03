@@ -23,6 +23,66 @@ from typing import Any
 logger = logging.getLogger("flinttrade.gateway.native_login")
 
 
+def _is_transient_probe_error(exc: BaseException) -> bool:
+    """True for transport hiccups that are NOT proof a token is dead.
+
+    A connect/timeout/network error means we could not reach the broker — the
+    token may be perfectly valid — so the liveness probe must keep the session
+    rather than false-alarming ``needs_relogin``. A 4xx (auth) or a broker
+    error payload, by contrast, is a real "this token does not work".
+    """
+    try:
+        import httpx  # noqa: PLC0415
+    except ImportError:  # pragma: no cover - httpx is a gateway dependency
+        return False
+    return isinstance(
+        exc,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+            httpx.NetworkError,
+        ),
+    )
+
+
+async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, account_id: str) -> str | None:
+    """Confirm a just-established token actually authenticates (error string or None).
+
+    The token-replay logins (Upstox/IndMoney) build a Session WITHOUT contacting
+    the broker, so a dead/expired token would otherwise report success. A cheap
+    authenticated ``funds`` read forces a real API call. On a hard auth/broker
+    failure the live session is DROPPED and an error returned so the caller can
+    surface ``needs_relogin``; on a transient transport error the session is
+    KEPT (returns None). An adapter without a ``funds`` read is unverifiable and
+    passes. Best-effort — never raises.
+    """
+    reader = getattr(adapter, "funds", None)
+    if not callable(reader):
+        return None
+    try:
+        session = registry.get_session_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001 - no session means nothing to probe
+        return "no session established"
+    try:
+        await reader(session)  # native adapters' funds() is always a coroutine
+        return None
+    except Exception as exc:  # noqa: BLE001 - classify below
+        if _is_transient_probe_error(exc):
+            logger.info(
+                "Token liveness probe transient error for %s:%s (%s) — keeping session",
+                adapter_id, account_id, exc,
+            )
+            return None
+        try:
+            registry.remove_session_for(adapter_id, account_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return f"token verification failed: {exc}"
+
+
 async def establish_native_session(
     adapter: Any,
     registry: Any,
@@ -30,6 +90,7 @@ async def establish_native_session(
     adapter_id: str,
     account_id: str,
     credential_store: Any | None = None,
+    verify: bool = False,
 ) -> Any:
     """Log a native adapter in and register its session under the selector.
 
@@ -87,6 +148,16 @@ async def establish_native_session(
                 account_id,
                 exc,
             )
+    if verify:
+        # The token-replay logins build a Session without a broker call, so a
+        # dead/expired token would report success. Probe a cheap authenticated
+        # read; a hard auth failure drops the session AND raises so the caller
+        # records the honest failure (a transient transport error keeps it).
+        probe_error = await verify_native_session(adapter, registry, adapter_id, account_id)
+        if probe_error is not None:
+            from .exceptions import AuthFlowError  # noqa: PLC0415
+
+            raise AuthFlowError(probe_error)
     return session
 
 
@@ -95,6 +166,7 @@ async def establish_native_sessions(
     registry: Any,
     credential_store: Any,
     selectors: list[str],
+    verify: bool = False,
 ) -> dict[str, Any]:
     """Re-establish sessions for every active native selector with vault creds.
 
@@ -110,6 +182,11 @@ async def establish_native_sessions(
         registry: The ``BrokerRegistry``.
         credential_store: The ``CredentialStore`` (``retrieve_for`` lookups).
         selectors: The registered ``<adapter_id>:<account_id>`` selectors.
+        verify: When True, probe each freshly-established session with a cheap
+            authenticated read so a dead token surfaces as a failure rather than
+            a false "ok". Used by the interactive connect/re-authenticate paths
+            (operator present); left False at boot to keep startup fast and
+            avoid dropping a good session on a transient startup network blip.
 
     Returns:
         ``{selector: "ok" | "<error>"}`` for observability (never raises).
@@ -135,7 +212,7 @@ async def establish_native_sessions(
         try:
             await establish_native_session(
                 adapter, registry, credentials, adapter_id, account_id,
-                credential_store=credential_store,
+                credential_store=credential_store, verify=verify,
             )
             results[selector] = "ok"
         except Exception as exc:  # noqa: BLE001 - per-selector isolation

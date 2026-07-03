@@ -26,6 +26,16 @@ def client(tmp_path, monkeypatch):
     # default no-key loopback-allowance mode deterministically.
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    # The interactive connect/relogin paths now VERIFY the session with a real
+    # `funds` read (audit fix). Stub IndMoney's funds so the probe is
+    # deterministic and never touches the network — tests that want a dead
+    # token re-stub it to raise (see test_relogin_dead_token_surfaces_relogin).
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _ok_funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _ok_funds)
     (tmp_path / "master_password").write_text("native-routes-test-pw", encoding="utf-8")
     from flinttrade_core.app import create_flask_app
 
@@ -308,3 +318,107 @@ def test_relogin_with_fresh_credentials_preserves_label_and_primary(client):
     entry = next(a for a in listing if a["account_id"] == "INDLBL")
     assert entry["label"] == "My IND"
     assert entry["is_primary"] is True
+
+
+def test_connect_dead_token_surfaces_needs_relogin_not_false_success(client, monkeypatch):
+    """Re-audit fix: the interactive connect path now probes the token with a
+    real funds read, so a dead token reports needs_relogin instead of a false
+    'connected' (the token-replay logins build a Session without a broker call)."""
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _dead_funds(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    c, _app, _tmp = client
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "INDDEAD", "credentials": {"access_token": "dead"}},
+    )
+    # Login could not be verified → not connected → 502, and the vault row is
+    # not left dead-credential'd.
+    assert resp.status_code == 502
+    assert resp.get_json()["data"]["connected"] is False
+
+
+def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
+    """The interactive Re-authenticate path probes too — a dead replayed token
+    drops the session and records login-failed (needs_relogin), not a false ok."""
+    c, app, _tmp = client
+    # First connect with the passing stub (fixture default) so the account exists.
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "INDRL", "credentials": {"access_token": "tok"}},
+    )
+    # Now the token has "gone dead": funds probe fails on re-authenticate.
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _dead_funds(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    resp = c.post("/api/v1/native/accounts/indmoney/INDRL/login", headers=_h())
+    assert resp.status_code == 502
+    assert resp.get_json()["data"]["session"]["has_session"] is False
+    # The accounts list surfaces the honest needs_relogin state.
+    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
+    entry = next(a for a in listing if a["account_id"] == "INDRL")
+    assert entry["needs_relogin"] is True
+
+
+def test_failed_reconnect_restores_prior_good_credentials(client, monkeypatch):
+    """Re-audit fix #3: re-connecting an EXISTING account with bad creds must
+    not destroy the previously-good vault row — on failure it is restored, and
+    the selector is NOT orphaned."""
+    c, app, tmp_path = client
+    # Connect once (good token, passing probe from the fixture stub).
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "INDRESTORE",
+              "label": "Keep me", "credentials": {"access_token": "good-token"}, "is_primary": True},
+    )
+    store = app.config["CREDENTIAL_STORE"]
+    assert store.retrieve_for("indmoney", "INDRESTORE")["access_token"] == "good-token"
+
+    # Reconnect with a token whose probe fails.
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _dead_funds(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "INDRESTORE", "credentials": {"access_token": "bad-token"}},
+    )
+    assert resp.status_code == 502
+    # The prior good credentials survive; the selector is still registered.
+    assert store.retrieve_for("indmoney", "INDRESTORE")["access_token"] == "good-token"
+    assert "indmoney:INDRESTORE" in _workspace_brokers(tmp_path).get("registered", [])
+
+
+def test_failed_new_connect_purges_and_deregisters(client, monkeypatch):
+    """A failed BRAND-NEW connect leaves nothing orphaned: no vault row, no
+    registered selector."""
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _dead_funds(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    c, app, tmp_path = client
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "INDNEW", "credentials": {"access_token": "dead"}},
+    )
+    assert resp.status_code == 502
+    store = app.config["CREDENTIAL_STORE"]
+    import pytest as _pt
+    with _pt.raises(Exception):
+        store.retrieve_for("indmoney", "INDNEW")
+    assert "indmoney:INDNEW" not in _workspace_brokers(tmp_path).get("registered", [])

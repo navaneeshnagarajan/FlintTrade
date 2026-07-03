@@ -101,7 +101,9 @@ export function BrokersSection() {
         account_id: accountId.trim(),
         credentials: Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
       });
-      if (!result.connected) throw new Error(result.message || "Login did not establish a session.");
+      // A failed connect is a non-2xx that already threw the backend message
+      // inside connectNativeAccount; a 2xx always carries connected:true.
+      if (!result.connected) throw new Error("Login did not establish a session.");
       return { oauth: false, message: `${broker.display_name} account ${accountId.trim()} connected.` };
     },
     onSuccess: (r) => {

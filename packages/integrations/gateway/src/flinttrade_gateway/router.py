@@ -227,9 +227,18 @@ class BrokerRouter:
 
         place/modify orders carry it directly; the extended gated verbs
         (forever/super/trigger/…) carry the order under a nested key or per-leg
-        list. When it cannot be recovered the caller buckets under a shared
-        per-broker key — conservative (it over-counts across exchanges, never
-        under-counts), the safe direction for a compliance ceiling.
+        list. When it cannot be recovered the caller buckets the write under a
+        shared per-broker ``"*"`` key.
+
+        Note the ``"*"`` bucket is a SEPARATE counter from a named exchange, so
+        for a broker whose per-second ceiling would be exceeded by
+        exchange-tagged + untagged writes combined, the two buckets can each
+        stay under the limit while the true aggregate exceeds it — i.e. this is
+        not a strict "never under-counts" guarantee. It is acceptable because
+        the untagged writes are cancels/modifies of EXISTING orders (the gated
+        verbs that carry no exchange), which do not add NEW order-placement rate
+        the way place orders do; place orders always carry ``exchange`` and are
+        counted correctly per-exchange.
         """
         exchange = getattr(order, "exchange", None)
         if exchange is None and isinstance(order, Mapping):

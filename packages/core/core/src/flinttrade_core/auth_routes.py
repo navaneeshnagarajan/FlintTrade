@@ -737,6 +737,14 @@ def auth_mode_switch() -> tuple[Any, int]:
         logger.info("Mode-switch with invalid/expired token: %s", exc)
         return jsonify({"status": "error", "message": "Token invalid or expired."}), 401
 
+    # Only a full login session may mint a new session token here. A password
+    # reset token (type "reset") otherwise launders into a fresh mode-scoped
+    # session token — which then satisfies the G9 broker-write guard and, via
+    # the D6 PIN unlock, could arm Live. Same hardening as
+    # require_operator_session / auth_pin_verify.
+    if payload.get("type") != "session":
+        return jsonify({"status": "error", "message": "A full login session is required."}), 401
+
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503

@@ -931,13 +931,18 @@ def configure_broker_router(
         )
 
 
-def _reestablish_native_sessions(app: Flask) -> dict[str, Any]:
+def _reestablish_native_sessions(app: Flask, *, verify: bool = False) -> dict[str, Any]:
     """Log in every active native selector whose credentials are in the vault.
 
     Runs the credential-replay login step (G3) for the natives that
     ``configure_broker_router`` just activated. Sync wrapper around the async
     ``establish_native_sessions`` — safe to call from the factory and from a
     Flask route (both run outside an event loop). Never raises.
+
+    ``verify`` (True from the interactive connect/re-authenticate routes, False
+    at boot) probes each freshly-established session with a cheap authenticated
+    read so a dead token surfaces honestly as ``needs_relogin`` instead of a
+    false "connected".
     """
     import asyncio  # noqa: PLC0415
 
@@ -952,7 +957,9 @@ def _reestablish_native_sessions(app: Flask) -> dict[str, Any]:
         brokers_cfg = _read_workspace_brokers() or {}
         selectors = [str(s) for s in (brokers_cfg.get("registered") or [])]
         results = asyncio.run(
-            establish_native_sessions(native_adapters, registry, credential_store, selectors)
+            establish_native_sessions(
+                native_adapters, registry, credential_store, selectors, verify=verify,
+            )
         )
         # G7 — surface per-selector login outcomes so the accounts list can say
         # "needs fresh login: <reason>" instead of a bare red "no live session".
