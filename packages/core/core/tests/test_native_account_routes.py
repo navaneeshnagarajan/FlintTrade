@@ -76,9 +76,13 @@ def test_connect_indmoney_stores_registers_and_establishes_session(client):
         },
     )
     assert resp.status_code == 200, resp.get_json()
-    data = resp.get_json()["data"]
+    body = resp.get_json()
+    data = body["data"]
     assert data["connected"] is True
     assert data["login"] == "ok"
+    public_body = json.dumps(body)
+    assert "INDTEST01" not in public_body
+    assert "dummy-dashboard-token" not in public_body
 
     # Credentials persisted under the composite selector.
     store = app.config["CREDENTIAL_STORE"]
@@ -366,7 +370,11 @@ def test_connect_dead_token_surfaces_needs_relogin_not_false_success(client, mon
     # Login could not be verified → not connected → 502, and the vault row is
     # not left dead-credential'd.
     assert resp.status_code == 502
-    assert resp.get_json()["data"]["connected"] is False
+    body = resp.get_json()
+    assert body["data"]["connected"] is False
+    public_body = json.dumps(body)
+    assert "INDDEAD" not in public_body
+    assert "dead" not in public_body
 
 
 def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):

@@ -115,20 +115,27 @@ def _is_safe_account_id(account_id: str) -> bool:
     return 0 < len(account_id) <= 80 and all(ch in _ACCOUNT_ID_CHARS for ch in account_id)
 
 
-def _public_connect_body(code: int) -> dict[str, Any]:
+def _public_connect_success_body() -> dict[str, Any]:
     """Return only the direct-connect fields consumed by the desktop UI."""
-    connected = code == 200
     return {
-        "status": "success" if connected else "error",
+        "status": "success",
         "data": {
-            "connected": connected,
-            "login": "ok" if connected else "failed",
+            "connected": True,
+            "login": "ok",
         },
-        "message": (
-            "Native broker account connected."
-            if connected
-            else "Login did not establish a session; credentials were not kept."
-        ),
+        "message": "Native broker account connected.",
+    }
+
+
+def _public_connect_failure_body() -> dict[str, Any]:
+    """Return a constant direct-connect failure body with no operator input."""
+    return {
+        "status": "error",
+        "data": {
+            "connected": False,
+            "login": "failed",
+        },
+        "message": "Login did not establish a session; credentials were not kept.",
     }
 
 
@@ -439,7 +446,9 @@ def connect_native_account() -> Any:
         return jsonify({"status": "error", "message": "credentials (a non-empty object) is required."}), 400
 
     _body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
-    return jsonify(_public_connect_body(code)), code
+    if code == 200:
+        return jsonify(_public_connect_success_body()), 200
+    return jsonify(_public_connect_failure_body()), 502
 
 
 # ---------------------------------------------------------------------------
