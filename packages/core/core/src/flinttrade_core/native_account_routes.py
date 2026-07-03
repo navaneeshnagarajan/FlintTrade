@@ -29,6 +29,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from .native_auth_methods import NATIVE_AUTH_METHODS
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.native_accounts")
@@ -188,6 +189,21 @@ def _do_connect(
             else f"Credentials stored but login did not establish a session: {login_state}"
         ),
     }, (200 if connected else 502)
+
+
+@native_accounts_bp.route("/brokers", methods=["GET"])
+def list_native_brokers() -> Any:
+    """The connect catalogue: each native broker + its supported login methods.
+
+    The connect UI renders forms/flows from this, so the operator can pick their
+    preferred login method per broker (full broker support). Secret fields are
+    flagged so the UI masks them.
+    """
+    brokers = [
+        {"adapter_id": bid, "display_name": bid.capitalize(), "auth_methods": methods}
+        for bid, methods in NATIVE_AUTH_METHODS.items()
+    ]
+    return jsonify({"status": "success", "data": {"brokers": brokers}})
 
 
 @native_accounts_bp.route("/accounts", methods=["POST"])

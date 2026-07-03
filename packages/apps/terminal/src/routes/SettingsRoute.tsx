@@ -19,6 +19,7 @@ import { ProfileSection }    from "@/tools/Settings/ProfileSection";
 import { GeneralSection }    from "@/tools/Settings/GeneralSection";
 import { AppearanceSection } from "@/tools/Settings/AppearanceSection";
 import { ConnectionSection } from "@/tools/Settings/ConnectionSection";
+import { BrokersSection }    from "@/tools/Settings/BrokersSection";
 import { TradingSection }    from "@/tools/Settings/TradingSection";
 import { RiskSection }       from "@/tools/Settings/RiskSection";
 import { KeyboardSection }   from "@/tools/Settings/KeyboardSection";
@@ -117,6 +118,7 @@ export default function SettingsRoute() {
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;
       case "api":        return <ConnectionSection settings={connection} onChange={updateConnection} />;
+      case "brokers":    return <BrokersSection />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
       case "leverage":   return <LeverageSection />;

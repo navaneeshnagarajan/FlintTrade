@@ -258,8 +258,21 @@ class DhanAdapter(BrokerAdapter):
     async def login(self, credentials: dict) -> Session:
         client_id = str(credentials.get("client_id") or credentials.get("dhan_client_id") or "")
         access_token = str(credentials.get("access_token") or "")
+        pin = str(credentials.get("pin") or "")
+        totp = str(credentials.get("totp") or "")
+        if not access_token and pin and totp:
+            # PIN + TOTP path: mint a fresh 24h token via the v2.5 token API
+            # (generate_token needs no existing token), then log in with it. Lets
+            # an operator connect without pasting a console-generated token —
+            # requires TOTP enabled on the account.
+            if not client_id:
+                raise BrokerError("Dhan PIN+TOTP login requires client_id")
+            resp = await self.generate_token(client_id, pin, totp)
+            access_token = str(resp.get("accessToken") or resp.get("access_token") or "")
+            if not access_token:
+                raise BrokerError(f"Dhan PIN+TOTP token generation failed: {resp}")
         if not access_token:
-            raise BrokerError("Dhan login requires an access_token")
+            raise BrokerError("Dhan login requires an access_token (or client_id + pin + totp)")
         client = None if self._client_factory is not None else _build_dhan_client(client_id, access_token)
         return Session(
             access_token=access_token,

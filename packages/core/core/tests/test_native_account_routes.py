@@ -110,6 +110,21 @@ def test_list_and_remove_native_account(client):
         app.config["REGISTRY"].get_session_for("indmoney", "INDTEST02")
 
 
+def test_list_native_brokers_catalogue(client):
+    c, _app, _tmp = client
+    data = c.get("/api/v1/native/brokers").get_json()["data"]
+    brokers = {b["adapter_id"]: b for b in data["brokers"]}
+    assert set(brokers) == {"dhan", "upstox", "kotakneo", "indmoney"}
+    # Dhan offers access-token AND pin+totp; Upstox offers OAuth AND direct token.
+    dhan_methods = {m["id"] for m in brokers["dhan"]["auth_methods"]}
+    assert {"access_token", "pin_totp"} <= dhan_methods
+    upstox_kinds = {m["kind"] for m in brokers["upstox"]["auth_methods"]}
+    assert "oauth" in upstox_kinds
+    # Secret fields are flagged for masking.
+    kotak = next(m for m in brokers["kotakneo"]["auth_methods"] if m["id"] == "totp_mpin")
+    assert any(f["secret"] for f in kotak["fields"])
+
+
 def test_oauth_start_returns_auth_url_and_state(client):
     c, _app, _tmp = client
     resp = c.post(

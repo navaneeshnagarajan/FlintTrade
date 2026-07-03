@@ -174,6 +174,32 @@ async def test_login_requires_access_token():
 
 
 @pytest.mark.asyncio
+async def test_login_with_pin_totp_mints_a_token():
+    """PIN + TOTP path: login() orchestrates generate_token() to mint a fresh
+    24h access token, then logs in with it (no console token needed)."""
+    from unittest.mock import MagicMock
+
+    login_helper = MagicMock()
+    login_helper.generate_token.return_value = {"accessToken": "MINTED-TOK", "expiryTime": "..."}
+    adapter = DhanAdapter(
+        client_factory=lambda _s: MockDhan(),
+        login_factory=lambda _client_id: login_helper,
+    )
+    session = await adapter.login({"client_id": "C1", "pin": "1234", "totp": "654321"})
+    assert session.access_token == "MINTED-TOK"
+    assert session.account_id == "C1"
+    login_helper.generate_token.assert_called_once_with("1234", "654321")
+
+
+@pytest.mark.asyncio
+async def test_login_pin_totp_requires_client_id():
+    from flinttrade_core.exceptions import BrokerError
+
+    with pytest.raises(BrokerError, match="client_id"):
+        await DhanAdapter().login({"pin": "1234", "totp": "654321"})
+
+
+@pytest.mark.asyncio
 async def test_place_order_is_gated():
     mock = MockDhan()
     adapter = _adapter(mock)

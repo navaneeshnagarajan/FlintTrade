@@ -25,6 +25,7 @@ import {
   LayoutTemplate,
   Rss,
   UserCircle,
+  Landmark,
   type LucideIcon,
 } from "lucide-react";
 
@@ -38,6 +39,7 @@ export type SectionId =
   | "appearance"
   | "ticker"
   | "api"
+  | "brokers"
   | "trading"
   | "risk"
   | "leverage"
@@ -69,6 +71,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "appearance", label: "Appearance",         icon: Palette      },
   { id: "ticker",     label: "Ticker Bar",         icon: Rss          },
   { id: "api",        label: "Broker Gateway",     icon: Wifi         },
+  { id: "brokers",    label: "Brokers",            icon: Landmark     },
   { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
   { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
   { id: "leverage",   label: "Leverage",           icon: Scale        },
