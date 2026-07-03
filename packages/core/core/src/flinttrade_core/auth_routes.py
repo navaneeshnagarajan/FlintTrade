@@ -174,50 +174,47 @@ def _rate_limit(limit_string: str):
     return decorator
 
 
-@auth_bp.record
-def _apply_rate_limits(state):
-    """Apply deferred rate limits once the blueprint is registered on an app.
+def install_auth_rate_limits(app: Any) -> int:
+    """Wire the deferred ``@_rate_limit`` limits onto Flask-Limiter.
 
-    Auto-discovers every blueprint view that carries the ``_rate_limits``
-    attribute set by the ``@_rate_limit(...)`` decorator. The previous
-    hardcoded list (auth_status, auth_setup, auth_login, auth_pin_verify,
-    auth_logout) silently skipped every other ``@_rate_limit`` decorator
-    in the module — including pre-existing ones on ``auth_setup_reset``
-    and ``auth_setup_regenerate_2fa`` and the 2026-05-19 additions on
-    ``auth_mode_switch``, ``auth_forgot_password``, ``auth_reset_password``.
-    Codex caught the new gaps; this rewrite also closes the older ones.
+    MUST be called AFTER ``app.register_blueprint(auth_bp)`` — at that point
+    every auth view is in ``app.view_functions``. For each ``auth.*`` view that
+    carries the ``_rate_limits`` attribute set by ``@_rate_limit(...)``, wrap it
+    with ``limiter.limit(limit_str)`` and REPLACE the registered view with the
+    returned wrapper — Flask-Limiter enforces the decorated limit inside that
+    wrapper (``RouteLimit.__call__``), so the wrapper must be the view that
+    actually runs. The previous ``@auth_bp.record`` implementation fired BEFORE
+    the routes were registered (blueprint deferred-function order), so
+    ``view_functions`` was empty and it silently wired nothing — leaving
+    login/PIN/setup brute-force UNTHROTTLED in tests and production. Each app
+    has its own Limiter + memory storage, so this is naturally per-app-isolated.
+
+    Returns the number of (view, limit) pairs wired, for logging/verification.
+    If no Flask-Limiter is configured, the ``@_rate_limit`` wrapper's own
+    in-memory sliding-window fallback still enforces the limit.
     """
-    limiter = state.app.config.get("LIMITER")
+    limiter = app.config.get("LIMITER")
     if limiter is None:
         logger.warning(
             "No LIMITER in app config — auth rate limits enforced by in-memory fallback"
         )
-        return
+        return 0
 
     registered = 0
-    # Scan the module's own globals for any function carrying the
-    # ``_rate_limits`` attribute the ``@_rate_limit`` decorator sets.
-    # This is module-local so it cannot accidentally pick up unrelated
-    # view functions registered by other blueprints on the same app.
-    #
-    # ``inspect.isfunction`` is intentionally strict so that Flask's
-    # ``current_app`` (a Werkzeug LocalProxy in globals) is not poked —
-    # ``getattr(current_app, "_rate_limits", None)`` would otherwise
-    # try to resolve the proxy outside a request context and raise.
-    import inspect  # noqa: PLC0415
-    for obj in list(globals().values()):
-        if not inspect.isfunction(obj):
+    for endpoint, view in list(app.view_functions.items()):
+        if not endpoint.startswith("auth."):
             continue
-        limits = getattr(obj, "_rate_limits", None)
+        limits = getattr(view, "_rate_limits", None)
         if not limits:
             continue
+        wrapped = view
         for limit_str in limits:
-            limiter.limit(limit_str)(obj)
+            wrapped = limiter.limit(limit_str)(wrapped)
             registered += 1
-        logger.debug(
-            "Registered %d rate limit(s) on %s", len(limits), obj.__name__,
-        )
+        app.view_functions[endpoint] = wrapped
+        logger.debug("Registered %d rate limit(s) on %s", len(limits), endpoint)
     logger.info("Auth blueprint: %d rate-limit rules registered with Flask-Limiter", registered)
+    return registered
 
 # JWT config
 _JWT_SECRET_KEY = ""  # Set from env or generated at startup

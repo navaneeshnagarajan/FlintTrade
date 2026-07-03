@@ -2,9 +2,10 @@
 """Tests for auth endpoint rate limiting.
 
 The FlintTrade auth blueprint applies per-route rate limits via
-flask-limiter.  Limits are defined as decorators on each route in
-``auth_routes.py`` and applied when the blueprint is registered on the
-app (see ``_apply_rate_limits`` in auth_routes.py).
+flask-limiter.  Limits are defined as ``@_rate_limit()`` decorators on each
+route in ``auth_routes.py`` and wired onto Flask-Limiter by
+``install_auth_rate_limits(app)``, called from ``create_flask_app`` AFTER the
+blueprint is registered (the views must already be in ``view_functions``).
 
 Configured limits:
   - /v1/auth/login   → 5 per minute
@@ -14,17 +15,9 @@ Configured limits:
   - /v1/auth/logout  → 10 per minute
 
 NOTE on flask-limiter in tests:
-  flask-limiter uses an in-memory backend by default (``memory://``).
-  The limiter must be part of the app — FlintTrade's ``create_flask_app``
-  already creates one and stores it at ``app.config["LIMITER"]``.
-  The ``@auth_bp.record`` hook applies the deferred ``@_rate_limit()``
-  decorators once the blueprint is registered.
-
-  However, flask-limiter's ``Limiter.limit()`` decorator is a wrapper
-  that applies to the *view function*.  When the decorated function is
-  the same object across test runs (module-level), limits accumulate
-  across tests.  We work around this by creating a fresh app per test
-  class and using the ``RATELIMIT_ENABLED`` config flag.
+  flask-limiter uses an in-memory backend by default (``memory://``), and each
+  app instance gets its own Limiter + storage, so limits are per-app-isolated —
+  a fresh ``_make_app`` per test starts with fresh counters.
 
 Run with:
     python -m pytest packages/core/core/tests/test_auth_rate_limiting.py -v --import-mode=importlib
@@ -35,7 +28,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
 
 
 def _make_app(tmp_path: Path):
@@ -101,25 +93,14 @@ class TestLoginRateLimit:
             for code in responses[:5]:
                 assert code in (401, 503), f"Expected 401/503, got {code}"
 
-            # The 6th should be 429 if the rate limiter is active.
-            # flask-limiter in test mode with in-memory storage may or may
-            # not enforce limits depending on how the deferred decorators
-            # are applied.  We document the expected behaviour here.
-            if responses[5] == 429:
-                # Rate limiter is working correctly
-                pass
-            else:
-                # Rate limiter deferred decoration may not have fired.
-                # This is a known limitation of the _rate_limit pattern
-                # with flask-limiter: the custom @_rate_limit decorator
-                # stores the limit string but relies on @auth_bp.record
-                # to call limiter.limit()(view_func), which may not
-                # produce a properly wrapped view in all Flask versions.
-                pytest.skip(
-                    "Rate limiter deferred decoration did not fire in "
-                    "test environment — see auth_routes._apply_rate_limits. "
-                    f"6th response was {responses[5]} instead of 429."
-                )
+            # The 6th request MUST be 429 — login is limited to 5/min and the
+            # limiter is wired via install_auth_rate_limits() after blueprint
+            # registration (previously the deferred decoration fired before the
+            # routes existed and silently wired nothing, so this test skipped
+            # and login brute-force went unthrottled in production).
+            assert responses[5] == 429, (
+                f"login rate limit did not fire: {responses} (6th must be 429)"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -153,15 +134,12 @@ class TestSetupRateLimit:
             # account allowed).
             assert responses[0] in (201, 503)
 
-            # The 4th should be 429 if the rate limiter is active.
-            if responses[3] == 429:
-                pass  # Rate limiter is working
-            else:
-                pytest.skip(
-                    "Rate limiter deferred decoration did not fire in "
-                    "test environment — see auth_routes._apply_rate_limits. "
-                    f"4th response was {responses[3]} instead of 429."
-                )
+            # The 4th MUST be 429 — setup is limited to 3/min. (Note: the 2nd/3rd
+            # legitimately return 409 "already set up" since only one account
+            # exists; the limiter still counts them and trips on the 4th.)
+            assert responses[3] == 429, (
+                f"setup rate limit did not fire: {responses} (4th must be 429)"
+            )
 
 
 # ---------------------------------------------------------------------------

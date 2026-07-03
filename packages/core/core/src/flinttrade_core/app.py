@@ -1707,10 +1707,15 @@ def create_flask_app(
 
     # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
     from .auth_service import AuthService as _AuthService  # noqa: PLC0415
-    from .auth_routes import auth_bp  # noqa: PLC0415
+    from .auth_routes import auth_bp, install_auth_rate_limits  # noqa: PLC0415
     _auth_db = _workspace_dir() / "auth.db"
     app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
     app.register_blueprint(auth_bp)
+    # Wire the deferred @_rate_limit limits onto Flask-Limiter AFTER the auth
+    # views are registered (they aren't present in view_functions during the
+    # blueprint's record hook), so login/PIN/setup brute-force is actually
+    # throttled — not merely registered against a discarded wrapper.
+    install_auth_rate_limits(app)
 
     # (Multi-user /api/v1/users/* CRUD removed 2026-06-10 as overscope — FlintTrade
     # is a single-operator tool; operator == user == data principal. Archived to
