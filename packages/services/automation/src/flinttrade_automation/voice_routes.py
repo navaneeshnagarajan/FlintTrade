@@ -30,33 +30,6 @@ logger = logging.getLogger("flinttrade.automation.voice_routes")
 
 voice_bp = Blueprint("voice", __name__, url_prefix="/api/v1/voice")
 
-# Fragments whose presence means an error string may carry internals (a
-# traceback, a filesystem path, a secret) rather than a bounded operator
-# message — mirrors order_routes._operator_safe_error_message.
-_SENSITIVE_ERROR_FRAGMENTS = (
-    "\n", "\r", "traceback", 'file "', "password", "secret", "token",
-    "api_key", "api key", "jwt", "fernet", "/users/", "/home/", "/var/",
-    "\\", "http://", "https://",
-)
-
-
-def _operator_safe_message(exc: BaseException, fallback: str) -> str:
-    """Surface a bounded operator-facing message, else the generic fallback.
-
-    The voice DOMAIN errors (ParseError / LowConfidenceError / VoiceOrderError)
-    carry controlled messages that tell the operator *why* their command failed
-    ("cannot parse this", "low confidence…") — legitimate validation detail the
-    UI depends on, not internals. Surface those bounded (no secrets/paths/
-    newlines, length-capped); anything suspicious collapses to the fallback.
-    """
-    message = str(exc).strip()
-    if not message or len(message) > 240:
-        return fallback
-    lowered = message.lower()
-    if any(fragment in lowered for fragment in _SENSITIVE_ERROR_FRAGMENTS):
-        return fallback
-    return message
-
 # Module-level singleton — replaced via ``init_voice_routes`` for DI.
 _bridge: VoiceOrderBridge | None = None
 
@@ -118,10 +91,9 @@ def parse_command() -> tuple[Response, int]:
     try:
         intent = bridge.parse(text)
         return jsonify({"status": "success", "data": intent.to_dict()}), 200
-    except ParseError as exc:
-        logger.warning("Parse error for %r: %s", text, exc)
-        message = _operator_safe_message(exc, "Could not understand the command")
-        return jsonify({"status": "error", "message": message}), 422
+    except ParseError:
+        logger.warning("Voice parse failed")
+        return jsonify({"status": "error", "message": "Could not understand the command"}), 422
     except Exception as exc:
         logger.error("Unexpected parse error: %s", exc)
         return jsonify({"status": "error", "message": "Internal error during parsing"}), 500
@@ -180,14 +152,12 @@ def execute_intent() -> tuple[Response, int]:
             "intent": exc.intent.to_dict(),
         }), 202
 
-    except LowConfidenceError as exc:
-        message = _operator_safe_message(exc, "Could not understand the command with enough confidence")
-        return jsonify({"status": "error", "message": message}), 422
+    except LowConfidenceError:
+        return jsonify({"status": "error", "message": "Could not understand the command with enough confidence"}), 422
 
-    except VoiceOrderError as exc:
-        logger.error("Voice order execution error: %s", exc)
-        message = _operator_safe_message(exc, "Could not execute the voice order")
-        return jsonify({"status": "error", "message": message}), 422
+    except VoiceOrderError:
+        logger.error("Voice order execution error")
+        return jsonify({"status": "error", "message": "Could not execute the voice order"}), 422
 
     except Exception as exc:
         logger.error("Unexpected execution error: %s", exc)

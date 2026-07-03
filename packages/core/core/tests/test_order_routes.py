@@ -860,3 +860,31 @@ class TestAuthRequired:
         )
         # CSRF middleware rejects before auth middleware runs
         assert resp.status_code in (401, 403)
+
+
+def test_gated_verb_write_returns_bounded_broker_error(flask_app, monkeypatch):
+    """Broker/adapter exception details stay out of the HTTP response."""
+    from flinttrade_core.exceptions import BrokerError
+    from flinttrade_core import order_routes as routes
+
+    class RefusingRouter:
+        async def execute_gated(self, *_args, **_kwargs):
+            raise BrokerError("Traceback\nFile \"/Users/me/secret.py\"\napi_key=leaked")
+
+    monkeypatch.setattr("flinttrade_engine.safety.gate_broker_write", lambda *_args, **_kwargs: object())
+    monkeypatch.setitem(flask_app.config, "BROKER_ROUTER", RefusingRouter())
+
+    with flask_app.app_context():
+        response, status = routes._gated_verb_write(
+            "cancel_forever",
+            {"order_id": "GTT-1"},
+            {"jti": "jti-1", "sub": "operator"},
+            adapter_id="dhan",
+            account_id="ACC1",
+            audit_event="FOREVER_CANCELLED",
+            fail_message="Forever order cancel failed",
+            ref="GTT-1",
+        )
+
+    assert status == 502
+    assert response.get_json()["message"] == "Forever order cancel failed"

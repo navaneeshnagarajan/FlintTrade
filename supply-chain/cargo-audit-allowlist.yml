@@ -6,52 +6,52 @@
 allowlist:
   - advisory: RUSTSEC-2024-0413
     package: atk
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0416
     package: atk-sys
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0412
     package: gdk
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0418
     package: gdk-sys
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0411
     package: gdkwayland-sys
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0417
     package: gdkx11
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0414
     package: gdkx11-sys
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0415
     package: gtk
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0420
     package: gtk-sys
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0419
     package: gtk3-macros
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack still depends on gtk-rs 0.18."
     accepted_by: "navaneesh"
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0370
@@ -86,6 +86,6 @@ allowlist:
     expires: "2026-10-31"
   - advisory: RUSTSEC-2024-0429
     package: glib
-    reason: "Tauri 2.11.2 Linux GTK/WebKit stack pins gtk 0.18, which requires glib 0.18; Dependabot reports no compatible glib 0.20 update path."
+    reason: "Tauri 2.11.5 Linux GTK/WebKit stack pins gtk 0.18, which requires glib 0.18; Dependabot reports no compatible glib 0.20 update path."
     accepted_by: "navaneesh"
     expires: "2026-10-31"

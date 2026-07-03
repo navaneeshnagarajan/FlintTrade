@@ -107,6 +107,27 @@ def test_connect_rejects_non_native_broker(client):
     assert "not a native broker" in resp.get_json()["message"]
 
 
+def test_connect_rejects_untrusted_identifiers_without_reflection(client):
+    c, _app, _tmp = client
+    payload = "<script>alert(1)</script>"
+
+    bad_adapter = c.post(
+        "/api/v1/native/accounts",
+        json={"adapter_id": payload, "account_id": "Z1", "credentials": {"access_token": "x"}},
+        headers=_h(),
+    )
+    bad_account = c.post(
+        "/api/v1/native/accounts",
+        json={"adapter_id": "indmoney", "account_id": payload, "credentials": {"access_token": "x"}},
+        headers=_h(),
+    )
+
+    assert bad_adapter.status_code == 400
+    assert payload not in bad_adapter.get_json()["message"]
+    assert bad_account.status_code == 400
+    assert payload not in bad_account.get_json()["message"]
+
+
 def test_connect_requires_credentials(client):
     c, _app, _tmp = client
     resp = c.post("/api/v1/native/accounts", json={"adapter_id": "dhan", "account_id": "D1"}, headers=_h())

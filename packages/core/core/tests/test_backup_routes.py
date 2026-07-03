@@ -87,6 +87,21 @@ class TestBackupCreate:
         assert resp.status_code == 500
         assert resp.get_json()["status"] == "error"
 
+    def test_create_accepts_absolute_path_inside_backup_root(self, client, tmp_path) -> None:
+        """Absolute output paths stay valid when contained by the backup root."""
+        target = tmp_path / "home" / "flint-backups" / "custom.tar.gz"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"0" * 1024)
+
+        with patch(
+            "flinttrade_core.backup.WorkspaceBackup.create_backup",
+            return_value=target,
+        ) as create_backup:
+            resp = client.post("/v1/admin/backup/create", json={"output_path": str(target)})
+
+        assert resp.status_code == 200
+        assert create_backup.call_args.args[0] == target
+
 
 # ---------------------------------------------------------------------------
 # POST /admin/backup/restore

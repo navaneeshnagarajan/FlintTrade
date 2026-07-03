@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -225,6 +226,35 @@ def test_import_rejects_path_traversal(client):
         "/api/v1/integration/excel/import",
         json={"file_path": "../outside.xlsx"},
     )
+    assert resp.status_code == 400
+
+
+def test_import_accepts_absolute_path_inside_output_dir(client, app):
+    """Absolute paths are accepted only when they resolve under EXCEL_OUTPUT_DIR."""
+    file_path = Path(app.config["EXCEL_OUTPUT_DIR"]) / "export.xlsx"
+
+    resp = client.post(
+        "/api/v1/integration/excel/import",
+        json={"file_path": str(file_path), "sheet_name": "Positions"},
+    )
+
+    assert resp.status_code == 200
+    mod._bridge.import_from_excel.assert_called_with(  # noqa: SLF001
+        str(file_path),
+        "Positions",
+        allowed_root=str(Path(app.config["EXCEL_OUTPUT_DIR"]).resolve()),
+    )
+
+
+def test_import_rejects_absolute_path_outside_output_dir(client, app):
+    """A rooted path outside EXCEL_OUTPUT_DIR is rejected before bridge IO."""
+    outside = Path(app.config["EXCEL_OUTPUT_DIR"]).parent / "outside.xlsx"
+
+    resp = client.post(
+        "/api/v1/integration/excel/import",
+        json={"file_path": str(outside)},
+    )
+
     assert resp.status_code == 400
 
 

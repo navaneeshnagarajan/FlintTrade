@@ -1459,37 +1459,6 @@ def _gated_target(params: Any) -> tuple[str, str]:
     return adapter_id, account_id
 
 
-_SENSITIVE_ERROR_FRAGMENTS = (
-    "\n",
-    "\r",
-    "traceback",
-    'file "',
-    "password",
-    "secret",
-    "token",
-    "api_key",
-    "api key",
-    "jwt",
-    "fernet",
-    "/users/",
-    "/var/",
-    "\\",
-    "http://",
-    "https://",
-)
-
-
-def _operator_safe_error_message(exc: BaseException, fallback: str) -> str:
-    """Return a bounded broker/operator message without leaking internals."""
-    message = str(exc).strip()
-    if not message or len(message) > 240:
-        return fallback
-    lowered = message.lower()
-    if any(fragment in lowered for fragment in _SENSITIVE_ERROR_FRAGMENTS):
-        return fallback
-    return message
-
-
 def _require_live_payload(*, require_unlock: bool) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
     """Decode the request JWT and enforce the live-mode guard for gated-verb routes.
 
@@ -1653,21 +1622,14 @@ def _gated_verb_write(
             "message": f"This operation ({verb}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except (BrokerError, ValueError) as exc:
-        # Honesty (audit MEDIUM): a real broker rejection (BrokerError, incl.
-        # OrderRejectedByBroker) or an adapter mapping refusal (the *MappingError
-        # classes, which subclass ValueError — e.g. DhanMappingError "segment not
-        # enabled") carries a message the operator NEEDS. Surface it verbatim
-        # rather than swallowing it into the generic 500. Mirrors how the live
-        # place path surfaces broker rejections (see _dispatch_live_order). 502 =
-        # the broker refused; the FlintTrade gate itself worked.
+        # The broker/adapter refused after the FlintTrade gate succeeded. Keep the
+        # detailed exception in logs, but return the route-specific bounded message
+        # so adapter tracebacks, paths, or tokens cannot reach HTTP callers.
         logger.warning(
             "Live %s rejected by broker/adapter | adapter=%s account=%s: %s",
             verb, adapter_id, account_id, exc,
         )
-        return jsonify({
-            "status": "error",
-            "message": _operator_safe_error_message(exc, fail_message),
-        }), 502
+        return jsonify({"status": "error", "message": fail_message}), 502
     except Exception:
         logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, ref, adapter_id)
         return jsonify({"status": "error", "message": fail_message}), 500

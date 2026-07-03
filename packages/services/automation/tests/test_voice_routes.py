@@ -109,7 +109,7 @@ class TestVoiceParse:
         from flinttrade_automation.voice_order_bridge import ParseError
 
         bridge, _ = mock_bridge
-        bridge.parse.side_effect = ParseError("cannot parse this")
+        bridge.parse.side_effect = ParseError("Traceback\nFile \"/Users/me/secret.py\"")
 
         resp = client.post(
             "/api/v1/voice/parse",
@@ -117,7 +117,7 @@ class TestVoiceParse:
             content_type="application/json",
         )
         assert resp.status_code == 422
-        assert "cannot parse" in resp.get_json()["message"]
+        assert resp.get_json()["message"] == "Could not understand the command"
 
     def test_parse_not_initialised_returns_503(self, app):
         """Bridge not injected → 503."""
@@ -205,6 +205,36 @@ class TestVoiceExecute:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+    def test_execute_low_confidence_returns_bounded_message(self, client, mock_bridge):
+        from flinttrade_automation.voice_order_bridge import LowConfidenceError
+
+        bridge, _ = mock_bridge
+        bridge.execute = AsyncMock(side_effect=LowConfidenceError("Traceback\nsecret token"))
+
+        resp = client.post(
+            "/api/v1/voice/execute",
+            data=json.dumps({"intent": self._intent_dict(), "confirm": False}),
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 422
+        assert resp.get_json()["message"] == "Could not understand the command with enough confidence"
+
+    def test_execute_voice_order_error_returns_bounded_message(self, client, mock_bridge):
+        from flinttrade_automation.voice_order_bridge import VoiceOrderError
+
+        bridge, _ = mock_bridge
+        bridge.execute = AsyncMock(side_effect=VoiceOrderError("Traceback\nsecret token"))
+
+        resp = client.post(
+            "/api/v1/voice/execute",
+            data=json.dumps({"intent": self._intent_dict(), "confirm": False}),
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 422
+        assert resp.get_json()["message"] == "Could not execute the voice order"
 
 
 # ---------------------------------------------------------------------------

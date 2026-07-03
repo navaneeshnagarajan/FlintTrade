@@ -63,6 +63,7 @@ def _serialized(fn: Any) -> Any:
 # Only the four founder-broker natives may be captured through this path; the
 # OpenAlgo bridge uses its own /v1/accounts flow.
 _NATIVE_BROKER_IDS = {"dhan", "upstox", "kotakneo", "indmoney"}
+_ACCOUNT_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-")
 
 native_accounts_bp = Blueprint("native_accounts", __name__, url_prefix="/api/v1/native")
 
@@ -107,6 +108,30 @@ def _operator_actor_id() -> str:
         except Exception:  # noqa: BLE001
             pass
     return "operator"
+
+
+def _is_safe_account_id(account_id: str) -> bool:
+    """Keep stored selectors bounded and safe for later route/path use."""
+    return 0 < len(account_id) <= 80 and all(ch in _ACCOUNT_ID_CHARS for ch in account_id)
+
+
+def _public_connect_body(body: dict[str, Any]) -> dict[str, Any]:
+    """Return only the direct-connect fields consumed by the desktop UI."""
+    data = body.get("data") if isinstance(body.get("data"), dict) else {}
+    connected = bool(data.get("connected"))
+    login = str(data.get("login") or "")
+    return {
+        "status": "success" if connected else "error",
+        "data": {
+            "connected": connected,
+            "login": login if connected else "failed",
+        },
+        "message": (
+            "Native broker account connected."
+            if connected
+            else "Login did not establish a session; credentials were not kept."
+        ),
+    }
 
 
 def _register_selector_in_workspace(
@@ -310,8 +335,7 @@ def _do_connect(
     try:
         store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
     except Exception:  # noqa: BLE001
-        logger.error("Failed to store native broker vault row for adapter=%s account=%s", adapter_id, account_id)
-        return {"status": "error", "message": "Could not store credentials"}, 500
+        return {"status": "error", "message": "Could not store broker auth material"}, 500
 
     actor_id = _operator_actor_id()
     try:
@@ -409,15 +433,15 @@ def connect_native_account() -> Any:
     if adapter_id not in _NATIVE_BROKER_IDS:
         return jsonify({
             "status": "error",
-            "message": f"'{adapter_id}' is not a native broker. Native brokers: {sorted(_NATIVE_BROKER_IDS)}.",
+            "message": "adapter_id is not a native broker.",
         }), 400
-    if not account_id:
-        return jsonify({"status": "error", "message": "account_id is required."}), 400
+    if not _is_safe_account_id(account_id):
+        return jsonify({"status": "error", "message": "account_id must use letters, numbers, dot, underscore, @ or hyphen."}), 400
     if not isinstance(credentials, dict) or not credentials:
         return jsonify({"status": "error", "message": "credentials (a non-empty object) is required."}), 400
 
     body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
-    return jsonify(body_out), code
+    return jsonify(_public_connect_body(body_out)), code
 
 
 # ---------------------------------------------------------------------------
@@ -473,8 +497,10 @@ def native_oauth_start() -> Any:
     api_secret = str(body.get("api_secret", "")).strip()
 
     if adapter_id not in _NATIVE_BROKER_IDS:
-        return jsonify({"status": "error", "message": f"'{adapter_id}' is not a native broker."}), 400
-    if not (account_id and api_key and api_secret):
+        return jsonify({"status": "error", "message": "adapter_id is not a native broker."}), 400
+    if not _is_safe_account_id(account_id):
+        return jsonify({"status": "error", "message": "account_id must use letters, numbers, dot, underscore, @ or hyphen."}), 400
+    if not (api_key and api_secret):
         return jsonify({
             "status": "error",
             "message": "account_id, api_key and api_secret are required.",
@@ -530,11 +556,7 @@ def native_oauth_callback() -> Any:
         return _oauth_result_html("Login link expired or invalid — start again from FlintTrade.", ok=False), 400
     if not code:
         # The broker can redirect with an error instead of a code.
-        logger.warning(
-            "Native OAuth callback for %s returned no code: %s",
-            pending["adapter_id"],
-            request.args.get("error_description") or request.args.get("error") or "no authorisation code",
-        )
+        logger.warning("Native OAuth callback returned no authorisation code")
         return _oauth_result_html("Broker did not return an authorisation code.", ok=False), 400
 
     adapter_id = pending["adapter_id"]

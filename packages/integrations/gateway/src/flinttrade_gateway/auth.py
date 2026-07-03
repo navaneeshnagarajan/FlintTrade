@@ -336,7 +336,6 @@ def oauth_callback() -> Any:
             label,
             credentials,
         )
-        logger.info("OAuth callback success for broker=%r", broker)
         return redirect("/setup?auth=success")
     except (BrokerNotFoundError, AuthFlowError, CredentialError):
         logger.warning("OAuth callback auth failure")

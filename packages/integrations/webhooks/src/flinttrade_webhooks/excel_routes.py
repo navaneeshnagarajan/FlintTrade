@@ -79,14 +79,16 @@ def _safe_path(filename: str) -> str:
 def _safe_xlsx_path(file_path: str) -> str | None:
     """Resolve an import path under the configured Excel output directory."""
     root = Path(_output_dir()).resolve()
-    supplied = Path(file_path).expanduser()
-    if supplied.is_absolute():
-        resolved = supplied.resolve(strict=False)
-    else:
-        joined = safe_join(str(root), file_path)
-        if joined is None:
+    candidate = str(file_path).strip()
+    if os.path.isabs(candidate):
+        try:
+            candidate = os.path.relpath(os.path.normpath(candidate), str(root))
+        except ValueError:
             return None
-        resolved = Path(joined).resolve(strict=False)
+    joined = safe_join(str(root), candidate)
+    if joined is None:
+        return None
+    resolved = Path(joined).resolve(strict=False)
     if resolved.suffix.lower() != ".xlsx":
         return None
     if resolved != root and root not in resolved.parents:

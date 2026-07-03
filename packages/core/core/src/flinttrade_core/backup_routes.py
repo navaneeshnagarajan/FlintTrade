@@ -18,9 +18,11 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request
+from werkzeug.utils import safe_join
 
 logger = logging.getLogger("flinttrade.core.backup_routes")
 
@@ -34,8 +36,16 @@ def _resolve_contained_path(root: Path, raw: str | None, default: Path | None = 
     """Resolve an operator-supplied path while keeping it under ``root``."""
     root = root.expanduser().resolve()
     if raw:
-        supplied = Path(raw).expanduser()
-        candidate = supplied if supplied.is_absolute() else root / supplied
+        candidate_str = str(raw).strip()
+        if os.path.isabs(candidate_str):
+            try:
+                candidate_str = os.path.relpath(os.path.normpath(candidate_str), str(root))
+            except ValueError as exc:
+                raise ValueError("path must stay under the FlintTrade backup directory") from exc
+        joined = safe_join(str(root), candidate_str)
+        if joined is None:
+            raise ValueError("path must stay under the FlintTrade backup directory")
+        candidate = Path(joined)
     elif default is not None:
         candidate = default
     else:

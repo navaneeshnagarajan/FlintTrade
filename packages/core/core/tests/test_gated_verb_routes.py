@@ -588,9 +588,8 @@ def test_trigger_modify_over_limit_leg_blocked_by_l1() -> None:
     router.execute_gated.assert_not_called()
 
 
-def test_gated_verb_surfaces_broker_rejection_message() -> None:
-    """Audit MEDIUM: a broker rejection / adapter mapping error propagates its
-    OWN message to the response (502) — it is NOT swallowed into a generic 500."""
+def test_gated_verb_bounds_broker_rejection_message() -> None:
+    """Broker/adapter detail is logged, not reflected to HTTP callers."""
     from flinttrade_core.exceptions import OrderRejectedByBroker
 
     router = MagicMock()
@@ -600,12 +599,11 @@ def test_gated_verb_surfaces_broker_rejection_message() -> None:
     client = _app(broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
     assert resp.status_code == 502
-    assert "segment not enabled" in resp.get_json()["message"]
+    assert resp.get_json()["message"] == "Conditional trigger placement failed"
 
 
-def test_gated_verb_surfaces_mapping_value_error_message() -> None:
-    """An adapter mapping ValueError (the *MappingError classes subclass it)
-    surfaces its message rather than a generic failure."""
+def test_gated_verb_bounds_mapping_value_error_message() -> None:
+    """Adapter mapping ValueErrors must not expose internals in responses."""
     router = MagicMock()
     router.execute_gated = AsyncMock(
         side_effect=ValueError("No Dhan segment for exchange 'XYZ'")
@@ -617,7 +615,7 @@ def test_gated_verb_surfaces_mapping_value_error_message() -> None:
         headers=_live_headers(),
     )
     assert resp.status_code == 502
-    assert "No Dhan segment" in resp.get_json()["message"]
+    assert resp.get_json()["message"] == "Forever order modify failed"
 
 
 # ---------------------------------------------------------------------------
