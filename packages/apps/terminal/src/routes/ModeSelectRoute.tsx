@@ -11,6 +11,7 @@ import { Monitor, FlaskConical, Zap, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
+import { unlockWithPin } from "@/lib/modeAuth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,29 +91,12 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
       }
       setIsVerifyingPin(true);
       try {
-        const res = await fetch("/ft-api/v1/auth/pin", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin }),
-        });
-        if (!res.ok) {
-          setPinError("Incorrect PIN. Try again.");
-          return;
-        }
-        const body = (await res.json()) as {
-          data?: { token?: string };
-          token?: string;
-        };
-        const liveSessionToken = body?.data?.token ?? body?.token;
-        if (!liveSessionToken) {
-          setPinError("Server did not return a live session token — try again.");
-          return;
-        }
+        const { token: liveSessionToken } = await unlockWithPin(pin, "live");
         setPinError("");
         onSelect(selected, liveSessionToken);
         return;
       } catch {
-        setPinError("Could not verify PIN — check connection.");
+        setPinError("Incorrect PIN. Try again.");
         return;
       } finally {
         setIsVerifyingPin(false);

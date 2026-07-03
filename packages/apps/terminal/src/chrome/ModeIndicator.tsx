@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
+import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -54,27 +55,10 @@ export default function ModeIndicator() {
       // token place real orders even though the UI says Practice.
       setToggleError("");
       try {
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        const res = await fetch("/ft-api/v1/auth/mode", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ mode: "practice" }),
-        });
-        if (!res.ok) {
-          setToggleError("Could not downgrade to Practice — try again.");
-          return;
-        }
-        const body = (await res.json()) as {
-          data?: { token?: string };
-          token?: string;
-        };
-        const newToken = body?.data?.token ?? body?.token;
-        if (newToken) updateToken(newToken);
+        const newToken = await downgradeMode("practice", token);
+        updateToken(newToken);
       } catch {
-        setToggleError("Could not downgrade to Practice — check connection.");
+        setToggleError("Could not downgrade to Practice — try again.");
         return;
       }
       setMode("practice");
@@ -92,33 +76,15 @@ export default function ModeIndicator() {
       return;
     }
     try {
-      const res = await fetch("/ft-api/v1/auth/pin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin }),
-      });
-      if (!res.ok) {
-        setPinError("Incorrect PIN. Try again.");
-        return;
-      }
-      // Capture the live-unlocked JWT the backend just minted. Without
-      // this the in-memory token stayed at the Explore/Practice JWT
-      // issued by login, so the server-side require_live_unlocked guard
-      // would reject every subsequent order. (Fixed 2026-05-19 per
-      // Codex audit — previously this response was thrown away.)
-      const body = (await res.json()) as {
-        data?: { token?: string };
-        token?: string;
-      };
-      const newToken = body?.data?.token ?? body?.token;
-      if (newToken) {
-        updateToken(newToken);
-      } else {
-        setPinError("Server did not return a session token — try again.");
-        return;
-      }
+      // Explicit Live arm: unlockWithPin defaults to mode "live", so the
+      // backend mints a live_mode_unlocked JWT. Capturing it is essential —
+      // otherwise the in-memory token stays at the Explore/Practice JWT from
+      // login and the server-side require_live_unlocked guard rejects every
+      // order. (Fixed 2026-05-19 per Codex audit; centralised in Phase 1.)
+      const { token: newToken } = await unlockWithPin(pin, "live");
+      updateToken(newToken);
     } catch {
-      setPinError("Could not verify PIN — check connection.");
+      setPinError("Incorrect PIN. Try again.");
       return;
     }
     setPinError("");
@@ -132,32 +98,53 @@ export default function ModeIndicator() {
     setPinError("");
   }, []);
 
-  const handleExploreClick = useCallback(() => {
+  const handleExploreClick = useCallback(async () => {
     if (token === "demo-user") {
       window.dispatchEvent(
         new CustomEvent("flinttrade:navigate", { detail: { path: "/setup-account" } }),
       );
       return;
     }
+    // Explore → Practice must upgrade the JWT server-side. Login always mints
+    // an `explore` JWT, so without this call the UI would show Practice while
+    // the backend still saw Explore and rejected every sandbox order 403
+    // `mode_blocked` — the Phase 1 G1 bug that made Practice trading
+    // unreachable. `/auth/mode` accepts the practice downgrade from an explore
+    // token (explore is the lowest mode; practice is a broker-free sandbox).
+    setToggleError("");
+    try {
+      const newToken = await downgradeMode("practice", token);
+      updateToken(newToken);
+    } catch {
+      setToggleError("Could not switch to Practice — try again.");
+      return;
+    }
     setMode("practice");
-  }, [setMode, token]);
+  }, [setMode, token, updateToken]);
 
   // ── Explore → Practice ──────────────────────────────────────────────────
   if (mode === "explore") {
     return (
-      <button
-        type="button"
-        onClick={handleExploreClick}
-        aria-label={
-          token === "demo-user"
-            ? "Explore mode active — sample data only. Click to set up Practice mode."
-            : "Explore mode active — sample data only. Click to switch to Practice mode."
-        }
-        className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary transition-colors"
-      >
-        <Compass size={11} aria-hidden="true" />
-        EXPLORE
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleExploreClick}
+          aria-label={
+            token === "demo-user"
+              ? "Explore mode active — sample data only. Click to set up Practice mode."
+              : "Explore mode active — sample data only. Click to switch to Practice mode."
+          }
+          className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary transition-colors"
+        >
+          <Compass size={11} aria-hidden="true" />
+          EXPLORE
+        </button>
+        {toggleError && (
+          <span role="alert" className="text-xs text-loss">
+            {toggleError}
+          </span>
+        )}
+      </div>
     );
   }
 

@@ -12,6 +12,7 @@ import { LogoIcon } from "@/components/brand/Logo";
 import { Lock, KeyRound, ShieldCheck, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
+import { downgradeMode } from "@/lib/modeAuth";
 
 interface LoginRouteProps {
   onSuccess: () => void;
@@ -41,8 +42,24 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
           data.data.username,
           data.data.expires_at,
         );
-        if (useModeStore.getState().mode === "live") {
+        // Reconcile the persisted UI mode with the freshly-minted JWT.
+        // Password login always mints an `explore` JWT. If the UI was last
+        // in Live, drop to Explore (never silently re-arm real money — Live
+        // requires the explicit PIN dialog). If the UI was in Practice,
+        // upgrade the JWT to practice so sandbox orders aren't rejected 403
+        // `mode_blocked` (Phase 1 G1: the login-time half of the divergence).
+        const uiMode = useModeStore.getState().mode;
+        if (uiMode === "live") {
           useModeStore.getState().setMode("explore");
+        } else if (uiMode === "practice") {
+          try {
+            const practiceToken = await downgradeMode("practice", data.data.token);
+            useAuthStore.getState().updateToken(practiceToken);
+          } catch {
+            // Couldn't sync — fall back to Explore rather than leave the UI
+            // in a Practice state the JWT doesn't back.
+            useModeStore.getState().setMode("explore");
+          }
         }
         onSuccess();
       } else {

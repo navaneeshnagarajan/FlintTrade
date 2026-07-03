@@ -9,6 +9,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Lock } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
+import { unlockWithPin } from "@/lib/modeAuth";
 
 // ---------------------------------------------------------------------------
 // IST clock hook
@@ -64,6 +66,7 @@ export function LockScreen() {
   const username = useAuthStore((s) => s.username);
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedIn = useAuthStore((s) => s.setLoggedIn);
+  const mode = useModeStore((s) => s.mode);
 
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -81,31 +84,21 @@ export function LockScreen() {
     setIsSubmitting(true);
     setError("");
     try {
-      const resp = await fetch("/ft-api/v1/auth/pin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: value }),
-      });
-      const data = await resp.json();
-      if (resp.ok && data.data?.token) {
-        setLoggedIn(
-          data.data.token,
-          data.data.username ?? username ?? "",
-          data.data.expires_at ?? "",
-        );
-      } else {
-        setError("Incorrect PIN. Try again.");
-        setPin("");
-        inputRef.current?.focus();
-      }
+      // Mode-PRESERVING idle unlock: pass the session's current UI mode so the
+      // backend does not silently escalate an idle Explore/Practice session to
+      // a Live-unlocked JWT (Phase 1 G2 — the LockScreen previously called
+      // /auth/pin with no mode and always received a live-unlocked token,
+      // leaving the next "practice" order to dispatch down the live path).
+      const result = await unlockWithPin(value, mode);
+      setLoggedIn(result.token, username ?? "", "");
     } catch {
-      setError("Cannot reach server.");
+      setError("Incorrect PIN. Try again.");
       setPin("");
       inputRef.current?.focus();
     } finally {
       setIsSubmitting(false);
     }
-  }, [setLoggedIn, username]);
+  }, [setLoggedIn, username, mode]);
 
   function handlePinChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value.replace(/\D/g, "").slice(0, 6);

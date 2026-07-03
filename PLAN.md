@@ -45,8 +45,8 @@ A phase closes only after: full multi-agent audit → fix everything → clean r
 App auth core already works (hands-on verified): setup → password+TOTP login → mode-scoped JWT (next-08:00-IST expiry, jti revocation) → PIN live-unlock → practice downgrade. The work is the seams and the broker side. Full trace: `raw/xcut-auth-flow.md`.
 
 **App-auth seams**
-- [ ] G1 — Explore→Practice must upgrade the JWT server-side (frontend calls `POST /v1/auth/mode` on every Practice flip; today practice orders 403 `mode_blocked`). Add a cross-layer test (UI mode vs JWT claim).
-- [ ] G2 — LockScreen idle PIN-unlock must be mode-preserving (today it silently mints a Live-unlocked JWT under a Practice/Explore UI). Decide + implement: mode param on `/auth/pin` or a dedicated unlock endpoint.
+- [x] G1 — Explore→Practice upgrades the JWT server-side. `/auth/mode` now accepts `explore`|`practice` downgrade targets; `lib/modeAuth.ts` centralises the calls; ModeIndicator (Explore→Practice + Live→Practice), LoginRoute (persisted-Practice reconciliation) wired. Hands-on proven: practice JWT places a sandbox order (200 paper fill) where explore is 403. (`.local/specs/auth-phase1/DESIGN_LOG.md`)
+- [x] G2 — LockScreen idle PIN-unlock is mode-preserving. `/auth/pin` takes an optional `mode` (default `live`); LockScreen passes the current UI mode so an idle Practice/Explore session never silently mints a Live-unlocked JWT. Backend + frontend tests + hands-on verified.
 - [ ] G6 — Make the auth brute-force rate-limiter tests actually fire (currently skipped: "deferred decoration did not fire"); unskip and keep as regression.
 - [ ] G8 — Route-prefix regression test for the `/api/v1`-vs-`/v1` 404 class: assert every frontend-called URL (both prefix families, incl. the `/ft-api/v1/auth/*` island) resolves against the registered Flask `url_map`.
 - [ ] G9 — Decide + enforce auth on gateway account-management writes (`/v1/accounts*` currently loopback-allowance only; any local process can add/remove broker accounts).

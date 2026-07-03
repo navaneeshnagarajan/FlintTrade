@@ -50,13 +50,37 @@ describe("ModeIndicator", () => {
       expect(screen.getByText("EXPLORE")).toBeInTheDocument();
     });
 
-    it("switches to Practice when clicked", () => {
+    it("switches to Practice when clicked, syncing the JWT server-side", async () => {
+      // Phase 1 G1 regression: Explore→Practice must call /auth/mode so the
+      // backend upgrades the explore JWT to practice. Without the server round
+      // trip the UI showed Practice while the JWT stayed explore and every
+      // sandbox order was rejected 403 mode_blocked.
       resetStore("explore");
-      render(<ModeIndicator />);
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        jsonResponse({ status: "success", data: { token: "practice-jwt", mode: "practice" } }),
+      );
 
+      render(<ModeIndicator />);
       fireEvent.click(screen.getByRole("button", { name: /explore mode active/i }));
 
-      expect(useModeStore.getState().mode).toBe("practice");
+      await waitFor(() => expect(useModeStore.getState().mode).toBe("practice"));
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/ft-api/v1/auth/mode",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "practice" }) }),
+      );
+      // The explore JWT is replaced with the practice JWT the server minted.
+      expect(useAuthStore.getState().token).toBe("practice-jwt");
+    });
+
+    it("stays in Explore if the Practice JWT sync fails", async () => {
+      resetStore("explore");
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({}, 503));
+
+      render(<ModeIndicator />);
+      fireEvent.click(screen.getByRole("button", { name: /explore mode active/i }));
+
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      expect(useModeStore.getState().mode).toBe("explore");
     });
 
     it("routes demo users to account setup instead of switching to API-backed Practice", () => {

@@ -41,11 +41,12 @@ describe("ModeSelectRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue with live/i }));
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith("live", "live-unlocked-jwt"));
+    // Routed through unlockWithPin, which always sends the explicit live mode.
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/ft-api/v1/auth/pin",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ pin: "123456" }),
+        body: JSON.stringify({ pin: "123456", mode: "live" }),
       }),
     );
   });
@@ -66,6 +67,8 @@ describe("ModeSelectRoute", () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
     expect(onSelect).not.toHaveBeenCalled();
-    expect(screen.getByText(/server did not return a live session token/i)).toBeInTheDocument();
+    // unlockWithPin throws on a missing token; the route surfaces the generic
+    // PIN error rather than proceeding.
+    expect(screen.getByText(/incorrect pin/i)).toBeInTheDocument();
   });
 });

@@ -542,11 +542,22 @@ def auth_login() -> tuple[Any, int]:
 @auth_bp.route("/pin", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_pin_verify() -> tuple[Any, int]:
-    """PIN quick-unlock — returns new session token with live mode unlocked.
+    """PIN quick-unlock — returns a new session token for the requested mode.
 
-    After successful PIN verification the returned JWT carries
-    ``live_mode_unlocked: true``, which is checked server-side by
-    ``order_routes`` before any live order is forwarded to OpenAlgo.
+    Default behaviour (no ``mode`` in the body) is unchanged: the returned
+    JWT carries ``mode: "live"`` and ``live_mode_unlocked: true``, which is
+    checked server-side by ``order_routes`` before any live order is
+    forwarded to a broker. This is the explicit Live-arming gesture used by
+    the ModeIndicator upgrade dialog and the login screen's quick-unlock.
+
+    An optional ``mode`` field (``"explore"`` | ``"practice"`` | ``"live"``)
+    lets mode-preserving callers — the idle LockScreen — re-authenticate
+    WITHOUT silently escalating the session to Live (Phase 1 fix for the
+    A4 divergence: an idle Practice session unlocking with a PIN previously
+    received a live-unlocked JWT under a Practice UI; design D2,
+    ``.local/specs/auth-phase1/DESIGN_LOG.md``). Non-live targets mint
+    ``live_mode_unlocked: false`` — strictly less privilege from the same
+    PIN verification.
     """
     svc = _get_auth_service()
     if svc is None:
@@ -554,61 +565,78 @@ def auth_pin_verify() -> tuple[Any, int]:
 
     body = request.get_json(silent=True) or {}
     pin = str(body.get("pin", ""))
+    target_mode = str(body.get("mode", "live")).strip().lower() or "live"
+    if target_mode not in ("explore", "practice", "live"):
+        return jsonify({
+            "status": "error",
+            "message": "mode must be one of 'explore', 'practice', 'live'.",
+        }), 400
 
     if not svc.verify_pin(pin):
         return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
+    live_unlocked = target_mode == "live"
     profile = svc.get_profile()
     token = _create_token(
         profile.get("username", "user"),
-        live_mode_unlocked=True,
-        mode="live",
+        live_mode_unlocked=live_unlocked,
+        mode=target_mode,
     )
 
     return jsonify({
         "status": "success",
-        "data": {"token": token, "live_mode_unlocked": True},
+        "data": {
+            "token": token,
+            "mode": target_mode,
+            "live_mode_unlocked": live_unlocked,
+        },
     }), 200
 
 
 @auth_bp.route("/mode", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_mode_switch() -> tuple[Any, int]:
-    """Downgrade the current session to Practice mode.
+    """Downgrade the current session to Practice or Explore mode.
 
-    Issues a NEW JWT with ``mode: "practice"`` and
+    Issues a NEW JWT with ``mode: "practice"`` or ``mode: "explore"`` and
     ``live_mode_unlocked: false``, and REVOKES the caller's existing JWT
     (so a stale live-unlocked token can't be replayed). This closes the
     2026-05-19 Codex audit finding that ``ModeIndicator.tsx`` was
     flipping local UI state to Practice without ever invalidating the
     PIN-unlocked JWT — meaning a retained live-unlocked JWT could still
-    place live orders even after the UI displayed Practice.
+    place live orders even after the UI displayed Practice. The Explore
+    target was added in Phase 1 (2026-07-03) so that EVERY UI mode change
+    keeps the JWT claim in lockstep — a Practice/Live session flipping the
+    UI to Explore must not keep holding a higher-mode token (design D1,
+    ``.local/specs/auth-phase1/DESIGN_LOG.md``).
 
-    Only ``mode: "practice"`` is accepted. Upgrading to Live ALWAYS goes
+    Both accepted targets are privilege *reductions* (explore is the most
+    restrictive mode; practice routes to the broker-free sandbox), so any
+    valid session token may request them. Upgrading to Live ALWAYS goes
     through ``/v1/auth/pin`` (re-authenticates with PIN) — no shortcut
     exists from this endpoint, by design.
 
     Request JSON:
-        mode (str): Must be ``"practice"``. Any other value is a 400.
+        mode (str): ``"practice"`` or ``"explore"``. Any other value is a 400.
 
     Auth:
-        Caller must send a valid Bearer JWT (Practice or Live). The
-        endpoint reads the JTI from that token, issues a fresh JWT for
-        the same user, then revokes the original JTI.
+        Caller must send a valid Bearer JWT (any mode). The endpoint reads
+        the JTI from that token, issues a fresh JWT for the same user,
+        then revokes the original JTI.
 
     Returns:
         JSON ``{"status": "success", "data": {"token": <new_jwt>,
-        "mode": "practice", "live_mode_unlocked": false}}`` on 200.
-        401 if no/invalid token; 400 if requested mode is not practice;
-        503 if auth service is not configured.
+        "mode": <target>, "live_mode_unlocked": false}}`` on 200.
+        401 if no/invalid token; 400 if requested mode is not a downgrade
+        target; 503 if auth service is not configured.
     """
     target_mode = str((request.get_json(silent=True) or {}).get("mode", "")).strip().lower()
-    if target_mode != "practice":
+    if target_mode not in ("practice", "explore"):
         return jsonify({
             "status": "error",
             "message": (
-                "Only downgrades to 'practice' are allowed here. Upgrade to "
-                "'live' via POST /v1/auth/pin with PIN verification."
+                "Only downgrades to 'practice' or 'explore' are allowed here. "
+                "Upgrade to 'live' via POST /v1/auth/pin with PIN verification."
             ),
         }), 400
 
@@ -665,19 +693,19 @@ def auth_mode_switch() -> tuple[Any, int]:
             ),
         }), 503
 
-    # Only AFTER successful revocation do we mint the new Practice token.
+    # Only AFTER successful revocation do we mint the new downgraded token.
     username = str(payload.get("sub") or svc.get_profile().get("username", "user"))
     new_token = _create_token(
         username,
         live_mode_unlocked=False,
-        mode="practice",
+        mode=target_mode,
     )
 
     return jsonify({
         "status": "success",
         "data": {
             "token": new_token,
-            "mode": "practice",
+            "mode": target_mode,
             "live_mode_unlocked": False,
         },
     }), 200

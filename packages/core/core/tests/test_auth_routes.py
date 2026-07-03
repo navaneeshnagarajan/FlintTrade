@@ -256,6 +256,120 @@ class TestModeSwitchEndpoint:
         # keeps the old live-unlocked JWT, frontend stays in Live.
         assert "data" not in resp.get_json() or "token" not in resp.get_json().get("data", {})
 
+    def test_downgrade_to_explore_returns_fresh_token(self, client):
+        """Phase 1 G1: /auth/mode must also accept an 'explore' downgrade so
+        a Practice/Live session flipping the UI to Explore keeps the JWT claim
+        in lockstep instead of holding a higher-mode token.
+        """
+        c, _ = client
+        live_token = self._setup_and_pin_unlock(c)
+
+        resp = c.post(
+            "/v1/auth/mode",
+            json={"mode": "explore"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {live_token}",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["mode"] == "explore"
+        assert data["live_mode_unlocked"] is False
+        assert data["token"] != live_token
+
+    def test_downgrade_to_explore_revokes_prior_jwt(self, client):
+        c, _ = client
+        live_token = self._setup_and_pin_unlock(c)
+        c.post(
+            "/v1/auth/mode",
+            json={"mode": "explore"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {live_token}",
+            },
+        )
+        retry = c.post(
+            "/v1/auth/mode",
+            json={"mode": "explore"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {live_token}",
+            },
+        )
+        assert retry.status_code == 401
+
+    def test_downgrade_rejects_unknown_target(self, client):
+        c, _ = client
+        live_token = self._setup_and_pin_unlock(c)
+        resp = c.post(
+            "/v1/auth/mode",
+            json={"mode": "live"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {live_token}",
+            },
+        )
+        assert resp.status_code == 400
+
+
+class TestPinModeParameter:
+    """Phase 1 G2: /auth/pin takes an optional ``mode`` so the idle LockScreen
+    can re-authenticate WITHOUT silently escalating an Explore/Practice session
+    to a Live-unlocked JWT. Default (no mode) stays Live for the explicit
+    arm-real-money callers.
+    """
+
+    def _setup(self, c):
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_pin_default_mode_is_live(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["mode"] == "live"
+        assert data["live_mode_unlocked"] is True
+
+    def test_pin_practice_mode_does_not_unlock_live(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "practice"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["mode"] == "practice"
+        assert data["live_mode_unlocked"] is False
+
+    def test_pin_explore_mode_does_not_unlock_live(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "explore"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["mode"] == "explore"
+        assert data["live_mode_unlocked"] is False
+
+    def test_pin_rejects_unknown_mode(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "bogus"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 400
+
+    def test_pin_wrong_pin_still_401_with_mode(self, client):
+        c, _ = client
+        self._setup(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "000000", "mode": "practice"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 401
+
 
 class TestRateLimitRegistration:
     """Codex stop-gate caught that the new `/mode`, `/forgot-password`,
