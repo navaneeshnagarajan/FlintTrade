@@ -130,6 +130,35 @@ def _register_selector_in_workspace(
     tmp.replace(path)
 
 
+def _snapshot_workspace() -> str | None:
+    """Return the raw workspace.json text (or None if it does not exist yet).
+
+    Paired with :func:`_restore_workspace` for a transactional connect: a failed
+    connect must revert EVERY workspace mutation (registered, account_acls, AND
+    ``execution.default``) to exactly its prior state — surgically blanking the
+    default would brick the order path when a working default already existed.
+    """
+    path = workspace_dir() / "workspace.json"
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def _restore_workspace(snapshot: str | None) -> None:
+    """Restore workspace.json to a snapshot from :func:`_snapshot_workspace`."""
+    path = workspace_dir() / "workspace.json"
+    if snapshot is None:
+        # There was no workspace.json before the attempt — remove one the
+        # register step may have created so nothing partial is left behind.
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+        return
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(snapshot, encoding="utf-8")
+    tmp.replace(path)
+
+
 def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> None:
     """Remove the native selector from brokers.registered / account_acls / default.
 
@@ -227,14 +256,31 @@ def _do_connect(
     if store is None or registry is None:
         return {"status": "error", "message": "Credential store or registry unavailable."}, 503
 
-    # Capture the prior vault row (if this account already existed) BEFORE the
-    # overwrite, so a failed RE-connect can restore the previously-good
-    # credentials rather than leaving them clobbered by the bad ones.
+    # --- Snapshot everything the connect will mutate, for a transactional
+    # rollback on failure. new-vs-existing is decided by PRESENCE via
+    # list_accounts (which never decrypts), so an existing-but-undecryptable row
+    # is not misread as brand-new and destroyed. The workspace snapshot lets a
+    # failed connect revert registered/account_acls/execution.default to EXACTLY
+    # the prior state — a working default must never be blanked by a rollback.
+    prior_meta: dict[str, Any] | None = None
     try:
-        prior_credentials: dict[str, Any] | None = store.retrieve_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - no prior row → this is a brand-new account
-        prior_credentials = None
-    is_new_account = prior_credentials is None
+        for row in store.list_accounts():
+            if (
+                str(row.get("adapter_id") or row.get("broker") or "") == adapter_id
+                and str(row.get("account_id") or "") == account_id
+            ):
+                prior_meta = row
+                break
+    except Exception:  # noqa: BLE001 - treat an unreadable listing as no prior row
+        prior_meta = None
+    is_new_account = prior_meta is None
+    prior_credentials: dict[str, Any] | None = None
+    if not is_new_account:
+        try:
+            prior_credentials = store.retrieve_for(adapter_id, account_id)
+        except Exception:  # noqa: BLE001 - existing but undecryptable: keep the row, can't restore creds
+            prior_credentials = None
+    ws_snapshot = _snapshot_workspace()
 
     try:
         store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
@@ -259,27 +305,33 @@ def _do_connect(
         # the already-running rotator (configure_session_rotation only scheduled
         # brokers present at boot). Idempotent (replace_existing).
         _schedule_refresh_job(adapter_id)
-    elif is_new_account:
-        # A failed BRAND-NEW connect must not leave replayable garbage — a
-        # single-use OAuth code or a stale TOTP would otherwise be retried
-        # (always failing) on every boot. Purge the just-stored row AND drop the
-        # selector we just registered so nothing orphaned is left behind.
-        try:
-            store.remove(account_id)
-        except Exception:  # noqa: BLE001 - best effort; nothing to clean up
-            pass
-        try:
-            _deregister_selector_in_workspace(adapter_id, account_id)
-        except Exception:  # noqa: BLE001
-            pass
     else:
-        # A failed RE-connect of an existing account must not destroy the
-        # previously-good credentials the store.store() overwrite just replaced.
-        # Restore them (the selector was already registered — leave it).
+        # Failed connect: revert the workspace mutation in full (registered,
+        # ACL, and execution.default all back to their prior values), then fix
+        # up the vault row.
         try:
-            store.update_credentials_for(adapter_id, account_id, prior_credentials)
+            _restore_workspace(ws_snapshot)
         except Exception:  # noqa: BLE001
-            logger.warning("Could not restore prior credentials for %s:%s", adapter_id, account_id)
+            logger.warning("Workspace rollback failed for %s:%s", adapter_id, account_id)
+        if is_new_account:
+            # Brand-new connect that never established a session — purge the
+            # just-stored row so a dead OAuth code / stale TOTP is not replayed.
+            try:
+                store.remove(account_id)
+            except Exception:  # noqa: BLE001 - best effort; nothing to clean up
+                pass
+        elif prior_credentials is not None:
+            # Re-connect of an existing account: restore the FULL prior vault row
+            # (credentials + label + is_primary) the store.store() overwrite just
+            # clobbered — update_credentials_for alone would leave the metadata
+            # wrong.
+            try:
+                store.store(
+                    account_id, adapter_id, str(prior_meta.get("label") or label),
+                    prior_credentials, is_primary=bool(prior_meta.get("is_primary")), adapter_id=adapter_id,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not restore prior credentials for %s:%s", adapter_id, account_id)
     return {
         "status": "success" if connected else "error",
         "data": {

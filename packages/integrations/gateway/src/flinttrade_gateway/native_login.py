@@ -30,22 +30,33 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
     token may be perfectly valid — so the liveness probe must keep the session
     rather than false-alarming ``needs_relogin``. A 4xx (auth) or a broker
     error payload, by contrast, is a real "this token does not work".
+
+    The four natives use three different HTTP stacks — IndMoney raw ``httpx``,
+    Upstox ``urllib3`` (via ``upstox_client``), Dhan/Kotak Neo ``requests`` —
+    so transport errors surface as different exception classes. All three
+    families' timeout/connection errors (plus the stdlib fallbacks) are
+    classified transient; a real 4xx auth error is a distinct exception on every
+    stack (``httpx.HTTPStatusError`` / ``ApiException`` / a broker error dict),
+    so it is never misclassified as transient.
     """
-    try:
-        import httpx  # noqa: PLC0415
-    except ImportError:  # pragma: no cover - httpx is a gateway dependency
-        return False
-    return isinstance(
-        exc,
-        (
-            httpx.ConnectError,
-            httpx.ConnectTimeout,
-            httpx.ReadTimeout,
-            httpx.WriteTimeout,
-            httpx.PoolTimeout,
-            httpx.NetworkError,
-        ),
-    )
+    # stdlib transport/timeout (also the base of some SDK errors)
+    import socket  # noqa: PLC0415
+
+    if isinstance(exc, (socket.timeout, ConnectionError, TimeoutError)):
+        return True
+    for module, names in (
+        ("httpx", ("ConnectError", "ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout", "NetworkError")),
+        ("requests.exceptions", ("ConnectionError", "Timeout", "ConnectTimeout", "ReadTimeout")),
+        ("urllib3.exceptions", ("TimeoutError", "ConnectionError", "NewConnectionError", "MaxRetryError", "ProtocolError")),
+    ):
+        try:
+            mod = __import__(module, fromlist=["*"])
+        except ImportError:  # pragma: no cover - optional per adapter SDK
+            continue
+        classes = tuple(getattr(mod, n) for n in names if hasattr(mod, n))
+        if classes and isinstance(exc, classes):
+            return True
+    return False
 
 
 async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, account_id: str) -> str | None:

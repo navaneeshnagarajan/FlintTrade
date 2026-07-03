@@ -42,6 +42,12 @@ class _FakeRegistry:
     def put_session(self, adapter_id: str, account_id: str, session: Any) -> None:
         self.sessions[(adapter_id, account_id)] = session
 
+    def get_session_for(self, adapter_id: str, account_id: str) -> Any:
+        return self.sessions[(adapter_id, account_id)]
+
+    def remove_session_for(self, adapter_id: str, account_id: str) -> None:
+        self.sessions.pop((adapter_id, account_id), None)
+
 
 class _FakeStore:
     def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
@@ -190,3 +196,60 @@ def test_unchanged_payload_skips_the_write() -> None:
         establish_native_sessions({"indmoney": adapter}, registry, store, ["indmoney:X"])
     )
     assert store.updates == []
+
+
+# ---------------------------------------------------------------------------
+# Re-audit fix: transient-error classification across all three HTTP stacks
+# ---------------------------------------------------------------------------
+
+
+def test_transient_classifier_covers_httpx_requests_urllib3_and_stdlib() -> None:
+    """The four natives use httpx (IndMoney), urllib3 (Upstox) and requests
+    (Dhan/Kotak) — a transport blip on ANY of them must be classified transient
+    so the liveness probe keeps a healthy session (audit fix, was httpx-only)."""
+    import socket
+
+    import httpx
+    import requests
+    import urllib3
+
+    from flinttrade_gateway.native_login import _is_transient_probe_error
+
+    transient = [
+        httpx.ConnectTimeout("t"),
+        httpx.ReadTimeout("t"),
+        requests.exceptions.ConnectionError("boom"),
+        requests.exceptions.Timeout("slow"),
+        urllib3.exceptions.NewConnectionError(None, "no route"),  # type: ignore[arg-type]
+        urllib3.exceptions.ProtocolError("reset"),
+        socket.timeout("timed out"),
+        TimeoutError("timed out"),
+    ]
+    for exc in transient:
+        assert _is_transient_probe_error(exc) is True, exc
+
+    # A real auth/broker error is NOT transient — the session must be dropped.
+    for exc in (RuntimeError("401 token expired"), ValueError("bad token"), httpx.HTTPStatusError(
+        "401", request=httpx.Request("GET", "http://x"), response=httpx.Response(401),
+    )):
+        assert _is_transient_probe_error(exc) is False, exc
+
+
+def test_verify_keeps_session_on_transient_error() -> None:
+    """A transient transport error keeps the live session (returns None), so a
+    momentary blip does not flip a healthy account to needs_relogin."""
+    import asyncio
+
+    import requests
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _BlipAdapter:
+        async def funds(self, _session):
+            raise requests.exceptions.ConnectionError("momentary blip")
+
+    registry = _FakeRegistry()
+    registry.sessions[("dhan", "1")] = _FakeSession("dhan", "1")
+    err = asyncio.run(verify_native_session(_BlipAdapter(), registry, "dhan", "1"))
+    assert err is None
+    assert ("dhan", "1") in registry.sessions  # kept

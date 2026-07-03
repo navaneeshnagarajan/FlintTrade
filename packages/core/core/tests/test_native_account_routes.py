@@ -53,7 +53,13 @@ def _h() -> dict[str, str]:
 
 
 def _workspace_brokers(tmp_path):
-    return json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8")).get("brokers", {})
+    # A failed first-ever connect restores workspace.json to its prior state,
+    # which for a fresh install (no file yet) means removing it — the app then
+    # falls back to default_workspace_config(). Treat a missing file as {}.
+    path = tmp_path / "workspace.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8")).get("brokers", {})
 
 
 def test_connect_indmoney_stores_registers_and_establishes_session(client):
@@ -422,3 +428,65 @@ def test_failed_new_connect_purges_and_deregisters(client, monkeypatch):
     with _pt.raises(Exception):
         store.retrieve_for("indmoney", "INDNEW")
     assert "indmoney:INDNEW" not in _workspace_brokers(tmp_path).get("registered", [])
+
+
+def test_failed_new_connect_preserves_a_prior_working_execution_default(client, monkeypatch):
+    """Re-audit fix (HIGH): a failed new connect with is_primary=True must NOT
+    blank a pre-existing working execution.default — that would brick the order
+    path on the next router rebuild/restart. The transactional rollback restores
+    it exactly."""
+    c, app, tmp_path = client
+    # Establish a working primary first (passing probe from the fixture stub).
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "PRIMARY1",
+              "credentials": {"access_token": "good"}, "is_primary": True},
+    )
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "indmoney:PRIMARY1"
+
+    # A new connect for a different account, is_primary=True, whose probe fails.
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _dead_funds(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "BADNEW",
+              "credentials": {"access_token": "dead"}, "is_primary": True},
+    )
+    assert resp.status_code == 502
+    brokers = _workspace_brokers(tmp_path)
+    # The prior working default survives; the failed selector is not registered.
+    assert brokers["execution"]["default"] == "indmoney:PRIMARY1"
+    assert "indmoney:BADNEW" not in brokers.get("registered", [])
+
+
+def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
+    """Re-audit fix: a failed reconnect restores the full prior vault row —
+    label and is_primary, not just the credential payload."""
+    c, app, tmp_path = client
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "META1", "label": "Original label",
+              "credentials": {"access_token": "good"}, "is_primary": True},
+    )
+    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+
+    async def _dead_funds(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "META1", "label": "New bad label",
+              "credentials": {"access_token": "bad"}, "is_primary": False},
+    )
+    row = next(r for r in app.config["CREDENTIAL_STORE"].list_accounts() if r["account_id"] == "META1")
+    assert row["label"] == "Original label"
+    assert bool(row["is_primary"]) is True
