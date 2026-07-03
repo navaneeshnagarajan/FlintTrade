@@ -166,10 +166,11 @@ def test_native_activation_checks_credential_presence() -> None:
     """``_native_activation_checks`` reflects what the vault holds.
 
     ``has_credentials`` must mirror the vault's ``list_accounts`` adapter ids.
-    ``attest_ok`` is real: brokers whose ``brokers.lock`` pin is still PLACEHOLDER
-    (upstox / kotakneo) are ``skipped`` and so never attested — environment-
-    independent. (Dhan's pin is real, so its attest_ok depends on whether dhanhq
-    is installed — not asserted here.)
+    ``attest_ok`` now depends on the pinned SDK being INSTALLED (dhan/upstox/
+    kotakneo all carry real pins) — so its per-broker value is environment-
+    dependent and not hard-asserted here. IndMoney is the exception: its SDK pin
+    is ``None`` (REST-only), so it always attests. PLACEHOLDER-pin dormancy is
+    covered against a fixture lock in ``test_broker_sdk_attest``.
     """
     from flinttrade_core.app import _native_activation_checks
 
@@ -180,18 +181,20 @@ def test_native_activation_checks_credential_presence() -> None:
     attest_ok, has_credentials = _native_activation_checks(_FakeVault())
     assert has_credentials("dhan") is True
     assert has_credentials("upstox") is False
-    # PLACEHOLDER-pinned brokers are never attested, regardless of environment.
-    assert attest_ok("upstox") is False
-    assert attest_ok("kotakneo") is False
+    # REST-only native: no SDK to attest, so activation is gated by creds alone.
+    assert attest_ok("indmoney") is True
+    # A non-native id never attests.
+    assert attest_ok("not-a-broker") is False
 
 
 def test_native_activation_checks_no_vault_fails_closed() -> None:
     from flinttrade_core.app import _native_activation_checks
 
-    attest_ok, has_credentials = _native_activation_checks(None)
-    assert has_credentials("dhan") is False
+    _attest_ok, has_credentials = _native_activation_checks(None)
     # No vault → nothing is credentialled, so nothing activates even if attested.
-    assert attest_ok("upstox") is False
+    assert has_credentials("dhan") is False
+    assert has_credentials("upstox") is False
+    assert has_credentials("indmoney") is False
 
 
 def test_dhan_activates_end_to_end_when_sdk_present() -> None:
@@ -220,7 +223,8 @@ def test_dhan_activates_end_to_end_when_sdk_present() -> None:
     )
     assert "dhan" in router._adapters
     assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
-    # upstox is registered in config but its pin is PLACEHOLDER → stays dormant.
+    # upstox is registered in config but the vault holds no upstox creds → dormant
+    # (has_credentials gate), regardless of whether its SDK is installed.
     assert "upstox" not in router._adapters
 
 

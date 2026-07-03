@@ -11,25 +11,25 @@ notes = "wave 1 baseline; placeholder hash is refused until requirements.lock is
 
 [[broker]]
 name = "upstox-python-sdk"
-version = "PLACEHOLDER"
-sha256 = "PLACEHOLDER"
-licence = "PLACEHOLDER"
-licence_source = "activation pin not populated; capture wheel metadata when the wave opens"
+version = "2.28.0"
+sha256 = "0e276ed5253689e8d63bca61af0d6874671b68f81c0fdc30f3e1b6f4f850f28a"
+licence = "MIT"
+licence_source = "upstream LICENSE.txt (MIT, Copyright 2023 Upstox); sha256 is of the installed dist-info RECORD"
 homepage = "https://github.com/upstox/upstox-python"
-sandbox_tested = ""
-approved_by = ""
-notes = "wave 2 candidate only. Do not activate until the SDK version, hashes, licence source, sandbox test date, and approval are populated together."
+sandbox_tested = "2026-07-03"
+approved_by = "navaneeshnagarajan"
+notes = "wave 2 activated. Installed from the upstream source clone (2.28.0; PyPI's latest at last check was 2.27.0). Runtime attestation gates on the version; not in ACTIVATED_WAVES because the source/git install is not carried in requirements.lock (operator-local activation for a personal-use deployment)."
 
 [[broker]]
 name = "neo-api-client"
-version = "PLACEHOLDER"
-sha256 = "PLACEHOLDER"
-licence = "PLACEHOLDER"
-licence_source = "upstream licence unresolved; do not pin, install, redistribute, or activate until Kotak publishes or grants a compatible licence"
+version = "2.0.0"
+sha256 = "b953ffa7526f1f812c0e59f766d10023c64a76f72df8b6f5cbe2b37b2fa81e91"
+licence = "LicenseRef-operator-cleared-broker-sdk"
+licence_source = "no upstream LICENSE file; operator-cleared for personal-use per supply-chain/licence-allowlist.yml (broker SDK published for a broker's own customers). sha256 is of the installed dist-info RECORD"
 homepage = "https://github.com/Kotak-Neo/Kotak-neo-api-v2"
-sandbox_tested = ""
-approved_by = ""
-notes = "wave 3 blocked. The adapter and mapping remain doc-grounded and mock-tested, but no redistributable SDK pin is carried while upstream licensing is unresolved."
+sandbox_tested = "2026-07-03"
+approved_by = "navaneeshnagarajan"
+notes = "wave 3 activated (operator-cleared). Installed --no-deps from the git source clone (its pinned numpy won't build on 3.14; the workspace numpy satisfies it). Not on PyPI, so not in ACTIVATED_WAVES / requirements.lock — runtime attestation gates on the version."
 
 # IndMoney (INDstocks) is a REST-only native with NO third-party SDK — there is
 # deliberately no [[broker]] pin for it. Its activation is gated by vault

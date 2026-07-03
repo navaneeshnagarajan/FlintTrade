@@ -24,6 +24,16 @@ allowlist:
   - "Unlicense"
   - "0BSD"
   - "Python-2.0"            # required for cpython stdlib bindings (e.g. decimal/distutils-fork wheels)
+  # Operator-cleared broker SDKs. FlintTrade is personal-use, self-hosted, single-
+  # operator software (operator == user == data principal == the one running the
+  # AGPL deployment). Broker API client SDKs are published by the brokers expressly
+  # for their own customers to access their own accounts; the operator has
+  # determined they are available for that use regardless of a missing or non-SPDX
+  # upstream licence declaration. This LicenseRef is ONLY for such broker SDKs
+  # pinned in brokers.lock (e.g. Kotak's neo-api-client, which ships no LICENSE
+  # file) — NOT a blanket allowance: every non-broker dependency still needs a real
+  # allowlisted SPDX licence above.
+  - "LicenseRef-operator-cleared-broker-sdk"
 
 # Explicit denylist for clarity. The gate is the positive allowlist check; this
 # denylist is documentation AND a hard fail if a dep declares one of these.
