@@ -19,6 +19,8 @@ logger = logging.getLogger("flinttrade.ai.team")
 
 team_bp = Blueprint("ai_team", __name__, url_prefix="/api/v1/ai/team")
 
+_PUBLIC_ANALYSIS_ERROR = "Analysis failed"
+
 # Module-level singleton — created on first use, re-used across requests.
 _team_instance = None
 
@@ -41,6 +43,37 @@ def _reset_team() -> None:
     """Reset the singleton (used after config updates)."""
     global _team_instance  # noqa: PLW0603
     _team_instance = None
+
+
+def _public_agent_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return one agent-analysis payload with exception details removed."""
+    public_payload = dict(payload)
+    if public_payload.get("error"):
+        public_payload["error"] = _PUBLIC_ANALYSIS_ERROR
+    return public_payload
+
+
+def _public_team_analysis_payload(result: Any) -> dict[str, Any]:
+    """Build a public TeamAnalysis payload without raw exception messages."""
+    raw = result.to_dict()
+    payload = dict(raw) if isinstance(raw, dict) else {}
+
+    agent_analyses = payload.get("agent_analyses", [])
+    if isinstance(agent_analyses, list):
+        payload["agent_analyses"] = [
+            _public_agent_analysis_payload(analysis)
+            for analysis in agent_analyses
+            if isinstance(analysis, dict)
+        ]
+    else:
+        payload["agent_analyses"] = []
+
+    errors = payload.get("errors", [])
+    if isinstance(errors, list):
+        payload["errors"] = [_PUBLIC_ANALYSIS_ERROR for error in errors if error]
+    else:
+        payload["errors"] = []
+    return payload
 
 
 @team_bp.route("/analyse", methods=["POST"])
@@ -81,7 +114,7 @@ def team_analyze() -> tuple[Any, int]:
         return jsonify({
             "status": "success",
             "data": {
-                "analysis": result.to_dict(),
+                "analysis": _public_team_analysis_payload(result),
                 "recommendation": recommendation.to_dict(),
             },
         }), 200

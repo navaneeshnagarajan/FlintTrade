@@ -149,8 +149,8 @@ def adjust_capital() -> Response:
 
     try:
         updated = engine.adjust_capital(amount)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({"status": "success", "data": {"capital": updated}})
 
@@ -352,7 +352,7 @@ def import_data() -> Response:
 
     try:
         stats = engine.import_data(json_str)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({"status": "success", "data": {"stats": stats}})

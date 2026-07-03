@@ -263,9 +263,10 @@ def start_agent() -> tuple[Any, int]:
         llm = _build_llm()
     except Exception as exc:
         _release_slot()
+        logger.warning("LLM client unavailable: %s", exc)
         return jsonify({
             "status": "error",
-            "message": f"LLM client unavailable — configure a provider in Settings ({exc})",
+            "message": "LLM client unavailable — configure a provider in Settings",
         }), 503
 
     # Everything from here to registration runs under ONE try so ANY failure
@@ -351,12 +352,12 @@ def start_agent() -> tuple[Any, int]:
             vault=_build_vault(),
             order_executor=executor,
         )
-    except Exception as exc:
+    except Exception:
         _release_slot()
         logger.exception("Agent session construction failed")
         return jsonify({
             "status": "error",
-            "message": f"Could not start the agent session: {exc}",
+            "message": "Could not start the agent session",
         }), 500
 
     def _run() -> None:

@@ -420,7 +420,7 @@ def rag_query() -> tuple[Any, int]:
         response = rag.query(query, n_results=top_k)
 
         if response.error:
-            return jsonify({"status": "error", "message": response.error}), 502
+            return jsonify({"status": "error", "message": "RAG query failed"}), 502
 
         results = [
             {

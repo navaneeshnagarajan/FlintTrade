@@ -221,9 +221,10 @@ def admin_repos() -> tuple[Response, int]:
         data: dict[str, Any] = json.loads(_STATUS_FILE.read_text(encoding="utf-8"))
         return jsonify({"status": "success", "data": data}), 200
     except json.JSONDecodeError as exc:
+        logger.warning("Invalid absorption status JSON: %s", exc)
         return jsonify({
             "status": "error",
-            "message": f"Invalid JSON: {exc}",
+            "message": "Invalid JSON",
         }), 500
 
 

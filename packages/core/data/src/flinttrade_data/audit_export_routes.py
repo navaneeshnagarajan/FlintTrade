@@ -79,8 +79,8 @@ def create_audit_export_blueprint(audit_logger: object) -> Blueprint:
         try:
             from_date = _parse_date(request.args.get("from", ""), "from")
             to_date = _parse_date(request.args.get("to", ""), "to")
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400  # type: ignore[return-value]
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400  # type: ignore[return-value]
 
         if from_date > to_date:
             return jsonify(  # type: ignore[return-value]
@@ -103,7 +103,8 @@ def create_audit_export_blueprint(audit_logger: object) -> Blueprint:
                     mimetype="application/pdf",
                 )
             except AuditExportError as exc:
-                return jsonify({"status": "error", "message": exc.message}), 500  # type: ignore[return-value]
+                logger.warning("Audit PDF export failed: %s", exc.message)
+                return jsonify({"status": "error", "message": "Audit export failed"}), 500  # type: ignore[return-value]
 
         # Default: CSV
         try:
@@ -120,7 +121,8 @@ def create_audit_export_blueprint(audit_logger: object) -> Blueprint:
                 mimetype="text/csv",
             )
         except AuditExportError as exc:
-            return jsonify({"status": "error", "message": exc.message}), 500  # type: ignore[return-value]
+            logger.warning("Audit CSV export failed: %s", exc.message)
+            return jsonify({"status": "error", "message": "Audit export failed"}), 500  # type: ignore[return-value]
 
     @bp.route("/admin/audit/summary", methods=["GET"])
     def audit_summary() -> Response:
@@ -137,8 +139,8 @@ def create_audit_export_blueprint(audit_logger: object) -> Blueprint:
         try:
             from_date = _parse_date(request.args.get("from", ""), "from")
             to_date = _parse_date(request.args.get("to", ""), "to")
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400  # type: ignore[return-value]
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400  # type: ignore[return-value]
 
         if from_date > to_date:
             return jsonify(  # type: ignore[return-value]

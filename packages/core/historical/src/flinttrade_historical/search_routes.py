@@ -133,7 +133,7 @@ def search_symbols() -> tuple[Any, int]:
                 {
                     "status": "error",
                     "message": "Could not fetch search results from OpenAlgo",
-                    "detail": str(exc),
+                    "detail": "search request failed",
                 }
             ),
             503,

@@ -316,15 +316,15 @@ def volcone_endpoint() -> Any:
 
     try:
         daily_returns = [float(r) for r in raw_returns]
-    except (TypeError, ValueError) as exc:
-        return jsonify({"status": "error", "message": f"Invalid return values: {exc}"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid return values"}), 400
 
     lookback_periods: list[int] | None = None
     if "lookback_periods" in body:
         try:
             lookback_periods = [int(p) for p in body["lookback_periods"]]
-        except (TypeError, ValueError) as exc:
-            return jsonify({"status": "error", "message": f"Invalid lookback_periods: {exc}"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "Invalid lookback_periods"}), 400
 
     current_iv: float | None = None
     if "current_iv" in body:

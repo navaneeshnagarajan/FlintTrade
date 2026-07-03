@@ -55,8 +55,15 @@ class HealthAggregator:
         """
         try:
             sessions = registry.list_sessions()
-        except Exception as exc:
-            return {"status": "error", "message": str(exc), "connected": 0, "disconnected": 0, "total": 0}
+        except Exception:
+            logger.exception("Broker connection health check failed")
+            return {
+                "status": "error",
+                "message": "Broker connection health check failed",
+                "connected": 0,
+                "disconnected": 0,
+                "total": 0,
+            }
 
         connected = sum(1 for s in sessions if s.get("is_connected", False))
         disconnected = len(sessions) - connected
@@ -145,8 +152,9 @@ class HealthAggregator:
                 "free_gb": round(free_gb, 2),
                 "percent_used": round(pct, 1),
             }
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        except Exception:
+            logger.exception("Disk health check failed")
+            return {"status": "error", "message": "Disk health check failed"}
 
     def check_memory(self) -> dict[str, Any]:
         """Check current process memory usage via psutil.
@@ -179,8 +187,9 @@ class HealthAggregator:
             }
         except ImportError:
             return {"status": "ok", "rss_mb": 0.0, "vms_mb": 0.0, "percent": 0.0, "note": "psutil not installed"}
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        except Exception:
+            logger.exception("Memory health check failed")
+            return {"status": "error", "message": "Memory health check failed"}
 
     def get_health(
         self,

@@ -95,7 +95,9 @@ def _seed_test_master_password(base: Path) -> None:
     pw_file = base / "master_password"
     try:
         if not pw_file.exists():
-            pw_file.write_text(_TEST_MASTER_PASSWORD)
+            from flinttrade_core.secure_file import write_secret_text
+
+            write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
     except OSError:
         pass
 
@@ -128,5 +130,5 @@ def _isolate_workspace() -> None:
     _seed_test_master_password(base)
 
 
-_isolate_workspace()
 _install_local_package_paths()
+_isolate_workspace()

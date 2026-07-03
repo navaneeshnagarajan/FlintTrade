@@ -25,6 +25,27 @@ from flask import Blueprint, Response, jsonify, request
 logger = logging.getLogger("flinttrade.core.backup_routes")
 
 
+def _backup_root() -> Path:
+    """Supported archive root for the HTTP admin surface."""
+    return (Path.home() / "flint-backups").resolve()
+
+
+def _resolve_contained_path(root: Path, raw: str | None, default: Path | None = None) -> Path:
+    """Resolve an operator-supplied path while keeping it under ``root``."""
+    root = root.expanduser().resolve()
+    if raw:
+        supplied = Path(raw).expanduser()
+        candidate = supplied if supplied.is_absolute() else root / supplied
+    elif default is not None:
+        candidate = default
+    else:
+        candidate = root
+    resolved = candidate.resolve(strict=False)
+    if resolved != root and root not in resolved.parents:
+        raise ValueError("path must stay under the FlintTrade backup directory")
+    return resolved
+
+
 def create_backup_blueprint(
     workspace_dir: Path | None = None,
 ) -> Blueprint:
@@ -42,7 +63,14 @@ def create_backup_blueprint(
 
     bp = Blueprint("backup_admin", __name__, url_prefix="/v1/admin")
 
-    bk = WorkspaceBackup(workspace_dir=workspace_dir)
+    if workspace_dir is None:
+        from flinttrade_core.workspace import workspace_dir as _workspace_dir  # noqa: PLC0415
+
+        workspace_path = _workspace_dir()
+    else:
+        workspace_path = Path(workspace_dir)
+    workspace_restore_root = workspace_path.expanduser().resolve().parent
+    bk = WorkspaceBackup(workspace_dir=workspace_path)
 
     @bp.route("/backup/create", methods=["POST"])
     def backup_create() -> Response:
@@ -61,15 +89,21 @@ def create_backup_blueprint(
         include_credentials: bool = bool(body.get("include_credentials", False))
         output_str: str | None = body.get("output_path")
 
+        backup_dir = _backup_root()
         if output_str:
-            output_path = Path(output_str).expanduser()
+            try:
+                output_path = _resolve_contained_path(backup_dir, output_str)
+            except ValueError:
+                return jsonify(  # type: ignore[return-value]
+                    {"status": "error", "message": "Backup output path is outside the backup directory"}
+                ), 400
         else:
             # Default into the same directory backup_list() searches —
             # a temp-dir default would vanish on OS cleanup and never
             # show up in /admin/backup/list.
             from datetime import datetime, timezone  # noqa: PLC0415
+
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            backup_dir = Path.home() / "flint-backups"
             backup_dir.mkdir(parents=True, exist_ok=True)
             output_path = backup_dir / f"flint_backup_{ts}.tar.gz"
 
@@ -88,7 +122,8 @@ def create_backup_blueprint(
                 }
             )
         except BackupError as exc:
-            return jsonify({"status": "error", "message": exc.message}), 500  # type: ignore[return-value]
+            logger.warning("Workspace backup creation failed: %s", exc.message)
+            return jsonify({"status": "error", "message": "Backup creation failed"}), 500  # type: ignore[return-value]
 
     @bp.route("/backup/restore", methods=["POST"])
     def backup_restore() -> Response:
@@ -109,9 +144,22 @@ def create_backup_blueprint(
                 {"status": "error", "message": "Missing required field: 'path'"}
             ), 400
 
-        backup_path = Path(path_str).expanduser()
+        try:
+            backup_path = _resolve_contained_path(_backup_root(), path_str)
+        except ValueError:
+            return jsonify(  # type: ignore[return-value]
+                {"status": "error", "message": "Backup archive path is outside the backup directory"}
+            ), 400
         target_str: str | None = body.get("target_dir")
-        target_dir = Path(target_str).expanduser() if target_str else None
+        if target_str:
+            try:
+                target_dir = _resolve_contained_path(workspace_restore_root, target_str)
+            except ValueError:
+                return jsonify(  # type: ignore[return-value]
+                    {"status": "error", "message": "Restore target is outside the workspace restore root"}
+                ), 400
+        else:
+            target_dir = None
         force: bool = bool(body.get("force", False))
 
         try:
@@ -120,7 +168,8 @@ def create_backup_blueprint(
             )
             return jsonify({"status": "ok", **result})  # type: ignore[return-value]
         except BackupError as exc:
-            return jsonify({"status": "error", "message": exc.message}), 500  # type: ignore[return-value]
+            logger.warning("Workspace backup restore failed: %s", exc.message)
+            return jsonify({"status": "error", "message": "Backup restore failed"}), 500  # type: ignore[return-value]
 
     @bp.route("/backup/list", methods=["GET"])
     def backup_list() -> Response:
@@ -134,10 +183,12 @@ def create_backup_blueprint(
             JSON with ``backups`` list.
         """
         dir_str: str | None = request.args.get("dir")
-        if dir_str:
-            backup_dir = Path(dir_str).expanduser()
-        else:
-            backup_dir = Path.home() / "flint-backups"
+        try:
+            backup_dir = _resolve_contained_path(_backup_root(), dir_str)
+        except ValueError:
+            return jsonify(  # type: ignore[return-value]
+                {"status": "error", "message": "Backup list path is outside the backup directory"}
+            ), 400
 
         backups = bk.list_backups(backup_dir)
         return jsonify({"status": "ok", "backups": backups})  # type: ignore[return-value]

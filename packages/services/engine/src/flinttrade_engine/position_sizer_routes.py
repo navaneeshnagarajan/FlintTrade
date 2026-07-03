@@ -109,8 +109,8 @@ def calculate_size() -> tuple[Any, int]:
             },
         }), 200
 
-    except (TypeError, ValueError) as exc:
-        return jsonify({"status": "error", "message": f"Invalid input: {exc}"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid input"}), 400
     except Exception:
         logger.exception("calculate_size error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

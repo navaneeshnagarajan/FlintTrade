@@ -441,4 +441,4 @@ def execution_analytics_endpoint() -> tuple[Any, int]:
         }), 200
     except Exception as exc:
         logger.exception("Execution analytics failed: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
+        return jsonify({"status": "error", "message": "Internal server error"}), 500

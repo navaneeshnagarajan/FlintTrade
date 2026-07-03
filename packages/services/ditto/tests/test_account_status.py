@@ -61,7 +61,8 @@ def test_offline_on_connection_error(mgr):
     s = mgr.connection_status(mgr.get_account("A1"))
     assert s.connected is False
     assert s.needs_reauth is True
-    assert "refused" in s.error
+    assert s.error == "OpenAlgo connection failed"
+    assert "refused" not in s.error
 
 
 def test_account_status_all(mgr):

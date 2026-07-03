@@ -171,10 +171,10 @@ def optimise_portfolio() -> tuple[Response, int]:
         result = optimiser.optimise(returns)
     except ValueError as exc:
         logger.warning("Optimisation failed: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 422
-    except Exception as exc:
+        return jsonify({"status": "error", "message": "Request could not be processed"}), 422
+    except Exception:
         logger.exception("Unexpected error during portfolio optimisation")
-        return jsonify({"status": "error", "message": f"Internal error: {exc}"}), 500
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     logger.info(
         "Portfolio optimised: method=%s assets=%d sharpe=%.3f",
@@ -235,10 +235,10 @@ def efficient_frontier() -> tuple[Response, int]:
         frontier = optimiser.efficient_frontier(returns, n_points=n_points)
     except ValueError as exc:
         logger.warning("Frontier generation failed: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 422
-    except Exception as exc:
+        return jsonify({"status": "error", "message": "Request could not be processed"}), 422
+    except Exception:
         logger.exception("Unexpected error during efficient frontier computation")
-        return jsonify({"status": "error", "message": f"Internal error: {exc}"}), 500
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     logger.info(
         "Efficient frontier: %d points computed for %d assets",

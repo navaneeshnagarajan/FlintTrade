@@ -528,7 +528,7 @@ def register_rl_endpoints(app: Any) -> None:
                 "action": action.tolist() if hasattr(action, "tolist") else list(action),
                 "algorithm": algorithm,
             }), 200
-        except ImportError as exc:
-            return jsonify({"error": str(exc)}), 500
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+        except ImportError:
+            return jsonify({"error": "Internal server error"}), 500
+        except Exception:
+            return jsonify({"error": "Internal server error"}), 500

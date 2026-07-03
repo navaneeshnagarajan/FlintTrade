@@ -82,8 +82,8 @@ def obsidian_read() -> tuple[Any, int]:
     path = request.args.get("path", "").strip()
     try:
         content = vault.read_note(path)
-    except ObsidianError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
+    except ObsidianError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
     return jsonify({"status": "success", "data": {"path": path, "content": content}}), 200
 
 
@@ -99,8 +99,8 @@ def obsidian_write() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "'path' is required"}), 400
     try:
         rel = vault.write_note(path, content)
-    except ObsidianError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ObsidianError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
     return jsonify({"status": "success", "data": {"path": rel}}), 200
 
 

@@ -131,7 +131,7 @@ def get_instruments() -> tuple[Any, int] | Response:
                 {
                     "status": "error",
                     "message": "Could not fetch instruments from OpenAlgo",
-                    "detail": str(exc),
+                    "detail": "instrument fetch failed",
                 }
             ),
             503,

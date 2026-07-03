@@ -94,7 +94,7 @@ from .csp import (  # noqa: E402
     inject_csp_nonce as _inject_csp_nonce,
 )
 from .openalgo_client import OpenAlgoClient  # noqa: E402
-from .secure_file import harden as _harden_secret  # noqa: E402
+from .secure_file import write_secret_text as _write_secret_text  # noqa: E402
 from .version import APP_VERSION_TAG  # noqa: E402
 from .workspace import workspace_dir as _workspace_dir  # noqa: E402
 from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
@@ -254,8 +254,7 @@ def _get_api_key_pepper() -> str:
     new_pepper = secrets.token_urlsafe(64)
     try:
         pepper_file.parent.mkdir(parents=True, exist_ok=True)
-        pepper_file.write_text(new_pepper)
-        _harden_secret(pepper_file)  # SC-04: icacls/0600 owner-only
+        _write_secret_text(pepper_file, new_pepper)  # SC-04: icacls/0600 owner-only
         logger.info("Generated new API_KEY_PEPPER (hardened) at %s", pepper_file)
     except OSError as exc:
         logger.warning(
@@ -287,33 +286,32 @@ def _get_safety_gate_secret_bytes() -> bytes:
     if _SAFETY_GATE_SECRET is not None:
         return _SAFETY_GATE_SECRET
 
-    secret_file = _workspace_dir() / "safety_gate_secret"
+    key_file = _workspace_dir() / "safety_gate_secret"
     try:
-        if secret_file.exists():
-            stored = secret_file.read_text().strip()
+        if key_file.exists():
+            stored = key_file.read_text().strip()
             if stored:
                 candidate = bytes.fromhex(stored)
                 if len(candidate) >= 32:
                     _SAFETY_GATE_SECRET = candidate
                     return _SAFETY_GATE_SECRET
                 logger.warning(
-                    "safety_gate_secret at %s is too short (<32 bytes) — regenerating",
-                    secret_file,
+                    "Safety-gate key file at %s is too short (<32 bytes) — regenerating",
+                    key_file,
                 )
     except (OSError, ValueError):
         # Unreadable or non-hex file — regenerate rather than fail closed forever.
-        logger.warning("safety_gate_secret at %s unreadable/invalid — regenerating", secret_file)
+        logger.warning("Safety-gate key file at %s unreadable/invalid — regenerating", key_file)
 
     new_secret = secrets.token_bytes(32)
     try:
-        secret_file.parent.mkdir(parents=True, exist_ok=True)
-        secret_file.write_text(new_secret.hex())
-        _harden_secret(secret_file)  # SC-04: icacls/0600 owner-only
-        logger.info("Generated new safety-gate secret (hardened) at %s", secret_file)
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        _write_secret_text(key_file, new_secret.hex())  # SC-04: icacls/0600 owner-only
+        logger.info("Generated new safety-gate key file (hardened) at %s", key_file)
     except OSError as exc:
         logger.warning(
-            "Could not persist safety_gate_secret to %s: %s — using ephemeral value",
-            secret_file,
+            "Could not persist safety-gate key file at %s: %s — using ephemeral value",
+            key_file,
             exc,
         )
 
@@ -366,10 +364,10 @@ def _get_master_password() -> str:
     if _MASTER_PASSWORD:
         return _MASTER_PASSWORD
 
-    password_file = _workspace_dir() / "master_password"
+    store_key_file = _workspace_dir() / "master_password"
     try:
-        if password_file.exists():
-            stored = password_file.read_text().strip()
+        if store_key_file.exists():
+            stored = store_key_file.read_text().strip()
             if stored:
                 _MASTER_PASSWORD = stored
                 return _MASTER_PASSWORD
@@ -381,14 +379,12 @@ def _get_master_password() -> str:
         raise RuntimeError("master password required (empty input rejected)")
 
     try:
-        password_file.parent.mkdir(parents=True, exist_ok=True)
-        password_file.write_text(password)
-        _harden_secret(password_file)  # SC-04: icacls/0600 owner-only
-        logger.info("Persisted credential-store master password (hardened) at %s", password_file)
+        _write_secret_text(store_key_file, password)  # SC-04: icacls/0600 owner-only
+        logger.info("Persisted credential-store key file (hardened) at %s", store_key_file)
     except OSError as exc:
         logger.warning(
-            "Could not persist master_password to %s: %s — using session value",
-            password_file, exc,
+            "Could not persist credential-store key file at %s: %s — using session value",
+            store_key_file, exc,
         )
 
     _MASTER_PASSWORD = password
@@ -2148,7 +2144,7 @@ def create_flask_app(
                 logger.error("Failed to read OpenAlgo config from workspace.json: %s", exc)
                 return jsonify({
                     "status": "error",
-                    "message": f"Could not read config: {exc}",
+                    "message": "Could not read config",
                 }), 500
 
         payload = request.get_json(silent=True) or {}
@@ -2181,7 +2177,7 @@ def create_flask_app(
             logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)
             return jsonify({
                 "status": "error",
-                "message": f"Could not persist config: {exc}",
+                "message": "Could not persist config",
             }), 500
 
         # Settings reads workspace.json directly; log the fresh UI-owned
@@ -2214,7 +2210,7 @@ def create_flask_app(
             )
             return jsonify({
                 "status": "partial",
-                "message": f"Config saved but client not reloaded: {exc}",
+                "message": "Config saved but client not reloaded",
             }), 200
 
         return jsonify({
@@ -2269,10 +2265,11 @@ def create_flask_app(
                 timeout=5.0,
             )
         except (_httpx.ConnectError, _httpx.ConnectTimeout) as exc:
+            logger.warning("OpenAlgo connection test could not reach configured host: %s", exc)
             return jsonify({
                 "status": "error",
                 "reachable": False,
-                "message": f"Cannot reach OpenAlgo at {host}: {exc}",
+                "message": "Cannot reach OpenAlgo at the configured host",
             }), 200
         except _httpx.TimeoutException:
             return jsonify({
@@ -2280,11 +2277,11 @@ def create_flask_app(
                 "reachable": False,
                 "message": f"OpenAlgo at {host} did not respond within 5s",
             }), 200
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             return jsonify({
                 "status": "error",
                 "reachable": False,
-                "message": f"Connection test failed ({type(exc).__name__}): {exc}",
+                "message": "Connection test failed",
             }), 200
 
         if resp.status_code == 200:
@@ -2336,6 +2333,7 @@ def create_flask_app(
     # ------------------------------------------------------------------
     if _frontend_available:
         from flask import Response as _Response, send_from_directory  # noqa: PLC0415
+        from werkzeug.utils import safe_join as _safe_join  # noqa: PLC0415
 
         _API_PREFIXES = ("/api/", "/ft-api/", "/v1/")
 
@@ -2366,17 +2364,23 @@ def create_flask_app(
 
             # If the exact file exists under dist/, serve it (favicon, assets/*).
             if path:
-                candidate = _dist_path / path
                 try:
+                    joined = _safe_join(str(_dist_path), path)
+                    if joined is None:
+                        return jsonify({
+                            "status": "error",
+                            "message": "Not found",
+                        }), 404
                     # Guard against path traversal: resolved path must be
                     # inside _dist_path.
-                    resolved = candidate.resolve()
+                    resolved = Path(joined).resolve()
                     if (
                         resolved.is_file()
                         and _dist_path.resolve() in resolved.parents
                     ):
+                        relative = resolved.relative_to(_dist_path.resolve())
                         return send_from_directory(
-                            str(_dist_path), path
+                            str(_dist_path), str(relative)
                         )
                 except Exception:
                     pass

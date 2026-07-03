@@ -593,8 +593,8 @@ def backtest_compare_endpoint() -> tuple[Any, int]:
         response_data = comparison.model_dump()
         response_data["optimal_blend"] = blend
         return jsonify({"status": "success", "data": response_data}), 200
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
     except Exception as exc:
         logger.exception("Strategy comparison failed: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
+        return jsonify({"status": "error", "message": "Internal server error"}), 500

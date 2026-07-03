@@ -9,7 +9,7 @@
 //! # Black-Scholes Greeks
 //! `delta`, `gamma`, `theta`, `vega`, and `rho` are computed analytically
 //! using the standard BSM closed-form formulas.  Implied volatility must
-//! be supplied by the caller as `iv` in the bar data.
+//! be supplied by the caller as implied volatility in the bar data.
 //!
 //! # Example
 //! ```python
@@ -24,8 +24,8 @@
 //! )
 //! strat = OptionsStrategy("NIFTY_STRADDLE", cfg)
 //! # spot_bars: [[ts, o, h, l, c, v], ...]
-//! # call_bars: [[ts, premium, iv, delta, gamma, theta], ...]
-//! # put_bars:  [[ts, premium, iv, delta, gamma, theta], ...]
+//! # call_bars: [[ts, premium, implied_volatility, delta, gamma, theta], ...]
+//! # put_bars:  [[ts, premium, implied_volatility, delta, gamma, theta], ...]
 //! result = strat.run(spot_bars, call_bars, put_bars, entries, exits, 100_000.0)
 //! ```
 
@@ -72,7 +72,7 @@ impl Greeks {
 ///     spot: Underlying price.
 ///     strike: Option strike price.
 ///     r: Risk-free rate (annual, e.g. 0.065 = 6.5%).
-///     iv: Implied volatility (annual, e.g. 0.20 = 20%).
+///     implied_volatility: Implied volatility (annual, e.g. 0.20 = 20%).
 ///     t: Time to expiry in **years**.
 ///     is_call: true for call, false for put.
 #[pyfunction]
@@ -80,17 +80,18 @@ pub fn black_scholes_greeks(
     spot: f64,
     strike: f64,
     r: f64,
-    iv: f64,
+    implied_volatility: f64,
     t: f64,
     is_call: bool,
 ) -> Greeks {
-    if t <= 0.0 || iv <= 0.0 || spot <= 0.0 || strike <= 0.0 {
+    if t <= 0.0 || implied_volatility <= 0.0 || spot <= 0.0 || strike <= 0.0 {
         return Greeks::default();
     }
 
     let sqrt_t = t.sqrt();
-    let d1 = ((spot / strike).ln() + (r + 0.5 * iv * iv) * t) / (iv * sqrt_t);
-    let d2 = d1 - iv * sqrt_t;
+    let d1 = ((spot / strike).ln() + (r + 0.5 * implied_volatility * implied_volatility) * t)
+        / (implied_volatility * sqrt_t);
+    let d2 = d1 - implied_volatility * sqrt_t;
 
     let nd1 = norm_cdf(d1);
     let nd2 = norm_cdf(d2);
@@ -99,12 +100,13 @@ pub fn black_scholes_greeks(
     let phi_d1 = norm_pdf(d1);
 
     let delta = if is_call { nd1 } else { nd1 - 1.0 };
-    let gamma = phi_d1 / (spot * iv * sqrt_t);
+    let gamma = phi_d1 / (spot * implied_volatility * sqrt_t);
     // Theta per calendar day (divide by 365)
     let theta_annual = if is_call {
-        -(spot * phi_d1 * iv) / (2.0 * sqrt_t) - r * strike * (-r * t).exp() * nd2
+        -(spot * phi_d1 * implied_volatility) / (2.0 * sqrt_t) - r * strike * (-r * t).exp() * nd2
     } else {
-        -(spot * phi_d1 * iv) / (2.0 * sqrt_t) + r * strike * (-r * t).exp() * nd2_neg
+        -(spot * phi_d1 * implied_volatility) / (2.0 * sqrt_t)
+            + r * strike * (-r * t).exp() * nd2_neg
     };
     let theta = theta_annual / 365.0;
     // Vega per 1% (multiply by 0.01)
@@ -247,8 +249,8 @@ impl OptionsStrategy {
     ///
     /// Args:
     ///     spot_bars:  `[ts, open, high, low, close, volume]` per bar.
-    ///     call_bars:  `[ts, premium, iv, dte_years, _unused, _unused]` per bar.
-    ///     put_bars:   `[ts, premium, iv, dte_years, _unused, _unused]` per bar.
+    ///     call_bars:  `[ts, premium, implied_volatility, dte_years, _unused, _unused]` per bar.
+    ///     put_bars:   `[ts, premium, implied_volatility, dte_years, _unused, _unused]` per bar.
     ///     entries:    Boolean list aligned with bars (true = enter at this bar).
     ///     exits:      Boolean list aligned with bars (true = exit at this bar).
     ///     initial_capital: Starting capital in INR.
@@ -291,18 +293,24 @@ impl OptionsStrategy {
             let spot = spot_bars[i][4]; // close
             let call_prem = call_bars[i][1];
             let put_prem = put_bars[i][1];
-            let call_iv = call_bars[i][2];
+            let call_implied_volatility = call_bars[i][2];
             let dte = call_bars[i][3]; // time to expiry in years
-            let put_iv = put_bars[i][2];
+            let put_implied_volatility = put_bars[i][2];
 
             // Compute Greeks for monitoring (not used in simple P&L simulation)
-            let call_greeks =
-                black_scholes_greeks(spot, self.call_strike(spot), self.config.risk_free_rate, call_iv, dte, true);
+            let call_greeks = black_scholes_greeks(
+                spot,
+                self.call_strike(spot),
+                self.config.risk_free_rate,
+                call_implied_volatility,
+                dte,
+                true,
+            );
             let put_greeks = black_scholes_greeks(
                 spot,
                 self.put_strike(spot),
                 self.config.risk_free_rate,
-                put_iv,
+                put_implied_volatility,
                 dte,
                 false,
             );

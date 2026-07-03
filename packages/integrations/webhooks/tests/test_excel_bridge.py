@@ -37,7 +37,7 @@ class TestExcelBridgeExportImport:
             returned_path = bridge.export_to_excel(data, "Holdings", path)
             assert os.path.exists(returned_path)
 
-            imported = bridge.import_from_excel(returned_path, "Holdings")
+            imported = bridge.import_from_excel(returned_path, "Holdings", trusted_local=True)
 
         assert len(imported) == 2
         assert imported[0]["symbol"] == "RELIANCE"
@@ -103,10 +103,29 @@ class TestExcelBridgeExportImport:
 
         bridge = ExcelBridge()
         try:
-            bridge.import_from_excel("/nonexistent/path/file.xlsx")
+            bridge.import_from_excel("/nonexistent/path/file.xlsx", trusted_local=True)
             assert False, "Expected ExcelBridgeError"
         except ExcelBridgeError as exc:
             assert "not found" in str(exc).lower()
+
+    def test_import_requires_allowed_root_unless_trusted(self):
+        """Server-side imports must be contained at the bridge sink."""
+        self._skip_if_no_openpyxl()
+        from flinttrade_webhooks.excel_bridge import ExcelBridge, ExcelBridgeError
+
+        bridge = ExcelBridge()
+        data = [{"col": "val"}]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "test.xlsx")
+            bridge.export_to_excel(data, "Sheet1", path)
+            try:
+                bridge.import_from_excel(path, sheet_name="Sheet1")
+                assert False, "Expected ExcelBridgeError"
+            except ExcelBridgeError as exc:
+                assert "trusted workbook root" in str(exc)
+
+            imported = bridge.import_from_excel(path, sheet_name="Sheet1", allowed_root=tmpdir)
+            assert imported == data
 
     def test_import_raises_on_missing_sheet(self):
         """import_from_excel raises ExcelBridgeError for a non-existent sheet."""
@@ -119,7 +138,7 @@ class TestExcelBridgeExportImport:
             path = os.path.join(tmpdir, "test.xlsx")
             bridge.export_to_excel(data, "Sheet1", path)
             try:
-                bridge.import_from_excel(path, sheet_name="NonExistentSheet")
+                bridge.import_from_excel(path, sheet_name="NonExistentSheet", trusted_local=True)
                 assert False, "Expected ExcelBridgeError"
             except ExcelBridgeError as exc:
                 assert "NonExistentSheet" in str(exc)

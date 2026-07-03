@@ -77,8 +77,8 @@ def create_rotation_blueprint(rotator: object) -> Blueprint:
             else:
                 rotator.schedule_daily_refresh(broker, time_ist=time_ist)  # type: ignore[attr-defined]
                 message = f"Daily refresh scheduled for {broker} at {time_ist} IST"
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400  # type: ignore[return-value]
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400  # type: ignore[return-value]
 
         return jsonify({"status": "ok", "message": message})  # type: ignore[return-value]
 

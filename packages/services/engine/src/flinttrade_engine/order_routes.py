@@ -165,8 +165,9 @@ def place_basket() -> Response:
                 )
             )
         except (TypeError, ValueError) as exc:
+            logger.warning("Basket leg %s parse error: %s", i, exc)
             return jsonify(
-                {"status": "error", "message": f"Leg {i} parse error: {exc}"}
+                {"status": "error", "message": f"Leg {i} parse error"}
             ), 400
 
     result = _run_async(executor.execute(legs, strategy=strategy))
@@ -257,8 +258,8 @@ def place_split() -> Response:
         trigger_price: float = float(body.get("trigger_price", 0.0))
         product: str = str(body.get("product", "MIS")).upper()
         strategy: str = str(body.get("strategy", "split"))
-    except (TypeError, ValueError) as exc:
-        return jsonify({"status": "error", "message": f"Parameter parse error: {exc}"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Parameter parse error"}), 400
 
     result = _run_async(
         executor.execute_split(
@@ -386,8 +387,8 @@ def place_options_strategy() -> Response:
         exchange: str = str(body.get("exchange", "NFO"))
         product: str = str(body.get("product", "NRML"))
         basket_strategy: str = str(body.get("strategy", strategy_name))
-    except (TypeError, ValueError) as exc:
-        return jsonify({"status": "error", "message": f"Parameter parse error: {exc}"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Parameter parse error"}), 400
 
     from flinttrade_engine.options_multi_order import OptionsStrategyBuilder
 
@@ -403,8 +404,8 @@ def place_options_strategy() -> Response:
             exchange=exchange,
             product=product,
         )
-    except (KeyError, ValueError, TypeError) as exc:
-        return jsonify({"status": "error", "message": f"Strategy build error: {exc}"}), 400
+    except (KeyError, ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Strategy build error"}), 400
 
     result = _run_async(executor.execute(legs, strategy=basket_strategy))
 

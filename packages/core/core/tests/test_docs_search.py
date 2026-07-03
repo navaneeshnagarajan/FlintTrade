@@ -39,6 +39,14 @@ class TestDocsIndex:
         assert "order" in tokens
         assert "module" in tokens
 
+    def test_markdown_link_stripper_handles_malformed_brackets(self):
+        from flinttrade_core.docs_search_routes import _strip_markdown_links
+
+        hostile = "[" * 1000 + "label](target)"
+        stripped = _strip_markdown_links(hostile)
+        assert stripped.endswith("label")
+        assert "target" not in stripped
+
     def test_build_empty_dir(self, tmp_path):
         from flinttrade_core.docs_search_routes import DocsIndex
 

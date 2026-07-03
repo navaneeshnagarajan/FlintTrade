@@ -11,6 +11,7 @@ operations — Security H5) can read them. POSIX falls back to ``chmod 0o600``.
 from __future__ import annotations
 
 import getpass
+import os
 import pathlib
 import subprocess
 import sys
@@ -44,6 +45,33 @@ def harden(path: pathlib.Path, user: str | None = None) -> None:
         raise OSError(
             f"icacls failed for {path.name}: returncode={result.returncode}: {detail}"
         )
+
+
+def write_secret_text(path: pathlib.Path, value: str, user: str | None = None) -> None:
+    """Write secret text through an owner-only file descriptor.
+
+    The file is created with ``0600`` on POSIX before any secret bytes are
+    written. On Windows an empty file is created first, then hardened with the
+    same DACL policy as :func:`harden`, so plaintext is never written into a
+    broadly inherited file.
+    """
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    flags |= nofollow
+    fd = os.open(path, flags, 0o600)
+    try:
+        harden(path, user=user)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        if fd != -1:
+            os.close(fd)
+    harden(path, user=user)
 
 
 def assert_hardened(path: pathlib.Path, user: str | None = None) -> tuple[bool, str]:

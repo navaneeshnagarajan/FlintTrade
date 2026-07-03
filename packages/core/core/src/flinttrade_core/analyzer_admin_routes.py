@@ -90,8 +90,9 @@ def create_analyzer_admin_blueprint(analyzer: object) -> Blueprint:
                 if older_than_days < 0:
                     raise ValueError("Must be non-negative")
             except ValueError as exc:
+                logger.warning("Invalid older_than_days: %s", exc)
                 return jsonify(  # type: ignore[return-value]
-                    {"status": "error", "message": f"Invalid older_than_days: {exc}"}
+                    {"status": "error", "message": "Invalid older_than_days"}
                 ), 400
 
         deleted: int = analyzer.clear_logs(older_than_days=older_than_days)  # type: ignore[attr-defined]

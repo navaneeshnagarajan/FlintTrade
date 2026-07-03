@@ -68,6 +68,52 @@ class _DocEntry:
 # ---------------------------------------------------------------------------
 
 
+def _strip_markdown_links(text: str) -> str:
+    """Replace ``[label](target)`` spans with ``label`` using a linear scan."""
+    out: list[str] = []
+    label: list[str] = []
+    target: list[str] = []
+    state = "text"
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if state == "text":
+            if ch == "[":
+                label = []
+                state = "label"
+            else:
+                out.append(ch)
+        elif state == "label":
+            if ch == "]" and i + 1 < len(text) and text[i + 1] == "(":
+                target = []
+                state = "target"
+                i += 1
+            elif ch == "]":
+                out.append("[")
+                out.extend(label)
+                out.append("]")
+                state = "text"
+            else:
+                label.append(ch)
+        else:
+            if ch == ")":
+                out.extend(label)
+                state = "text"
+            else:
+                target.append(ch)
+        i += 1
+
+    if state == "label":
+        out.append("[")
+        out.extend(label)
+    elif state == "target":
+        out.append("[")
+        out.extend(label)
+        out.append("](")
+        out.extend(target)
+    return "".join(out)
+
+
 def _tokenise(text: str) -> list[str]:
     """Lowercase + split on non-word characters, removing stop words.
 
@@ -88,7 +134,7 @@ def _tokenise(text: str) -> list[str]:
     # Strip markdown syntax noise (headers, code fences, links)
     cleaned = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     cleaned = re.sub(r"`[^`]+`", " ", cleaned)
-    cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", cleaned)
+    cleaned = _strip_markdown_links(cleaned)
     cleaned = re.sub(r"[#*_>~]", " ", cleaned)
     words = re.findall(r"\b[a-z][a-z0-9_-]{1,}\b", cleaned.lower())
     return [w for w in words if w not in _STOP]
@@ -393,6 +439,8 @@ def search_docs() -> Any:
     query = request.args.get("q", "").strip()
     if not query:
         return jsonify({"status": "error", "message": "Missing 'q' query parameter"}), 400
+    if len(query) > 200:
+        return jsonify({"status": "error", "message": "Query is too long"}), 400
 
     try:
         limit = max(1, min(50, int(request.args.get("limit", 10))))

@@ -219,6 +219,15 @@ def test_import_missing_file_path(client):
     assert resp.status_code == 400
 
 
+def test_import_rejects_path_traversal(client):
+    """Server-side imports stay within the configured Excel export directory."""
+    resp = client.post(
+        "/api/v1/integration/excel/import",
+        json={"file_path": "../outside.xlsx"},
+    )
+    assert resp.status_code == 400
+
+
 def test_import_bridge_error(app):
     """400 on ExcelBridgeError during import."""
     bridge = _mock_bridge()
@@ -306,6 +315,6 @@ def test_import_upload_bridge_error(app):
             "/api/v1/integration/excel/import/upload",
             data={"file": (io.BytesIO(b"not-xlsx"), "bad.xlsx")},
             content_type="multipart/form-data",
-        )
+    )
     assert resp.status_code == 400
-    assert "Invalid workbook" in resp.get_json()["message"]
+    assert "Invalid request" in resp.get_json()["message"]

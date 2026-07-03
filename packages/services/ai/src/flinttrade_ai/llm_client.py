@@ -357,8 +357,9 @@ class LLMClient:
                 finish_reason=finish_reason,
                 reasoning=reasoning,
             )
-        except Exception as exc:
-            return LLMResponse(provider=cfg.provider, model=model, error=str(exc))
+        except Exception:
+            logger.exception("OpenAI-compatible chat request failed for provider=%s model=%s", cfg.provider, model)
+            return LLMResponse(provider=cfg.provider, model=model, error="LLM request failed")
 
     def _chat_anthropic(
         self,
@@ -414,8 +415,9 @@ class LLMClient:
                 total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
                 finish_reason=data.get("stop_reason", ""),
             )
-        except Exception as exc:
-            return LLMResponse(provider="anthropic", model=model, error=str(exc))
+        except Exception:
+            logger.exception("Anthropic chat request failed for model=%s", model)
+            return LLMResponse(provider="anthropic", model=model, error="LLM request failed")
 
     # ------------------------------------------------------------------
     # Streaming

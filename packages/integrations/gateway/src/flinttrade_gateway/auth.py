@@ -28,6 +28,11 @@ logger = logging.getLogger("flinttrade.gateway.auth")
 
 gateway_bp = Blueprint("gateway", __name__, url_prefix="/v1")
 
+_ACCOUNT_NOT_FOUND_MESSAGE = "Broker account not found"
+_AUTH_FAILED_MESSAGE = "Broker authentication failed"
+_BROKER_NOT_FOUND_MESSAGE = "Broker not found"
+_CREDENTIALS_INVALID_MESSAGE = "Invalid broker credentials"
+
 
 @gateway_bp.before_request
 def _guard_management_writes() -> Any | None:
@@ -150,12 +155,12 @@ def add_account() -> Any:
     try:
         info = _registry().add_account(account_id, broker, label, credentials)
         return jsonify({"status": "success", "account": info.model_dump()}), 201
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
-    except AuthFlowError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 401
-    except CredentialError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 400
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
+    except AuthFlowError:
+        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
+    except CredentialError:
+        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
     except Exception:
         logger.exception("Failed to add account broker=%r", broker)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -174,8 +179,8 @@ def remove_account(account_id: str) -> Any:
     try:
         _registry().remove_account(account_id)
         return jsonify({"status": "success"}), 200
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
     except Exception:
         logger.exception("Failed to remove account %r", account_id)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -204,12 +209,12 @@ def reconnect_account(account_id: str) -> Any:
             credential_store=_credential_store() if credentials is None else None,
         )
         return jsonify({"status": "success", "account": info.model_dump()})
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
-    except AuthFlowError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 401
-    except CredentialError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 400
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
+    except AuthFlowError:
+        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
+    except CredentialError:
+        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
     except Exception:
         logger.exception("Failed to reconnect account %r", account_id)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -228,8 +233,8 @@ def set_primary(account_id: str) -> Any:
     try:
         _registry().set_primary(account_id)
         return jsonify({"status": "success"})
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
     except Exception:
         logger.exception("Failed to set primary account %r", account_id)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -261,7 +266,7 @@ def oauth_start() -> Any:
         return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
 
     if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": f"Broker not found: {broker}"}), 404
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
 
     broker_info = BROKER_CATALOG[broker]
     if broker_info.auth_flow != AuthFlowType.oauth_redirect:
@@ -324,24 +329,20 @@ def oauth_callback() -> Any:
     try:
         # Authenticate via the registry/adapter
         credentials = {"code": code}
-        info = _registry().add_account(account_id, broker, label, credentials)
+        _registry().add_account(account_id, broker, label, credentials)
         _credential_store().store(
             account_id,
             broker,
             label,
             credentials,
         )
-        logger.info(
-            "OAuth callback success: account=%r broker=%r",
-            info.account_id,
-            broker,
-        )
+        logger.info("OAuth callback success for broker=%r", broker)
         return redirect("/setup?auth=success")
-    except (BrokerNotFoundError, AuthFlowError, CredentialError) as exc:
-        logger.warning("OAuth callback auth failure: %s", exc)
+    except (BrokerNotFoundError, AuthFlowError, CredentialError):
+        logger.warning("OAuth callback auth failure")
         return redirect("/setup?auth=error")
     except Exception:
-        logger.exception("OAuth callback unexpected error for broker=%r", broker)
+        logger.exception("OAuth callback unexpected error")
         return redirect("/setup?auth=error")
 
 
@@ -380,14 +381,14 @@ def submit_credentials() -> Any:
         info = _registry().add_account(account_id, broker, label, credentials)
         _credential_store().store(account_id, broker, label, credentials)
         return jsonify({"status": "success", "account": info.model_dump()}), 201
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
-    except AuthFlowError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 401
-    except CredentialError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 400
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
+    except AuthFlowError:
+        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
+    except CredentialError:
+        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
     except Exception:
-        logger.exception("Failed to submit credentials for broker=%r", broker)
+        logger.error("Failed to submit broker auth material for broker=%r", broker)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
@@ -414,13 +415,13 @@ def otp_request() -> Any:
         return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
 
     if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": f"Broker not found: {broker}"}), 404
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
 
     broker_info = BROKER_CATALOG[broker]
     if broker_info.auth_flow != AuthFlowType.otp_sms:
         return jsonify({
             "status": "error",
-            "message": f"Broker '{broker}' does not use OTP SMS flow",
+            "message": "Broker does not use OTP SMS flow",
         }), 400
 
     # OTP dispatch is broker-specific; the adapter handles the actual call.
@@ -436,10 +437,10 @@ def otp_request() -> Any:
             credentials,
         )
         return jsonify({"status": "success", "message": "OTP sent"})
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
-    except AuthFlowError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 401
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
+    except AuthFlowError:
+        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
     except Exception:
         logger.exception("OTP request failed for broker=%r", broker)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -470,19 +471,19 @@ def otp_verify() -> Any:
         return jsonify({"status": "error", "message": "Missing required field: otp"}), 400
 
     if broker not in BROKER_CATALOG:
-        return jsonify({"status": "error", "message": f"Broker not found: {broker}"}), 404
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
 
     try:
         full_credentials = {"otp": otp, **credentials}
         info = _registry().add_account(account_id, broker, body.get("label", ""), full_credentials)
         _credential_store().store(account_id, broker, body.get("label", ""), full_credentials)
         return jsonify({"status": "success", "account": info.model_dump()}), 201
-    except BrokerNotFoundError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 404
-    except AuthFlowError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 401
-    except CredentialError as exc:
-        return jsonify({"status": "error", "message": exc.message}), 400
+    except BrokerNotFoundError:
+        return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
+    except AuthFlowError:
+        return jsonify({"status": "error", "message": _AUTH_FAILED_MESSAGE}), 401
+    except CredentialError:
+        return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
     except Exception:
         logger.exception("OTP verify failed for broker=%r account=%r", broker, account_id)
         return jsonify({"status": "error", "message": "Internal server error"}), 500

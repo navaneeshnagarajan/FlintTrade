@@ -76,8 +76,8 @@ def create_rate_limit_admin_blueprint(rate_limiter: object) -> Blueprint:
 
         try:
             rate_limiter.set_user_override(str(user_id), str(endpoint), int(rate))  # type: ignore[attr-defined]
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400  # type: ignore[return-value]
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400  # type: ignore[return-value]
 
         return jsonify(  # type: ignore[return-value]
             {

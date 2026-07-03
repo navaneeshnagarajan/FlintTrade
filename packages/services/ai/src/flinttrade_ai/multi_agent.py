@@ -298,13 +298,13 @@ class AgentTeam:
         for analysis in analyses:
             result.agent_analyses.append(analysis)
             if analysis.error:
-                result.errors.append(f"{analysis.agent_name}: {analysis.error}")
+                result.errors.append(f"{analysis.agent_name}: analysis failed")
 
         # Phase 2: Aggregator synthesises all reports
         try:
             self._run_aggregator(result)
         except Exception as exc:  # noqa: BLE001
-            result.errors.append(f"Aggregator: {exc}")
+            result.errors.append("Aggregator: analysis failed")
             logger.warning("Aggregator failed: %s", exc)
             # Fall back to majority vote
             self._majority_vote_fallback(result)
@@ -456,7 +456,7 @@ class AgentTeam:
                 return AgentAnalysis(
                     agent_name=agent.name,
                     role_type=agent.role_type.value,
-                    error=response.error or "LLM returned empty response",
+                    error="LLM request failed" if response.error else "LLM returned empty response",
                 )
 
             signal, confidence, report = self._parse_agent_response(response.content)
@@ -472,7 +472,7 @@ class AgentTeam:
             return AgentAnalysis(
                 agent_name=agent.name,
                 role_type=agent.role_type.value,
-                error=str(exc),
+                error="Agent analysis failed",
             )
 
     # ------------------------------------------------------------------
@@ -763,7 +763,7 @@ class AutonomousResearchLoop:
                         symbol, exchange, iteration, exc,
                     )
                     record.status = "failed"
-                    record.error = str(exc)
+                    record.error = "Research iteration failed"
 
                 self._results.append(record)
 

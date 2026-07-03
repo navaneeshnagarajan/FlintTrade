@@ -92,8 +92,8 @@ def indicators_vwap() -> Any:
 
     try:
         result = calculate_vwap_bands(bars, session_reset=session_reset)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
     except Exception as exc:
         logger.exception("VWAP calculation failed: %s", exc)
         return jsonify({"status": "error", "message": "VWAP calculation failed"}), 500
@@ -211,7 +211,7 @@ def analytics_pairs() -> Any:
                     logger.exception("Pair analysis failed for %s/%s: %s", sym_a, sym_b, exc)
                     return jsonify({
                         "status": "error",
-                        "message": f"Analysis failed for pair {sym_a}/{sym_b}: {exc}",
+                        "message": f"Analysis failed for pair {sym_a}/{sym_b}",
                     }), 500
 
     return jsonify({

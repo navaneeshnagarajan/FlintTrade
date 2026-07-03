@@ -218,7 +218,8 @@ class GatedChildExecutor:
                 total_balance=l2_total_balance,
             )
         except Exception as exc:  # malformed child — refuse, never dispatch
-            return _GatedDecision(False, error=f"Order validation failed: {exc}")
+            logger.warning("Smart-route child validation failed: %s", exc)
+            return _GatedDecision(False, error="Order validation failed")
         blocked = next((r for r in results if not r.passed), None)
         if blocked is not None:
             return _GatedDecision(
@@ -244,7 +245,9 @@ class GatedChildExecutor:
                 "Smart-route child refused | adapter=%s account=%s symbol=%s: %s",
                 self._adapter_id, self._account_id, getattr(order, "symbol", "?"), exc,
             )
-            return _GatedDecision(False, error=str(exc) or "dispatch failed")
+            if exc.__class__.__name__ == "SafetyBypassError":
+                return _GatedDecision(False, error="verification failed")
+            return _GatedDecision(False, error="dispatch failed")
 
         orderid = str(result)
 
@@ -529,8 +532,8 @@ def start_smart_route() -> tuple[Any, int]:
             product=product,  # type: ignore[arg-type]
         )
         parent_results = safety.check_order(parent_order)
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"Order validation failed: {exc}"}), 400
+    except Exception:
+        return jsonify({"status": "error", "message": "Order validation failed"}), 400
     blocked = next((r for r in parent_results if not r.passed), None)
     if blocked is not None:
         return jsonify({
@@ -690,10 +693,10 @@ def start_smart_route() -> tuple[Any, int]:
             else:
                 job.status = "done"
             job.error = final.error
-        except Exception as exc:  # pragma: no cover — route() catches internally
+        except Exception:  # pragma: no cover — route() catches internally
             logger.exception("smart-route job %s crashed", job.job_id)
             job.status = "error"
-            job.error = str(exc)
+            job.error = "smart route failed"
 
     threading.Thread(target=_run, name=f"smart-route-{job.job_id}", daemon=True).start()
 

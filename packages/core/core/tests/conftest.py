@@ -69,7 +69,9 @@ def _seed_test_master_password(base: Path) -> None:
     pw_file = base / "master_password"
     try:
         if not pw_file.exists():
-            pw_file.write_text("pytest-master-password")
+            from flinttrade_core.secure_file import write_secret_text
+
+            write_secret_text(pw_file, "pytest-master-password")
     except OSError:
         pass
 

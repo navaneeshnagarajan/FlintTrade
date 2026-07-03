@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
+from werkzeug.utils import safe_join
 
 from .excel_bridge import ExcelBridge, ExcelBridgeError
 
@@ -75,6 +76,24 @@ def _safe_path(filename: str) -> str:
     return os.path.join(_output_dir(), safe_name)
 
 
+def _safe_xlsx_path(file_path: str) -> str | None:
+    """Resolve an import path under the configured Excel output directory."""
+    root = Path(_output_dir()).resolve()
+    supplied = Path(file_path).expanduser()
+    if supplied.is_absolute():
+        resolved = supplied.resolve(strict=False)
+    else:
+        joined = safe_join(str(root), file_path)
+        if joined is None:
+            return None
+        resolved = Path(joined).resolve(strict=False)
+    if resolved.suffix.lower() != ".xlsx":
+        return None
+    if resolved != root and root not in resolved.parents:
+        return None
+    return str(resolved)
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
@@ -105,8 +124,8 @@ def export_data() -> tuple[Response, int]:
 
     try:
         written_path = bridge.export_to_excel(data, sheet_name, file_path)
-    except ExcelBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    except ExcelBridgeError:
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     logger.info("Excel export: %s (%d rows)", written_path, len(data))
     return jsonify({
@@ -154,8 +173,9 @@ def export_download() -> Response:
     try:
         payload = bridge.export_to_bytes(data, sheet_name)
     except ExcelBridgeError as exc:
+        logger.warning("Excel download export failed: %s", exc)
         return Response(
-            f'{{"status": "error", "message": "{exc}"}}',
+            '{"status": "error", "message": "Excel export failed"}',
             status=500,
             mimetype="application/json",
         )
@@ -198,8 +218,8 @@ def portfolio_report() -> tuple[Response, int]:
 
     try:
         written_path = bridge.create_portfolio_report(positions, holdings, file_path)
-    except ExcelBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    except ExcelBridgeError:
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     logger.info(
         "Portfolio report: %s (%d positions, %d holdings)",
@@ -240,8 +260,9 @@ def portfolio_report_download() -> Response:
     try:
         payload = bridge.create_portfolio_report_bytes(positions, holdings)
     except ExcelBridgeError as exc:
+        logger.warning("Portfolio report download failed: %s", exc)
         return Response(
-            f'{{"status": "error", "message": "{exc}"}}',
+            '{"status": "error", "message": "Portfolio report failed"}',
             status=500,
             mimetype="application/json",
         )
@@ -285,14 +306,22 @@ def import_data() -> tuple[Response, int]:
     if not file_path:
         return jsonify({"status": "error", "message": "file_path is required"}), 400
 
+    safe_file_path = _safe_xlsx_path(file_path)
+    if safe_file_path is None:
+        return jsonify({"status": "error", "message": "file_path must reference an exported .xlsx file"}), 400
+
     # None → the bridge reads the workbook's FIRST sheet (most workbooks are
     # not literally named "Sheet1" — incl. FlintTrade's own exports).
     sheet_name: str | None = body.get("sheet_name") or None
 
     try:
-        rows = bridge.import_from_excel(file_path, sheet_name)
-    except ExcelBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        rows = bridge.import_from_excel(
+            safe_file_path,
+            sheet_name,
+            allowed_root=_output_dir(),
+        )
+    except ExcelBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({
         "status": "success",
@@ -329,9 +358,13 @@ def import_upload() -> tuple[Response, int]:
         fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
         with os.fdopen(fd, "wb") as handle:
             upload.save(handle)
-        rows, resolved_sheet = _get_bridge().import_from_excel_named(tmp_path, sheet_name)
-    except ExcelBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        rows, resolved_sheet = _get_bridge().import_from_excel_named(
+            tmp_path,
+            sheet_name,
+            trusted_local=True,
+        )
+    except ExcelBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
     finally:
         if tmp_path is not None:
             try:

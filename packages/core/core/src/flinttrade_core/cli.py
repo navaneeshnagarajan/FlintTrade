@@ -11,7 +11,7 @@ import argparse
 import secrets
 import sys
 
-from .secure_file import harden
+from .secure_file import harden, write_secret_text
 from .workspace import Workspace
 
 
@@ -28,9 +28,7 @@ def _provision_master_password(ws: Workspace) -> bool:
         harden(password_file)
         return False
 
-    password_file.parent.mkdir(parents=True, exist_ok=True)
-    password_file.write_text(secrets.token_hex(32), encoding="utf-8")
-    harden(password_file)
+    write_secret_text(password_file, secrets.token_hex(32))
     return True
 
 

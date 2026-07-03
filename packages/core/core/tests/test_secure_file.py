@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from flinttrade_core.secure_file import assert_hardened, harden, startup_check
+from flinttrade_core.secure_file import assert_hardened, harden, startup_check, write_secret_text
 
 try:  # pragma: no cover - env-dependent
     import win32security  # noqa: F401
@@ -39,6 +39,16 @@ def test_startup_check_returns_filenames(tmp_path) -> None:
     for entry in result:
         assert "\\" not in entry.split(":")[0]
         assert "/" not in entry.split(":")[0]
+
+
+def test_write_secret_text_creates_hardened_file(tmp_path) -> None:
+    secret = tmp_path / "jwt_secret"
+
+    write_secret_text(secret, "secret-value")
+
+    assert secret.read_text(encoding="utf-8") == "secret-value"
+    ok, reason = assert_hardened(secret)
+    assert ok, reason
 
 
 @pytest.mark.skipif(_IS_WIN, reason="POSIX mode-bit semantics")

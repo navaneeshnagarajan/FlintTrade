@@ -271,8 +271,8 @@ def scanner_run() -> tuple[Any, int]:
     elif "config" in body:
         try:
             config = ScanConfig.model_validate(body["config"])
-        except Exception as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400
     else:
         return jsonify({
             "status": "error",
@@ -293,9 +293,9 @@ def scanner_run() -> tuple[Any, int]:
 
     try:
         results: list[ScanResult] = _scanner.scan(config, data_fetcher=fetcher)
-    except Exception as exc:
+    except Exception:
         logger.exception("Scanner run error for '%s'", config.name)
-        return jsonify({"status": "error", "message": str(exc)}), 500
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     symbols = config.get_symbols()
 
@@ -400,13 +400,13 @@ def scanner_custom() -> tuple[Any, int]:
 
     try:
         config = ScanConfig.model_validate(body)
-    except Exception as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     try:
         symbols = config.get_symbols()
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({
         "status": "success",

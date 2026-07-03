@@ -408,8 +408,8 @@ def backtest_portfolio() -> tuple[Any, int]:
             rebalance_freq=rebalance_freq,
             initial_capital=initial_capital,
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     try:
         result = backtester.run(
@@ -420,8 +420,8 @@ def backtest_portfolio() -> tuple[Any, int]:
             vol_lookback=vol_lookback,
             top_n=top_n,
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
     except Exception:
         logger.exception("Portfolio backtest simulation error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

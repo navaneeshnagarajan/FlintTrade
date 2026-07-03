@@ -94,8 +94,8 @@ def approve_order(order_id: str) -> tuple[Any, int]:
     ac = _get_ac()
     try:
         po = ac.approve(order_id)
-    except ActionCenterError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except ActionCenterError:
+        return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     return jsonify({"status": "success", "data": {"order": po.to_dict()}}), 200
 
 
@@ -113,8 +113,8 @@ def reject_order(order_id: str) -> tuple[Any, int]:
     ac = _get_ac()
     try:
         po = ac.reject(order_id)
-    except ActionCenterError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except ActionCenterError:
+        return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     return jsonify({"status": "success", "data": {"order": po.to_dict()}}), 200
 
 
@@ -183,8 +183,8 @@ def update_config() -> tuple[Any, int]:
             return jsonify({"status": "error", "message": "ttl_seconds must be an integer"}), 400
         try:
             ac.ttl_seconds = ttl
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+        except ValueError:
+            return jsonify({"status": "error", "message": "ttl_seconds must be >= 1"}), 400
 
     return jsonify({
         "status": "success",
@@ -239,8 +239,8 @@ def admin_list_pending() -> tuple[Any, int]:
     queue = _get_queue()
     try:
         requests = queue.list_pending()
-    except ActionCenterError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    except ActionCenterError:
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
     return jsonify({
         "status": "success",
         "data": {"requests": [r.to_dict() for r in requests]},
@@ -260,8 +260,8 @@ def admin_approve_request(request_id: str) -> tuple[Any, int]:
     queue = _get_queue()
     try:
         req = queue.approve(request_id)
-    except ActionCenterError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except ActionCenterError:
+        return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     return jsonify({"status": "success", "data": {"request": req.to_dict()}}), 200
 
 
@@ -283,8 +283,8 @@ def admin_reject_request(request_id: str) -> tuple[Any, int]:
     reason: str = body.get("reason", "")
     try:
         req = queue.reject(request_id, reason)
-    except ActionCenterError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except ActionCenterError:
+        return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     return jsonify({"status": "success", "data": {"request": req.to_dict()}}), 200
 
 
@@ -311,8 +311,8 @@ def admin_history() -> tuple[Any, int]:
 
     try:
         history = queue.list_history(statuses=statuses, limit=limit)  # type: ignore[arg-type]
-    except ActionCenterError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    except ActionCenterError:
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
     return jsonify({
         "status": "success",
         "data": {"requests": [r.to_dict() for r in history]},

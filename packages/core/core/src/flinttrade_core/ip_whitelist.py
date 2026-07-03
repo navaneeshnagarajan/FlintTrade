@@ -379,8 +379,8 @@ def make_ip_whitelist_bp(whitelist: IPWhitelist) -> Blueprint:
             return jsonify({"status": "error", "message": "ip is required"}), 400
         try:
             whitelist.add_ip(user_id, ip, label=label)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400
         return jsonify({"status": "success"}), 201
 
     @bp.route("/<user_id>/<path:ip>", methods=["DELETE"])
@@ -392,8 +392,8 @@ def make_ip_whitelist_bp(whitelist: IPWhitelist) -> Blueprint:
         """
         try:
             removed = whitelist.remove_ip(user_id, ip)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid request"}), 400
         if not removed:
             return jsonify({"status": "error", "message": "IP not found"}), 404
         return jsonify({"status": "success"}), 200

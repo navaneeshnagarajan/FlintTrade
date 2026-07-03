@@ -178,8 +178,8 @@ def get_timings() -> tuple[Any, int]:
 
     try:
         open_t, close_t = get_standard_hours(exchange)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     # Pre-open is 15 min before open for equity exchanges, same as open otherwise
     _equity = {"NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"}

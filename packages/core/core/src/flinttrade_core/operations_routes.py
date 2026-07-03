@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, jsonify, request
+from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
 
@@ -1496,6 +1497,17 @@ def _read_jsonl_tail(path: Path, limit: int) -> list[dict[str, Any]]:
     return reports
 
 
+def _reconciliation_report_path(root: Path, broker: str, account_id: str) -> Path | None:
+    """Resolve one reconciliation JSONL path under ``root``."""
+    joined = safe_join(str(root), broker, f"{account_id}.jsonl")
+    if joined is None:
+        return None
+    path = Path(joined).resolve(strict=False)
+    if path != root and root not in path.parents:
+        return None
+    return path
+
+
 @operations_bp.route("/reconciliation/reports", methods=["GET"])
 @require_scope("admin.observability.read")
 def reconciliation_reports() -> tuple[Any, int]:
@@ -1529,10 +1541,10 @@ def reconciliation_reports() -> tuple[Any, int]:
         root = _reconciliation_root()
         safe_broker = _reconciliation_safe_component(broker, "unknown")
         safe_account = _reconciliation_safe_component(account_id, "default")
-        path = (root / safe_broker / f"{safe_account}.jsonl").resolve()
         # Belt-and-braces: the sanitiser already collapses traversal input to a
         # single component, but never read outside the reconciliation tree.
-        if not path.is_relative_to(root):
+        path = _reconciliation_report_path(root, safe_broker, safe_account)
+        if path is None:
             return jsonify({"status": "error", "message": "Invalid broker or account_id"}), 400
         reports = _read_jsonl_tail(path, limit) if path.is_file() else []
         return jsonify({

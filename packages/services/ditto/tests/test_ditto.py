@@ -807,7 +807,8 @@ class TestAccountManagerExtra:
 
         health = mgr.health_check(acc)
         assert not health.reachable
-        assert "Connection Refused" in health.error
+        assert health.error == "OpenAlgo health check failed"
+        assert "Connection Refused" not in health.error
         mgr.close()
 
     def test_health_check_all(self, tmp_path):

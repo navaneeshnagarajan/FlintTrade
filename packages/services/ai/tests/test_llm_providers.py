@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from urllib.parse import urlparse
 
 import pytest
 
@@ -143,7 +144,7 @@ def test_chat_falls_back_to_a_different_providers_endpoint() -> None:
 
     def fake_post(url, **_kwargs):
         calls.append(url)
-        if "openai.com" in url:
+        if urlparse(url).hostname == "api.openai.com":
             bad = MagicMock()
             bad.status_code = 500
             bad.text = "boom"

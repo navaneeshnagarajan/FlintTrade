@@ -17,7 +17,7 @@ Usage::
 
     bridge = ExcelBridge()
     path = bridge.export_to_excel(positions, "Positions", "/tmp/positions.xlsx")
-    rows = bridge.import_from_excel("/tmp/watchlist.xlsx", sheet_name="Watchlist")
+    rows = bridge.import_from_excel(path, sheet_name="Positions", trusted_local=True)
     report = bridge.create_portfolio_report(positions, holdings, "/tmp/portfolio.xlsx")
 """
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("flinttrade.integration.excel_bridge")
@@ -56,6 +57,27 @@ _NEGATIVE_FG = "EF4444" # Red for losses
 
 class ExcelBridgeError(Exception):
     """Raised when an Excel operation fails."""
+
+
+def _resolve_xlsx_input(
+    file_path: str,
+    *,
+    allowed_root: str | Path | None = None,
+    trusted_local: bool = False,
+) -> Path:
+    """Resolve a workbook path after containment and local-file validation."""
+    path = Path(file_path).expanduser().resolve(strict=False)
+    if not trusted_local:
+        if allowed_root is None:
+            raise ExcelBridgeError("Excel import requires a trusted workbook root")
+        root = Path(allowed_root).expanduser().resolve()
+        if path != root and root not in path.parents:
+            raise ExcelBridgeError("Excel workbook path is outside the import directory")
+    if path.suffix.lower() != ".xlsx":
+        raise ExcelBridgeError("Excel import expects an .xlsx workbook")
+    if not path.is_file():
+        raise ExcelBridgeError("Excel workbook was not found")
+    return path
 
 
 def _require_openpyxl() -> None:
@@ -164,15 +186,26 @@ class ExcelBridge:
         self,
         file_path: str,
         sheet_name: str | None = None,
+        *,
+        allowed_root: str | Path | None = None,
+        trusted_local: bool = False,
     ) -> list[dict[str, Any]]:
         """Import rows from an Excel file (see :meth:`import_from_excel_named`)."""
-        rows, _ = self.import_from_excel_named(file_path, sheet_name)
+        rows, _ = self.import_from_excel_named(
+            file_path,
+            sheet_name,
+            allowed_root=allowed_root,
+            trusted_local=trusted_local,
+        )
         return rows
 
     def import_from_excel_named(
         self,
         file_path: str,
         sheet_name: str | None = None,
+        *,
+        allowed_root: str | Path | None = None,
+        trusted_local: bool = False,
     ) -> tuple[list[dict[str, Any]], str]:
         """Import data from an Excel file, returning the sheet actually read.
 
@@ -185,6 +218,9 @@ class ExcelBridge:
                 the workbook's FIRST sheet — most real workbooks (including
                 FlintTrade's own exports, whose sheet is named "Data") are not
                 called "Sheet1", so a hardcoded name failed the round-trip.
+            allowed_root: Directory that server-side workbook paths must stay under.
+            trusted_local: Set true only for process-created paths such as upload
+                temp files or direct library use.
 
         Returns:
             ``(rows, resolved_sheet_name)`` — the list of row dicts (keys are
@@ -197,22 +233,25 @@ class ExcelBridge:
         """
         _require_openpyxl()
 
-        if not os.path.exists(file_path):
-            raise ExcelBridgeError(f"File not found: {file_path}")
+        workbook_path = _resolve_xlsx_input(
+            file_path,
+            allowed_root=allowed_root,
+            trusted_local=trusted_local,
+        )
 
         try:
-            wb = load_workbook(file_path, read_only=True, data_only=True)
+            wb = load_workbook(workbook_path, read_only=True, data_only=True)
         except Exception as exc:
-            raise ExcelBridgeError(f"Failed to open {file_path}: {exc}") from exc
+            raise ExcelBridgeError("Failed to open Excel workbook") from exc
 
         if sheet_name is None:
             if not wb.sheetnames:
-                raise ExcelBridgeError(f"No sheets in {file_path}")
+                raise ExcelBridgeError("Excel workbook has no sheets")
             sheet_name = wb.sheetnames[0]
         elif sheet_name not in wb.sheetnames:
             available = ", ".join(wb.sheetnames)
             raise ExcelBridgeError(
-                f"Sheet '{sheet_name}' not found in {file_path}. "
+                f"Sheet '{sheet_name}' not found. "
                 f"Available sheets: {available}"
             )
 

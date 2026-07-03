@@ -310,8 +310,8 @@ class AccountManager:
                 result.reachable = True
             else:
                 result.error = f"HTTP {resp.status_code}"
-        except Exception as exc:
-            result.error = str(exc)
+        except Exception:
+            result.error = "OpenAlgo health check failed"
 
         return result
 
@@ -348,9 +348,9 @@ class AccountManager:
                 status.needs_reauth = False
             else:
                 status.error = f"HTTP {resp.status_code}"
-        except Exception as exc:  # noqa: BLE001 - offline/connection error
+        except Exception:  # noqa: BLE001 - offline/connection error
             status.connected = False
-            status.error = str(exc)
+            status.error = "OpenAlgo connection failed"
         return status
 
     def account_status_all(self) -> list[AccountStatus]:
@@ -367,7 +367,7 @@ class AccountManager:
             api_key = decrypt_value(row[3], self._enc_key)
         except Exception:
             api_key = ""
-            logger.warning("Could not decrypt API key for account %s", row[0])
+            logger.warning("Could not decrypt Ditto account auth material")
 
         account = BrokerAccount(
             account_id=row[0],

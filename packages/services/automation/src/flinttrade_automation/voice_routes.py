@@ -30,6 +30,33 @@ logger = logging.getLogger("flinttrade.automation.voice_routes")
 
 voice_bp = Blueprint("voice", __name__, url_prefix="/api/v1/voice")
 
+# Fragments whose presence means an error string may carry internals (a
+# traceback, a filesystem path, a secret) rather than a bounded operator
+# message — mirrors order_routes._operator_safe_error_message.
+_SENSITIVE_ERROR_FRAGMENTS = (
+    "\n", "\r", "traceback", 'file "', "password", "secret", "token",
+    "api_key", "api key", "jwt", "fernet", "/users/", "/home/", "/var/",
+    "\\", "http://", "https://",
+)
+
+
+def _operator_safe_message(exc: BaseException, fallback: str) -> str:
+    """Surface a bounded operator-facing message, else the generic fallback.
+
+    The voice DOMAIN errors (ParseError / LowConfidenceError / VoiceOrderError)
+    carry controlled messages that tell the operator *why* their command failed
+    ("cannot parse this", "low confidence…") — legitimate validation detail the
+    UI depends on, not internals. Surface those bounded (no secrets/paths/
+    newlines, length-capped); anything suspicious collapses to the fallback.
+    """
+    message = str(exc).strip()
+    if not message or len(message) > 240:
+        return fallback
+    lowered = message.lower()
+    if any(fragment in lowered for fragment in _SENSITIVE_ERROR_FRAGMENTS):
+        return fallback
+    return message
+
 # Module-level singleton — replaced via ``init_voice_routes`` for DI.
 _bridge: VoiceOrderBridge | None = None
 
@@ -79,8 +106,8 @@ def parse_command() -> tuple[Response, int]:
     """
     try:
         bridge = _get_bridge()
-    except RuntimeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 503
+    except RuntimeError:
+        return jsonify({"status": "error", "message": "Service unavailable"}), 503
 
     body = request.get_json(silent=True) or {}
     text: str = str(body.get("text", "")).strip()
@@ -93,7 +120,8 @@ def parse_command() -> tuple[Response, int]:
         return jsonify({"status": "success", "data": intent.to_dict()}), 200
     except ParseError as exc:
         logger.warning("Parse error for %r: %s", text, exc)
-        return jsonify({"status": "error", "message": str(exc)}), 422
+        message = _operator_safe_message(exc, "Could not understand the command")
+        return jsonify({"status": "error", "message": message}), 422
     except Exception as exc:
         logger.error("Unexpected parse error: %s", exc)
         return jsonify({"status": "error", "message": "Internal error during parsing"}), 500
@@ -123,8 +151,8 @@ def execute_intent() -> tuple[Response, int]:
     """
     try:
         bridge = _get_bridge()
-    except RuntimeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 503
+    except RuntimeError:
+        return jsonify({"status": "error", "message": "Service unavailable"}), 503
 
     body = request.get_json(silent=True) or {}
     intent_data: Any = body.get("intent")
@@ -136,8 +164,8 @@ def execute_intent() -> tuple[Response, int]:
     # Reconstruct VoiceOrderIntent from the dict
     try:
         intent = _dict_to_intent(intent_data)
-    except (KeyError, ValueError) as exc:
-        return jsonify({"status": "error", "message": f"Invalid intent: {exc}"}), 400
+    except (KeyError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid intent"}), 400
 
     import asyncio
 
@@ -148,16 +176,18 @@ def execute_intent() -> tuple[Response, int]:
     except PendingApprovalError as exc:
         return jsonify({
             "status": "pending",
-            "message": str(exc),
+            "message": "Approval required before execution",
             "intent": exc.intent.to_dict(),
         }), 202
 
     except LowConfidenceError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 422
+        message = _operator_safe_message(exc, "Could not understand the command with enough confidence")
+        return jsonify({"status": "error", "message": message}), 422
 
     except VoiceOrderError as exc:
         logger.error("Voice order execution error: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 422
+        message = _operator_safe_message(exc, "Could not execute the voice order")
+        return jsonify({"status": "error", "message": message}), 422
 
     except Exception as exc:
         logger.error("Unexpected execution error: %s", exc)
@@ -190,8 +220,8 @@ def transcribe_audio() -> tuple[Response, int]:
     """
     try:
         bridge = _get_bridge()
-    except RuntimeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 503
+    except RuntimeError:
+        return jsonify({"status": "error", "message": "Service unavailable"}), 503
 
     if "file" not in request.files:
         return jsonify({"status": "error", "message": "No audio file in request"}), 400
@@ -225,15 +255,16 @@ def transcribe_audio() -> tuple[Response, int]:
         return jsonify({"status": "success", "text": text}), 200
 
     except TranscribeUnavailableError as exc:
+        logger.warning("Voice transcription unavailable: %s", exc)
         return jsonify({
             "status": "error",
-            "message": str(exc),
+            "message": "Voice transcription is unavailable",
             "install": "pip install openai-whisper",
         }), 501
 
     except VoiceOrderError as exc:
         logger.error("Transcription error: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 502
+        return jsonify({"status": "error", "message": "Upstream service failed"}), 502
 
     except Exception as exc:
         logger.error("Unexpected transcription error: %s", exc)

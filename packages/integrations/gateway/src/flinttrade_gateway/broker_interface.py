@@ -38,6 +38,33 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("flinttrade.gateway.broker_interface")
 
 
+_SENSITIVE_ERROR_FRAGMENTS = (
+    "\n",
+    "\r",
+    "traceback",
+    'file "',
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "api key",
+    "jwt",
+    "http://",
+    "https://",
+)
+
+
+def _safe_error_message(exc: BaseException, fallback: str) -> str:
+    """Return a bounded operational error without exposing sensitive details."""
+    message = str(exc).strip()
+    if not message or len(message) > 160:
+        return fallback
+    lowered = message.lower()
+    if any(fragment in lowered for fragment in _SENSITIVE_ERROR_FRAGMENTS):
+        return fallback
+    return message
+
+
 # ---------------------------------------------------------------------------
 # Shared model types
 # ---------------------------------------------------------------------------
@@ -579,7 +606,7 @@ class OpenAlgoBroker:
             )
         except Exception as exc:
             logger.exception("place_order failed for %s", order.symbol)
-            return OrderResponse(success=False, message=str(exc))
+            return OrderResponse(success=False, message=_safe_error_message(exc, "Order placement failed"))
 
     def modify_order(self, order_id: str, modifications: dict[str, Any]) -> OrderResponse:
         """Modify an open order via ``/api/v1/modifyorder``.
@@ -604,7 +631,11 @@ class OpenAlgoBroker:
             )
         except Exception as exc:
             logger.exception("modify_order failed for order_id=%s", order_id)
-            return OrderResponse(success=False, order_id=order_id, message=str(exc))
+            return OrderResponse(
+                success=False,
+                order_id=order_id,
+                message=_safe_error_message(exc, "Order modification failed"),
+            )
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order via ``/api/v1/cancelorder``.

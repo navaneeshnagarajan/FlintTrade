@@ -90,9 +90,9 @@ def calculate_pivots() -> tuple[Any, int]:
             float(payload["open"]) if "open" in payload and payload["open"] is not None
             else None
         )
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError):
         return (
-            jsonify({"status": "error", "message": f"Invalid numeric value: {exc}"}),
+            jsonify({"status": "error", "message": "Invalid numeric value"}),
             400,
         )
 
@@ -103,8 +103,8 @@ def calculate_pivots() -> tuple[Any, int]:
         all_levels = PivotCalculator.all_methods(
             high=high, low=low, close=close, open_price=open_price
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return (
         jsonify({

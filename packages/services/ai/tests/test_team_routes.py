@@ -163,6 +163,42 @@ class TestTeamAnalyse:
         assert "recommendation" in data["data"]
         assert data["data"]["recommendation"]["action"] == "BUY"
 
+    def test_analyse_sanitises_analysis_errors(self, client) -> None:
+        """Raw analysis exception details are not returned by the team route."""
+        team = _make_team()
+        team.analyse.return_value.to_dict.return_value = {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "agent_analyses": [
+                {
+                    "agent_name": "Technical Analyst",
+                    "role_type": "technical",
+                    "report": "",
+                    "signal": "HOLD",
+                    "confidence": 0.0,
+                    "timestamp": "2026-07-03T00:00:00+00:00",
+                    "error": "Traceback: /Users/example/.env token failed",
+                }
+            ],
+            "consensus_signal": "HOLD",
+            "consensus_confidence": 0.0,
+            "consensus_reasoning": "Fallback",
+            "timestamp": "2026-07-03T00:00:00+00:00",
+            "errors": ["Technical Analyst: /Users/example/.env token failed"],
+        }
+        with patch("flinttrade_ai.team_routes._get_team", return_value=team):
+            resp = client.post(
+                "/api/v1/ai/team/analyse",
+                json={"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+            )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        analysis = body["data"]["analysis"]
+        assert analysis["errors"] == ["Analysis failed"]
+        assert analysis["agent_analyses"][0]["error"] == "Analysis failed"
+        assert "Traceback" not in str(body)
+        assert "/Users/example" not in str(body)
+
     def test_team_exception_returns_500(self, client) -> None:
         """Exception inside team.analyse surfaces as HTTP 500.
 

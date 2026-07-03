@@ -115,7 +115,7 @@ class OpenClawBridge:
                 }
         except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
             logger.warning("OpenClaw deploy_agent failed: %s", exc)
-            return {"status": "error", "message": str(exc)}
+            return {"status": "error", "message": "OpenClaw request failed"}
 
     def list_agents(self) -> list[dict]:
         """List all running agents on OpenClaw.
@@ -161,7 +161,7 @@ class OpenClawBridge:
                 }
         except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
             logger.warning("OpenClaw stop_agent failed: %s", exc)
-            return {"status": "error", "message": str(exc)}
+            return {"status": "error", "message": "OpenClaw request failed"}
 
     def get_agent_logs(self, agent_id: str) -> list[str]:
         """Get logs for a specific agent.

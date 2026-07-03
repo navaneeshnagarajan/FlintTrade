@@ -18,6 +18,14 @@ from datetime import datetime, timezone
 from enum import StrEnum
 
 
+_PUBLIC_ANALYSIS_ERROR = "Analysis failed"
+
+
+def _public_error(value: str) -> str:
+    """Collapse internal error details before serialising API responses."""
+    return _PUBLIC_ANALYSIS_ERROR if value else ""
+
+
 class AgentRoleType(StrEnum):
     """Supported agent role types in a trading team."""
 
@@ -112,7 +120,7 @@ class AgentAnalysis:
             "signal": self.signal,
             "confidence": round(self.confidence, 4),
             "timestamp": self.timestamp,
-            "error": self.error,
+            "error": _public_error(self.error),
         }
 
 
@@ -156,7 +164,7 @@ class TeamAnalysis:
             "consensus_confidence": round(self.consensus_confidence, 4),
             "consensus_reasoning": self.consensus_reasoning,
             "timestamp": self.timestamp,
-            "errors": self.errors,
+            "errors": [_public_error(error) for error in self.errors if error],
         }
 
 

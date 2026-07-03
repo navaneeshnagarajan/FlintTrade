@@ -28,6 +28,7 @@ its one-shot ``state`` token, so the write guard does not apply to it.
 from __future__ import annotations
 
 import functools
+import html
 import json
 import logging
 import threading
@@ -223,8 +224,8 @@ def _schedule_refresh_job(adapter_id: str, *, remove: bool = False) -> None:
             rotator.unschedule(adapter_id)
         else:
             rotator.schedule_daily_refresh(adapter_id, "08:05")
-    except Exception as exc:  # noqa: BLE001 - scheduling must not break connect/remove
-        logger.warning("Could not update refresh schedule for %s: %s", adapter_id, exc)
+    except Exception:  # noqa: BLE001 - scheduling must not break connect/remove
+        logger.warning("Could not update native broker refresh schedule")
 
 
 def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str, Any]:
@@ -308,16 +309,16 @@ def _do_connect(
 
     try:
         store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to store native credentials for %s:%s", adapter_id, account_id)
-        return {"status": "error", "message": f"Could not store credentials: {exc}"}, 500
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to store native broker vault row for adapter=%s account=%s", adapter_id, account_id)
+        return {"status": "error", "message": "Could not store credentials"}, 500
 
     actor_id = _operator_actor_id()
     try:
         _register_selector_in_workspace(adapter_id, account_id, actor_id, is_primary)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to register selector %s:%s in workspace", adapter_id, account_id)
-        return {"status": "error", "message": f"Could not register broker selector: {exc}"}, 500
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to register native broker selector in workspace")
+        return {"status": "error", "message": "Could not register broker selector"}, 500
 
     login_results = _activate_after_credentials(adapter_id, account_id)
     selector = f"{adapter_id}:{account_id}"
@@ -336,7 +337,7 @@ def _do_connect(
         try:
             _restore_workspace(ws_snapshot)
         except Exception:  # noqa: BLE001
-            logger.warning("Workspace rollback failed for %s:%s", adapter_id, account_id)
+            logger.warning("Workspace rollback failed for native broker connect")
         if is_new_account:
             # Brand-new connect that never established a session — purge the
             # just-stored row so a dead OAuth code / stale TOTP is not replayed.
@@ -355,7 +356,7 @@ def _do_connect(
                     prior_credentials, is_primary=bool(prior_meta.get("is_primary")), adapter_id=adapter_id,
                 )
             except Exception:  # noqa: BLE001
-                logger.warning("Could not restore prior credentials for %s:%s", adapter_id, account_id)
+                logger.warning("Could not restore prior native broker vault row")
     return {
         "status": "success" if connected else "error",
         "data": {
@@ -529,8 +530,12 @@ def native_oauth_callback() -> Any:
         return _oauth_result_html("Login link expired or invalid — start again from FlintTrade.", ok=False), 400
     if not code:
         # The broker can redirect with an error instead of a code.
-        err = request.args.get("error_description") or request.args.get("error") or "no authorisation code"
-        return _oauth_result_html(f"Broker did not return an authorisation code: {err}", ok=False), 400
+        logger.warning(
+            "Native OAuth callback for %s returned no code: %s",
+            pending["adapter_id"],
+            request.args.get("error_description") or request.args.get("error") or "no authorisation code",
+        )
+        return _oauth_result_html("Broker did not return an authorisation code.", ok=False), 400
 
     adapter_id = pending["adapter_id"]
     account_id = pending["account_id"]
@@ -548,14 +553,14 @@ def native_oauth_callback() -> Any:
     msg = (
         f"{adapter_id} account {account_id} connected — you can close this tab and return to FlintTrade."
         if connected
-        else f"Login failed: {body_out.get('message')}"
+        else "Login failed — return to FlintTrade and try again."
     )
     return _oauth_result_html(msg, ok=connected), (200 if connected else 502)
 
 
 def _oauth_result_html(message: str, ok: bool) -> str:
     colour = "#22c55e" if ok else "#ef4444"
-    safe = message.replace("<", "&lt;").replace(">", "&gt;")
+    safe = html.escape(message, quote=True)
     return (
         "<!doctype html><meta charset='utf-8'><title>FlintTrade — broker login</title>"
         "<body style='font-family:system-ui,sans-serif;background:#0a0a0f;color:#e5e7eb;"
@@ -591,8 +596,8 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
         # the encrypted payload and leaves the metadata + created_at intact.
         try:
             store.update_credentials_for(adapter_id, account_id, fresh)
-        except Exception as exc:  # noqa: BLE001
-            return jsonify({"status": "error", "message": f"Could not store fresh credentials: {exc}"}), 500
+        except Exception:  # noqa: BLE001
+            return jsonify({"status": "error", "message": "Could not store fresh credentials"}), 500
 
     login_results = _activate_after_credentials(adapter_id, account_id)
     selector = f"{adapter_id}:{account_id}"
@@ -613,8 +618,8 @@ def list_native_accounts() -> Any:
         return jsonify({"status": "error", "message": "Credential store unavailable."}), 503
     try:
         rows = store.list_accounts()
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"status": "error", "message": f"Could not list accounts: {exc}"}), 500
+    except Exception:  # noqa: BLE001
+        return jsonify({"status": "error", "message": "Could not list accounts"}), 500
 
     login_status: dict[str, Any] = current_app.config.get("NATIVE_SESSION_STATUS") or {}
     accounts = []
@@ -683,7 +688,7 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
         result = asyncio.run(reader(session))
     except Exception as exc:  # noqa: BLE001 - surface the broker error verbatim
         logger.warning("Native read %s/%s %s failed: %s", adapter_id, account_id, kind, exc)
-        return jsonify({"status": "error", "message": f"Broker read failed: {exc}"}), 502
+        return jsonify({"status": "error", "message": "Broker read failed"}), 502
 
     # Pydantic models -> dicts for JSON.
     def _dump(v: Any) -> Any:

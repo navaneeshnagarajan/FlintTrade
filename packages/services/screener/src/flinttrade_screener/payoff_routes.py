@@ -126,8 +126,8 @@ def payoff_analyse() -> Any:
 
     try:
         legs = _legs_from_body(body)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     if not legs:
         return jsonify({"status": "error", "message": "At least one leg is required"}), 400
@@ -184,8 +184,8 @@ def payoff_curve() -> Any:
 
     try:
         legs = _legs_from_body(body)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     if not legs:
         return jsonify({"status": "error", "message": "At least one leg is required"}), 400

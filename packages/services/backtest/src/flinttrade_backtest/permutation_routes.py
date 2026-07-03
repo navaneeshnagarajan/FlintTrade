@@ -270,11 +270,11 @@ def run_permutation_test() -> tuple[Response, int]:
 
         try:
             result = tester.test_trades(trades_raw, all_returns)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 422
-        except Exception as exc:
+        except ValueError:
+            return jsonify({"status": "error", "message": "Request could not be processed"}), 422
+        except Exception:
             logger.exception("Unexpected error in test_trades")
-            return jsonify({"status": "error", "message": f"Internal error: {exc}"}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     else:
         # Default: mode == "returns"
@@ -304,11 +304,11 @@ def run_permutation_test() -> tuple[Response, int]:
 
         try:
             result = tester.test_returns(strategy_returns, benchmark_returns)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 422
-        except Exception as exc:
+        except ValueError:
+            return jsonify({"status": "error", "message": "Request could not be processed"}), 422
+        except Exception:
             logger.exception("Unexpected error in test_returns")
-            return jsonify({"status": "error", "message": f"Internal error: {exc}"}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     logger.info(
         "Permutation test complete: metric=%s p_value=%.4f significant=%s",
@@ -363,11 +363,11 @@ def run_walk_forward() -> tuple[Response, int]:
             strategy_kwargs={},
             metric=metric,
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 422
-    except Exception as exc:
+    except ValueError:
+        return jsonify({"status": "error", "message": "Request could not be processed"}), 422
+    except Exception:
         logger.exception("Unexpected error in walk-forward analysis")
-        return jsonify({"status": "error", "message": f"Internal error: {exc}"}), 500
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     logger.info(
         "Walk-forward complete: %d splits, degradation=%.1f%%, robust=%s",

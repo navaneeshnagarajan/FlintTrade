@@ -111,7 +111,7 @@ def get_current_margin() -> tuple[Any, int]:
                 {
                     "status": "error",
                     "message": "Could not fetch margin from OpenAlgo",
-                    "detail": str(exc),
+                    "detail": "margin fetch failed",
                 }
             ),
             503,

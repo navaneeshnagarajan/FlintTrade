@@ -103,8 +103,8 @@ def insert_ticks() -> tuple[Response, int]:
 
     try:
         count = bridge.insert_ticks(ticks)
-    except QuestDBBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 502
+    except QuestDBBridgeError:
+        return jsonify({"status": "error", "message": "Upstream service failed"}), 502
 
     return jsonify({"status": "success", "data": {"inserted": count}}), 200
 
@@ -137,8 +137,8 @@ def run_query() -> tuple[Response, int]:
 
     try:
         rows = bridge.query(sql)
-    except QuestDBBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except QuestDBBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({
         "status": "success",
@@ -181,8 +181,8 @@ def aggregate_ohlcv() -> tuple[Response, int]:
 
     try:
         bars = bridge.aggregate_ohlcv(symbol, interval, start, end)
-    except QuestDBBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except QuestDBBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({
         "status": "success",
@@ -210,8 +210,8 @@ def get_latest_tick(symbol: str) -> tuple[Response, int]:
     bridge = _get_bridge()
     try:
         tick = bridge.get_latest_tick(symbol)
-    except QuestDBBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except QuestDBBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     if tick is None:
         return jsonify({

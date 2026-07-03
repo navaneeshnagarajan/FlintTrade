@@ -233,7 +233,7 @@ class WebhookServer:
             return jsonify({"status": "success", **result})
         except Exception as exc:
             logger.error("Webhook %s error: %s", endpoint.name, exc)
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     def _health(self) -> Response:
         """Health check endpoint."""

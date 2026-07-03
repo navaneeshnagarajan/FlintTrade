@@ -216,7 +216,7 @@ def indicators_compute() -> tuple[Any, int]:
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("Indicator %r error: %s", ind_name, exc)
-            result[ind_name] = {"error": str(exc)}
+            result[ind_name] = {"error": "indicator calculation failed"}
 
     return jsonify({"status": "success", "data": result}), 200
 
@@ -280,7 +280,7 @@ def pine_compile() -> tuple[Any, int]:
         logger.warning("Pine converter error: %s", exc)
         return jsonify({
             "status": "error",
-            "message": f"Conversion failed: {exc}",
+            "message": "Conversion failed",
         }), 400
 
     # AST-based safety validation — ensure the generated Python does not

@@ -119,8 +119,8 @@ def upload_strategy() -> Response:
 
     try:
         strategy_id = runner.upload(name, code)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 422
+    except ValueError:
+        return jsonify({"status": "error", "message": "Request could not be processed"}), 422
     except Exception:
         logger.exception("Failed to upload strategy '%s'", name)
         return jsonify({"status": "error", "message": "Upload failed. Check server logs."}), 500
@@ -179,10 +179,10 @@ def start_strategy(strategy_id: str) -> Response:
 
     try:
         runner.start(strategy_id)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
-    except RuntimeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
+    except RuntimeError:
+        return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     except Exception:
         logger.exception("Failed to start strategy %s", strategy_id)
         return jsonify({"status": "error", "message": "Start failed. Check server logs."}), 500
@@ -212,11 +212,11 @@ def stop_strategy(strategy_id: str) -> Response:
 
     try:
         runner.stop(strategy_id)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
-    except RuntimeError as exc:
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
+    except RuntimeError:
         # Not running — treat as a no-op success
-        return jsonify({"status": "success", "message": str(exc)})
+        return jsonify({"status": "success", "message": "Strategy was already stopped"})
     except Exception:
         logger.exception("Failed to stop strategy %s", strategy_id)
         return jsonify({"status": "error", "message": "Stop failed. Check server logs."}), 500
@@ -245,8 +245,8 @@ def delete_strategy(strategy_id: str) -> Response:
 
     try:
         runner.delete(strategy_id)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
     except Exception:
         logger.exception("Failed to delete strategy %s", strategy_id)
         return jsonify({"status": "error", "message": "Delete failed. Check server logs."}), 500
@@ -275,8 +275,8 @@ def get_strategy_status(strategy_id: str) -> Response:
 
     try:
         status = runner.get_status(strategy_id)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
 
     return jsonify({"status": "success", "data": {"strategy": status}})
 
@@ -308,8 +308,8 @@ def get_strategy_trades(strategy_id: str) -> Response:
 
     try:
         runner.get_status(strategy_id)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
 
     return jsonify({"status": "success", "data": {"strategy_id": strategy_id, "trades": []}})
 
@@ -340,8 +340,8 @@ def get_strategy_logs(strategy_id: str) -> Response:
 
     try:
         log_lines = runner.get_logs(strategy_id, lines=n)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
 
     return jsonify({"status": "success", "data": {"strategy_id": strategy_id, "lines": log_lines}})
 
@@ -394,8 +394,8 @@ def create_strategy_schedule(strategy_id: str) -> Response:
 
     try:
         runner.get_status(strategy_id)
-    except FileNotFoundError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 404
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
 
     # Validate cron scheduler availability
     cron_scheduler, err = _cron_scheduler_required()
@@ -421,8 +421,8 @@ def create_strategy_schedule(strategy_id: str) -> Response:
     try:
         from .scheduler import CronStrategyScheduler
         CronStrategyScheduler._parse_cron_expr(cron_expr)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Cron expression expected 5 fields"}), 400
 
     # Build the callback — fires strategy start
     def _strategy_start_callback() -> None:
@@ -442,8 +442,8 @@ def create_strategy_schedule(strategy_id: str) -> Response:
             callback=_strategy_start_callback,
             exchange=exchange,
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Cron expression expected 5 fields"}), 400
     except Exception:
         logger.exception("Failed to schedule strategy %s", strategy_id)
         return jsonify({"status": "error", "message": "Scheduling failed. Check server logs."}), 500

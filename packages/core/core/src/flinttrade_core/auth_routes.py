@@ -242,13 +242,13 @@ def _get_jwt_secret() -> str:
     if _JWT_SECRET_KEY:
         return _JWT_SECRET_KEY
 
-    from .secure_file import harden  # noqa: PLC0415
+    from .secure_file import write_secret_text  # noqa: PLC0415
     from .workspace import workspace_dir  # noqa: PLC0415
 
-    secret_file = workspace_dir() / "jwt_secret"
+    key_file = workspace_dir() / "jwt_secret"
     try:
-        if secret_file.exists():
-            stored = secret_file.read_text().strip()
+        if key_file.exists():
+            stored = key_file.read_text().strip()
             if stored:
                 _JWT_SECRET_KEY = stored
                 return _JWT_SECRET_KEY
@@ -257,11 +257,9 @@ def _get_jwt_secret() -> str:
 
     new_secret = secrets.token_urlsafe(64)
     try:
-        secret_file.parent.mkdir(parents=True, exist_ok=True)
-        secret_file.write_text(new_secret)
-        harden(secret_file)  # SC-04: icacls/0600 owner-only
+        write_secret_text(key_file, new_secret)  # SC-04: icacls/0600 owner-only
     except OSError as exc:
-        logger.warning("Could not persist JWT secret to %s: %s", secret_file, exc)
+        logger.warning("Could not persist JWT key file at %s: %s", key_file, exc)
 
     _JWT_SECRET_KEY = new_secret
     return _JWT_SECRET_KEY
@@ -452,10 +450,10 @@ def auth_setup() -> tuple[Any, int]:
 
     try:
         backup_codes = svc.setup_account(username, email, password, pin)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
+    except RuntimeError:
+        return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
 
     # Mint an explore-mode session token so the REST of the setup wizard is
     # authenticated (broker connection + mode selection are behind the G9
@@ -947,8 +945,8 @@ def auth_reset_password() -> tuple[Any, int]:
 
     try:
         result = svc.update_password(username, new_password)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Password too weak: minimum 8 characters"}), 400
 
     if not result:
         return jsonify({"status": "error", "message": "Password update failed."}), 400
@@ -1383,8 +1381,8 @@ def auth_reset_password_otp() -> tuple[Any, int]:
         profile = svc.get_profile()
         username = profile.get("username", "user")
         result = svc.update_password(username, new_password)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Password too weak: minimum 8 characters"}), 400
 
     if not result:
         return jsonify({"status": "error", "message": "Password update failed."}), 400

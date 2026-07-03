@@ -964,7 +964,7 @@ class RAGPipeline:
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("LLM generation failed: %s", exc)
-            return RAGResult(query=question, error=str(exc), chunks_used=chunks)
+            return RAGResult(query=question, error="RAG query failed", chunks_used=chunks)
 
     # ------------------------------------------------------------------
     # Stats

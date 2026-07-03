@@ -314,7 +314,7 @@ class SmartOrderRouter:
                 "SmartOrderRouter.route failed for %s %s: %s",
                 action, symbol, exc,
             )
-            result.error = str(exc)
+            result.error = "route failed"
 
         result.compute_average_slippage()
         result.completed = True
@@ -537,7 +537,7 @@ class SmartOrderRouter:
                 quantity=quantity,
                 price_type=price_type.value if hasattr(price_type, "value") else str(price_type),
                 status="failed",
-                error=str(exc),
+                error="child order failed",
                 slippage_bps=slippage_bps,
             )
 

@@ -193,14 +193,14 @@ def receive_webhook(source: str) -> tuple[Response, int]:
             payload = receiver.parse_custom(body_dict)
     except Exception as exc:
         logger.warning("Webhook parse error for source=%s: %s", source, exc)
-        return jsonify({"status": "error", "message": f"Parse error: {exc}"}), 422
+        return jsonify({"status": "error", "message": "Webhook parse failed"}), 422
 
     # Dispatch
     try:
         result = _run_dispatch(receiver, payload)
-    except Exception as exc:
+    except Exception:
         logger.exception("Webhook dispatch error for source=%s", source)
-        return jsonify({"status": "error", "message": f"Dispatch error: {exc}"}), 500
+        return jsonify({"status": "error", "message": "Webhook dispatch failed"}), 500
 
     logger.info(
         "Webhook dispatched: source=%s action=%s symbol=%s status=%s",

@@ -90,8 +90,8 @@ def list_workflows() -> tuple[Response, int]:
     bridge = _get_bridge()
     try:
         workflows = bridge.list_workflows()
-    except N8nBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except N8nBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     return jsonify({
         "status": "success",
@@ -112,8 +112,8 @@ def activate_workflow(workflow_id: str) -> tuple[Response, int]:
     bridge = _get_bridge()
     try:
         ok = bridge.activate_workflow(workflow_id)
-    except N8nBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except N8nBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     if ok:
         return jsonify({
@@ -140,8 +140,8 @@ def deactivate_workflow(workflow_id: str) -> tuple[Response, int]:
     bridge = _get_bridge()
     try:
         ok = bridge.deactivate_workflow(workflow_id)
-    except N8nBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except N8nBridgeError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     if ok:
         return jsonify({
@@ -182,7 +182,7 @@ def trigger_webhook() -> tuple[Response, int]:
 
     try:
         result = bridge.trigger_webhook(webhook_id, payload)
-    except N8nBridgeError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 502
+    except N8nBridgeError:
+        return jsonify({"status": "error", "message": "Upstream service failed"}), 502
 
     return jsonify({"status": "success", "data": result}), 200

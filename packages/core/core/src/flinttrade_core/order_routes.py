@@ -460,12 +460,26 @@ def _dispatch_live_order(
             used_margin=l2_used_margin,
             total_balance=l2_total_balance,
         )
-    except (ValueError, ValidationError) as exc:
+    except ValueError as exc:
         logger.warning(
             "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",
             ft_action, adapter_id, exc,
         )
-        return jsonify({"status": "error", "message": f"Order validation failed: {exc}"}), 400
+        message = "Order validation failed"
+        raw_quantity = body.get("quantity")
+        if raw_quantity is not None:
+            try:
+                if not float(raw_quantity).is_integer():
+                    message = "Invalid order quantity"
+            except (TypeError, ValueError):
+                message = "Invalid order quantity"
+        return jsonify({"status": "error", "message": message}), 400
+    except ValidationError as exc:
+        logger.warning(
+            "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",
+            ft_action, adapter_id, exc,
+        )
+        return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
     blocked = next((r for r in safety_results if not r.passed), None)
     if blocked is not None:
@@ -513,7 +527,7 @@ def _dispatch_live_order(
             "Live order refused by safety gate | action=%s adapter=%s account=%s: %s",
             ft_action, adapter_id, account_id, exc,
         )
-        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 403
+        return jsonify({"status": "error", "message": "Order refused"}), 403
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning(
             "Live order — broker not connected | action=%s adapter=%s account=%s: %s",
@@ -534,7 +548,7 @@ def _dispatch_live_order(
             "Live order refused by algo-tag guard | action=%s adapter=%s account=%s: %s",
             ft_action, adapter_id, account_id, exc,
         )
-        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 429
+        return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
         # Gated-skeleton adapters (e.g. Dhan) raise NotImplementedError for
         # un-built order paths; an adapter raises UnsupportedCapabilityError for
@@ -546,7 +560,7 @@ def _dispatch_live_order(
         )
         return jsonify({
             "status": "error",
-            "message": str(exc) or f"Order placement is not yet available for broker '{adapter_id}'.",
+            "message": f"Order placement ({ft_action}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except Exception:
         logger.exception(
@@ -712,13 +726,13 @@ def _gated_write_dispatch(
         asyncio.run(dispatch(router, request_ctx, safety_ctx))
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | order=%s: %s", op, order_id, exc)
-        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 403
+        return jsonify({"status": "error", "message": "Order refused"}), 403
     except AlgoTagLimitError as exc:
         # The router's algo-tag guard refused the dispatch (per-(broker,
         # exchange) per-second algo-order ceiling). A throttle refusal callers
         # should retry — 429, mirroring the place path; never a 500.
         logger.warning("Live %s refused by algo-tag guard | order=%s: %s", op, order_id, exc)
-        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 429
+        return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
         return jsonify({
@@ -735,7 +749,7 @@ def _gated_write_dispatch(
         logger.warning("Live %s — adapter capability not available | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
         return jsonify({
             "status": "error",
-            "message": str(exc) or f"This operation is not yet available for broker '{adapter_id}'.",
+            "message": f"This operation ({op}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except Exception:
         logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, order_id, adapter_id)
@@ -800,7 +814,7 @@ def _dispatch_live_modify(
         ModifyOrder(orderid=order_id, **changes)  # validate up-front; no gate consumed on bad input
     except (ValueError, ValidationError) as exc:
         logger.warning("Live modify rejected by order-model validation | order=%s: %s", order_id, exc)
-        return jsonify({"status": "error", "message": f"Modify validation failed: {exc}"}), 400
+        return jsonify({"status": "error", "message": "Modify validation failed"}), 400
 
     canonical = {"_op": "modify", "order_id": order_id, **changes}
     hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
@@ -1445,6 +1459,37 @@ def _gated_target(params: Any) -> tuple[str, str]:
     return adapter_id, account_id
 
 
+_SENSITIVE_ERROR_FRAGMENTS = (
+    "\n",
+    "\r",
+    "traceback",
+    'file "',
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "api key",
+    "jwt",
+    "fernet",
+    "/users/",
+    "/var/",
+    "\\",
+    "http://",
+    "https://",
+)
+
+
+def _operator_safe_error_message(exc: BaseException, fallback: str) -> str:
+    """Return a bounded broker/operator message without leaking internals."""
+    message = str(exc).strip()
+    if not message or len(message) > 240:
+        return fallback
+    lowered = message.lower()
+    if any(fragment in lowered for fragment in _SENSITIVE_ERROR_FRAGMENTS):
+        return fallback
+    return message
+
+
 def _require_live_payload(*, require_unlock: bool) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
     """Decode the request JWT and enforce the live-mode guard for gated-verb routes.
 
@@ -1581,12 +1626,12 @@ def _gated_verb_write(
         )
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, ref, exc)
-        return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 403
+        return jsonify({"status": "error", "message": "Request refused"}), 403
     except AlgoTagLimitError as exc:
         # Algo-tag guard ceiling breach — a throttle refusal callers should
         # retry (429), never the generic 500 (audit fix); mirrors the place path.
         logger.warning("Live %s refused by algo-tag guard | ref=%s: %s", verb, ref, exc)
-        return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 429
+        return jsonify({"status": "error", "message": "Request refused by rate guard"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", verb, adapter_id, account_id, exc)
         return jsonify({
@@ -1605,7 +1650,7 @@ def _gated_verb_write(
         )
         return jsonify({
             "status": "error",
-            "message": str(exc) or f"This operation is not yet available for broker '{adapter_id}'.",
+            "message": f"This operation ({verb}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except (BrokerError, ValueError) as exc:
         # Honesty (audit MEDIUM): a real broker rejection (BrokerError, incl.
@@ -1621,7 +1666,7 @@ def _gated_verb_write(
         )
         return jsonify({
             "status": "error",
-            "message": str(exc) or fail_message,
+            "message": _operator_safe_error_message(exc, fail_message),
         }), 502
     except Exception:
         logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, ref, adapter_id)
@@ -1703,7 +1748,7 @@ def _gated_broker_read(
         rows = asyncio.run(method(session))
     except SafetyBypassError as exc:
         logger.warning("Broker read %s refused | adapter=%s account=%s: %s", read_verb, adapter_id, account_id, exc)
-        return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 403
+        return jsonify({"status": "error", "message": "Request refused"}), 403
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning("Broker read %s — not connected | adapter=%s account=%s: %s", read_verb, adapter_id, account_id, exc)
         return jsonify({
@@ -1714,9 +1759,13 @@ def _gated_broker_read(
             ),
         }), 503
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
+        logger.warning(
+            "Broker read %s — adapter capability not available | adapter=%s account=%s: %s",
+            read_verb, adapter_id, account_id, exc,
+        )
         return jsonify({
             "status": "error",
-            "message": str(exc) or f"This listing is not yet available for broker '{adapter_id}'.",
+            "message": f"This listing ({read_verb}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except Exception:
         logger.exception("Broker read %s failed | adapter=%s account=%s", read_verb, adapter_id, account_id)
@@ -1977,8 +2026,8 @@ def trigger_place() -> tuple[Any, int]:
     body = request.get_json(silent=True) or {}
     try:
         condition, legs = _trigger_legs_from_body(body)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": f"Trigger validation failed: {exc}"}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Trigger validation failed"}), 400
     adapter_id, account_id = _gated_target(body)
     # Run the FULL SafetySystem (L1–L5) over every leg — a placement path must
     # never skip the risk layers (the kill-switch flag below only runs L5).
@@ -2017,8 +2066,8 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
     body = request.get_json(silent=True) or {}
     try:
         condition, legs = _trigger_legs_from_body(body)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": f"Trigger validation failed: {exc}"}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Trigger validation failed"}), 400
     adapter_id, account_id = _gated_target(body)
     # A modify replaces the armed legs, so re-run the FULL SafetySystem (L1–L5)
     # over the new legs before re-gating — same brake as placement.
@@ -2106,8 +2155,8 @@ def multi_order_place() -> tuple[Any, int]:
                     "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
                 }), 403
             legs.append(typed)
-    except (ValueError, ValidationError) as exc:
-        return jsonify({"status": "error", "message": f"Order validation failed: {exc}"}), 400
+    except (ValueError, ValidationError):
+        return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
     return _gated_verb_write(
         "place_multi_order", {"orders": legs}, payload,

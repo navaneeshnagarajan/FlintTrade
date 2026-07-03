@@ -297,8 +297,8 @@ def create_preset() -> tuple[Response, int]:
     body = request.get_json(silent=True) or {}
     try:
         req = PresetCreateRequest(**body)
-    except ValidationError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValidationError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     name_stripped = req.name.strip()
     if not name_stripped:
@@ -380,8 +380,8 @@ def update_preset(preset_id: str) -> tuple[Response, int]:
     body = request.get_json(silent=True) or {}
     try:
         req = PresetUpdateRequest(**body)
-    except ValidationError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValidationError:
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
 
     # Apply partial updates
     update_data = req.model_dump(exclude_none=True)

@@ -118,7 +118,7 @@ class TestBackupRestore:
         ):
             resp = client.post(
                 "/v1/admin/backup/restore",
-                json={"path": "/tmp/fake_backup.tar.gz"},
+                json={"path": "fake_backup.tar.gz"},
             )
 
         assert resp.status_code == 200
@@ -140,10 +140,19 @@ class TestBackupRestore:
         ):
             resp = client.post(
                 "/v1/admin/backup/restore",
-                json={"path": "/tmp/bad.tar.gz"},
+                json={"path": "bad.tar.gz"},
             )
 
         assert resp.status_code == 500
+        assert resp.get_json()["status"] == "error"
+
+    def test_restore_rejects_archive_outside_backup_root(self, client) -> None:
+        resp = client.post(
+            "/v1/admin/backup/restore",
+            json={"path": "/tmp/fake_backup.tar.gz"},
+        )
+
+        assert resp.status_code == 400
         assert resp.get_json()["status"] == "error"
 
 
@@ -186,3 +195,9 @@ class TestBackupList:
         data = resp.get_json()
         assert len(data["backups"]) == 1
         assert data["backups"][0]["path"] == "/tmp/backup1.tar.gz"
+
+    def test_list_rejects_directory_outside_backup_root(self, client) -> None:
+        resp = client.get("/v1/admin/backup/list?dir=/tmp")
+
+        assert resp.status_code == 400
+        assert resp.get_json()["status"] == "error"
