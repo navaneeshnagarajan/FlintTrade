@@ -229,6 +229,7 @@ interface AccountSecurityStepProps {
 function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
   const navigate = useNavigate();
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
+  const setLoggedIn = useAuthStore((s) => s.setLoggedIn);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -256,11 +257,15 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
         password: values.password,
         pin: values.pin || "",
       });
-      // Server now has an account but no session yet. Reflect this in the
-      // store so any subsequent route decisions (e.g. /welcome redirect,
-      // the setup-required reconcile in this component) see truth, not
-      // the stale "setup-required" value from before the POST.
-      setLoggedOut();
+      // /auth/setup mints an explore-mode session so the rest of the wizard
+      // (broker connection behind the G9 write guard, mode selection behind the
+      // D6 session-bound PIN) is authenticated. Without it those steps 401.
+      // Fall back to logged-out only if an older backend returned no token.
+      if (result.token) {
+        setLoggedIn(result.token, values.username, "");
+      } else {
+        setLoggedOut();
+      }
       onComplete(values, result.totpUri, result.backupCodes);
     } catch (error) {
       if (error instanceof AccountSetupError && error.kind === "account-exists") {

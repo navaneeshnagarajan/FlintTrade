@@ -363,7 +363,12 @@ FlintTrade backend routes accept `X-API-Key` against `FLINTTRADE_API_KEY`
 when configured. `OPENALGO_API_KEY` is retained as a compatibility fallback,
 but it is no longer required for native FlintTrade practice/explore flows.
 When neither key exists, loopback-only local requests are allowed so a fresh
-desktop/dev install can reach native setup and sandbox endpoints.
+desktop/dev install can reach read-only setup and sandbox endpoints. Broker
+account-management **writes** (connect/remove/re-authenticate a broker,
+credential capture, OAuth start, rate-limit and rotation config) additionally
+require the operator's logged-in session JWT — the loopback allowance alone is
+not sufficient for them. The PIN quick-unlock likewise requires an existing
+session (the PIN is a re-authentication factor, never a standalone login).
 
 The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. The app
 reads that key from Setup/Settings-backed workspace config first, with

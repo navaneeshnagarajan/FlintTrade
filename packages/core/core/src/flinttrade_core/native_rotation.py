@@ -30,6 +30,36 @@ from flask import Blueprint, current_app, request
 logger = logging.getLogger("flinttrade.native_rotation")
 
 
+def _probe_session(adapter: Any, registry: Any, broker: str, account_id: str) -> str | None:
+    """Confirm a just-established token actually authenticates (returns error or None).
+
+    The token-replay logins (Upstox/IndMoney) build a Session WITHOUT contacting
+    the broker, so a dead/expired token would report success. A cheap
+    authenticated ``funds`` read (every native supports it) forces a real API
+    call; on failure the live session is dropped so the caller records
+    "needs fresh login" instead of trading on a dead token. Best-effort — an
+    adapter with no ``funds`` read is treated as unverifiable (passes).
+    """
+    import asyncio  # noqa: PLC0415
+
+    reader = getattr(adapter, "funds", None)
+    if not callable(reader):
+        return None
+    try:
+        session = registry.get_session_for(broker, account_id)
+    except Exception:  # noqa: BLE001 - no session means nothing to probe
+        return "no session established"
+    try:
+        asyncio.run(reader(session))
+        return None
+    except Exception as exc:  # noqa: BLE001 - a failing read means the token is dead
+        try:
+            registry.remove_session_for(broker, account_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return f"token verification failed: {exc}"
+
+
 class NativeSessionRefresher:
     """``refresh_token(broker)`` over every stored selector of a native broker.
 
@@ -78,6 +108,7 @@ class NativeSessionRefresher:
             selector = f"{broker}:{account_id}"
             try:
                 credentials = store.retrieve_for(broker, account_id)
+                renewed_token = False
                 # Renew-in-place when the broker supports it (Dhan RenewToken
                 # extends the 24h window without a fresh 2FA) — needs the still-
                 # live session; best-effort, falling back to a plain replay.
@@ -97,6 +128,7 @@ class NativeSessionRefresher:
                             )
                             if token:
                                 credentials = {**credentials, "access_token": token}
+                                renewed_token = True
                         except Exception as exc:  # noqa: BLE001 - fall back to replay
                             logger.info(
                                 "renew_token failed for %s (%s) — replaying vault credentials",
@@ -108,7 +140,26 @@ class NativeSessionRefresher:
                         credential_store=store,
                     )
                 )
-                status[selector] = "ok"
+                # Persist the renewed token: establish_native_session's write-back
+                # compares the replayable payload against the (already-merged)
+                # in-memory credentials and would skip the write, leaving the OLD
+                # token in the vault to be replayed next boot. Force the write.
+                if renewed_token:
+                    try:
+                        store.update_credentials_for(broker, account_id, credentials)
+                    except Exception as exc:  # noqa: BLE001 - session is live regardless
+                        logger.warning("Renewed-token persist failed for %s: %s", selector, exc)
+                # The token-replay logins (Upstox/IndMoney) are lazy — login()
+                # builds a Session without contacting the broker, so a DEAD token
+                # would otherwise report "ok". Probe a cheap authenticated read
+                # to confirm the token actually works; on failure downgrade the
+                # session so the UI shows "needs fresh login" honestly.
+                probe_err = _probe_session(adapter, registry, broker, account_id)
+                if probe_err is not None:
+                    status[selector] = f"login-failed: {probe_err}"
+                    failures.append(f"{selector}: {probe_err}")
+                else:
+                    status[selector] = "ok"
             except Exception as exc:  # noqa: BLE001 - per-selector isolation
                 status[selector] = f"login-failed: {exc}"
                 failures.append(f"{selector}: {exc}")

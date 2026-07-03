@@ -21,6 +21,7 @@ function resetStores() {
   useAuthStore.setState({
     status: "unknown",
     token: null,
+    reauthToken: null,
     username: null,
     expiresAt: null,
     lastActivity: Date.now(),
@@ -269,5 +270,34 @@ describe("authStore", () => {
       const { lastActivity } = useAuthStore.getState();
       expect(lastActivity).toBeGreaterThanOrEqual(before);
     });
+  });
+});
+
+describe("authStore — session-bound PIN re-auth (D6)", () => {
+  it("setPinRequired retains the session token in reauthToken (active token nulled)", () => {
+    useAuthStore.getState().setLoggedIn("live-jwt", "nav", "");
+    useAuthStore.getState().setPinRequired();
+    const s = useAuthStore.getState();
+    expect(s.status).toBe("pin-required");
+    expect(s.token).toBeNull(); // no authenticated calls while locked
+    expect(s.reauthToken).toBe("live-jwt"); // available for the PIN re-auth
+  });
+
+  it("idle pin-lock also retains the session token for re-auth", () => {
+    useAuthStore.getState().setLoggedIn("live-jwt", "nav", "");
+    // Simulate 6 minutes idle (> 5 min PIN threshold, < 30 min logout).
+    useAuthStore.setState({ lastActivity: Date.now() - 6 * 60 * 1000 });
+    useAuthStore.getState().checkIdle();
+    const s = useAuthStore.getState();
+    expect(s.status).toBe("pin-required");
+    expect(s.token).toBeNull();
+    expect(s.reauthToken).toBe("live-jwt");
+  });
+
+  it("full logout clears the reauth token so a cold PIN cannot unlock", () => {
+    useAuthStore.getState().setLoggedIn("live-jwt", "nav", "");
+    useAuthStore.getState().setPinRequired();
+    useAuthStore.getState().setLoggedOut();
+    expect(useAuthStore.getState().reauthToken).toBeNull();
   });
 });

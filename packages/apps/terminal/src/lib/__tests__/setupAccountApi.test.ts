@@ -14,6 +14,7 @@ describe("setupAccountApi", () => {
           data: {
             totp_uri: "otpauth://totp/FlintTrade:alice",
             backup_codes: ["ABCD-1234"],
+            token: "setup-session-jwt",
           },
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
@@ -30,6 +31,9 @@ describe("setupAccountApi", () => {
     ).resolves.toEqual({
       totpUri: "otpauth://totp/FlintTrade:alice",
       backupCodes: ["ABCD-1234"],
+      // The setup response now mints an explore session so the rest of the
+      // wizard (broker connect, mode select) is authenticated (audit fix).
+      token: "setup-session-jwt",
     });
 
     expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup", {

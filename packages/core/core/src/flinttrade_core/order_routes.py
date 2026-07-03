@@ -683,6 +683,7 @@ def _gated_write_dispatch(
     import asyncio  # noqa: PLC0415
 
     from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import gate_order  # noqa: PLC0415
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
@@ -712,6 +713,12 @@ def _gated_write_dispatch(
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | order=%s: %s", op, order_id, exc)
         return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 403
+    except AlgoTagLimitError as exc:
+        # The router's algo-tag guard refused the dispatch (per-(broker,
+        # exchange) per-second algo-order ceiling). A throttle refusal callers
+        # should retry — 429, mirroring the place path; never a 500.
+        logger.warning("Live %s refused by algo-tag guard | order=%s: %s", op, order_id, exc)
+        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
         return jsonify({
@@ -1526,6 +1533,7 @@ def _gated_verb_write(
         SafetyBypassError,
         UnsupportedCapabilityError,
     )
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import gate_broker_write  # noqa: PLC0415
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
@@ -1574,6 +1582,11 @@ def _gated_verb_write(
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, ref, exc)
         return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 403
+    except AlgoTagLimitError as exc:
+        # Algo-tag guard ceiling breach — a throttle refusal callers should
+        # retry (429), never the generic 500 (audit fix); mirrors the place path.
+        logger.warning("Live %s refused by algo-tag guard | ref=%s: %s", verb, ref, exc)
+        return jsonify({"status": "error", "message": f"Request refused: {exc}"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", verb, adapter_id, account_id, exc)
         return jsonify({

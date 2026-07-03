@@ -8,8 +8,15 @@ from flinttrade_core.app import create_flask_app
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
     """Flask test client with auth service pointed at tmp_path."""
+    # Other test modules set OPENALGO_API_KEY / FLINTTRADE_API_KEY via os.environ
+    # directly, and the value leaks across xdist workers — making the global
+    # require_auth demand an X-API-Key before our own auth guards even run.
+    # Unset them so the guard/PIN/native-write tests exercise the loopback
+    # allowance deterministically (mirrors the test_native_account_routes fixture).
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     with patch("flinttrade_core.auth_routes._get_auth_service") as mock:
         from flinttrade_core.auth_service import AuthService
         svc = AuthService(db_path=tmp_path / "auth.db")
@@ -470,3 +477,74 @@ class TestPinIsSessionBound:
                       headers={"Content-Type": "application/json",
                                "Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
+
+
+class TestGuardsRejectResetTokens:
+    """Audit finding (auth-bypass): a password-reset token (type='reset')
+    proves only email possession and is exempt from the password-change kill
+    switch, so it must NOT authorise broker-management writes (G9) or satisfy
+    the D6 session requirement on /v1/auth/pin."""
+
+    def _setup(self, c):
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_reset_token_rejected_by_native_write_guard(self, client):
+        c, _ = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+
+        reset = _create_reset_token("nav")
+        resp = c.post(
+            "/api/v1/native/accounts",
+            json={"adapter_id": "dhan", "account_id": "X", "credentials": {"access_token": "x"}},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
+        assert resp.status_code == 401
+        assert "full login session" in resp.get_json()["message"].lower()
+
+    def test_reset_token_rejected_by_pin_unlock(self, client):
+        c, _ = client
+        self._setup(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+
+        reset = _create_reset_token("nav")
+        resp = c.post(
+            "/v1/auth/pin", json={"pin": "123456"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
+        )
+        assert resp.status_code == 401
+        assert "full login session" in resp.get_json()["message"].lower()
+
+
+class TestSetupMintsSession:
+    """Audit fix (#18/#19): /v1/auth/setup returns an explore-mode session token
+    so the rest of the setup wizard (broker connect behind the G9 guard, mode
+    select behind the D6 PIN) is authenticated. Non-live: arming Live still
+    needs the PIN."""
+
+    def test_setup_returns_explore_session_token(self, client):
+        c, _ = client
+        resp = c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 201
+        data = resp.get_json()["data"]
+        assert data["mode"] == "explore"
+        from flinttrade_core.auth_routes import decode_token
+
+        payload = decode_token(data["token"])
+        assert payload["type"] == "session"
+        assert payload["mode"] == "explore"
+        assert payload["live_mode_unlocked"] is False
+        # And that token satisfies the G9 write guard (proves the wizard's
+        # broker-connect step is authenticated).
+        w = c.post(
+            "/api/v1/native/accounts",
+            json={"adapter_id": "dhan", "account_id": "X", "credentials": {"access_token": "x"}},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {data['token']}"},
+        )
+        assert w.status_code != 401

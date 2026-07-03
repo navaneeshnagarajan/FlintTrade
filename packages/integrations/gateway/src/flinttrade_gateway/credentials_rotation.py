@@ -151,12 +151,16 @@ class CredentialsRotator:
             self._job_ids[job_id] = job_id
 
             # Compute next run time (approximate — IST today or tomorrow).
+            # timedelta, not replace(day=+1): on the last day of a month
+            # ``day + 1`` overflows the month and datetime.replace raises
+            # ValueError, which previously aborted the whole boot-time
+            # scheduling loop.
             now_ist = datetime.now(IST)
             next_run = now_ist.replace(
                 hour=hour, minute=minute, second=0, microsecond=0
             )
             if next_run <= now_ist:
-                next_run = next_run.replace(day=next_run.day + 1)
+                next_run = next_run + timedelta(days=1)
             self._next_rotation[broker] = next_run
 
         logger.info(
@@ -222,6 +226,24 @@ class CredentialsRotator:
             day,
             time_ist,
         )
+
+    def unschedule(self, broker: str) -> None:
+        """Remove every scheduled refresh/rotation job for *broker*.
+
+        Called when the operator disconnects a broker so its 08:05 refresh job
+        stops firing (and no longer logs a "no stored accounts" error each
+        morning). Idempotent — unknown brokers and already-removed jobs are
+        silently ignored.
+        """
+        with self._lock:
+            for job_id in (f"cred_refresh_{broker}", f"cred_rotate_{broker}"):
+                if job_id in self._job_ids:
+                    try:
+                        self._scheduler.remove_job(job_id)
+                    except Exception:  # noqa: BLE001 - job may already be gone
+                        pass
+                    self._job_ids.pop(job_id, None)
+            self._next_rotation.pop(broker, None)
 
     # ------------------------------------------------------------------
     # Immediate rotation

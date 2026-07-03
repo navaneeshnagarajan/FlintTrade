@@ -273,3 +273,35 @@ class TestUpdateCredentialsFor:
     def test_update_missing_selector_raises(self, store: CredentialStore) -> None:
         with pytest.raises(CredentialError):
             store.update_credentials_for("dhan", "nope", {"access_token": "x"})
+
+
+class TestCrossAdapterCollisionGuard:
+    """Audit finding: the accounts PK is account_id alone, but the selector is
+    composite (adapter_id, account_id). store() must refuse a second adapter
+    reusing an account_id rather than silently overwriting the first's creds."""
+
+    def test_second_adapter_same_account_id_is_rejected(self, store: CredentialStore) -> None:
+        store.store("SHARED", "dhan", "Dhan", {"access_token": "dhan-tok"}, adapter_id="dhan")
+        with pytest.raises(CredentialError, match="already used by adapter"):
+            store.store("SHARED", "upstox", "Upstox", {"access_token": "upx-tok"}, adapter_id="upstox")
+        # The first adapter's credentials survive intact.
+        assert store.retrieve_for("dhan", "SHARED")["access_token"] == "dhan-tok"
+
+    def test_same_adapter_update_still_allowed(self, store: CredentialStore) -> None:
+        store.store("A1", "dhan", "Dhan", {"access_token": "old"}, adapter_id="dhan")
+        store.store("A1", "dhan", "Dhan", {"access_token": "new"}, adapter_id="dhan")
+        assert store.retrieve_for("dhan", "A1")["access_token"] == "new"
+
+
+class TestUnschedule:
+    def test_unschedule_is_idempotent_and_month_end_safe(self) -> None:
+        """schedule_daily_refresh must use timedelta (not replace(day+1)) so it
+        never raises on the last day of a month; unschedule is idempotent."""
+        from unittest.mock import MagicMock
+
+        from flinttrade_gateway.credentials_rotation import CredentialsRotator
+
+        rot = CredentialsRotator(MagicMock(), MagicMock())
+        rot.schedule_daily_refresh("dhan", "08:05")  # must not raise regardless of today's date
+        rot.unschedule("dhan")
+        rot.unschedule("dhan")  # second call is a no-op

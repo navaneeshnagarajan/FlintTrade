@@ -398,11 +398,21 @@ def require_operator_session() -> tuple[Any, int] | None:
             "message": "Broker account management requires a logged-in session — sign in first.",
         }), 401
     try:
-        decode_token(token)
+        payload = decode_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return jsonify({
             "status": "error",
             "message": "Session expired or invalid — sign in again to manage broker accounts.",
+        }), 401
+    # Only a full login session qualifies. A password-reset token (type
+    # "reset") proves email possession, not password+TOTP, AND is exempt from
+    # the password-change invalidation in decode_token — accepting it would let
+    # an email-only attacker mutate broker registration/credentials and survive
+    # a defensive password change.
+    if payload.get("type") != "session":
+        return jsonify({
+            "status": "error",
+            "message": "Broker account management requires a full login session.",
         }), 401
     return None
 
@@ -447,11 +457,21 @@ def auth_setup() -> tuple[Any, int]:
     except RuntimeError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 409
 
+    # Mint an explore-mode session token so the REST of the setup wizard is
+    # authenticated (broker connection + mode selection are behind the G9
+    # write guard / D6 session-bound PIN). Legitimate: the operator is
+    # physically creating the account right now, so this first session needs no
+    # separate TOTP step. It is non-live (mode=explore, live_mode_unlocked
+    # false); arming Live still requires the PIN. Subsequent logins after this
+    # session ends require password + TOTP as usual.
+    token = _create_token(username, mode="explore")
     return jsonify({
         "status": "success",
         "data": {
             "backup_codes": backup_codes,
             "totp_uri": svc.get_totp_provisioning_uri(),
+            "token": token,
+            "mode": "explore",
         },
     }), 201
 
@@ -611,11 +631,19 @@ def auth_pin_verify() -> tuple[Any, int]:
             "message": "PIN unlock requires an active session — sign in with password and TOTP first.",
         }), 401
     try:
-        decode_token(session_token)
+        session_payload = decode_token(session_token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return jsonify({
             "status": "error",
             "message": "Session expired — sign in with password and TOTP, then use the PIN.",
+        }), 401
+    # A reset token proves only email possession (not password+TOTP) and is
+    # exempt from the password-change kill switch — it must never satisfy the
+    # D6 session requirement, or (reset token + PIN) would arm Live.
+    if session_payload.get("type") != "session":
+        return jsonify({
+            "status": "error",
+            "message": "PIN unlock requires a full login session — sign in with password and TOTP first.",
         }), 401
 
     body = request.get_json(silent=True) or {}

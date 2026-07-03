@@ -8,6 +8,9 @@ export interface AccountSetupInput {
 export interface AccountSetupResult {
   totpUri: string;
   backupCodes: string[];
+  /** Explore-mode session token minted at account creation so the rest of the
+   * setup wizard (broker connect, mode select) is authenticated. */
+  token: string;
 }
 
 export type AccountSetupErrorKind = "account-exists" | "network" | "server";
@@ -93,6 +96,7 @@ export async function setupFlintTradeAccount(input: AccountSetupInput): Promise<
   const backupCodes = Array.isArray(payload.data.backup_codes)
     ? payload.data.backup_codes.filter((code): code is string => typeof code === "string")
     : [];
+  const token = typeof payload.data.token === "string" ? payload.data.token : "";
 
-  return { totpUri, backupCodes };
+  return { totpUri, backupCodes, token };
 }

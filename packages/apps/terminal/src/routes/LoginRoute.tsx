@@ -81,7 +81,8 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
       // message tells the operator to do the full password+TOTP login — which
       // is exactly the daily re-auth requirement.
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const sessionToken = useAuthStore.getState().token;
+      const authState = useAuthStore.getState();
+      const sessionToken = authState.token ?? authState.reauthToken;
       if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
       const resp = await fetch("/ft-api/v1/auth/pin", {
         method: "POST",

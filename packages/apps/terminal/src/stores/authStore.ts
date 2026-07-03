@@ -12,6 +12,16 @@ type AuthStatus = "unknown" | "logged-in" | "logged-out" | "pin-required" | "set
 interface AuthState {
   status: AuthStatus;
   token: string | null;
+  /**
+   * The still-valid session JWT retained across an idle/manual lock so the
+   * PIN unlock can re-authenticate against it (the PIN is a re-auth factor, not
+   * a session-minting one — backend policy D6). The ACTIVE `token` is still
+   * nulled while locked, so no API call runs during the lock; only the explicit
+   * PIN unlock consumes this. Cleared on full login/logout and when the daily
+   * 08:00 IST expiry fires — a cold or expired session has none, so a PIN alone
+   * can never unlock.
+   */
+  reauthToken: string | null;
   username: string | null;
   expiresAt: string | null;
   lastActivity: number;
@@ -62,6 +72,7 @@ function msUntilNext8amIST(): number {
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: "unknown",
   token: null,
+  reauthToken: null,
   username: null,
   expiresAt: null,
   lastActivity: Date.now(),
@@ -81,7 +92,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setLoggedIn: (token, username, expiresAt) => {
-    set({ status: "logged-in", token, username, expiresAt, lastActivity: Date.now() });
+    set({
+      status: "logged-in", token, reauthToken: null, username, expiresAt, lastActivity: Date.now(),
+    });
     // Schedule automatic expiry at the next 08:00 IST
     get().startExpiryTimer();
   },
@@ -91,14 +104,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const existing = get()._expiryTimerId;
     if (existing !== null) clearTimeout(existing);
     clearDemoSession();
-    set({ status: "logged-out", token: null, username: null, expiresAt: null, _expiryTimerId: null });
+    set({
+      status: "logged-out", token: null, reauthToken: null, username: null,
+      expiresAt: null, _expiryTimerId: null,
+    });
   },
 
+  // Lock the UI but RETAIN the session token for the PIN re-auth (moved out of
+  // the active `token` so nothing makes authenticated calls while locked).
   setPinRequired: () =>
-    set({ status: "pin-required", token: null }),
+    set((s) => ({ status: "pin-required", token: null, reauthToken: s.token ?? s.reauthToken })),
 
   setSetupRequired: () =>
-    set({ status: "setup-required", token: null, username: null }),
+    set({ status: "setup-required", token: null, reauthToken: null, username: null }),
 
   updateToken: (token) => set({ token, lastActivity: Date.now() }),
 
@@ -112,7 +130,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (idle >= IDLE_LOGOUT_THRESHOLD) {
       get().setLoggedOut();
     } else if (idle >= IDLE_PIN_THRESHOLD) {
-      set({ status: "pin-required", token: null });
+      set((s) => ({ status: "pin-required", token: null, reauthToken: s.token ?? s.reauthToken }));
     }
   },
 }));

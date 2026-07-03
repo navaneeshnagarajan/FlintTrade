@@ -130,6 +130,27 @@ def _register_selector_in_workspace(
     tmp.replace(path)
 
 
+def _schedule_refresh_job(adapter_id: str, *, remove: bool = False) -> None:
+    """Add or remove the broker's daily 08:05 IST refresh job on the rotator.
+
+    Keeps the G5 schedule in step with runtime connect/disconnect: boot only
+    scheduled the brokers registered at startup, so a broker connected later
+    would never get a morning refresh, and a disconnected broker's job would
+    keep firing (logging a "no stored accounts" error each morning). Best-effort
+    — a missing rotator (APScheduler unavailable) is a no-op.
+    """
+    rotator = current_app.config.get("CREDENTIALS_ROTATOR")
+    if rotator is None:
+        return
+    try:
+        if remove:
+            rotator.unschedule(adapter_id)
+        else:
+            rotator.schedule_daily_refresh(adapter_id, "08:05")
+    except Exception as exc:  # noqa: BLE001 - scheduling must not break connect/remove
+        logger.warning("Could not update refresh schedule for %s: %s", adapter_id, exc)
+
+
 def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str, Any]:
     """Non-throwing snapshot of a selector's live session, for the UI."""
     try:
@@ -193,6 +214,20 @@ def _do_connect(
     login_state = login_results.get(selector, "not-activated")
     session_status = _session_status(registry, adapter_id, account_id)
     connected = session_status["has_session"]
+    if connected:
+        # G5: give the freshly connected broker a daily 08:05 IST refresh job on
+        # the already-running rotator (configure_session_rotation only scheduled
+        # brokers present at boot). Idempotent (replace_existing).
+        _schedule_refresh_job(adapter_id)
+    else:
+        # A failed connect must not leave replayable garbage in the vault — a
+        # single-use OAuth code or a stale TOTP would otherwise be retried
+        # (always failing) on every boot. Purge the just-stored row so the
+        # selector is cleanly sessionless rather than dead-credential'd.
+        try:
+            store.remove(account_id)
+        except Exception:  # noqa: BLE001 - best effort; nothing to clean up
+            pass
     return {
         "status": "success" if connected else "error",
         "data": {
@@ -205,7 +240,7 @@ def _do_connect(
         "message": (
             f"{adapter_id} account {account_id} connected."
             if connected
-            else f"Credentials stored but login did not establish a session: {login_state}"
+            else f"Login did not establish a session ({login_state}); credentials were not kept."
         ),
     }, (200 if connected else 502)
 
@@ -422,9 +457,12 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     body: dict[str, Any] = request.get_json(silent=True) or {}
     fresh = body.get("credentials")
     if isinstance(fresh, dict) and fresh:
+        # Payload-only update: re-authenticating an EXISTING account must not
+        # reset its label to the adapter id or clear its is_primary flag (which
+        # store()'s ON CONFLICT upsert would). update_credentials_for swaps just
+        # the encrypted payload and leaves the metadata + created_at intact.
         try:
-            existing_label = adapter_id
-            store.store(account_id, adapter_id, existing_label, fresh, adapter_id=adapter_id)
+            store.update_credentials_for(adapter_id, account_id, fresh)
         except Exception as exc:  # noqa: BLE001
             return jsonify({"status": "error", "message": f"Could not store fresh credentials: {exc}"}), 500
 
@@ -567,6 +605,24 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         tmp.replace(path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Selector deregister failed for %s:%s: %s", adapter_id, account_id, exc)
+
+    # Drop any stale login-status entry so a later re-add of the same selector
+    # doesn't inherit a phantom "needs fresh login" from the removed account.
+    status_map = current_app.config.get("NATIVE_SESSION_STATUS")
+    if isinstance(status_map, dict):
+        status_map.pop(f"{adapter_id}:{account_id}", None)
+
+    # If that was the broker's last account, stop its daily refresh job so it
+    # doesn't fire every morning against a broker with nothing to refresh.
+    try:
+        remaining = any(
+            str(r.get("adapter_id") or r.get("broker") or "") == adapter_id
+            for r in store.list_accounts()
+        )
+    except Exception:  # noqa: BLE001
+        remaining = True
+    if not remaining:
+        _schedule_refresh_job(adapter_id, remove=True)
 
     # Rebuild so the removed native drops out of routing.
     from .app import configure_broker_router  # noqa: PLC0415

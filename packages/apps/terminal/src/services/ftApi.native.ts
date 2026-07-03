@@ -44,20 +44,19 @@ export interface NativeAccount {
   login_error?: string | null;
 }
 
-interface ApiEnvelope<T> {
-  status: string;
-  data?: T;
-  message?: string;
-}
+// NOTE: `get`/`post` (ftApi.helpers) already unwrap the backend `{status,
+// data}` envelope and return `data` directly (and throw the backend `message`
+// on any non-2xx). So these functions consume the INNER payload — do NOT read
+// a second `.data` level, or every list comes back empty.
 
 export async function listNativeBrokers(): Promise<NativeBroker[]> {
-  const r = await get<ApiEnvelope<{ brokers: NativeBroker[] }>>("native/brokers");
-  return r.data?.brokers ?? [];
+  const r = await get<{ brokers: NativeBroker[] }>("native/brokers");
+  return r?.brokers ?? [];
 }
 
 export async function listNativeAccounts(): Promise<NativeAccount[]> {
-  const r = await get<ApiEnvelope<{ accounts: NativeAccount[] }>>("native/accounts");
-  return r.data?.accounts ?? [];
+  const r = await get<{ accounts: NativeAccount[] }>("native/accounts");
+  return r?.accounts ?? [];
 }
 
 export interface ConnectResult {
@@ -73,8 +72,10 @@ export async function connectNativeAccount(input: {
   credentials: Record<string, string>;
   is_primary?: boolean;
 }): Promise<ConnectResult> {
-  const r = await post<ApiEnvelope<{ connected: boolean; login: string }>>("native/accounts", input);
-  return { connected: !!r.data?.connected, login: r.data?.login ?? "", message: r.message };
+  // A failed connect is a non-2xx, so `post` throws the backend message before
+  // returning; a 2xx always carries connected:true.
+  const r = await post<{ connected: boolean; login: string }>("native/accounts", input);
+  return { connected: !!r?.connected, login: r?.login ?? "" };
 }
 
 export interface OAuthStartResult {
@@ -91,9 +92,9 @@ export async function oauthStartNativeAccount(input: {
   label?: string;
   is_primary?: boolean;
 }): Promise<OAuthStartResult> {
-  const r = await post<ApiEnvelope<OAuthStartResult>>("native/oauth/start", input);
-  if (!r.data?.auth_url) throw new Error(r.message || "Could not start OAuth login");
-  return r.data;
+  const r = await post<OAuthStartResult>("native/oauth/start", input);
+  if (!r?.auth_url) throw new Error("Could not start OAuth login");
+  return r;
 }
 
 export async function removeNativeAccount(adapterId: string, accountId: string): Promise<void> {
@@ -116,13 +117,13 @@ export async function reloginNativeAccount(
   accountId: string,
   credentials?: Record<string, string>,
 ): Promise<ReloginResult> {
-  const r = await post<ApiEnvelope<{ session: ReloginResult; login?: string }>>(
+  const r = await post<{ session: ReloginResult; login?: string }>(
     `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/login`,
     credentials ? { credentials } : {},
   );
-  const session = r.data?.session;
+  const session = r?.session;
   if (!session?.has_session) {
-    throw new Error(r.message || "Re-login did not establish a session — enter fresh credentials.");
+    throw new Error("Re-login did not establish a session — enter fresh credentials.");
   }
   return session;
 }

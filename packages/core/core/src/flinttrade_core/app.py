@@ -804,30 +804,55 @@ def build_broker_router(
     # algo-order ceiling) for adapters advertising ``algo_tag_required``
     # (Dhan/IndMoney). Built only when the operator configured their
     # broker-registered algo ids in workspace.json
-    # ``brokers.algo_tags[broker_id].{algo_id, max_orders_per_sec}``; without
-    # config the adapters' retail-default algo ids apply unchanged. Unlike the
-    # rate limiter this is a compliance control, so a malformed entry raises —
-    # configure_broker_router then leaves BROKER_ROUTER None (orders 503) rather
-    # than silently dispatching untagged.
+    # ``brokers.algo_tags[broker_id].{algo_id, max_orders_per_sec}``.
+    #
+    # Parsed LENIENTLY per-entry: an invalid or unknown-broker entry is dropped
+    # with a loud error and the remaining valid entries still apply. A dropped
+    # entry is safe — the adapter/mapping retail default takes over (Dhan places
+    # untagged, IndMoney injects its per-exchange default id), so no order ever
+    # dispatches in a broker-flagging state. Crucially the guard is NOT allowed
+    # to brick the whole BrokerRouter: a bad algo_tags block must not take down
+    # broker READS, reconciliation, and bridge dispatch (only the custom
+    # ceiling/relay is forfeited until the operator fixes workspace.json).
     algo_tag_guard = None
     algo_tags_cfg = brokers_config.get("algo_tags", {}) if isinstance(brokers_config, dict) else {}
-    if algo_tags_cfg:
+    if isinstance(algo_tags_cfg, dict) and algo_tags_cfg:
         from flinttrade_engine.algo_tag_guard import AlgoTagConfig, AlgoTagGuard  # noqa: PLC0415
 
+        # Only adapters that actually consult the guard (algo_tag_required) can
+        # be tagged; a typo'd/non-algo broker key is inert, so reject it loudly
+        # rather than logging it as "active".
+        taggable = {
+            aid for aid, adapter in resolved_adapters.items()
+            if getattr(getattr(adapter, "capabilities", None), "algo_tag_required", False)
+        }
         tag_configs: dict[str, AlgoTagConfig] = {}
         for broker_id, spec in algo_tags_cfg.items():
+            bid = str(broker_id)
             if not isinstance(spec, dict):
-                raise ValueError(f"brokers.algo_tags[{broker_id!r}] must be an object")
+                logger.error("brokers.algo_tags[%r] ignored — must be an object", bid)
+                continue
             algo_id = str(spec.get("algo_id", "")).strip()
-            max_per_sec = int(spec.get("max_orders_per_sec", 0) or 0)
+            try:
+                max_per_sec = int(spec.get("max_orders_per_sec", 0) or 0)
+            except (TypeError, ValueError):
+                max_per_sec = 0
             if not algo_id or max_per_sec <= 0:
-                raise ValueError(
-                    f"brokers.algo_tags[{broker_id!r}] needs a non-empty algo_id "
-                    "and a positive max_orders_per_sec"
+                logger.error(
+                    "brokers.algo_tags[%r] ignored — needs a non-empty algo_id and a "
+                    "positive max_orders_per_sec", bid,
                 )
-            tag_configs[str(broker_id)] = AlgoTagConfig(algo_id=algo_id, max_orders_per_sec=max_per_sec)
-        algo_tag_guard = AlgoTagGuard(tag_configs)
-        logger.info("Algo-tag guard active for: %s", ", ".join(sorted(tag_configs)))
+                continue
+            if taggable and bid not in taggable:
+                logger.error(
+                    "brokers.algo_tags[%r] ignored — %r is not an active algo-tag broker "
+                    "(algo_tag_required). Active: %s", bid, bid, sorted(taggable),
+                )
+                continue
+            tag_configs[bid] = AlgoTagConfig(algo_id=algo_id, max_orders_per_sec=max_per_sec)
+        if tag_configs:
+            algo_tag_guard = AlgoTagGuard(tag_configs)
+            logger.info("Algo-tag guard active for: %s", ", ".join(sorted(tag_configs)))
 
     return BrokerRouter(
         resolved_adapters, session_provider, consume_gate=gate.consume, config=config,

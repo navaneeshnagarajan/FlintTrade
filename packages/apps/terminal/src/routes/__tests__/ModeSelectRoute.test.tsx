@@ -67,8 +67,9 @@ describe("ModeSelectRoute", () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
     expect(onSelect).not.toHaveBeenCalled();
-    // unlockWithPin throws on a missing token; the route surfaces the generic
-    // PIN error rather than proceeding.
-    expect(screen.getByText(/incorrect pin/i)).toBeInTheDocument();
+    // unlockWithPin throws on a missing token; the route now surfaces the
+    // ACTUAL reason (audit fix — the old blanket "Incorrect PIN" mislabelled a
+    // missing/expired session).
+    expect(screen.getByText(/no token/i)).toBeInTheDocument();
   });
 });

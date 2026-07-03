@@ -95,8 +95,11 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
         setPinError("");
         onSelect(selected, liveSessionToken);
         return;
-      } catch {
-        setPinError("Incorrect PIN. Try again.");
+      } catch (e) {
+        // Surface the backend's actual reason — a wrong PIN says "Invalid PIN",
+        // but a missing/expired session (D6) says to sign in first; the old
+        // blanket "Incorrect PIN" mislabelled the latter.
+        setPinError(e instanceof Error && e.message ? e.message : "Incorrect PIN. Try again.");
         return;
       } finally {
         setIsVerifyingPin(false);

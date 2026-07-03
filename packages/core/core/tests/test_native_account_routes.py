@@ -270,3 +270,41 @@ def test_connected_account_has_no_relogin_flag(client):
     entry = next(a for a in listing if a["account_id"] == "INDG7B")
     assert entry["has_session"] is True
     assert "needs_relogin" not in entry
+
+
+def test_connect_schedules_a_daily_refresh_job(client):
+    """A broker connected at runtime (after boot) gets its 08:05 IST refresh
+    job on the already-running rotator (audit finding G5)."""
+    c, app, _tmp = client
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "indmoney", "account_id": "INDJOB", "credentials": {"access_token": "tok"}},
+    )
+    rotator = app.config.get("CREDENTIALS_ROTATOR")
+    assert rotator is not None
+    assert "cred_refresh_indmoney" in rotator._job_ids
+
+
+def test_relogin_with_fresh_credentials_preserves_label_and_primary(client):
+    """Re-authenticating an existing account must not reset its label to the
+    adapter id or clear is_primary (audit finding: relogin clobbers metadata)."""
+    c, _app, tmp_path = client
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "indmoney", "account_id": "INDLBL",
+            "label": "My IND", "credentials": {"access_token": "tok"}, "is_primary": True,
+        },
+    )
+    resp = c.post(
+        "/api/v1/native/accounts/indmoney/INDLBL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "fresh-tok"}},
+    )
+    assert resp.status_code == 200
+    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
+    entry = next(a for a in listing if a["account_id"] == "INDLBL")
+    assert entry["label"] == "My IND"
+    assert entry["is_primary"] is True

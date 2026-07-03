@@ -221,6 +221,29 @@ class BrokerRouter:
         if self._rate_limiter is not None:
             await self._rate_limiter.acquire(adapter_id, kind)
 
+    @staticmethod
+    def _order_exchange(order: Any) -> str:
+        """Best-effort exchange for the per-exchange algo ceiling.
+
+        place/modify orders carry it directly; the extended gated verbs
+        (forever/super/trigger/…) carry the order under a nested key or per-leg
+        list. When it cannot be recovered the caller buckets under a shared
+        per-broker key — conservative (it over-counts across exchanges, never
+        under-counts), the safe direction for a compliance ceiling.
+        """
+        exchange = getattr(order, "exchange", None)
+        if exchange is None and isinstance(order, Mapping):
+            exchange = order.get("exchange")
+            if exchange is None:
+                for key in ("order", "orders", "legs"):
+                    nested = order.get(key)
+                    if isinstance(nested, (list, tuple)) and nested:
+                        nested = nested[0]
+                    if isinstance(nested, Mapping) and nested.get("exchange"):
+                        exchange = nested.get("exchange")
+                        break
+        return str(exchange) if exchange else ""
+
     def _algo_tag(self, adapter_id: str, session: Session, order: Any) -> None:
         """Relay the configured algo_id and count this write for algo-tag brokers.
 
@@ -230,6 +253,12 @@ class BrokerRouter:
         adapter/mapping retail defaults. Runs after ``_verify_safety`` (below
         the gate) so it can only stamp or refuse a verified dispatch.
 
+        The dispatch session comes from the registry and is SHARED across
+        writes, so ``session.algo_id`` is set on EVERY tagged path — cleared to
+        ``""`` whenever this dispatch is not tagged — otherwise a stale id from
+        an earlier order (or from before the operator removed the algo_tags
+        config) would keep flowing to the broker uncounted.
+
         Raises:
             flinttrade_engine.algo_tag_guard.AlgoTagLimitError: When the
                 per-(broker, exchange) per-second algo-order ceiling would be
@@ -237,17 +266,17 @@ class BrokerRouter:
                 the account.
         """
         guard = self._algo_tag_guard
-        if guard is None:
-            return
         caps = getattr(self._adapters[adapter_id], "capabilities", None)
-        if not getattr(caps, "algo_tag_required", False):
+        if (
+            guard is None
+            or not getattr(caps, "algo_tag_required", False)
+            or guard.algo_id_for(adapter_id) is None
+        ):
+            session.algo_id = ""
             return
-        if guard.algo_id_for(adapter_id) is None:
-            return
-        exchange = getattr(order, "exchange", None)
-        if exchange is None and isinstance(order, Mapping):
-            exchange = order.get("exchange")
-        session.algo_id = guard.tag_order(adapter_id, str(exchange or ""))
+        # tag_order may raise AlgoTagLimitError (ceiling breach) — leave the
+        # prior algo_id untouched on refusal; the dispatch is aborted anyway.
+        session.algo_id = guard.tag_order(adapter_id, self._order_exchange(order) or "*")
 
     # ------------------------------------------------------------------
     # Resolution (contract §13.2)

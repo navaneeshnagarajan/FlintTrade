@@ -189,3 +189,58 @@ async def test_no_guard_is_a_noop() -> None:
     )
     assert session.algo_id == ""
     assert adapter.placed == [order]
+
+
+# ---------------------------------------------------------------------------
+# Audit fixes: stale-id clearing + exchange fallback bucket
+# ---------------------------------------------------------------------------
+
+
+async def test_stale_algo_id_is_cleared_when_a_later_dispatch_is_not_tagged() -> None:
+    """The registry Session is shared across writes; once the guard stops
+    tagging (config removed / adapter no longer required) a previously stamped
+    algo_id must NOT keep flowing to the broker."""
+    adapter, session, guard = _FakeAdapter(), _session(), _guard()
+    router = _router(adapter, session, guard)
+    order = _order()
+    await router.place_order(
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+    )
+    assert session.algo_id == "ALGO-REG-1"
+
+    # Operator removes the algo_tags config → guard has no config for the broker.
+    empty_guard = AlgoTagGuard({})
+    router2 = _router(adapter, session, empty_guard)
+    order2 = _order()
+    await router2.place_order(
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order2, safety_ctx=_mint(order2)
+    )
+    assert session.algo_id == ""  # cleared, not the stale ALGO-REG-1
+
+
+async def test_exchange_less_payload_buckets_under_the_star_key() -> None:
+    """An extended-verb payload with no recoverable exchange still counts
+    (conservative shared per-broker bucket), and still stamps the algo_id."""
+    adapter, session = _FakeAdapter(), _session()
+    guard = _guard(max_per_sec=2)
+    router = _router(adapter, session, guard)
+    payload1 = {"_op": "cancel_forever", "order_id": "GTT-1"}  # no exchange
+    ctx1 = gate_broker_write("cancel_forever", payload1, _request_ctx(), "dhan", account_id="acct-1")
+    await router.execute_gated(
+        _request_ctx(), verb="cancel_forever", payload=payload1, safety_ctx=ctx1,
+        adapter_id="dhan", account_id="acct-1",
+    )
+    assert session.algo_id == "ALGO-REG-1"
+    assert guard.usage("dhan", "*") == 1
+
+
+async def test_nested_exchange_is_recovered_from_the_payload() -> None:
+    adapter, session, guard = _FakeAdapter(), _session(), _guard()
+    router = _router(adapter, session, guard)
+    payload = {"_op": "cancel_forever", "order_id": "G1", "order": {"exchange": "BFO"}}
+    ctx = gate_broker_write("cancel_forever", payload, _request_ctx(), "dhan", account_id="acct-1")
+    await router.execute_gated(
+        _request_ctx(), verb="cancel_forever", payload=payload, safety_ctx=ctx,
+        adapter_id="dhan", account_id="acct-1",
+    )
+    assert guard.usage("dhan", "BFO") == 1

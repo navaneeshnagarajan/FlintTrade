@@ -965,3 +965,16 @@ def test_route_minted_context_verifies_against_real_router() -> None:
     )
     assert resp.status_code == 200, resp.get_json()
     assert calls == [("GTT-1", {"price": "2900"})]
+
+
+def test_gated_verb_algo_tag_limit_returns_429() -> None:
+    """The router's algo-tag guard refusing an extended gated verb maps to 429
+    (throttle refusal, retry), not the generic 500 (audit fix #3)."""
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError
+
+    router = MagicMock()
+    router.execute_gated = AsyncMock(side_effect=AlgoTagLimitError("dhan/NSE algo ceiling reached"))
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.delete("/api/v1/orders/forever/GTT-9?broker=dhan", headers=_live_headers())
+    assert resp.status_code == 429
+    assert "refused" in resp.get_json()["message"].lower()

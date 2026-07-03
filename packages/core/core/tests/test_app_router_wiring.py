@@ -363,15 +363,27 @@ def test_build_broker_router_builds_algo_tag_guard_from_config() -> None:
 
 
 @pytest.mark.unit
-def test_build_broker_router_malformed_algo_tags_fails_closed() -> None:
-    """A malformed algo_tags entry raises (→ configure_broker_router leaves
-    BROKER_ROUTER None, orders 503) rather than silently dispatching untagged —
-    the safe direction for a compliance control."""
+def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal() -> None:
+    """A malformed algo_tags entry is DROPPED (loud error log), never raised —
+    a bad compliance-config block must not brick broker reads/reconciliation/
+    dispatch (audit finding: over-broad blast radius). The adapter/mapping
+    retail default takes over, so no order dispatches in a broker-flagging
+    state. A mix of valid + invalid keeps only the valid entry."""
+    from flinttrade_engine.algo_tag_guard import AlgoTagGuard
+
     base = default_workspace_config()["brokers"]
     for bad in (
         {"dhan": {"algo_id": "", "max_orders_per_sec": 8}},
         {"dhan": {"algo_id": "A", "max_orders_per_sec": 0}},
         {"dhan": "not-an-object"},
+        {"dhan": {"algo_id": "A", "max_orders_per_sec": "not-an-int"}},
     ):
-        with pytest.raises(ValueError):
-            build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad})
+        router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad})
+        assert isinstance(router, BrokerRouter)
+        assert router._algo_tag_guard is None  # the only entry was dropped
+
+    mixed = {"dhan": {"algo_id": "OK", "max_orders_per_sec": 5}, "indmoney": "bad"}
+    router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": mixed})
+    assert isinstance(router._algo_tag_guard, AlgoTagGuard)
+    assert router._algo_tag_guard.algo_id_for("dhan") == "OK"
+    assert router._algo_tag_guard.algo_id_for("indmoney") is None

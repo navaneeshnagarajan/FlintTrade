@@ -56,6 +56,9 @@ class _Registry:
     def put_session(self, adapter_id: str, account_id: str, session: Any) -> None:
         self.sessions[(adapter_id, account_id)] = session
 
+    def remove_session_for(self, adapter_id: str, account_id: str) -> None:
+        self.sessions.pop((adapter_id, account_id), None)
+
 
 class _Store:
     def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
@@ -152,3 +155,49 @@ def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch) -> None:
     assert c.get("/admin/credentials/rotation/status").status_code == 200
     # Writes need the operator session (G9).
     assert c.post("/admin/credentials/rotation/dhan/rotate-now").status_code == 401
+
+
+def test_renewed_token_is_persisted_to_the_vault() -> None:
+    """After Dhan RenewToken, the vault must hold the NEW token (write-back's
+    replay-equality guard would otherwise skip the write, leaving the old
+    token to be replayed next boot)."""
+    adapter = _Adapter(renewable=True)
+    registry = _Registry()
+    registry.sessions[("dhan", "111")] = _Session("old-token")
+    store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "old-token"}})
+
+    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+
+    assert store.rows[("dhan", "111")]["access_token"] == "renewed-token"
+
+
+def test_dead_token_probe_downgrades_to_needs_relogin() -> None:
+    """A lazy token login that builds a Session for a DEAD token must not report
+    'ok' — the funds probe fails, the session is dropped, needs_relogin fires."""
+    class _DeadTokenAdapter(_Adapter):
+        async def funds(self, session):  # noqa: ANN001
+            raise RuntimeError("401 token expired")
+
+    adapter = _DeadTokenAdapter()
+    registry = _Registry()
+    store = _Store({("dhan", "111"): {"access_token": "dead"}})
+    app = _app(adapter, registry, store)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="token verification failed"):
+        NativeSessionRefresher(app).refresh_token("dhan")
+    assert "login-failed" in app.config["NATIVE_SESSION_STATUS"]["dhan:111"]
+    assert ("dhan", "111") not in registry.sessions  # dropped
+
+
+def test_live_token_probe_passes() -> None:
+    class _LiveAdapter(_Adapter):
+        async def funds(self, session):  # noqa: ANN001
+            return {"available": 100}
+
+    adapter = _LiveAdapter()
+    registry = _Registry()
+    store = _Store({("dhan", "111"): {"access_token": "good"}})
+    app = _app(adapter, registry, store)
+    NativeSessionRefresher(app).refresh_token("dhan")
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "ok"

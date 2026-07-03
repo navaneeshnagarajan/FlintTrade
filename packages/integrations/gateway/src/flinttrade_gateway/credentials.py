@@ -265,6 +265,23 @@ class CredentialStore:
         resolved_adapter_id: str = adapter_id or broker
 
         with self._get_connection() as conn:
+            # The table's PRIMARY KEY is ``account_id`` alone, but the selector
+            # model is composite ``(adapter_id, account_id)``. Without this guard
+            # the ON CONFLICT(account_id) upsert would let a second broker that
+            # happens to share a client code silently OVERWRITE the first
+            # broker's encrypted credentials (unrecoverable). Reject the
+            # cross-adapter collision explicitly; re-storing under the SAME
+            # adapter (a credential update) is still allowed.
+            existing = conn.execute(
+                "SELECT adapter_id FROM accounts WHERE account_id = ?",
+                (account_id,),
+            ).fetchone()
+            if existing is not None and str(existing["adapter_id"]) != resolved_adapter_id:
+                raise CredentialError(
+                    f"account_id {account_id!r} is already used by adapter "
+                    f"{existing['adapter_id']!r}; a different broker cannot reuse it "
+                    "(it would overwrite the other broker's stored credentials)"
+                )
             conn.execute(
                 """
                 INSERT INTO accounts

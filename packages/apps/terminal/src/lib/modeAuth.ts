@@ -77,9 +77,12 @@ export async function unlockWithPin(
   mode: AppMode = "live",
 ): Promise<UnlockResult> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  // Session-bound PIN unlock (policy D6): the backend 401s without the current
-  // session JWT, so a PIN alone can never arm Live.
-  const sessionToken = useAuthStore.getState().token;
+  // Session-bound PIN unlock (policy D6): the backend 401s without a valid
+  // session JWT, so a PIN alone can never arm Live. During an idle/manual lock
+  // the active token is nulled but the still-valid session is kept in
+  // `reauthToken` for exactly this re-auth.
+  const auth = useAuthStore.getState();
+  const sessionToken = auth.token ?? auth.reauthToken;
   if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
 
   const res = await fetch(`${FT_API}/auth/pin`, {
