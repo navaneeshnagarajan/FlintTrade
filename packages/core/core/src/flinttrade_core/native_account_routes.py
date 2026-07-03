@@ -27,8 +27,10 @@ its one-shot ``state`` token, so the write guard does not apply to it.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import threading
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -37,6 +39,25 @@ from .native_auth_methods import NATIVE_AUTH_METHODS, NATIVE_DISPLAY_NAMES
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.native_accounts")
+
+# Serialises the whole connect transaction. _do_connect snapshots workspace.json,
+# runs a multi-second broker login, then restores the snapshot verbatim on
+# failure — so two connects overlapping in time could let the restore of a
+# FAILED one clobber the workspace a concurrent SUCCEEDED one just wrote. This is
+# a single-operator desktop tool (connects are normally sequential), but the lock
+# closes the window cheaply: connects run one at a time.
+_CONNECT_LOCK = threading.Lock()
+
+
+def _serialized(fn: Any) -> Any:
+    """Run ``fn`` under ``_CONNECT_LOCK`` so connect transactions never interleave."""
+
+    @functools.wraps(fn)
+    def _wrap(*args: Any, **kwargs: Any) -> Any:
+        with _CONNECT_LOCK:
+            return fn(*args, **kwargs)
+
+    return _wrap
 
 # Only the four founder-broker natives may be captured through this path; the
 # OpenAlgo bridge uses its own /v1/accounts flow.
@@ -163,9 +184,9 @@ def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> None:
     """Remove the native selector from brokers.registered / account_acls / default.
 
     The inverse of :func:`_register_selector_in_workspace`; used by the remove
-    route and by the failed-NEW-connect rollback so a connect that never
-    established a session does not leave an orphaned selector behind. No-op if
-    there is no workspace.json.
+    route to drop a disconnected account (the failed-connect rollback instead
+    restores the whole workspace snapshot via :func:`_restore_workspace`). No-op
+    if there is no workspace.json.
     """
     selector = f"{adapter_id}:{account_id}"
     path = workspace_dir() / "workspace.json"
@@ -238,6 +259,7 @@ def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, A
     return results
 
 
+@_serialized
 def _do_connect(
     adapter_id: str,
     account_id: str,
@@ -249,7 +271,9 @@ def _do_connect(
 
     The shared connect transaction used by both the direct-credential POST and
     the OAuth callback. Returns ``(response_body, http_status)``. Fail-closed at
-    each stage.
+    each stage. Serialised by ``_CONNECT_LOCK`` (see above) so an overlapping
+    connect's failure-rollback can never clobber another connect's workspace
+    write.
     """
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")
