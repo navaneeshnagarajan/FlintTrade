@@ -2,38 +2,39 @@
  * ConnectionStep — connection configuration step in the setup wizard.
  *
  * Two modes toggled via tabs:
- *   - "FlintTrade Gateway" — pick a broker, enter credentials, manage accounts
- *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server
+ *   - "FlintTrade Gateway" — connect a NATIVE broker (Dhan / Upstox / Kotak Neo
+ *     / INDmoney) with its real login method. This reuses the same working
+ *     native flow as Settings → Brokers, so OAuth (Upstox) and the direct
+ *     token / TOTP methods behave identically here. Brokers without a native
+ *     adapter yet are shown as "coming soon".
+ *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server.
  *
  * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
  */
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle,
   XCircle,
   Loader2,
   Wifi,
   ArrowRight,
-  ArrowLeft,
-  PlusCircle,
   CheckCheck,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useBrokerStore } from "@/stores/brokerStore";
 import { ping } from "@/services/api";
-import { useBrokerAuth } from "@/hooks/useBrokerAuth";
-import { BrokerPicker } from "./BrokerPicker";
-import { ConnectedAccounts } from "./ConnectedAccounts";
-import { AuthFlowAPIKey } from "./AuthFlowAPIKey";
-import { AuthFlowTOTP } from "./AuthFlowTOTP";
-import type { BrokerInfo } from "@/types/broker";
+import { gatewayApi } from "@/services/gatewayApi";
+import { listNativeAccounts } from "@/services/ftApi.native";
+import { BrokersSection } from "@/tools/Settings/BrokersSection";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -234,13 +235,13 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Direct Connect sub-panel
+// Direct Connect sub-panel — native broker flow (reuses Settings → Brokers)
 // ---------------------------------------------------------------------------
 
 /**
  * Synthetic ConnectionFormValues used when proceeding from Direct Connect.
- * Host/key are left as placeholder values — the gateway adapter handles auth
- * independently and the actual broker sessions live in brokerStore.
+ * Host/key are placeholders — the native gateway handles auth independently and
+ * the real sessions live in the backend vault, queried via /native/accounts.
  */
 const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
   host: "http://127.0.0.1:5100",
@@ -248,150 +249,86 @@ const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
   wsPort: "8765",
 };
 
+// Adapter ids that FlintTrade connects natively today. Anything catalogued for
+// the OpenAlgo bridge but NOT in this set has no native adapter yet, so it is
+// surfaced as "coming soon" rather than as a broken native option. ``kotak``
+// (Kotak Securities, a bridge-only entry) is excluded from the coming-soon list
+// too, to avoid confusion with the native ``kotakneo`` (Kotak Neo).
+const NATIVE_ADAPTER_IDS = new Set(["dhan", "upstox", "kotakneo", "kotak", "indmoney"]);
+
+/** A muted roster of brokers catalogued but not yet connectable natively. */
+function ComingSoonBrokers() {
+  const bridgeQuery = useQuery({
+    queryKey: ["gateway", "brokers"],
+    queryFn: gatewayApi.listBrokers,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+
+  const names = (bridgeQuery.data ?? [])
+    .filter((b) => !NATIVE_ADAPTER_IDS.has(b.name))
+    .map((b) => b.display_name);
+
+  if (names.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border-default bg-surface-base p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+        <Sparkles className="size-3.5" /> More brokers — coming soon
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {names.map((name) => (
+          <Badge
+            key={name}
+            variant="outline"
+            className="text-[11px] text-text-muted opacity-70"
+          >
+            {name}
+          </Badge>
+        ))}
+      </div>
+      <p className="text-[11px] text-text-muted">
+        Already run OpenAlgo? These connect today via the OpenAlgo Bridge tab above.
+      </p>
+    </div>
+  );
+}
+
 interface DirectConnectPanelProps {
   onComplete: (values: ConnectionFormValues) => void;
 }
 
-type DirectStep = "accounts" | "picking" | "auth";
-
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
-  const { flowState, startFlow, submitCredentials, reset } = useBrokerAuth();
-  const accounts = useBrokerStore((s) => s.accounts);
-  const [directStep, setDirectStep] = useState<DirectStep>("accounts");
-  const [selectedBroker, setSelectedBroker] = useState<BrokerInfo | null>(null);
+  // Shares the ["native","accounts"] query cache with BrokersSection, so a
+  // successful connect there flips the Continue button on immediately. Gate on a
+  // LIVE session, not a mere stored row — re-running setup after the daily token
+  // expired would otherwise count a dead account (has_session:false /
+  // needs_relogin:true) as connected and let the operator advance with no
+  // working broker session.
+  const accountsQuery = useQuery({ queryKey: ["native", "accounts"], queryFn: listNativeAccounts });
+  const connectedCount = (accountsQuery.data ?? []).filter(
+    (a) => a.has_session && a.needs_relogin !== true,
+  ).length;
 
-  // Derive which auth sub-form to show from useBrokerAuth state
-  const showAuthForm =
-    flowState.step === "entering_credentials" ||
-    flowState.step === "authenticating" ||
-    flowState.step === "error";
+  return (
+    <div className="space-y-5">
+      {/* The proven native connect UI — Dhan / Upstox / Kotak Neo / INDmoney. */}
+      <BrokersSection />
 
-  // When auth succeeds go back to accounts list (must be in useEffect, not render body)
-  useEffect(() => {
-    if (flowState.step === "success" && directStep === "auth") {
-      setDirectStep("accounts");
-      setSelectedBroker(null);
-    }
-  }, [flowState.step, directStep]);
+      <ComingSoonBrokers />
 
-  function handleBrokerSelect(broker: BrokerInfo) {
-    setSelectedBroker(broker);
-    startFlow(broker);
-    setDirectStep("auth");
-  }
-
-  function handleAuthCancel() {
-    reset();
-    setSelectedBroker(null);
-    setDirectStep("accounts");
-  }
-
-  const isAuthLoading = flowState.step === "authenticating";
-  const authError = flowState.step === "error" ? flowState.message : undefined;
-
-  // Accounts list view
-  if (directStep === "accounts") {
-    return (
-      <div className="space-y-4">
-        <ConnectedAccounts />
-
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setDirectStep("picking")}
-          className="w-full border-border-default text-text-secondary hover:text-text-primary"
-        >
-          <PlusCircle className="size-3.5 mr-1.5" />
-          Add Broker Account
-        </Button>
-
-        <Button
-          type="button"
-          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-          disabled={accounts.length === 0}
-          onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
-        >
-          <CheckCheck className="size-4 mr-2" />
-          {accounts.length === 0 ? "Connect at least one broker" : "Continue"}
-          {accounts.length > 0 && <ArrowRight className="size-4 ml-2" />}
-        </Button>
-      </div>
-    );
-  }
-
-  // Broker picker grid
-  if (directStep === "picking") {
-    return (
-      <div className="space-y-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setDirectStep("accounts")}
-          className="text-text-muted hover:text-text-primary -ml-1"
-        >
-          <ArrowLeft className="size-3.5 mr-1" /> Back
-        </Button>
-
-        <p className="text-xs text-text-secondary">Select a broker to connect</p>
-
-        <div className="max-h-64 overflow-y-auto pr-1">
-          <BrokerPicker onSelect={handleBrokerSelect} />
-        </div>
-      </div>
-    );
-  }
-
-  // Auth form (api_key_direct or totp_form)
-  if (directStep === "auth" && selectedBroker) {
-    const broker = selectedBroker;
-
-    return (
-      <div className="space-y-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleAuthCancel}
-          className="text-text-muted hover:text-text-primary -ml-1"
-        >
-          <ArrowLeft className="size-3.5 mr-1" /> Back to broker list
-        </Button>
-
-        {authError && (
-          <p className="text-red-400 text-xs px-1">{authError}</p>
-        )}
-
-        {showAuthForm && broker.auth_flow === "api_key_direct" && (
-          <AuthFlowAPIKey
-            broker={broker}
-            onSubmit={(label, creds) => void submitCredentials(label, creds)}
-            onCancel={handleAuthCancel}
-            isLoading={isAuthLoading}
-          />
-        )}
-
-        {showAuthForm && broker.auth_flow === "totp_form" && (
-          <AuthFlowTOTP
-            broker={broker}
-            onSubmit={(label, creds) => void submitCredentials(label, creds)}
-            onCancel={handleAuthCancel}
-            isLoading={isAuthLoading}
-          />
-        )}
-
-        {!showAuthForm && (
-          <p className="text-xs text-text-secondary py-4 text-center">
-            Auth flow &ldquo;{broker.auth_flow}&rdquo; is not yet supported in the setup wizard.
-            Use Settings &rarr; Accounts after setup.
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return null;
+      <Button
+        type="button"
+        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+        disabled={connectedCount === 0}
+        onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
+      >
+        <CheckCheck className="size-4 mr-2" />
+        {connectedCount === 0 ? "Connect at least one broker to continue" : "Continue"}
+        {connectedCount > 0 && <ArrowRight className="size-4 ml-2" />}
+      </Button>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +387,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
           I&apos;ll connect later →
         </button>
         <p className="text-xs text-text-muted text-center">
-          You can connect your broker anytime from Settings &rarr; Broker Gateway.
+          You can connect your broker anytime from Settings &rarr; Brokers.
         </p>
       </div>
     </div>
