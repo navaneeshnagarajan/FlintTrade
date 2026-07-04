@@ -59,6 +59,83 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
     return False
 
 
+# Substrings (compared case-insensitively) that mark a probe read failure as a
+# genuine *service-window* closure — the venue/endpoint is shut for its nightly
+# maintenance window — which does NOT prove the access token is dead. Upstox's
+# funds endpoint, for instance, is offline 12:00 AM–5:30 AM IST nightly and
+# replies "The Funds service is accessible from 5:30 AM to 12:00 AM IST daily.
+# Please try again during these service hours." Treating that as a dead token
+# would throw a freshly-minted, valid session away every night. Matched on text
+# because such closures surface as a generic ``BrokerError`` with no distinct
+# type. Kept deliberately NARROW: broad retry/throttle phrasing ("rate limit",
+# "too many requests", "try again later") is intentionally absent because it
+# collides with genuine auth/lockout messages — rate limiting is recognised by
+# its typed ``RateLimitError`` in :func:`verify_native_session` instead.
+_SERVICE_WINDOW_MARKERS = (
+    "accessible from",  # "... service is accessible from 5:30 AM to 12:00 AM ..."
+    "service hours",  # "... try again during these service hours"
+    "try again during",
+    "under maintenance",
+    "maintenance window",
+    "temporarily unavailable",
+    "service unavailable",
+    "service is unavailable",
+)
+
+
+def _is_service_window_error(exc: BaseException) -> bool:
+    """True when a probe read failed because the broker service window was closed.
+
+    A closed venue/maintenance window is not proof the token is dead, so — like a
+    transport blip — it must KEEP the session rather than false-alarm
+    ``needs_relogin``. Matched on the error text because such closures surface as
+    a generic ``BrokerError`` with no distinct type. Auth failures take
+    precedence (see :func:`_is_auth_failure`), so a dead token whose message also
+    carries maintenance phrasing is still evicted.
+    """
+    return any(marker in str(exc).lower() for marker in _SERVICE_WINDOW_MARKERS)
+
+
+# Substrings that unambiguously mark a DEAD credential (evict + surface
+# ``needs_relogin``). Used only as a fallback for adapters that raise a generic
+# exception instead of the typed ``AuthError`` subtree.
+_AUTH_FAILURE_MARKERS = (
+    "unauthorized",
+    "401",
+    "403",
+    "forbidden",
+    "invalid token",
+    "token expired",
+    "expired token",
+    "access token",
+    "invalid credential",
+    "authentication failed",
+    "session expired",
+    "please login",
+    "please log in",
+    "account locked",
+    "too many failed",
+)
+
+
+def _is_auth_failure(exc: BaseException) -> bool:
+    """True when a probe error proves the token is DEAD — evict + ``needs_relogin``.
+
+    Takes precedence over every keep path (transient / service-window / rate
+    limit), so a genuine 401 / lockout whose broker message happens to carry
+    retry or maintenance phrasing is surfaced rather than masked. Typed first —
+    adapters map 401/403/expired to the :class:`AuthError` subtree — with an
+    unambiguous-message fallback for adapters that raise a generic exception.
+    ``BrokerSessionDegraded`` is excluded: its credentials are authentic (only a
+    runtime constraint blocks writes), so its session must be kept.
+    """
+    from flinttrade_core.exceptions import AuthError, BrokerSessionDegraded  # noqa: PLC0415
+
+    if isinstance(exc, AuthError):
+        return not isinstance(exc, BrokerSessionDegraded)
+    return any(marker in str(exc).lower() for marker in _AUTH_FAILURE_MARKERS)
+
+
 async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, account_id: str) -> str | None:
     """Confirm a just-established token actually authenticates (error string or None).
 
@@ -66,9 +143,13 @@ async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, ac
     the broker, so a dead/expired token would otherwise report success. A cheap
     authenticated ``funds`` read forces a real API call. On a hard auth/broker
     failure the live session is DROPPED and an error returned so the caller can
-    surface ``needs_relogin``; on a transient transport error the session is
-    KEPT (returns None). An adapter without a ``funds`` read is unverifiable and
-    passes. Best-effort — never raises.
+    surface ``needs_relogin``. A dead credential (typed :class:`AuthError` or an
+    unambiguous auth message) is always evicted — even if the broker's text also
+    carries retry/maintenance phrasing. Otherwise, an error that does NOT prove
+    the token is dead — a transient transport blip, a closed service window, or a
+    typed rate-limit/network error — KEEPS the session (returns None). An adapter
+    without a ``funds`` read is unverifiable and passes. Best-effort — never
+    raises.
     """
     reader = getattr(adapter, "funds", None)
     if not callable(reader):
@@ -81,9 +162,20 @@ async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, ac
         await reader(session)  # native adapters' funds() is always a coroutine
         return None
     except Exception as exc:  # noqa: BLE001 - classify below
-        if _is_transient_probe_error(exc):
+        from flinttrade_core.exceptions import NetworkError, RateLimitError  # noqa: PLC0415
+
+        # A dead credential is evicted no matter what else the message says. Only
+        # errors that do NOT prove the token is dead keep the freshly-minted
+        # session: a transport blip, a closed service window, or a typed
+        # rate-limit / network error (NetworkError covers BrokerTimeout/Internal).
+        keep = not _is_auth_failure(exc) and (
+            _is_transient_probe_error(exc)
+            or _is_service_window_error(exc)
+            or isinstance(exc, (RateLimitError, NetworkError))
+        )
+        if keep:
             logger.info(
-                "Token liveness probe transient error for %s:%s (%s) — keeping session",
+                "Token liveness probe inconclusive for %s:%s (%s) — keeping session",
                 adapter_id, account_id, exc,
             )
             return None

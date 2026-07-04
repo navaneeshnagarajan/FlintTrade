@@ -253,3 +253,111 @@ def test_verify_keeps_session_on_transient_error() -> None:
     err = asyncio.run(verify_native_session(_BlipAdapter(), registry, "dhan", "1"))
     assert err is None
     assert ("dhan", "1") in registry.sessions  # kept
+
+
+def test_verify_keeps_session_on_service_window_error() -> None:
+    """Upstox's funds endpoint is offline 12:00 AM–5:30 AM IST nightly and replies
+    "... service is accessible from ... service hours". That is NOT proof the token
+    is dead, so a freshly-minted session must be KEPT (returns None) rather than
+    evicted — otherwise an OAuth connect made after midnight IST always reports
+    'login failed' despite a perfectly valid token."""
+    import asyncio
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _WindowClosedAdapter:
+        async def funds(self, _session):
+            raise RuntimeError(
+                "The Funds service is accessible from 5:30 AM to 12:00 AM IST daily. "
+                "Please try again during these service hours."
+            )
+
+    registry = _FakeRegistry()
+    registry.sessions[("upstox", "UPXTEST")] = _FakeSession("upstox", "UPXTEST")
+    err = asyncio.run(verify_native_session(_WindowClosedAdapter(), registry, "upstox", "UPXTEST"))
+    assert err is None
+    assert ("upstox", "UPXTEST") in registry.sessions  # kept — window closed ≠ dead token
+
+
+def test_verify_drops_session_on_real_auth_failure() -> None:
+    """A genuine auth failure (expired/invalid token) must STILL drop the session
+    and surface an error, so the service-window keep-path does not swallow real
+    dead tokens and hide needs_relogin."""
+    import asyncio
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _DeadTokenAdapter:
+        async def funds(self, _session):
+            raise RuntimeError("401 Unauthorized: access token expired")
+
+    registry = _FakeRegistry()
+    registry.sessions[("upstox", "DEAD")] = _FakeSession("upstox", "DEAD")
+    err = asyncio.run(verify_native_session(_DeadTokenAdapter(), registry, "upstox", "DEAD"))
+    assert err is not None
+    assert "token verification failed" in err
+    assert ("upstox", "DEAD") not in registry.sessions  # dropped
+
+
+def test_verify_evicts_typed_auth_failure_despite_service_phrasing() -> None:
+    """A typed auth failure (SessionExpired) is evicted even when its message ALSO
+    carries service-window/retry phrasing — auth detection takes precedence over
+    the keep-on-service-window path, so a dead token is never masked as connected.
+    (Review finding: the earlier substring-only classifier could keep it.)"""
+    import asyncio
+
+    from flinttrade_core.exceptions import SessionExpired
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _DeadButChattyAdapter:
+        async def funds(self, _session):
+            raise SessionExpired(
+                "Token expired — service temporarily unavailable, please try again during service hours"
+            )
+
+    registry = _FakeRegistry()
+    registry.sessions[("upstox", "DEAD2")] = _FakeSession("upstox", "DEAD2")
+    err = asyncio.run(verify_native_session(_DeadButChattyAdapter(), registry, "upstox", "DEAD2"))
+    assert err is not None
+    assert ("upstox", "DEAD2") not in registry.sessions  # dropped despite service phrasing
+
+
+def test_verify_evicts_lockout_message_with_retry_copy() -> None:
+    """A generic (untyped) locked/dead credential whose text carries retry copy is
+    still evicted — the narrowed service-window markers must not keep it alive."""
+    import asyncio
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _LockedAdapter:
+        async def funds(self, _session):
+            raise RuntimeError("Account locked due to too many failed attempts, please try again later")
+
+    registry = _FakeRegistry()
+    registry.sessions[("kotakneo", "LOCK")] = _FakeSession("kotakneo", "LOCK")
+    err = asyncio.run(verify_native_session(_LockedAdapter(), registry, "kotakneo", "LOCK"))
+    assert err is not None
+    assert ("kotakneo", "LOCK") not in registry.sessions  # dropped
+
+
+def test_verify_keeps_session_on_typed_rate_limit() -> None:
+    """A 429 (typed RateLimitError) means the token is fine but throttled — keep
+    the live session rather than false-alarm needs_relogin. Recognised by TYPE,
+    not by a "rate limit"/"too many requests" substring (which would collide with
+    a genuine lockout message)."""
+    import asyncio
+
+    from flinttrade_core.exceptions import RateLimitError
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _ThrottledAdapter:
+        async def funds(self, _session):
+            raise RateLimitError("429 request rate exceeded", endpoint="funds")
+
+    registry = _FakeRegistry()
+    registry.sessions[("dhan", "RL")] = _FakeSession("dhan", "RL")
+    err = asyncio.run(verify_native_session(_ThrottledAdapter(), registry, "dhan", "RL"))
+    assert err is None
+    assert ("dhan", "RL") in registry.sessions  # kept
