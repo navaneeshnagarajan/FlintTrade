@@ -599,25 +599,21 @@ class PositionMirror:
         mirror_config: MirrorConfig | None = None,
         broker_router: Any | None = None,
         actor_id: str = "ditto",
-        allow_ungated_fallback: bool = False,
     ) -> None:
         self._accounts = accounts or []
         self._mode = mode
         self._max_workers = max_workers
         self._mirror_config = mirror_config
         self._history: list[MirrorResult] = []
-        # When a safety-gated BrokerRouter is injected (G6), each mirrored order
-        # is dispatched through gate_order -> router.place_order (account-bound
-        # HMAC + ACL + one-shot consume) instead of a raw OpenAlgo httpx POST.
-        # ``actor_id`` must be authorised in workspace.json.brokers.account_acls
-        # for each openalgo:<account_id> the mirror targets.
+        # Every mirrored order dispatches through the safety-gated BrokerRouter
+        # (G6): gate_order -> router.place_order (account-bound HMAC + ACL +
+        # one-shot consume). There is NO ungated path — without an injected
+        # router the mirror fails closed per account (the raw-httpx fallback was
+        # retired 2026-07-04; contract §8.1). ``actor_id`` must be authorised in
+        # workspace.json.brokers.account_acls for each openalgo:<account_id>
+        # the mirror targets.
         self._broker_router = broker_router
         self._actor_id = actor_id
-        # The raw-httpx fallback (no router) is UNGATED — no SafetyContext, ACL,
-        # or one-shot consume. It fails closed by default; an operator must opt in
-        # explicitly (allow_ungated_fallback=True) to use it. Production wiring
-        # always injects a broker_router, so this fallback is test/transitional.
-        self._allow_ungated_fallback = allow_ungated_fallback
 
     @property
     def history(self) -> list[MirrorResult]:
@@ -729,69 +725,30 @@ class PositionMirror:
         account: BrokerAccount,
         quantity: int,
     ) -> MirrorOrderResult:
-        """Place an order on a single account.
+        """Place an order on a single account through the gated router.
 
-        With a safety-gated BrokerRouter configured (G6) this dispatches through
-        ``gate_order`` -> ``BrokerRouter.place_order``; otherwise it falls back to
-        a direct OpenAlgo httpx POST (transitional, ungated — to be retired once
-        every deployment injects a router).
+        Dispatches through ``gate_order`` -> ``BrokerRouter.place_order`` (G6).
+        Without an injected router this fails closed — there is no ungated
+        path (contract §8.1; the raw OpenAlgo httpx POST was retired
+        2026-07-04).
         """
         result = MirrorOrderResult(
             account_id=account.account_id,
             quantity_sent=quantity,
         )
 
-        if self._broker_router is not None:
-            return self._place_via_router(order, account, quantity, result)
-
-        if not self._allow_ungated_fallback:
+        if self._broker_router is None:
             result.error = (
-                "ungated mirroring is disabled — inject a broker_router for the gated "
-                "path, or set allow_ungated_fallback=True for the transitional forward"
+                "ungated mirroring is not supported — inject a broker_router so "
+                "every mirrored order traverses gate_order -> BrokerRouter"
             )
             logger.error(
-                "Mirror to %s refused — no broker_router and ungated fallback disabled",
+                "Mirror to %s refused — no broker_router (fails closed, §8.1)",
                 account.account_id,
             )
             return result
 
-        action = order.action.value if hasattr(order.action, "value") else str(order.action)
-        exchange = order.exchange.value if hasattr(order.exchange, "value") else str(order.exchange)
-        pricetype = order.pricetype.value if hasattr(order.pricetype, "value") else str(order.pricetype)
-        product = order.product.value if hasattr(order.product, "value") else str(order.product)
-
-        url = f"{account.openalgo_host.rstrip('/')}/api/v1/placeorder"
-        payload = {
-            "apikey": account.api_key,
-            "strategy": order.strategy,
-            "symbol": order.symbol,
-            "action": action,
-            "exchange": exchange,
-            "pricetype": pricetype,
-            "product": product,
-            "quantity": str(quantity),
-            "price": order.price,
-            "trigger_price": order.trigger_price,
-            "disclosed_quantity": order.disclosed_quantity,
-        }
-
-        try:
-            with httpx.Client(timeout=15.0) as http:
-                resp = http.post(url, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") != "error":
-                        result.success = True
-                        result.order_response = OrderResponse(**data)
-                    else:
-                        result.error = data.get("message", "Unknown error")
-                else:
-                    result.error = f"HTTP {resp.status_code}"
-        except Exception as exc:
-            result.error = str(exc)
-            logger.error("Mirror order to %s failed: %s", account.account_id, exc)
-
-        return result
+        return self._place_via_router(order, account, quantity, result)
 
     def _place_via_router(
         self,

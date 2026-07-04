@@ -411,3 +411,59 @@ def test_only_gate_order_mints_safety_context():
         "Only flinttrade_engine.safety.gate_order() may mint a SafetyContext (§8.1):\n"
         + "\n".join(offenders)
     )
+
+
+# Raw OpenAlgo order-write ENDPOINT strings (URL builds POSTed via httpx/requests
+# rather than attribute calls) — the G12 blind spot the attribute-call regex
+# above cannot see. The ditto mirror's retired ungated fallback built exactly
+# such a URL (f"{host}/api/v1/placeorder") and passed the guard for months.
+_ORDER_WRITE_URL_RE = re.compile(
+    r"api/v1/(placeorder|placesmartorder|basketorder|splitorder"
+    r"|modifyorder|cancelorder|cancelallorder|closeposition)"
+)
+
+# Modules that legitimately mention order-write endpoint paths: the canonical
+# OpenAlgo client (docstrings on the single sanctioned path in) and the v1
+# compatibility route TABLE (inbound route mapping, not an outbound POST).
+_ORDER_WRITE_URL_ALLOWLIST = {
+    "packages/core/core/src/flinttrade_core/openalgo_client.py",
+    "packages/core/core/src/flinttrade_core/v1_compat.py",
+}
+
+
+def test_no_raw_order_write_urls_in_services_and_webhooks():
+    """G12 blind-spot tripwire: no hand-built OpenAlgo order-write URL anywhere.
+
+    A raw ``httpx.post(f"{host}/api/v1/placeorder", ...)`` never matches the
+    attribute-call regexes above, so it would bypass every guard in this file.
+    This scans services/webhooks/core for order-write ENDPOINT strings outside
+    the canonical client and the v1 compat route table. Comments are skipped;
+    docstrings outside the allowlist still fail (they advertise a raw path).
+    """
+    scan_dirs = [
+        _REPO_ROOT / "packages" / "services",
+        _REPO_ROOT / "packages" / "integrations" / "webhooks",
+        _REPO_ROOT / "packages" / "core",
+    ]
+    offenders: list[str] = []
+    for root in scan_dirs:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            parts = path.parts
+            if "tests" in parts or path.name.startswith("test_"):
+                continue
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if rel in _ORDER_WRITE_URL_ALLOWLIST:
+                continue
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if _ORDER_WRITE_URL_RE.search(line):
+                    offenders.append(f"{rel}:{n}: {stripped}")
+    assert not offenders, (
+        "Raw OpenAlgo order-write endpoint URL outside the canonical client "
+        "(contract §8.1 / G12). Order writes must traverse gate_order -> "
+        "BrokerRouter — never a hand-built endpoint POST:\n" + "\n".join(offenders)
+    )

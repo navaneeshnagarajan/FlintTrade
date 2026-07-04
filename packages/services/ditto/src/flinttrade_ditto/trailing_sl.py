@@ -6,8 +6,10 @@ Adapts AlgoMirror's supertrend.py patterns. Supports four trailing modes:
 3. Supertrend-based: Supertrend indicator as dynamic trailing SL
 4. ATR-based: trail by N x ATR from peak
 
-Each open position has its own SL tracker. When the trail moves, the SL order
-is auto-modified via OpenAlgo /api/v1/modifyorder.
+Each open position has its own SL tracker. This module only COMPUTES the
+trailing level — it places no orders and holds no client. When the trail
+moves, the caller dispatches the SL modification through the gated chain
+(gate_broker_write -> BrokerRouter), never a raw endpoint POST.
 """
 
 from __future__ import annotations
