@@ -150,4 +150,65 @@ describe("LoginRoute", () => {
     // Mode stays practice — it must NOT have been dropped to explore.
     expect(mockSetMode).not.toHaveBeenCalledWith("explore");
   });
+
+  it("accepts an 8-char backup code in the 2FA field and enables Sign In", () => {
+    // The field must take a backup code (upper-hex, 8 chars), not only a
+    // 6-digit TOTP — the backend accepts either, so the UI must too.
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    const field = screen.getByLabelText("Enter your 2FA code") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "a1b2c3d4" } });
+
+    expect(field.value).toBe("A1B2C3D4"); // upper-cased, all 8 chars kept
+    expect(screen.getByRole("button", { name: /sign in/i })).not.toBeDisabled();
+  });
+
+  it("recovers a lost authenticator: password mints a fresh QR + backup codes", async () => {
+    // The lockout fix — a self-hosted operator who lost their TOTP device AND
+    // backup codes can reset 2FA from the login screen with just their password.
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: {
+            totp_uri: "otpauth://totp/FlintTrade:testuser?secret=ABCDEF23GHIJKL45&issuer=FlintTrade",
+            backup_codes: ["A1B2C3D4", "E5F6A7B8"],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
+    expect(screen.getByText("Reset your 2FA")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Confirm your password to reset 2FA"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset 2fa$/i }));
+
+    await waitFor(() => expect(screen.getByText("New 2FA ready")).toBeInTheDocument());
+    expect(screen.getByText("A1B2C3D4")).toBeInTheDocument();
+    expect(screen.getByText("E5F6A7B8")).toBeInTheDocument();
+    // The manual-entry secret is surfaced from the otpauth URI.
+    expect(screen.getByText("ABCDEF23GHIJKL45")).toBeInTheDocument();
+  });
+
+  it("surfaces a wrong-password error in the recovery panel", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ status: "error", message: "Invalid password." }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
+    fireEvent.change(screen.getByLabelText("Confirm your password to reset 2FA"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset 2fa$/i }));
+
+    await waitFor(() => expect(screen.getByText("Invalid password.")).toBeInTheDocument());
+    // Stays on the confirm view — no QR minted.
+    expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
+  });
 });
