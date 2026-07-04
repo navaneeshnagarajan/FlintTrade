@@ -352,19 +352,24 @@ class TestRateLimit:
 
 
 class TestDispatch:
-    def test_place_order(self):
+    def test_place_order_fails_honestly_when_ungated(self):
+        """Order actions are NOT wired to the gated router yet (PLAN G23) — the
+        receiver must say so, never fake a "queued" success for an order that
+        was not placed."""
         r = _make_receiver()
         p = WebhookPayload(source="tradingview", action="place_order", symbol="NIFTY")
         result = _run(r.dispatch(p))
-        assert result["status"] == "queued"
+        assert result["status"] == "error"
         assert result["action"] == "place_order"
+        assert "no order was placed" in result["message"]
 
-    def test_cancel_order(self):
+    def test_cancel_order_fails_honestly_when_ungated(self):
         r = _make_receiver()
         p = WebhookPayload(source="custom", action="cancel_order", symbol="RELIANCE")
         result = _run(r.dispatch(p))
-        assert result["status"] == "queued"
+        assert result["status"] == "error"
         assert result["action"] == "cancel_order"
+        assert "nothing was cancelled" in result["message"]
 
     def test_alert(self):
         r = _make_receiver()

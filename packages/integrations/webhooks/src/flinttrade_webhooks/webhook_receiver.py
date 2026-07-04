@@ -473,52 +473,64 @@ class WebhookReceiver:
     async def _handle_place_order(
         self, payload: WebhookPayload
     ) -> dict[str, Any]:
-        """Handle a ``place_order`` action.
+        """Handle a ``place_order`` action — honestly unsupported for now.
 
-        Override in a subclass to integrate with the engine's order router.
+        Webhook-triggered order placement is not yet wired to the gated order
+        chain (SafetySystem -> ``gate_order`` -> ``BrokerRouter``; PLAN G23).
+        Until it is, this MUST fail loudly rather than pretend to queue: a fake
+        "queued" response would let an operator believe a TradingView signal
+        placed an order when nothing happened. Subclasses that wire the gated
+        dispatch override this.
 
         Args:
             payload: Parsed webhook payload.
 
         Returns:
-            Response dict.
+            Response dict with ``status: "error"`` — no order was placed.
         """
-        # Placeholder — full integration with engine order router is done
-        # when the engine package is mounted in the main app.
-        logger.info(
-            "place_order signal received: %s %s via %s",
+        logger.warning(
+            "place_order signal received but webhook order dispatch is not "
+            "wired to the gated router — REJECTED: %s %s via %s",
             payload.symbol, payload.exchange, payload.source,
         )
         return {
-            "status": "queued",
+            "status": "error",
             "action": "place_order",
             "symbol": payload.symbol,
             "exchange": payload.exchange,
-            "message": "Order queued for routing",
+            "message": (
+                "Webhook order placement is not connected to the gated order "
+                "router yet — no order was placed."
+            ),
         }
 
     async def _handle_cancel_order(
         self, payload: WebhookPayload
     ) -> dict[str, Any]:
-        """Handle a ``cancel_order`` action.
+        """Handle a ``cancel_order`` action — honestly unsupported for now.
 
-        Override in a subclass to integrate with the engine's order manager.
+        Same contract as :meth:`_handle_place_order`: no gated wiring yet, so
+        fail loudly instead of returning a fake "queued".
 
         Args:
             payload: Parsed webhook payload.
 
         Returns:
-            Response dict.
+            Response dict with ``status: "error"`` — nothing was cancelled.
         """
-        logger.info(
-            "cancel_order signal received: %s via %s",
+        logger.warning(
+            "cancel_order signal received but webhook order dispatch is not "
+            "wired to the gated router — REJECTED: %s via %s",
             payload.symbol, payload.source,
         )
         return {
-            "status": "queued",
+            "status": "error",
             "action": "cancel_order",
             "symbol": payload.symbol,
-            "message": "Cancellation queued",
+            "message": (
+                "Webhook order cancellation is not connected to the gated "
+                "order router yet — nothing was cancelled."
+            ),
         }
 
     async def _handle_alert(
