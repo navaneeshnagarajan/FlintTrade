@@ -56,8 +56,53 @@ class AccountStatus(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+class AuthMethodField(BaseModel):
+    """One credential input field of a native login method.
+
+    Args:
+        name: The credential key the adapter's ``login()`` (or OAuth start)
+            consumes, e.g. ``"access_token"``.
+        label: Human-readable field label for the connect form.
+        secret: Masked in the UI and never logged when ``True``.
+        required: Whether the connect form must enforce a value.
+        help: Optional inline hint rendered under the field.
+    """
+
+    name: str
+    label: str
+    secret: bool = False
+    required: bool = True
+    help: str = ""
+
+
+class AuthMethod(BaseModel):
+    """One login method a native broker adapter supports.
+
+    ``kind`` tells the frontend how to drive the flow: ``"direct"`` POSTs the
+    fields to the native connect route; ``"oauth"`` POSTs api_key/api_secret to
+    the OAuth start route and then follows the returned ``auth_url``.
+
+    Args:
+        id: Stable method identifier (e.g. ``"access_token"``, ``"oauth"``).
+        label: Human-readable method name for the method picker.
+        kind: ``"direct"`` or ``"oauth"``.
+        description: One-line operator guidance for the method.
+        fields: The credential fields the method needs.
+    """
+
+    id: str
+    label: str
+    kind: str
+    description: str = ""
+    fields: list[AuthMethodField] = []
+
+
 class BrokerInfo(BaseModel):
     """Static metadata describing a broker's capabilities and auth requirements.
+
+    THE single broker catalogue record (consolidation G40): bridge metadata,
+    native-adapter metadata, and the verified/coming-soon status all live here
+    so no second catalogue can drift.
 
     Args:
         name: Canonical machine-readable broker identifier (e.g. ``"zerodha"``).
@@ -76,6 +121,15 @@ class BrokerInfo(BaseModel):
             ``primary_ip``, and optionally ``secondary_ip``.  Values stored
             here are *field name hints only* — actual values are encrypted in
             the :class:`CredentialStore`.
+        native: A native FlintTrade adapter exists for this broker (it can be
+            captured through the native connect path, not only the OpenAlgo
+            bridge).
+        connectable: The native adapter is tried-and-tested against a live
+            account, so the UI may offer a native connect. ``native=True,
+            connectable=False`` renders as "coming soon" — built but not yet
+            live-verified — and the backend refuses native connects for it.
+            Promote a broker by flipping this single flag.
+        auth_methods: The native login methods (empty for bridge-only brokers).
     """
 
     name: str
@@ -87,6 +141,9 @@ class BrokerInfo(BaseModel):
     oauth_url_template: str | None = None
     is_sandbox: bool = False
     aux_params: list[str] = []
+    native: bool = False
+    connectable: bool = False
+    auth_methods: list[AuthMethod] = []
 
 
 class BrokerAccountInfo(BaseModel):

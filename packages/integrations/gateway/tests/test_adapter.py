@@ -52,17 +52,21 @@ class TestBrokerCatalog:
     """Verify the BROKER_CATALOG constants are consistent and complete."""
 
     def test_broker_catalog_has_31_non_sandbox_entries(self):
-        """Exactly 31 live (non-sandbox) brokers must be in the catalog.
+        """Exactly 32 live (non-sandbox) brokers must be in the catalog.
 
-        Upstream gained ``iiflcapital`` as a distinct entry in OpenAlgo
-        v2.0.1.1; FlintTrade tracks the upstream count exactly so a future
-        addition trips this assertion.
+        31 track OpenAlgo upstream exactly (upstream gained ``iiflcapital`` in
+        v2.0.1.1) plus 1 FlintTrade-native-only entry, ``kotakneo`` (Kotak Neo) —
+        distinct from the upstream ``kotak`` (Kotak Securities). A future addition
+        on either side trips this assertion.
         """
         live = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
-        assert len(live) == 31, (
-            f"Expected 31 live brokers, got {len(live)}: "
+        assert len(live) == 32, (
+            f"Expected 32 live brokers, got {len(live)}: "
             f"{sorted(info.name for info in live)}"
         )
+        # The one native-only (non-upstream) live entry.
+        native_only = [info.name for info in live if info.name == "kotakneo"]
+        assert native_only == ["kotakneo"]
 
     def test_broker_catalog_includes_iiflcapital(self):
         """iiflcapital must be present and distinct from iifl (added v2.0.1.1)."""
@@ -88,8 +92,11 @@ class TestBrokerCatalog:
             )
 
     def test_catalog_total_size(self):
-        """Total catalog entries must be exactly 32 (31 live + 1 sandbox)."""
-        assert len(BROKER_CATALOG) == 32
+        """Total catalog entries must be exactly 33 (32 live + 1 sandbox).
+
+        32 live = 31 OpenAlgo-upstream + 1 FlintTrade-native ``kotakneo``.
+        """
+        assert len(BROKER_CATALOG) == 33
 
     def test_zerodha_supports_new_exchanges(self):
         """Zerodha gained NCO, MCX_INDEX, GLOBAL_INDEX in OpenAlgo v2.0.0.7+."""

@@ -36,7 +36,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .native_auth_methods import NATIVE_AUTH_METHODS, NATIVE_DISPLAY_NAMES
+from flinttrade_gateway.adapter import BROKER_CATALOG
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.native_accounts")
@@ -60,9 +60,14 @@ def _serialized(fn: Any) -> Any:
 
     return _wrap
 
-# Only the four founder-broker natives may be captured through this path; the
+# Native brokers (those with a FlintTrade adapter) — derived from the one
+# catalogue so this set can never drift from it (consolidation G40). The
 # OpenAlgo bridge uses its own /v1/accounts flow.
-_NATIVE_BROKER_IDS = {"dhan", "upstox", "kotakneo", "indmoney"}
+_NATIVE_BROKER_IDS = {info.name for info in BROKER_CATALOG.values() if info.native}
+
+# Of those, only the tried-and-tested ones may actually be connected today; the
+# rest are catalogued as "coming soon" and rejected server-side (principle 3).
+_CONNECTABLE_BROKER_IDS = {info.name for info in BROKER_CATALOG.values() if info.native and info.connectable}
 _ACCOUNT_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-")
 
 native_accounts_bp = Blueprint("native_accounts", __name__, url_prefix="/api/v1/native")
@@ -413,11 +418,13 @@ def list_native_brokers() -> Any:
     """
     brokers = [
         {
-            "adapter_id": bid,
-            "display_name": NATIVE_DISPLAY_NAMES.get(bid, bid.capitalize()),
-            "auth_methods": methods,
+            "adapter_id": info.name,
+            "display_name": info.display_name,
+            "connectable": info.connectable,
+            "auth_methods": [m.model_dump() for m in info.auth_methods],
         }
-        for bid, methods in NATIVE_AUTH_METHODS.items()
+        for info in BROKER_CATALOG.values()
+        if info.native
     ]
     return jsonify({"status": "success", "data": {"brokers": brokers}})
 
@@ -439,6 +446,11 @@ def connect_native_account() -> Any:
         return jsonify({
             "status": "error",
             "message": "adapter_id is not a native broker.",
+        }), 400
+    if adapter_id not in _CONNECTABLE_BROKER_IDS:
+        return jsonify({
+            "status": "error",
+            "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
         }), 400
     if not _is_safe_account_id(account_id):
         return jsonify({"status": "error", "message": "account_id must use letters, numbers, dot, underscore, @ or hyphen."}), 400
@@ -505,6 +517,11 @@ def native_oauth_start() -> Any:
 
     if adapter_id not in _NATIVE_BROKER_IDS:
         return jsonify({"status": "error", "message": "adapter_id is not a native broker."}), 400
+    if adapter_id not in _CONNECTABLE_BROKER_IDS:
+        return jsonify({
+            "status": "error",
+            "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
+        }), 400
     if not _is_safe_account_id(account_id):
         return jsonify({"status": "error", "message": "account_id must use letters, numbers, dot, underscore, @ or hyphen."}), 400
     if not (api_key and api_secret):

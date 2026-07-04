@@ -309,6 +309,67 @@ class _WrappedBrokerAdapter:
 # refresh to catch upstream additions.
 # ---------------------------------------------------------------------------
 
+
+# Native login-method schemas, folded here from the former
+# flinttrade_core.native_auth_methods (consolidation G40 — one catalogue). Each
+# method lists the exact credential fields the native adapter's ``login()`` (or
+# OAuth start) consumes, whether they are secret, and the flow ``kind`` so the
+# connect UI renders a form ("direct") or launches OAuth ("oauth"). Only methods
+# the adapter actually supports today are listed. Attached to the catalogue
+# entry below via ``auth_methods=``; Pydantic coerces these dicts to AuthMethod.
+def _f(name: str, label: str, *, secret: bool = False, required: bool = True, help_: str = "") -> dict[str, Any]:
+    return {"name": name, "label": label, "secret": secret, "required": required, "help": help_}
+
+
+_NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
+    "dhan": [
+        {
+            "id": "access_token", "label": "Access token", "kind": "direct",
+            "description": "Paste a 24h access token from web.dhan.co → Profile → Access DhanHQ APIs.",
+            "fields": [_f("client_id", "Dhan client ID"), _f("access_token", "Access token", secret=True)],
+        },
+        {
+            "id": "pin_totp", "label": "PIN + TOTP", "kind": "direct",
+            "description": "Mint a fresh 24h token from your PIN and authenticator code (TOTP must be enabled on the account).",
+            "fields": [_f("client_id", "Dhan client ID"), _f("pin", "PIN", secret=True), _f("totp", "6-digit TOTP")],
+        },
+    ],
+    "upstox": [
+        {
+            "id": "oauth", "label": "Log in with Upstox (OAuth)", "kind": "oauth",
+            "description": "Approve access on upstox.com. Register the shown redirect URL in your Upstox app (Developer → Apps).",
+            "fields": [_f("api_key", "API key (client ID)"), _f("api_secret", "API secret", secret=True)],
+        },
+        {
+            "id": "access_token", "label": "Access token", "kind": "direct",
+            "description": "Paste a token you already generated (e.g. via a prior OAuth login or a sandbox app).",
+            "fields": [_f("client_id", "Client ID", required=False), _f("access_token", "Access token", secret=True)],
+        },
+    ],
+    "kotakneo": [
+        {
+            "id": "totp_mpin", "label": "TOTP + MPIN", "kind": "direct",
+            "description": "Kotak NEO two-step 2FA. Consumer key from NEO → Invest → Trade API; TOTP from your authenticator; MPIN is your NEO PIN.",
+            "fields": [
+                _f("consumer_key", "Consumer key", secret=True),
+                _f("mobile_number", "Mobile number (with country code)"),
+                _f("ucc", "UCC (client code)"),
+                _f("totp", "6-digit TOTP"),
+                _f("mpin", "MPIN", secret=True),
+                _f("neo_fin_key", "Neo fin key", required=False),
+            ],
+        },
+    ],
+    "indmoney": [
+        {
+            "id": "access_token", "label": "Access token", "kind": "direct",
+            "description": "Generate an access token on the INDstocks API dashboard and paste it here.",
+            "fields": [_f("user_id", "User ID", required=False), _f("access_token", "Access token", secret=True)],
+        },
+    ],
+}
+
+
 BROKER_CATALOG: dict[str, BrokerInfo] = {
     # ---- OAuth redirect flow (10) ----------------------------------------
     "zerodha": BrokerInfo(
@@ -349,6 +410,9 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         display_name="Dhan",
         auth_flow=AuthFlowType.oauth_redirect,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
+        native=True,
+        connectable=True,  # tried-and-tested against a live account
+        auth_methods=_NATIVE_AUTH["dhan"],
     ),
     "aliceblue": BrokerInfo(
         name="aliceblue",
@@ -364,6 +428,9 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
             "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
             "NSE_INDEX", "BSE_INDEX", "GLOBAL_INDEX",
         ],
+        native=True,
+        connectable=True,  # tried-and-tested against a live account
+        auth_methods=_NATIVE_AUTH["upstox"],
     ),
     "compositedge": BrokerInfo(
         name="compositedge",
@@ -423,12 +490,23 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
     "kotak": BrokerInfo(
         name="kotak",
         display_name="Kotak Securities",
-        # Catalogue id "kotak" is the OpenAlgo bridge plugin; the NATIVE
-        # FlintTrade adapter for the same broker registers as "kotakneo"
-        # (brokers/native_factory.py) — alias the two when surfacing natives
-        # in the catalogue UI.
+        # Bridge-only entry: "kotak" is the OpenAlgo Kotak Securities plugin —
+        # a DIFFERENT product from the native "kotakneo" (Kotak Neo) entry
+        # below. Reachable via the OpenAlgo primary path; no native adapter.
         auth_flow=AuthFlowType.totp_form,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    ),
+    "kotakneo": BrokerInfo(
+        name="kotakneo",
+        display_name="Kotak Neo",
+        # Native FlintTrade adapter (brokers/kotakneo.py). Distinct from the
+        # bridge "kotak" (Kotak Securities) above. Built + mock-tested, not yet
+        # live-verified → native but "coming soon" (connectable=False).
+        auth_flow=AuthFlowType.totp_form,
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "NSE_INDEX", "BSE_INDEX"],
+        native=True,
+        connectable=False,
+        auth_methods=_NATIVE_AUTH["kotakneo"],
     ),
     "motilal": BrokerInfo(
         name="motilal",
@@ -515,6 +593,9 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         # session credential.
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
+        native=True,
+        connectable=False,  # built + mock-tested, not yet live-verified → "coming soon"
+        auth_methods=_NATIVE_AUTH["indmoney"],
     ),
     "fivepaisaxts": BrokerInfo(
         name="fivepaisaxts",

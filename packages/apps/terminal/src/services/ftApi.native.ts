@@ -28,6 +28,10 @@ export interface NativeAuthMethod {
 export interface NativeBroker {
   adapter_id: string;
   display_name: string;
+  /** Tried-and-tested against a live account (Dhan, Upstox today). When false
+   * the broker is catalogued but "coming soon" — the connect UI must not offer
+   * it, and the backend rejects a connect for it. */
+  connectable: boolean;
   auth_methods: NativeAuthMethod[];
 }
 

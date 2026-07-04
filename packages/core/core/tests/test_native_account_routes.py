@@ -1,9 +1,10 @@
 """Tests for the native broker capture + activation routes (Phase 1 G4 + G9).
 
-IndMoney is used as the exercise broker because its ``login()`` builds a session
-from any non-empty access token WITHOUT calling the broker (validation is lazy,
-on the first API call) and its SDK pin is ``None`` (creds-only activation gate),
-so the full connect -> register -> rebuild -> login -> session path runs offline.
+Upstox (its direct access-token method) is the exercise broker: ``login()`` builds
+a session from any non-empty access token WITHOUT calling the broker (validation is
+lazy, on the first API call), so the full connect -> register -> rebuild -> login ->
+session path runs offline. Upstox is one of the two connectable natives (Dhan being
+the other); IndMoney/Kotak Neo are catalogued 'coming soon' and rejected on connect.
 
 G9: every WRITE on these routes requires a valid operator session JWT — the
 fixture mints one and ``_h()`` attaches it; the dedicated G9 tests pin the
@@ -27,15 +28,15 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     # The interactive connect/relogin paths now VERIFY the session with a real
-    # `funds` read (audit fix). Stub IndMoney's funds so the probe is
+    # `funds` read (audit fix). Stub Upstox's funds so the probe is
     # deterministic and never touches the network — tests that want a dead
     # token re-stub it to raise (see test_relogin_dead_token_surfaces_relogin).
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _ok_funds(_self, _session):
         return {"available_balance": 0.0}
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _ok_funds)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _ok_funds)
     (tmp_path / "master_password").write_text("native-routes-test-pw", encoding="utf-8")
     from flinttrade_core.app import create_flask_app
 
@@ -62,16 +63,16 @@ def _workspace_brokers(tmp_path):
     return json.loads(path.read_text(encoding="utf-8")).get("brokers", {})
 
 
-def test_connect_indmoney_stores_registers_and_establishes_session(client):
+def test_connect_upstox_stores_registers_and_establishes_session(client):
     c, app, tmp_path = client
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
         json={
-            "adapter_id": "indmoney",
-            "account_id": "INDTEST01",
-            "label": "IndMoney test",
-            "credentials": {"access_token": "dummy-dashboard-token", "user_id": "INDTEST01"},
+            "adapter_id": "upstox",
+            "account_id": "UPXTEST01",
+            "label": "Upstox test",
+            "credentials": {"access_token": "dummy-token"},
             "is_primary": True,
         },
     )
@@ -81,23 +82,23 @@ def test_connect_indmoney_stores_registers_and_establishes_session(client):
     assert data["connected"] is True
     assert data["login"] == "ok"
     public_body = json.dumps(body)
-    assert "INDTEST01" not in public_body
-    assert "dummy-dashboard-token" not in public_body
+    assert "UPXTEST01" not in public_body
+    assert "dummy-token" not in public_body
 
     # Credentials persisted under the composite selector.
     store = app.config["CREDENTIAL_STORE"]
-    creds = store.retrieve_for("indmoney", "INDTEST01")
-    assert creds["access_token"] == "dummy-dashboard-token"
+    creds = store.retrieve_for("upstox", "UPXTEST01")
+    assert creds["access_token"] == "dummy-token"
 
     # Selector registered + operator ACL'd + set as execution default.
     brokers = _workspace_brokers(tmp_path)
-    assert "indmoney:INDTEST01" in brokers["registered"]
-    assert brokers["account_acls"]["indmoney"]["INDTEST01"]  # non-empty actor list
-    assert brokers["execution"]["default"] == "indmoney:INDTEST01"
+    assert "upstox:UPXTEST01" in brokers["registered"]
+    assert brokers["account_acls"]["upstox"]["UPXTEST01"]  # non-empty actor list
+    assert brokers["execution"]["default"] == "upstox:UPXTEST01"
 
     # Session registered in the registry.
-    session = app.config["REGISTRY"].get_session_for("indmoney", "INDTEST01")
-    assert session.adapter_id == "indmoney"
+    session = app.config["REGISTRY"].get_session_for("upstox", "UPXTEST01")
+    assert session.adapter_id == "upstox"
 
 
 def test_connect_rejects_non_native_broker(client):
@@ -122,7 +123,7 @@ def test_connect_rejects_untrusted_identifiers_without_reflection(client):
     )
     bad_account = c.post(
         "/api/v1/native/accounts",
-        json={"adapter_id": "indmoney", "account_id": payload, "credentials": {"access_token": "x"}},
+        json={"adapter_id": "upstox", "account_id": payload, "credentials": {"access_token": "x"}},
         headers=_h(),
     )
 
@@ -144,25 +145,25 @@ def test_list_and_remove_native_account(client):
         "/api/v1/native/accounts",
         headers=_h(),
         json={
-            "adapter_id": "indmoney",
-            "account_id": "INDTEST02",
+            "adapter_id": "upstox",
+            "account_id": "UPXTEST02",
             "credentials": {"access_token": "tok2"},
         },
     )
 
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "INDTEST02")
-    assert entry["adapter_id"] == "indmoney"
+    entry = next(a for a in listing if a["account_id"] == "UPXTEST02")
+    assert entry["adapter_id"] == "upstox"
     assert entry["has_session"] is True
 
-    removed = c.delete("/api/v1/native/accounts/indmoney/INDTEST02", headers=_h())
+    removed = c.delete("/api/v1/native/accounts/upstox/UPXTEST02", headers=_h())
     assert removed.status_code == 200
 
     # Selector deregistered and session gone.
     brokers = _workspace_brokers(tmp_path)
-    assert "indmoney:INDTEST02" not in brokers.get("registered", [])
+    assert "upstox:UPXTEST02" not in brokers.get("registered", [])
     with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("indmoney", "INDTEST02")
+        app.config["REGISTRY"].get_session_for("upstox", "UPXTEST02")
 
 
 def test_list_native_brokers_catalogue(client):
@@ -216,11 +217,11 @@ def test_relogin_replays_stored_credentials(client):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDTEST03", "credentials": {"access_token": "tok3"}},
+        json={"adapter_id": "upstox", "account_id": "UPXTEST03", "credentials": {"access_token": "tok3"}},
     )
     # Drop the session, then re-login should re-establish it from stored creds.
-    app.config["REGISTRY"].remove_session_for("indmoney", "INDTEST03")
-    resp = c.post("/api/v1/native/accounts/indmoney/INDTEST03/login", headers=_h())
+    app.config["REGISTRY"].remove_session_for("upstox", "UPXTEST03")
+    resp = c.post("/api/v1/native/accounts/upstox/UPXTEST03/login", headers=_h())
     assert resp.status_code == 200
     assert resp.get_json()["data"]["session"]["has_session"] is True
 
@@ -236,7 +237,7 @@ def test_write_without_jwt_is_rejected(client):
     c, _app, _tmp = client
     resp = c.post(
         "/api/v1/native/accounts",
-        json={"adapter_id": "indmoney", "account_id": "NOJWT", "credentials": {"access_token": "x"}},
+        json={"adapter_id": "upstox", "account_id": "NOJWT", "credentials": {"access_token": "x"}},
     )
     assert resp.status_code == 401
     assert "logged-in session" in resp.get_json()["message"]
@@ -245,7 +246,7 @@ def test_write_without_jwt_is_rejected(client):
 def test_write_with_invalid_jwt_is_rejected(client):
     c, _app, _tmp = client
     resp = c.delete(
-        "/api/v1/native/accounts/indmoney/X",
+        "/api/v1/native/accounts/upstox/X",
         headers={"Authorization": "Bearer not-a-real-token"},
     )
     assert resp.status_code == 401
@@ -285,16 +286,16 @@ def test_sessionless_account_with_failed_replay_surfaces_needs_relogin(client):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDG7", "credentials": {"access_token": "tok"}},
+        json={"adapter_id": "upstox", "account_id": "UPXG7", "credentials": {"access_token": "tok"}},
     )
     # Simulate the next boot: session gone, replay failed on stale credentials.
-    app.config["REGISTRY"].remove_session_for("indmoney", "INDG7")
-    app.config.setdefault("NATIVE_SESSION_STATUS", {})["indmoney:INDG7"] = (
+    app.config["REGISTRY"].remove_session_for("upstox", "UPXG7")
+    app.config.setdefault("NATIVE_SESSION_STATUS", {})["upstox:UPXG7"] = (
         "login-failed: IndMoney login requires an access_token"
     )
 
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "INDG7")
+    entry = next(a for a in listing if a["account_id"] == "UPXG7")
     assert entry["has_session"] is False
     assert entry["needs_relogin"] is True
     assert "login-failed" in entry["login_error"]
@@ -305,10 +306,10 @@ def test_connected_account_has_no_relogin_flag(client):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDG7B", "credentials": {"access_token": "tok"}},
+        json={"adapter_id": "upstox", "account_id": "UPXG7B", "credentials": {"access_token": "tok"}},
     )
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "INDG7B")
+    entry = next(a for a in listing if a["account_id"] == "UPXG7B")
     assert entry["has_session"] is True
     assert "needs_relogin" not in entry
 
@@ -320,11 +321,11 @@ def test_connect_schedules_a_daily_refresh_job(client):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDJOB", "credentials": {"access_token": "tok"}},
+        json={"adapter_id": "upstox", "account_id": "UPXJOB", "credentials": {"access_token": "tok"}},
     )
     rotator = app.config.get("CREDENTIALS_ROTATOR")
     assert rotator is not None
-    assert "cred_refresh_indmoney" in rotator._job_ids
+    assert "cred_refresh_upstox" in rotator._job_ids
 
 
 def test_relogin_with_fresh_credentials_preserves_label_and_primary(client):
@@ -335,19 +336,19 @@ def test_relogin_with_fresh_credentials_preserves_label_and_primary(client):
         "/api/v1/native/accounts",
         headers=_h(),
         json={
-            "adapter_id": "indmoney", "account_id": "INDLBL",
-            "label": "My IND", "credentials": {"access_token": "tok"}, "is_primary": True,
+            "adapter_id": "upstox", "account_id": "UPXLBL",
+            "label": "My UPX", "credentials": {"access_token": "tok"}, "is_primary": True,
         },
     )
     resp = c.post(
-        "/api/v1/native/accounts/indmoney/INDLBL/login",
+        "/api/v1/native/accounts/upstox/UPXLBL/login",
         headers=_h(),
         json={"credentials": {"access_token": "fresh-tok"}},
     )
     assert resp.status_code == 200
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "INDLBL")
-    assert entry["label"] == "My IND"
+    entry = next(a for a in listing if a["account_id"] == "UPXLBL")
+    assert entry["label"] == "My UPX"
     assert entry["is_primary"] is True
 
 
@@ -355,17 +356,17 @@ def test_connect_dead_token_surfaces_needs_relogin_not_false_success(client, mon
     """Re-audit fix: the interactive connect path now probes the token with a
     real funds read, so a dead token reports needs_relogin instead of a false
     'connected' (the token-replay logins build a Session without a broker call)."""
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _dead_funds(_self, _session):
         raise RuntimeError("401 token expired")
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
     c, _app, _tmp = client
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDDEAD", "credentials": {"access_token": "dead"}},
+        json={"adapter_id": "upstox", "account_id": "UPXDEAD", "credentials": {"access_token": "dead"}},
     )
     # Login could not be verified → not connected → 502, and the vault row is
     # not left dead-credential'd.
@@ -373,7 +374,7 @@ def test_connect_dead_token_surfaces_needs_relogin_not_false_success(client, mon
     body = resp.get_json()
     assert body["data"]["connected"] is False
     public_body = json.dumps(body)
-    assert "INDDEAD" not in public_body
+    assert "UPXDEAD" not in public_body
     assert "dead" not in public_body
 
 
@@ -385,21 +386,21 @@ def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDRL", "credentials": {"access_token": "tok"}},
+        json={"adapter_id": "upstox", "account_id": "UPXRL", "credentials": {"access_token": "tok"}},
     )
     # Now the token has "gone dead": funds probe fails on re-authenticate.
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _dead_funds(_self, _session):
         raise RuntimeError("401 token expired")
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
-    resp = c.post("/api/v1/native/accounts/indmoney/INDRL/login", headers=_h())
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
+    resp = c.post("/api/v1/native/accounts/upstox/UPXRL/login", headers=_h())
     assert resp.status_code == 502
     assert resp.get_json()["data"]["session"]["has_session"] is False
     # The accounts list surfaces the honest needs_relogin state.
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "INDRL")
+    entry = next(a for a in listing if a["account_id"] == "UPXRL")
     assert entry["needs_relogin"] is True
 
 
@@ -412,51 +413,51 @@ def test_failed_reconnect_restores_prior_good_credentials(client, monkeypatch):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDRESTORE",
+        json={"adapter_id": "upstox", "account_id": "INDRESTORE",
               "label": "Keep me", "credentials": {"access_token": "good-token"}, "is_primary": True},
     )
     store = app.config["CREDENTIAL_STORE"]
-    assert store.retrieve_for("indmoney", "INDRESTORE")["access_token"] == "good-token"
+    assert store.retrieve_for("upstox", "INDRESTORE")["access_token"] == "good-token"
 
     # Reconnect with a token whose probe fails.
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _dead_funds(_self, _session):
         raise RuntimeError("401 token expired")
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDRESTORE", "credentials": {"access_token": "bad-token"}},
+        json={"adapter_id": "upstox", "account_id": "INDRESTORE", "credentials": {"access_token": "bad-token"}},
     )
     assert resp.status_code == 502
     # The prior good credentials survive; the selector is still registered.
-    assert store.retrieve_for("indmoney", "INDRESTORE")["access_token"] == "good-token"
-    assert "indmoney:INDRESTORE" in _workspace_brokers(tmp_path).get("registered", [])
+    assert store.retrieve_for("upstox", "INDRESTORE")["access_token"] == "good-token"
+    assert "upstox:INDRESTORE" in _workspace_brokers(tmp_path).get("registered", [])
 
 
 def test_failed_new_connect_purges_and_deregisters(client, monkeypatch):
     """A failed BRAND-NEW connect leaves nothing orphaned: no vault row, no
     registered selector."""
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _dead_funds(_self, _session):
         raise RuntimeError("401 token expired")
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
     c, app, tmp_path = client
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "INDNEW", "credentials": {"access_token": "dead"}},
+        json={"adapter_id": "upstox", "account_id": "INDNEW", "credentials": {"access_token": "dead"}},
     )
     assert resp.status_code == 502
     store = app.config["CREDENTIAL_STORE"]
     import pytest as _pt
     with _pt.raises(Exception):
-        store.retrieve_for("indmoney", "INDNEW")
-    assert "indmoney:INDNEW" not in _workspace_brokers(tmp_path).get("registered", [])
+        store.retrieve_for("upstox", "INDNEW")
+    assert "upstox:INDNEW" not in _workspace_brokers(tmp_path).get("registered", [])
 
 
 def test_failed_new_connect_preserves_a_prior_working_execution_default(client, monkeypatch):
@@ -469,29 +470,29 @@ def test_failed_new_connect_preserves_a_prior_working_execution_default(client, 
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "PRIMARY1",
+        json={"adapter_id": "upstox", "account_id": "PRIMARY1",
               "credentials": {"access_token": "good"}, "is_primary": True},
     )
-    assert _workspace_brokers(tmp_path)["execution"]["default"] == "indmoney:PRIMARY1"
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:PRIMARY1"
 
     # A new connect for a different account, is_primary=True, whose probe fails.
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _dead_funds(_self, _session):
         raise RuntimeError("401 token expired")
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "BADNEW",
+        json={"adapter_id": "upstox", "account_id": "BADNEW",
               "credentials": {"access_token": "dead"}, "is_primary": True},
     )
     assert resp.status_code == 502
     brokers = _workspace_brokers(tmp_path)
     # The prior working default survives; the failed selector is not registered.
-    assert brokers["execution"]["default"] == "indmoney:PRIMARY1"
-    assert "indmoney:BADNEW" not in brokers.get("registered", [])
+    assert brokers["execution"]["default"] == "upstox:PRIMARY1"
+    assert "upstox:BADNEW" not in brokers.get("registered", [])
 
 
 def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
@@ -501,21 +502,36 @@ def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "META1", "label": "Original label",
+        json={"adapter_id": "upstox", "account_id": "META1", "label": "Original label",
               "credentials": {"access_token": "good"}, "is_primary": True},
     )
-    from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _dead_funds(_self, _session):
         raise RuntimeError("401 token expired")
 
-    monkeypatch.setattr(IndMoneyAdapter, "funds", _dead_funds)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "indmoney", "account_id": "META1", "label": "New bad label",
+        json={"adapter_id": "upstox", "account_id": "META1", "label": "New bad label",
               "credentials": {"access_token": "bad"}, "is_primary": False},
     )
     row = next(r for r in app.config["CREDENTIAL_STORE"].list_accounts() if r["account_id"] == "META1")
     assert row["label"] == "Original label"
     assert bool(row["is_primary"]) is True
+
+
+def test_connect_rejects_coming_soon_native(client):
+    """A native broker that is catalogued but not yet tried-and-tested
+    (connectable=False, e.g. IndMoney / Kotak Neo) is rejected on connect with a
+    'coming soon' message — principle 3: only Dhan + Upstox connect today."""
+    c, _app, _tmp = client
+    for adapter_id in ("indmoney", "kotakneo"):
+        resp = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={"adapter_id": adapter_id, "account_id": "CS1", "credentials": {"access_token": "x"}},
+        )
+        assert resp.status_code == 400, adapter_id
+        assert "coming soon" in resp.get_json()["message"].lower()
