@@ -223,7 +223,7 @@ function InvestShell() {
       {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
       <RouteBanner
         hintId="invest-broker-connect"
-        text="Connect a broker in Settings → API to see your real holdings, SIPs, and portfolio value here."
+        text="Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here."
       />
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">

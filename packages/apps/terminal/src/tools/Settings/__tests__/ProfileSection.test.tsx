@@ -52,8 +52,8 @@ describe("ProfileSection", () => {
 
   it("deep-links to a settings section via the hash", () => {
     render(<ProfileSection />);
-    fireEvent.click(screen.getByRole("button", { name: /open broker gateway settings/i }));
-    expect(window.location.hash).toBe("#api");
+    fireEvent.click(screen.getByRole("button", { name: /open brokers settings/i }));
+    expect(window.location.hash).toBe("#brokers");
   });
 
   // The most security-relevant Profile Manager actions — only shown when the

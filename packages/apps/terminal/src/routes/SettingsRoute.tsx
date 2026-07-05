@@ -45,7 +45,7 @@ import { useSettingsState } from "@/hooks/useSettingsState";
 export default function SettingsRoute() {
   const navigate = useNavigate();
 
-  // Read hash fragment to allow deep-linking: /settings#api
+  // Read hash fragment to allow deep-linking: /settings#api, /settings#brokers, etc.
   const sectionFromHash = (): SectionId => {
     const hash = window.location.hash.replace("#", "") as SectionId;
     return SECTIONS.some((s) => s.id === hash) ? hash : "general";
@@ -145,7 +145,7 @@ export default function SettingsRoute() {
       {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
       <RouteBanner
         hintId="settings-broker-gateway-connect"
-        text="Go to Broker Gateway to connect FlintTrade's direct broker support or an OpenAlgo-compatible bridge."
+        text="Use Brokers to connect broker accounts. Use Broker Gateway for OpenAlgo-compatible bridge URL and API-key settings."
       />
       {/* Slim header */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-glass-chrome bg-glass-chrome backdrop-blur-md shrink-0">

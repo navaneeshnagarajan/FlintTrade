@@ -39,8 +39,8 @@ function rowKey(a: AccountStatus): string {
   return `${a.source ?? "openalgo"}:${a.broker ?? "openalgo"}:${a.account_id}`;
 }
 
-function reauthHref(a: AccountStatus): string {
-  return a.source === "native" ? "/settings#brokers" : "/settings#api";
+function reauthHref(_a: AccountStatus): string {
+  return "/settings#brokers";
 }
 
 function authState(a: AccountStatus): AuthState {
@@ -124,8 +124,8 @@ export function AccountStatusPanel() {
                     </span>
                   )}
                   {state === "reauth" ? (
-                    // Actionable: deep-link to the Broker Gateway settings where the
-                    // operator re-authenticates — the panel must DRIVE the action,
+                    // Actionable: deep-link to the unified broker account settings where
+                    // the operator re-authenticates — the panel must DRIVE the action,
                     // not just report it.
                     <Link
                       to={reauthHref(a)}

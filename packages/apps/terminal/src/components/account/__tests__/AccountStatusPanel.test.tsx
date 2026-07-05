@@ -49,7 +49,7 @@ describe("AccountStatusPanel", () => {
     expect(screen.getByText("HTTP 403")).toBeInTheDocument();
   });
 
-  it("makes the Re-auth badge an actionable link to the Broker Gateway settings", async () => {
+  it("makes the Re-auth badge an actionable link to the unified broker settings", async () => {
     mockGet.mockResolvedValue({
       accounts: [
         { account_id: "A2", name: "Secondary", enabled: true, connected: true, authenticated: false, needs_reauth: true, latency_ms: 20, error: "HTTP 403" },
@@ -60,7 +60,7 @@ describe("AccountStatusPanel", () => {
 
     // The needs-reauth account must DRIVE the operator to act, not just report.
     const link = await screen.findByRole("link", { name: /re-authenticate secondary/i });
-    expect(link).toHaveAttribute("href", "/settings#api");
+    expect(link).toHaveAttribute("href", "/settings#brokers");
   });
 
   it("deep-links native broker reauth to the broker settings section", async () => {

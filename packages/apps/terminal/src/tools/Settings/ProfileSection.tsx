@@ -48,7 +48,7 @@ const MODE_META: Record<
 // Settings sections surfaced as "optimisation & preferences" quick links.
 const QUICK_LINK_IDS: SectionId[] = [
   "appearance",
-  "api",
+  "brokers",
   "risk",
   "monitoring",
   "dataPaths",
@@ -202,13 +202,13 @@ export function ProfileSection() {
           </div>
         ) : (
           <p className="text-xs text-text-muted">
-            No active broker session. Connect a broker gateway from{" "}
+            No active broker session. Connect a broker account from{" "}
             <button
               type="button"
-              onClick={() => jumpTo("api")}
+              onClick={() => jumpTo("brokers")}
               className="text-accent hover:underline"
             >
-              Broker Gateway settings
+              Brokers settings
             </button>
             .
           </p>
