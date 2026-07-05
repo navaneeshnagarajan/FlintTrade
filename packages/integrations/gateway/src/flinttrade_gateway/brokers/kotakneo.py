@@ -623,13 +623,17 @@ class KotakNeoAdapter(BrokerAdapter):
         only indexes are passed by NAME (``Quotes.md`` "Nifty 50" example). Each
         non-index symbol is resolved via the shared ``_resolve_token`` path.
         """
-        if quote_type not in M.QUOTE_TYPES:
-            raise BrokerError(f"Kotak Neo quote_type must be one of {sorted(M.QUOTE_TYPES)}, got {quote_type!r}")
+        try:
+            quote_type = M.canonical_quote_type(quote_type)
+        except M.KotakNeoMappingError as exc:
+            raise BrokerError(
+                f"Kotak Neo quote_type must be one of {sorted(M.QUOTE_TYPES)}, got {quote_type!r}"
+            ) from exc
         resolved: list[tuple[str, str]] = []
         for raw in symbols:
             exchange, name = _split_symbol(raw)
             if M.is_index_name(name):
-                resolved.append((name, exchange))  # indexes key by name
+                resolved.append((M.canonical_index_name(name), exchange))  # indexes key by case-sensitive name
             else:
                 resolved.append((await self._resolve_token(session, name, exchange), exchange))
         tokens = M.to_quote_tokens(resolved)
@@ -653,12 +657,12 @@ class KotakNeoAdapter(BrokerAdapter):
     async def quote_details(self, session: Session, symbols: list[str], quote_type: str = "all") -> list[dict]:
         """Typed quote snapshot (read) — the full NEO quote_type surface.
 
-        ``quote_type`` ∈ all / depth / ohlc / ltp / oi / 52w / circuit_limits /
+        ``quote_type`` ∈ all / depth / ohlc / ltp / oi / 52W / circuit_limits /
         scrip_details (``Quotes.md``). ``depth`` rows are book-shaped — use
         ``market_depth`` for the normalised bid/ask ladder; everything else is
         returned as the raw row dicts NEO serves.
         """
-        return await self._fetch_quote_rows(session, symbols, str(quote_type).lower())
+        return await self._fetch_quote_rows(session, symbols, quote_type)
 
     async def market_depth(self, session: Session, symbols: list[str]) -> list[dict]:
         """5-level market depth via the quotes endpoint (``quote_type="depth"``).
@@ -756,7 +760,7 @@ class KotakNeoAdapter(BrokerAdapter):
         for raw in symbols:
             exchange, name = _split_symbol(raw)
             seg = M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower())
-            token = name if is_index else await self._resolve_token(session, name, exchange)
+            token = M.canonical_index_name(name) if is_index else await self._resolve_token(session, name, exchange)
             tokens.append({"instrument_token": token, "exchange_segment": seg})
         return tokens
 

@@ -522,6 +522,20 @@ async def test_quote_details_typed_request():
 
 
 @pytest.mark.asyncio
+async def test_quote_details_canonicalises_filter_and_index_case():
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    await adapter.quote_details(session, ["NSE:nifty 50", "BSE:bankex"], quote_type="52w")
+    (_, (tokens, qtype)) = [c for c in mock.calls if c[0] == "quotes"][0]
+    assert qtype == "52W"
+    assert tokens == [
+        {"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"},
+        {"instrument_token": "BANKEX", "exchange_segment": "bse_cm"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_quote_details_rejects_unknown_type():
     mock = MockNeoFull()
     adapter = _adapter(mock)
@@ -573,8 +587,9 @@ async def test_subscribe_index_mode_passes_name_through():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    await adapter.subscribe(session, ["NSE:Nifty 50"], mode="INDEX")
-    assert mock.calls == [("subscribe", ([{"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"}],
+    await adapter.subscribe(session, ["NSE:nifty 50", "BSE:bankex"], mode="INDEX")
+    assert mock.calls == [("subscribe", ([{"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"},
+                                          {"instrument_token": "BANKEX", "exchange_segment": "bse_cm"}],
                                          True, False))]
 
 

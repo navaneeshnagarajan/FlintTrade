@@ -16,6 +16,8 @@ import pytest
 from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
+    canonical_index_name,
+    canonical_quote_type,
     decode_kotak_feed,
     decode_kotak_order_feed,
     ensure_ok,
@@ -217,7 +219,23 @@ def test_to_quote_tokens_packs_resolved_token():
 
 def test_is_index_name_detects_indexes():
     assert is_index_name("Nifty 50") and is_index_name("NIFTY BANK") and is_index_name("sensex")
+    assert is_index_name("BANKEX")
     assert not is_index_name("IDEA") and not is_index_name("RELIANCE")
+
+
+def test_canonical_quote_type_preserves_documented_path_case():
+    assert canonical_quote_type("52w") == "52W"
+    assert canonical_quote_type("52W") == "52W"
+    assert canonical_quote_type("ltp") == "ltp"
+    with pytest.raises(KotakNeoMappingError, match="quote_type"):
+        canonical_quote_type("greeks")
+
+
+def test_canonical_index_name_uses_documented_case_when_known():
+    assert canonical_index_name("nifty 50") == "Nifty 50"
+    assert canonical_index_name("NIFTY BANK") == "Nifty Bank"
+    assert canonical_index_name("bankex") == "BANKEX"
+    assert canonical_index_name("NIFTY MID SELECT") == "NIFTY MID SELECT"
 
 
 # ---------------------------------------------------------------------------

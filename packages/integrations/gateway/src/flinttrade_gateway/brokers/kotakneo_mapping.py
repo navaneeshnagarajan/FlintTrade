@@ -66,8 +66,20 @@ LIMITS_SEGMENTS = frozenset({"CASH", "CUR", "FO", "ALL"})
 LIMITS_EXCHANGES = frozenset({"NSE", "BSE", "ALL"})
 LIMITS_PRODUCTS = frozenset({"CNC", "MIS", "NRML", "ALL"})
 
-# REST quotes quote_type values (Quotes.md).
-QUOTE_TYPES = frozenset({"all", "depth", "ohlc", "ltp", "oi", "52w", "circuit_limits", "scrip_details"})
+# REST quotes quote_type values (Quotes.md). The SDK places the value directly
+# into the URL path, so FlintTrade accepts case-insensitive input but emits
+# Kotak's documented case (notably ``52W``).
+QUOTE_TYPE_CANONICAL = {
+    "all": "all",
+    "depth": "depth",
+    "ohlc": "ohlc",
+    "ltp": "ltp",
+    "oi": "oi",
+    "52w": "52W",
+    "circuit_limits": "circuit_limits",
+    "scrip_details": "scrip_details",
+}
+QUOTE_TYPES = frozenset(QUOTE_TYPE_CANONICAL)
 
 # Index exchange identifiers (``webSocket.md`` "For Indexes" + Quotes.md): the
 # ``instrument_token`` for an index is its NAME, not a numeric scrip token. Both
@@ -78,6 +90,7 @@ INDEX_NAMES = frozenset({
     "NIFTY BANK",
     "NIFTY FIN SERVICE",
     "SENSEX",
+    "BANKEX",
     "INDIA VIX",
     "NIFTY MIDCAP 100",
     "NIFTY 100",
@@ -93,6 +106,21 @@ INDEX_NAMES = frozenset({
     "NIFTY NEXT 50",
     "NIFTY MID SELECT",
 })
+_INDEX_NAME_CANONICAL = {
+    "NIFTY 50": "Nifty 50",
+    "NIFTY BANK": "Nifty Bank",
+    "SENSEX": "SENSEX",
+    "BANKEX": "BANKEX",
+}
+
+
+def canonical_quote_type(quote_type: str | None) -> str:
+    """Return Kotak's documented quote filter spelling for ``quote_type``."""
+    key = str(quote_type or "all").strip().lower()
+    try:
+        return QUOTE_TYPE_CANONICAL[key]
+    except KeyError as exc:
+        raise KotakNeoMappingError(f"Unsupported quote_type {quote_type!r}") from exc
 
 
 def is_index_name(name: str) -> bool:
@@ -102,6 +130,12 @@ def is_index_name(name: str) -> bool:
     "For Indexes"); everything else needs a numeric scrip token resolved first.
     """
     return str(name).strip().upper() in INDEX_NAMES
+
+
+def canonical_index_name(name: str) -> str:
+    """Return the case-sensitive index name Kotak documents, where known."""
+    text = str(name).strip()
+    return _INDEX_NAME_CANONICAL.get(text.upper(), text)
 
 # HSM live-feed terse keys -> long names (settings.stock_key_mapping).
 STOCK_FEED_KEYS = {
