@@ -159,6 +159,16 @@ def pypi_release_json(package: str, opener: UrlOpener = _open_url) -> dict[str, 
     return json.loads(body.decode("utf-8"))
 
 
+def latest_pypi_version(package: str, opener: UrlOpener = _open_url) -> str:
+    """Return the latest version advertised by PyPI for ``package``."""
+
+    data = pypi_release_json(package, opener)
+    version = str((data.get("info") or {}).get("version") or "").strip()
+    if not version:
+        raise RuntimeError(f"PyPI metadata for {package} did not include info.version")
+    return version
+
+
 def select_pypi_artifact(files: list[Mapping[str, Any]]) -> Mapping[str, Any]:
     """Pick the best audit artifact from a PyPI release file list."""
 
@@ -241,10 +251,21 @@ def build_readme(manifest: dict[str, Any]) -> str:
         lines.append(f"- {entry['package']} {entry['version']}")
         if entry.get("git"):
             lines.append(f"  - git: {entry['git']['path']} @ {entry['git']['describe']}")
+            if "git_current" in entry:
+                status = "current" if entry["git_current"] else "locked behind upstream HEAD"
+                lines.append(f"  - git status: {status}")
         if entry.get("pypi"):
             lines.append(f"  - pypi: {entry['pypi']['path']}")
+            latest = entry.get("pypi_latest_version")
+            if latest:
+                status = "current" if entry.get("pypi_current") else "locked behind latest"
+                lines.append(f"  - PyPI latest: {latest} ({status})")
         if entry.get("notes"):
             lines.append(f"  - notes: {entry['notes']}")
+    if manifest.get("drift"):
+        lines.extend(["", "## Drift", ""])
+        for entry in manifest["drift"]:
+            lines.append(f"- {entry['package']}: locked {entry['locked']} vs upstream {entry['upstream']} ({entry['source']})")
     if manifest.get("sdkless_brokers"):
         lines.extend(["", "## SDK-Less Brokers", ""])
         for entry in manifest["sdkless_brokers"]:
@@ -274,6 +295,7 @@ def sync(
         "lock_path": _display_path(lock_path),
         "audit_root": _display_path(audit_root),
         "sdks": [],
+        "drift": [],
         "sdkless_brokers": [],
     }
     for entry in entries:
@@ -285,8 +307,33 @@ def sync(
             "notes": source.notes,
         }
         if source.git_url:
-            sdk_record["git"] = sync_git_mirror(source, audit_root)
+            git = sync_git_mirror(source, audit_root)
+            sdk_record["git"] = git
+            if entry["source_commit"]:
+                current = str(git.get("head", "")) == entry["source_commit"]
+                sdk_record["git_current"] = current
+                if not current:
+                    manifest["drift"].append(
+                        {
+                            "package": entry["name"],
+                            "source": "git",
+                            "locked": entry["source_commit"],
+                            "upstream": str(git.get("head", "")),
+                        }
+                    )
         if source.pypi_name:
+            latest = latest_pypi_version(source.pypi_name, opener)
+            sdk_record["pypi_latest_version"] = latest
+            sdk_record["pypi_current"] = latest == entry["version"]
+            if latest != entry["version"]:
+                manifest["drift"].append(
+                    {
+                        "package": entry["name"],
+                        "source": "pypi",
+                        "locked": entry["version"],
+                        "upstream": latest,
+                    }
+                )
             sdk_record["pypi"] = download_pypi_artifact(source.pypi_name, entry["version"], pypi_dir, opener)
         manifest["sdks"].append(sdk_record)
 
@@ -314,6 +361,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="do not query PyPI/npm for SDK-less broker evidence",
     )
+    parser.add_argument(
+        "--fail-on-drift",
+        action="store_true",
+        help="return a non-zero status if any locked SDK is behind upstream metadata",
+    )
     return parser.parse_args(argv)
 
 
@@ -329,10 +381,17 @@ def main(argv: list[str] | None = None) -> int:
         bits = [f"{entry['package']}=={entry['version']}"]
         if entry.get("git"):
             bits.append(f"git={entry['git']['describe']}")
+            if "git_current" in entry:
+                bits.append("git-current" if entry["git_current"] else "git-drift")
         if entry.get("pypi"):
             bits.append(f"artifact={entry['pypi']['filename']}")
+            bits.append("pypi-current" if entry.get("pypi_current") else "pypi-drift")
         print(" - " + ", ".join(bits))
-    return 0
+    if manifest.get("drift"):
+        print("drift detected:")
+        for entry in manifest["drift"]:
+            print(f" - {entry['package']}: locked {entry['locked']} vs upstream {entry['upstream']} ({entry['source']})")
+    return 1 if args.fail_on_drift and manifest.get("drift") else 0
 
 
 if __name__ == "__main__":

@@ -17,8 +17,8 @@ REST-only native with no SDK pin. INDstocks' own FAQ advertises
 `indstocks-sdk`, but PyPI and npm currently have no matching package, so the
 adapter stays REST-native until a real SDK distribution can be pinned.
 Broker SDK source/artifact mirrors can be refreshed into the gitignored
-`.local/sdk-audit/` cache with `python scripts/sync_broker_sdk_refs.py`; tracked
-runtime installation still comes only from `uv.lock` and `brokers.lock`.
+`.local/sdk-audit/` cache with `python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
+tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.
 Closed-market/no-funds verification does not prove funded live order execution.
 
 ## Legend
