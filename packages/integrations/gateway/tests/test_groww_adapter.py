@@ -180,7 +180,7 @@ async def test_modify_cancel_and_smart_cancel_are_gated_and_mapped() -> None:
     adapter = _adapter(transport)
     session = await _session(adapter)
     await adapter.modify_order(session, "GROWWOID1", {"quantity": 2, "price": 2910}, _router_token=_ROUTER_TOKEN)
-    await adapter.cancel_order(session, "GROWWOID1", _router_token=_ROUTER_TOKEN)
+    await adapter.cancel_order(session, "GROWWOID1", segment="FNO", _router_token=_ROUTER_TOKEN)
     await adapter.cancel_smart_order(session, "GTT1", segment="CASH", smart_order_type="GTT", _router_token=_ROUTER_TOKEN)
     assert [call["path"] for call in transport.calls] == [
         "/v1/order/modify",
@@ -188,6 +188,7 @@ async def test_modify_cancel_and_smart_cancel_are_gated_and_mapped() -> None:
         "/v1/order-advance/cancel/CASH/GTT/GTT1",
     ]
     assert transport.calls[0]["json_body"] == {"groww_order_id": "GROWWOID1", "segment": "CASH", "quantity": 2, "price": 2910.0}
+    assert transport.calls[1]["json_body"] == {"groww_order_id": "GROWWOID1", "segment": "FNO"}
 
 
 @pytest.mark.asyncio

@@ -105,10 +105,10 @@ class _FakeNativeAdapter:
         self._require(_router_token)
         self.calls.append(("cancel_smart_order", order_id, segment))
 
-    async def cancel_order(self, session, order_id, *, variety="regular", amo=False, _router_token=None):
-        # Kotak-Neo-shaped cancel: variety/amo extras dispatch within the gate.
+    async def cancel_order(self, session, order_id, *, variety="regular", amo=False, segment=None, _router_token=None):
+        # Kotak/Groww-shaped cancel extras dispatch within the gate.
         self._require(_router_token)
-        self.calls.append(("cancel_order", order_id, variety, amo))
+        self.calls.append(("cancel_order", order_id, variety, amo, segment))
 
 
 def _session(read_only: bool = False) -> Session:
@@ -127,7 +127,7 @@ def _request_ctx() -> RequestContext:
 
 def _router(adapter: object, *, read_only: bool = False, consume_gate=None) -> BrokerRouter:
     return BrokerRouter(
-        {"dhan": adapter, "upstox": adapter},
+        {"dhan": adapter, "groww": adapter, "upstox": adapter},
         lambda _ctx, _aid, _acct: _session(read_only=read_only),
         consume_gate=consume_gate,
     )
@@ -421,7 +421,26 @@ async def test_cancel_order_extras_dispatch_when_covered_by_fingerprint() -> Non
         adapter_id="dhan", account_id="acct-1",
         extras={"variety": "bracket", "amo": False},
     )
-    assert adapter.calls == [("cancel_order", "OID-7", "bracket", False)]
+    assert adapter.calls == [("cancel_order", "OID-7", "bracket", False, None)]
+
+
+async def test_cancel_order_segment_extra_dispatches_when_covered_by_fingerprint() -> None:
+    from flinttrade_engine.safety import gate_order
+
+    adapter = _FakeNativeAdapter()
+    router = _router(adapter)
+    canonical = {"_op": "cancel", "order_id": "OID-8", "segment": "FNO"}
+    ctx = gate_order(canonical, _request_ctx(), "groww", account_id="acct-1")
+    await router.cancel_order(
+        _request_ctx(),
+        order=canonical,
+        order_id="OID-8",
+        safety_ctx=ctx,
+        adapter_id="groww",
+        account_id="acct-1",
+        extras={"segment": "FNO"},
+    )
+    assert adapter.calls == [("cancel_order", "OID-8", "regular", False, "FNO")]
 
 
 async def test_cancel_order_extras_not_in_fingerprint_are_refused() -> None:

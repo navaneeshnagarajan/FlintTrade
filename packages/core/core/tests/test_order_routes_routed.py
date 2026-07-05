@@ -639,17 +639,34 @@ def test_routed_cancel_happy_path_targets_named_broker_account() -> None:
     router.cancel_order = AsyncMock(return_value=None)
     client = _app(broker_router=router).test_client()
     resp = client.post(
-        "/api/v1/orders/upstox/cancel",
-        json={"orderid": "UP-7", "account_id": "U1"},
+        "/api/v1/orders/groww/cancel",
+        json={"orderid": "GW-7", "account_id": "G1", "segment": "FNO"},
         headers=_live_headers(),
     )
     assert resp.status_code == 200
     router.cancel_order.assert_awaited_once()
     request_ctx = router.cancel_order.await_args.args[0]
     kw = router.cancel_order.await_args.kwargs
-    assert request_ctx.selector == "upstox:U1"
-    assert kw["hint"].adapter_id == "upstox"
-    assert kw["hint"].account_id == "U1"
+    assert request_ctx.selector == "groww:G1"
+    assert kw["hint"].adapter_id == "groww"
+    assert kw["hint"].account_id == "G1"
+    assert kw["extras"] == {"segment": "FNO"}
+    assert kw["order"]["segment"] == "FNO"
+
+
+def test_routed_cancel_ignores_segment_for_non_groww_brokers() -> None:
+    router = MagicMock()
+    router.cancel_order = AsyncMock(return_value=None)
+    client = _app(broker_router=router).test_client()
+    resp = client.post(
+        "/api/v1/orders/upstox/cancel",
+        json={"orderid": "UP-7", "account_id": "U1", "segment": "FNO"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 200
+    kw = router.cancel_order.await_args.kwargs
+    assert kw["extras"] is None
+    assert "segment" not in kw["order"]
 
 
 def test_cancel_missing_orderid_returns_400() -> None:

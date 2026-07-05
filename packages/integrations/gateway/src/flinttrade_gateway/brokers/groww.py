@@ -216,10 +216,15 @@ class GrowwAdapter(BrokerAdapter):
         await self._request(session, "POST", "/v1/order/modify", json_body=M.to_modify_payload(order_id, changes, segment=segment))
 
     async def cancel_order(
-        self, session: Session, order_id: str, *, _router_token: object | None = None
+        self,
+        session: Session,
+        order_id: str,
+        *,
+        segment: str = "CASH",
+        _router_token: object | None = None,
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        await self._request(session, "POST", "/v1/order/cancel", json_body=M.to_cancel_payload(order_id, segment="CASH"))
+        await self._request(session, "POST", "/v1/order/cancel", json_body=M.to_cancel_payload(order_id, segment=segment))
 
     async def cancel_smart_order(
         self,
