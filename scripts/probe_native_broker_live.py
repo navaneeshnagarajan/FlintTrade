@@ -23,6 +23,7 @@ for rel in ("packages/core/core/src", "packages/integrations/gateway/src"):
         sys.path.insert(0, path)
 
 from flinttrade_gateway.brokers.dhan import DhanAdapter  # noqa: E402
+from flinttrade_gateway.brokers.groww import GrowwAdapter  # noqa: E402
 from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter  # noqa: E402
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter  # noqa: E402
 from flinttrade_gateway.brokers.upstox import UpstoxAdapter  # noqa: E402
@@ -33,6 +34,7 @@ ReadCall = Callable[[Any], Awaitable[Any]]
 
 ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
     "dhan": DhanAdapter,
+    "groww": GrowwAdapter,
     "indmoney": IndMoneyAdapter,
     "kotakneo": KotakNeoAdapter,
     "upstox": UpstoxAdapter,
@@ -41,12 +43,14 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
     "dhan": READ_CHOICES,
+    "groww": READ_CHOICES,
     "indmoney": READ_CHOICES,
     "kotakneo": ("funds", "positions", "holdings", "orders", "trades"),
     "upstox": READ_CHOICES,
 }
 DEFAULT_METHOD: dict[str, str] = {
     "dhan": "access_token",
+    "groww": "access_token",
     "indmoney": "access_token",
     "kotakneo": "totp_mpin",
     "upstox": "access_token",
@@ -76,6 +80,12 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
             CredentialField("app_id", "Dhan app ID"),
             CredentialField("app_secret", "Dhan app secret"),
             CredentialField("token_id", "Dhan OAuth tokenId"),
+        ),
+    },
+    "groww": {
+        "access_token": (
+            CredentialField("access_token", "Groww Trade API access token"),
+            CredentialField("user_id", "Optional Groww user/account label", required=False),
         ),
     },
     "indmoney": {
@@ -213,7 +223,13 @@ def _resolve_method(broker: str, method: str | None) -> str:
 
 def collect_credentials(broker: str, method: str, environment: str) -> dict[str, str]:
     """Collect broker credentials without shell history or terminal echo."""
-    display = {"dhan": "Dhan", "indmoney": "INDstocks", "kotakneo": "Kotak Neo", "upstox": "Upstox"}[broker]
+    display = {
+        "dhan": "Dhan",
+        "groww": "Groww",
+        "indmoney": "INDstocks",
+        "kotakneo": "Kotak Neo",
+        "upstox": "Upstox",
+    }[broker]
     print(f"Enter {display} values locally. They will not be printed or stored by this script.")
     credentials: dict[str, str] = {}
     if broker == "kotakneo":
@@ -327,7 +343,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("broker", choices=sorted(ADAPTER_FACTORIES))
     parser.add_argument(
         "--method",
-        help="Credential method. Defaults per broker: dhan/upstox/indmoney access_token, kotakneo totp_mpin.",
+        help="Credential method. Defaults per broker: dhan/groww/indmoney/upstox access_token, kotakneo totp_mpin.",
     )
     parser.add_argument(
         "--environment",

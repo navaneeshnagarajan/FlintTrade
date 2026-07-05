@@ -21,6 +21,9 @@ class _FakeAdapter:
     async def user_profile(self, _session: object) -> dict:
         return {"secret": "SHOULD_NOT_PRINT"}
 
+    async def profile(self, _session: object) -> dict:
+        return {"secret": "SHOULD_NOT_PRINT"}
+
     async def funds(self, _session: object) -> dict:
         return {"available_cash": 1000}
 
@@ -155,6 +158,26 @@ def test_run_probe_keeps_session_on_service_window_read_error(monkeypatch, capsy
     assert "positions: ok rows=0" in out
     assert "logout: skipped" in out
     assert "TOKEN1" not in out
+
+
+def test_run_probe_dispatches_groww_access_token_reads(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["GROWW-TOKEN-SECRET", "GROWWUSER1"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "groww", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("groww", "access_token", ["profile", "funds", "orders"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.credentials == {"access_token": "GROWW-TOKEN-SECRET", "user_id": "GROWWUSER1"}
+    assert fake.logged_out is False
+    assert "profile: ok object_keys=1" in out
+    assert "funds: ok object_keys=1" in out
+    assert "orders: ok rows=0" in out
+    assert "logout: skipped" in out
+    assert "GROWW-TOKEN-SECRET" not in out
+    assert "GROWWUSER1" not in out
 
 
 def test_kotak_wrapper_help_is_kotak_specific(capsys) -> None:
