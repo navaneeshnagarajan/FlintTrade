@@ -64,6 +64,38 @@ class _FakeAdapter:
         self.calls.append(("market_depth", tuple(symbols)))
         return [{"symbol": symbols[0], "bids": [], "asks": []}]
 
+    async def margin_calculator(self, _session: object, order: object) -> dict:
+        self.calls.append(("margin", getattr(order, "symbol", ""), getattr(order, "exchange", "")))
+        return {"required_margin": 1}
+
+    async def historical(self, _session: object, req: dict) -> dict:
+        self.calls.append(("history", req.get("symbol"), req.get("exchange"), req.get("interval")))
+        return {"bars": []}
+
+    async def expiry_list(self, _session: object, symbol: str, exchange: str) -> list:
+        self.calls.append(("expiry", symbol, exchange))
+        return ["2026-07-30"]
+
+    async def option_chain(self, _session: object, req: dict) -> dict:
+        self.calls.append(("optionchain", req.get("underlying"), req.get("exchange")))
+        return {"strikes": []}
+
+    async def option_greeks(self, _session: object, symbols: list[str]) -> list:
+        self.calls.append(("optiongreeks", tuple(symbols)))
+        return []
+
+    async def search_instruments(self, _session: object, query: str) -> list:
+        self.calls.append(("search", query))
+        return [{"symbol": query}]
+
+    async def market_timings(self, _session: object, timing_date: str) -> list:
+        self.calls.append(("timings", timing_date))
+        return []
+
+    async def market_holidays(self, _session: object, date: str | None = None) -> list:
+        self.calls.append(("holidays", date))
+        return []
+
 
 def test_redact_removes_secret_and_account_like_values() -> None:
     raw = (
@@ -203,8 +235,37 @@ def test_kotak_probe_prompts_for_docs_token_once() -> None:
 
 def test_resolve_reads_is_broker_specific() -> None:
     assert "market_depth" not in probe._resolve_reads("dhan", ["all"])
+    assert "depth" in probe._resolve_reads("dhan", ["default"])
+    assert "quotes" in probe._resolve_reads("groww", ["default"])
+    assert "search" in probe._resolve_reads("upstox", ["default"])
+    assert "optiongreeks" in probe._resolve_reads("upstox", ["all"])
     assert "market_depth" in probe._resolve_reads("kotakneo", ["all"])
     assert "quote_details" in probe._resolve_reads("kotakneo", ["default"])
+
+
+def test_upstox_default_probe_exercises_market_and_calendar_reads(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["upstox-test-token", "upstox-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "upstox", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("upstox", "access_token", ["default"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.credentials == {"access_token": "upstox-test-token", "client_id": "upstox-user"}
+    assert ("quotes", ("NSE:RELIANCE",)) in fake.calls
+    assert ("market_depth", ("NSE:RELIANCE",)) in fake.calls
+    assert ("margin", "RELIANCE", "NSE") in fake.calls
+    assert ("history", "RELIANCE", "NSE", "1d") in fake.calls
+    assert ("search", "RELIANCE") in fake.calls
+    assert any(call[0] == "timings" for call in fake.calls)
+    assert ("holidays", None) in fake.calls
+    assert "quotes: ok rows=1" in out
+    assert "depth: ok rows=1" in out
+    assert "history: ok object_keys=1" in out
+    assert "upstox-test-token" not in out
+    assert "upstox-user" not in out
 
 
 def test_kotak_default_probe_exercises_extended_reads(monkeypatch, capsys) -> None:
@@ -226,6 +287,7 @@ def test_kotak_default_probe_exercises_extended_reads(monkeypatch, capsys) -> No
         "mpin": "111111",
     }
     assert ("limits",) in fake.calls
+    assert ("margin", "RELIANCE", "NSE") in fake.calls
     assert ("scrip_master", "NSE") in fake.calls
     assert ("search_scrip", "RELIANCE", "NSE") in fake.calls
     assert ("quotes", ("NSE:RELIANCE",)) in fake.calls

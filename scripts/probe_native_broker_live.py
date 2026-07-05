@@ -13,8 +13,10 @@ import getpass
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 for rel in ("packages/core/core/src", "packages/integrations/gateway/src"):
@@ -41,9 +43,16 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 }
 
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
-KOTAK_PROBE_EXCHANGE = "NSE"
-KOTAK_PROBE_SYMBOL = "RELIANCE"
-KOTAK_PROBE_QUOTE_SYMBOL = f"{KOTAK_PROBE_EXCHANGE}:{KOTAK_PROBE_SYMBOL}"
+COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
+PROBE_EXCHANGE = "NSE"
+PROBE_SYMBOL = "RELIANCE"
+PROBE_QUOTE_SYMBOL = f"{PROBE_EXCHANGE}:{PROBE_SYMBOL}"
+PROBE_UNDERLYING = "NIFTY"
+PROBE_INDEX_EXCHANGE = "NSE_INDEX"
+PROBE_OPTION_SYMBOL = "NFO:NIFTY25000CE"
+KOTAK_PROBE_EXCHANGE = PROBE_EXCHANGE
+KOTAK_PROBE_SYMBOL = PROBE_SYMBOL
+KOTAK_PROBE_QUOTE_SYMBOL = PROBE_QUOTE_SYMBOL
 KOTAK_READ_CHOICES = (
     "funds",
     "limits",
@@ -51,6 +60,7 @@ KOTAK_READ_CHOICES = (
     "holdings",
     "orders",
     "trades",
+    "margin",
     "scrip_master",
     "search_scrip",
     "quotes",
@@ -58,19 +68,26 @@ KOTAK_READ_CHOICES = (
     "market_depth",
 )
 READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
-    "dhan": COMMON_READ_CHOICES,
-    "groww": COMMON_READ_CHOICES,
-    "indmoney": COMMON_READ_CHOICES,
+    "dhan": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("expiry", "optionchain"),
+    "groww": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
+    "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
     "kotakneo": KOTAK_READ_CHOICES,
-    "upstox": COMMON_READ_CHOICES,
+    "upstox": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + (
+        "optiongreeks",
+        "expiry",
+        "optionchain",
+        "search",
+        "timings",
+        "holidays",
+    ),
 }
-READ_CHOICES = tuple(dict.fromkeys(COMMON_READ_CHOICES + KOTAK_READ_CHOICES))
+READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
-    "dhan": COMMON_READ_CHOICES,
-    "groww": COMMON_READ_CHOICES,
-    "indmoney": COMMON_READ_CHOICES,
+    "dhan": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
+    "groww": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
+    "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
-    "upstox": COMMON_READ_CHOICES,
+    "upstox": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("search", "timings", "holidays"),
 }
 DEFAULT_METHOD: dict[str, str] = {
     "dhan": "access_token",
@@ -292,6 +309,48 @@ def _resolve_reads(broker: str, requested: list[str] | None) -> list[str]:
     return deduped
 
 
+def _today_ist() -> datetime:
+    return datetime.now(ZoneInfo("Asia/Kolkata"))
+
+
+def _history_request() -> dict[str, Any]:
+    end = _today_ist().date()
+    start = end - timedelta(days=7)
+    return {
+        "symbol": PROBE_SYMBOL,
+        "exchange": PROBE_EXCHANGE,
+        "interval": "1d",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+    }
+
+
+def _sample_order() -> Any:
+    from flinttrade_core.models import Order  # noqa: PLC0415
+
+    return Order(
+        symbol=PROBE_SYMBOL,
+        exchange=PROBE_EXCHANGE,
+        action="BUY",
+        product="MIS",
+        quantity="1",
+        pricetype="MARKET",
+        price="0",
+        trigger_price="0",
+    )
+
+
+def _option_chain_request() -> dict[str, Any]:
+    expiry = (_today_ist().date() + timedelta(days=30)).isoformat()
+    return {
+        "symbol": PROBE_UNDERLYING,
+        "underlying": PROBE_UNDERLYING,
+        "exchange": PROBE_INDEX_EXCHANGE,
+        "expiry": expiry,
+        "expiry_date": expiry,
+    }
+
+
 def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
     if name == "profile":
         if broker == "dhan":
@@ -301,17 +360,69 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
         return adapter.order_book
     if name == "trades":
         return adapter.trade_book
+    if name == "quotes":
+        return lambda session: adapter.quotes(session, [PROBE_QUOTE_SYMBOL])
+    if name in {"depth", "market_depth"}:
+        return (
+            (lambda session: adapter.market_depth(session, [PROBE_QUOTE_SYMBOL]))
+            if callable(getattr(adapter, "market_depth", None))
+            else None
+        )
+    if name == "margin":
+        return (
+            (lambda session: adapter.margin_calculator(session, _sample_order()))
+            if callable(getattr(adapter, "margin_calculator", None))
+            else None
+        )
+    if name == "history":
+        return (
+            (lambda session: adapter.historical(session, _history_request()))
+            if callable(getattr(adapter, "historical", None))
+            else None
+        )
+    if name == "expiry":
+        return (
+            (lambda session: adapter.expiry_list(session, PROBE_UNDERLYING, PROBE_INDEX_EXCHANGE))
+            if callable(getattr(adapter, "expiry_list", None))
+            else None
+        )
+    if name == "optionchain":
+        return (
+            (lambda session: adapter.option_chain(session, _option_chain_request()))
+            if callable(getattr(adapter, "option_chain", None))
+            else None
+        )
+    if name == "optiongreeks":
+        return (
+            (lambda session: adapter.option_greeks(session, [PROBE_OPTION_SYMBOL]))
+            if callable(getattr(adapter, "option_greeks", None))
+            else None
+        )
+    if name == "search":
+        return (
+            (lambda session: adapter.search_instruments(session, PROBE_SYMBOL))
+            if callable(getattr(adapter, "search_instruments", None))
+            else None
+        )
+    if name == "timings":
+        return (
+            (lambda session: adapter.market_timings(session, _today_ist().date().isoformat()))
+            if callable(getattr(adapter, "market_timings", None))
+            else None
+        )
+    if name == "holidays":
+        return (
+            (lambda session: adapter.market_holidays(session))
+            if callable(getattr(adapter, "market_holidays", None))
+            else None
+        )
     if broker == "kotakneo":
         if name == "scrip_master":
             return lambda session: adapter.scrip_master(session, KOTAK_PROBE_EXCHANGE)
         if name == "search_scrip":
             return lambda session: adapter.search_scrip(session, KOTAK_PROBE_SYMBOL, KOTAK_PROBE_EXCHANGE)
-        if name == "quotes":
-            return lambda session: adapter.quotes(session, [KOTAK_PROBE_QUOTE_SYMBOL])
         if name == "quote_details":
             return lambda session: adapter.quote_details(session, [KOTAK_PROBE_QUOTE_SYMBOL], "ltp")
-        if name == "market_depth":
-            return lambda session: adapter.market_depth(session, [KOTAK_PROBE_QUOTE_SYMBOL])
     return getattr(adapter, name, None)
 
 
@@ -396,9 +507,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         nargs="+",
         default=["default"],
         help=(
-            "Read-only calls: default, all, or broker-supported names. Common names: "
-            "profile funds positions holdings orders trades. Kotak adds limits "
-            "scrip_master search_scrip quotes quote_details market_depth."
+            "Read-only calls: default, all, or broker-supported names. Common names include "
+            "profile funds positions holdings orders trades quotes depth margin history. "
+            "Broker extras include expiry optionchain optiongreeks search timings holidays "
+            "limits scrip_master search_scrip quote_details market_depth."
         ),
     )
     parser.add_argument(
