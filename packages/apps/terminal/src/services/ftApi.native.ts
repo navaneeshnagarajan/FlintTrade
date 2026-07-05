@@ -108,22 +108,28 @@ export async function listNativeAccounts(): Promise<NativeAccount[]> {
 
 export type NativeReadKind =
   | "funds"
+  | "limits"
   | "positions"
   | "holdings"
   | "profile"
   | "orders"
   | "orderstatus"
+  | "orderhistory"
+  | "ordertrades"
   | "trades"
   | "quotes"
+  | "quote_details"
   | "depth"
   | "margin"
+  | "scrip_master"
   | "holidays"
   | "timings"
   | "optiongreeks"
   | "history"
   | "expiry"
   | "optionchain"
-  | "search";
+  | "search"
+  | "search_scrip";
 
 export type NativeReadParams = Record<
   string,

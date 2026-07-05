@@ -67,10 +67,16 @@ import {
   orderStatus,
   getGttOrderbook,
   getQuotes,
+  getQuoteDetails,
   getDepth,
   getIntervals,
   getFunds,
   getMargin,
+  getBrokerLimits,
+  getScripMaster,
+  getOrderHistory,
+  getOrderTrades,
+  searchScrip,
   getHolidays,
   getTimings,
   getMultiOptionGreeks,
@@ -465,6 +471,58 @@ describe("OpenAlgo API client (api.ts)", () => {
       expect.stringContaining("/api/v1/margin"),
       expect.anything(),
     );
+  });
+
+  it("uses native broker-specific read exports without falling through to OpenAlgo", async () => {
+    mockConnectionState.apiKey = "";
+    const accounts = {
+      status: "success",
+      data: {
+        accounts: [
+          { adapter_id: "kotakneo", account_id: "K1", is_primary: true, has_session: true },
+        ],
+      },
+    };
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(accounts))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { segment: "CASH" } }))
+      .mockResolvedValueOnce(jsonResponse(accounts))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: [{ symbol: "INFY", ltp: 1450.25 }] }))
+      .mockResolvedValueOnce(jsonResponse(accounts))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { segments: [{ exchange: "NSE" }] } }))
+      .mockResolvedValueOnce(jsonResponse(accounts))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: [{ symbol: "NIFTY", token: "12345" }] }))
+      .mockResolvedValueOnce(jsonResponse(accounts))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: [{ order_id: "OID-1", status: "OPEN" }] }))
+      .mockResolvedValueOnce(jsonResponse(accounts))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: [{ order_id: "OID-1", trade_id: "T1" }] }));
+
+    await expect(getBrokerLimits("CASH", "NSE", "MIS")).resolves.toMatchObject({ segment: "CASH" });
+    await expect(getQuoteDetails("INFY", "NSE", "ltp")).resolves.toEqual([{ symbol: "INFY", ltp: 1450.25 }]);
+    await expect(getScripMaster("NSE")).resolves.toMatchObject({ segments: [{ exchange: "NSE" }] });
+    await expect(searchScrip("NIFTY", {
+      exchange: "NFO",
+      expiry: "30JUL2026",
+      option_type: "CE",
+      strike_price: "25000",
+      ignore_50multiple: false,
+    })).resolves.toEqual([{ symbol: "NIFTY", token: "12345" }]);
+    await expect(getOrderHistory("OID-1")).resolves.toEqual([{ order_id: "OID-1", status: "OPEN" }]);
+    await expect(getOrderTrades("OID-1")).resolves.toEqual([{ order_id: "OID-1", trade_id: "T1" }]);
+
+    const urls = fetchSpy.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual(expect.arrayContaining([
+      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/limits?segment=CASH&exchange=NSE&product=MIS"),
+      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/quote_details?symbol=INFY&exchange=NSE&quote_type=ltp"),
+      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/scrip_master?exchange=NSE"),
+      expect.stringContaining(
+        "/api/v1/native/accounts/kotakneo/K1/search_scrip?symbol=NIFTY&exchange=NFO&expiry=30JUL2026&option_type=CE&strike_price=25000&ignore_50multiple=false",
+      ),
+      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/orderhistory?order_id=OID-1"),
+      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/ordertrades?order_id=OID-1"),
+    ]));
+    expect(urls.some((url) => url.includes("/api/v1/limits"))).toBe(false);
+    expect(urls.some((url) => url.includes("/api/v1/search_scrip"))).toBe(false);
   });
 
   it("uses native market calendar reads when a live native account is connected without an OpenAlgo key", async () => {

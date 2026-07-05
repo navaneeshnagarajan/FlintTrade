@@ -89,16 +89,21 @@ const SMART_ORDER_ENDPOINTS = new Set(["placesmartorder"]);
 
 const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
   funds: "funds",
+  limits: "limits",
   orderbook: "orders",
   orderstatus: "orderstatus",
+  orderhistory: "orderhistory",
+  ordertrades: "ordertrades",
   tradebook: "trades",
   positionbook: "positions",
   holdings: "holdings",
   quotes: "quotes",
+  quote_details: "quote_details",
   ticker: "quotes",
   multiquotes: "quotes",
   depth: "depth",
   margin: "margin",
+  scrip_master: "scrip_master",
   holidays: "holidays",
   timings: "timings",
   optiongreeks: "optiongreeks",
@@ -108,6 +113,7 @@ const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
   optionchain: "optionchain",
   search: "search",
   symbol: "search",
+  search_scrip: "search_scrip",
 };
 
 const NATIVE_ROUTED_ORDER_ENDPOINTS = new Set(["place", "modify", "cancel"]);
@@ -119,7 +125,7 @@ const NATIVE_ROUTED_ORDER_ENDPOINTS = new Set(["place", "modify", "cancel"]);
 // kinds (quotes/history/depth/optionchain/greeks/expiry/search/timings/holidays)
 // are broker-agnostic reference data and stay available in every mode.
 const NATIVE_ACCOUNT_SCOPED_KINDS = new Set<NativeReadKind>([
-  "funds", "positions", "holdings", "orders", "orderstatus", "trades", "margin",
+  "funds", "limits", "positions", "holdings", "orders", "orderstatus", "orderhistory", "ordertrades", "trades", "margin",
 ]);
 
 function getBase(): string {
@@ -212,6 +218,13 @@ function buildNativeReadParams(endpoint: string, extra: object): NativeReadParam
       exchange: stringParam(params.exchange, "NSE"),
     };
   }
+  if (endpoint === "quote_details") {
+    return {
+      symbol: stringParam(params.symbol),
+      exchange: stringParam(params.exchange, "NSE"),
+      quote_type: stringParam(params.quote_type ?? params.type, "all"),
+    };
+  }
   if (endpoint === "multiquotes") {
     const symbols = Array.isArray(params.symbols)
       ? params.symbols
@@ -260,6 +273,22 @@ function buildNativeReadParams(endpoint: string, extra: object): NativeReadParam
       order_id: stringParam(params.order_id ?? params.orderId ?? params.orderid),
     };
   }
+  if (endpoint === "orderhistory" || endpoint === "ordertrades") {
+    return {
+      order_id: stringParam(params.order_id ?? params.orderId ?? params.orderid),
+    };
+  }
+  if (endpoint === "limits") {
+    return {
+      segment: stringParam(params.segment, "ALL"),
+      exchange: stringParam(params.exchange, "ALL"),
+      product: stringParam(params.product, "ALL"),
+    };
+  }
+  if (endpoint === "scrip_master") {
+    const exchange = stringParam(params.exchange);
+    return exchange ? { exchange } : undefined;
+  }
   if (endpoint === "history") {
     return {
       symbol: stringParam(params.symbol),
@@ -291,6 +320,21 @@ function buildNativeReadParams(endpoint: string, extra: object): NativeReadParam
     return {
       query: stringParam(params.query) || stringParam(params.symbol),
       ...(exchange ? { exchange } : {}),
+    };
+  }
+  if (endpoint === "search_scrip") {
+    const optional: NativeReadParams = {};
+    const expiry = stringParam(params.expiry);
+    const optionType = stringParam(params.option_type);
+    const strikePrice = stringParam(params.strike_price);
+    if (expiry) optional.expiry = expiry;
+    if (optionType) optional.option_type = optionType;
+    if (strikePrice) optional.strike_price = strikePrice;
+    if (typeof params.ignore_50multiple === "boolean") optional.ignore_50multiple = params.ignore_50multiple;
+    return {
+      symbol: stringParam(params.symbol) || stringParam(params.query),
+      exchange: stringParam(params.exchange, "NSE"),
+      ...optional,
     };
   }
   return undefined;
@@ -943,6 +987,12 @@ async function readPrimaryNative<T>(endpoint: string, extra: object = {}): Promi
   return normaliseNativeRead(endpoint, value) as T;
 }
 
+async function readRequiredPrimaryNative<T>(endpoint: string, extra: object = {}): Promise<T> {
+  const value = await readPrimaryNative<T>(endpoint, extra);
+  if (value !== undefined) return value;
+  throw new Error(`A live native broker account is required for ${endpoint}.`);
+}
+
 function requireApiKey(endpoint: string): void {
   if (getApiKey().trim().length > 0) return;
   throw new Error(`OpenAlgo API key is not configured for ${endpoint}. Check Settings -> Connection.`);
@@ -1514,6 +1564,38 @@ export interface MultiQuoteResult {
 export const getQuotes = (symbol: string, exchange = "NSE") =>
   post<Quote>("quotes", { symbol, exchange });
 
+export const getQuoteDetails = (
+  symbol: string,
+  exchange = "NSE",
+  quoteType = "all",
+) => readRequiredPrimaryNative<Array<Record<string, unknown>>>("quote_details", {
+  symbol,
+  exchange,
+  quote_type: quoteType,
+});
+
+export const getBrokerLimits = (
+  segment = "ALL",
+  exchange = "ALL",
+  product = "ALL",
+) => readRequiredPrimaryNative<Record<string, unknown>>("limits", { segment, exchange, product });
+
+export const getScripMaster = (exchange?: string) =>
+  readRequiredPrimaryNative<Record<string, unknown>>("scrip_master", exchange ? { exchange } : {});
+
+export interface NativeScripSearchOptions {
+  exchange?: string;
+  expiry?: string;
+  option_type?: string;
+  strike_price?: string;
+  ignore_50multiple?: boolean;
+}
+
+export const searchScrip = (
+  symbol: string,
+  options: NativeScripSearchOptions = {},
+) => readRequiredPrimaryNative<Array<Record<string, unknown>>>("search_scrip", { symbol, ...options });
+
 /**
  * Fetch quotes for multiple symbols in one request.
  *
@@ -1627,6 +1709,10 @@ export const getOIProfile = (symbol: string, exchange: string, expiry_date?: str
 export const getFunds = () => post<Funds>("funds");
 export const getMargin = (symbol: string, exchange: string, qty: number, product: string, action: string) =>
   post<MarginData>("margin", { symbol, exchange, qty, product, action });
+export const getOrderHistory = (orderId: string) =>
+  readRequiredPrimaryNative<Array<Record<string, unknown>>>("orderhistory", { order_id: orderId });
+export const getOrderTrades = (orderId: string) =>
+  readRequiredPrimaryNative<Array<Record<string, unknown>>>("ordertrades", { order_id: orderId });
 
 // OpenAlgo wraps list responses: { data: { orders: [...], statistics: {...} } }
 // post() unwraps json.data, so we receive { orders: [...], statistics: {...} }.

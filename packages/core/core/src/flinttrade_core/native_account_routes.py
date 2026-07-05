@@ -961,15 +961,20 @@ def list_native_accounts() -> Any:
 
 _READ_METHODS = {
     "funds": ("funds",),
+    "limits": ("limits",),
     "positions": ("positions",),
     "holdings": ("holdings",),
     "profile": ("profile", "user_profile"),
     "orders": ("order_book",),
     "orderstatus": ("order_details",),
+    "orderhistory": ("order_history",),
+    "ordertrades": ("order_trades",),
     "trades": ("trade_book",),
     "quotes": ("quotes",),
+    "quote_details": ("quote_details",),
     "depth": ("market_depth",),
     "margin": ("margin_calculator",),
+    "scrip_master": ("scrip_master",),
     "holidays": ("market_holidays",),
     "timings": ("market_timings",),
     "optiongreeks": ("option_greeks",),
@@ -977,6 +982,7 @@ _READ_METHODS = {
     "expiry": ("expiry_list",),
     "optionchain": ("option_chain",),
     "search": ("search_instruments", "search_symbols"),
+    "search_scrip": ("search_scrip",),
 }
 _READ_KINDS = set(_READ_METHODS)
 
@@ -1009,6 +1015,14 @@ def _native_depth_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
     if not symbols:
         return None, "depth read requires symbol or symbols."
     return (symbols,), None
+
+
+def _native_quote_details_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    args, message = _native_quote_read_args()
+    if message is not None or args is None:
+        return None, message
+    quote_type = str(request.args.get("quote_type") or request.args.get("type") or "all").strip().lower() or "all"
+    return (args[0], quote_type), None
 
 
 def _native_margin_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
@@ -1051,6 +1065,18 @@ def _native_order_status_read_args() -> tuple[tuple[Any, ...] | None, str | None
     if not order_id:
         return None, "orderstatus read requires order_id or orderId."
     return (order_id,), None
+
+
+def _native_limits_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    segment = str(request.args.get("segment") or "ALL").strip().upper() or "ALL"
+    exchange = str(request.args.get("exchange") or "ALL").strip().upper() or "ALL"
+    product = str(request.args.get("product") or "ALL").strip().upper() or "ALL"
+    return (segment, exchange, product), None
+
+
+def _native_scrip_master_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    exchange = str(request.args.get("exchange") or request.args.get("segment") or "").strip().upper()
+    return ((exchange,) if exchange else ()), None
 
 
 def _native_holidays_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
@@ -1128,15 +1154,55 @@ def _native_search_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
     return (query[:80],), None
 
 
+def _native_search_scrip_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    symbol = str(request.args.get("symbol") or request.args.get("query") or request.args.get("q") or "").strip()
+    if not symbol:
+        return None, "search_scrip read requires symbol, query or q."
+    exchange = str(request.args.get("exchange") or "NSE").strip().upper() or "NSE"
+    return (symbol[:80], exchange), None
+
+
+def _truthy_query_arg(name: str, default: bool) -> bool:
+    value = request.args.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _native_read_kwargs(kind: str) -> dict[str, Any]:
+    if kind != "search_scrip":
+        return {}
+    kwargs: dict[str, Any] = {}
+    for query_key, arg_name in (
+        ("expiry", "expiry"),
+        ("option_type", "option_type"),
+        ("strike_price", "strike_price"),
+    ):
+        value = str(request.args.get(query_key) or "").strip()
+        if value:
+            kwargs[arg_name] = value.upper() if query_key == "option_type" else value
+    if "ignore_50multiple" in request.args:
+        kwargs["ignore_50multiple"] = _truthy_query_arg("ignore_50multiple", True)
+    return kwargs
+
+
 def _native_read_args(kind: str) -> tuple[tuple[Any, ...] | None, str | None]:
+    if kind == "limits":
+        return _native_limits_read_args()
     if kind == "quotes":
         return _native_quote_read_args()
+    if kind == "quote_details":
+        return _native_quote_details_read_args()
     if kind == "depth":
         return _native_depth_read_args()
     if kind == "margin":
         return _native_margin_read_args()
     if kind == "orderstatus":
         return _native_order_status_read_args()
+    if kind in {"orderhistory", "ordertrades"}:
+        return _native_order_status_read_args()
+    if kind == "scrip_master":
+        return _native_scrip_master_read_args()
     if kind == "holidays":
         return _native_holidays_read_args()
     if kind == "timings":
@@ -1151,6 +1217,8 @@ def _native_read_args(kind: str) -> tuple[tuple[Any, ...] | None, str | None]:
         return _native_option_chain_read_args()
     if kind == "search":
         return _native_search_read_args()
+    if kind == "search_scrip":
+        return _native_search_scrip_read_args()
     return (), None
 
 
@@ -1195,8 +1263,9 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
     args, message = _native_read_args(kind)
     if message is not None:
         return jsonify({"status": "error", "message": message}), 400
+    kwargs = _native_read_kwargs(kind)
     try:
-        result = asyncio.run(reader(session, *(args or ())))
+        result = asyncio.run(reader(session, *(args or ()), **kwargs))
     except NotImplementedError:
         return jsonify({"status": "error", "message": f"{adapter_id} adapter does not support {kind} reads."}), 501
     except Exception as exc:  # noqa: BLE001 - classify before surfacing a public route error

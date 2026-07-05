@@ -928,6 +928,82 @@ def test_native_account_reads_include_instrument_search(client, monkeypatch):
     assert resp.get_json()["data"][0]["instrument_key"] == "NSE_EQ|INE002A01018"
 
 
+def test_native_account_reads_include_broker_specific_surfaces(client, monkeypatch):
+    """Broker-specific read methods stay reachable through the unified native route."""
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _limits(_self, _session, segment, exchange, product):
+        assert (segment, exchange, product) == ("CASH", "NSE", "MIS")
+        return {"available_cash": 1000, "segment": segment, "exchange": exchange, "product": product}
+
+    async def _quote_details(_self, _session, symbols, quote_type="all"):
+        assert symbols == ["NSE:INFY"]
+        assert quote_type == "ltp"
+        return [{"symbol": "INFY", "ltp": 1450.25}]
+
+    async def _scrip_master(_self, _session, exchange=None):
+        assert exchange == "NSE"
+        return {"segments": [{"exchange": exchange, "url": "https://example.invalid/nse.csv"}]}
+
+    async def _search_scrip(
+        _self, _session, symbol, exchange="NSE", *, expiry=None, option_type=None, strike_price=None,
+        ignore_50multiple=True,
+    ):
+        assert symbol == "NIFTY"
+        assert exchange == "NFO"
+        assert expiry == "30JUL2026"
+        assert option_type == "CE"
+        assert strike_price == "25000"
+        assert ignore_50multiple is False
+        return [{"symbol": symbol, "exchange": exchange, "token": "12345"}]
+
+    async def _order_history(_self, _session, order_id):
+        assert order_id == "OID-1"
+        return [{"order_id": order_id, "status": "OPEN"}]
+
+    async def _order_trades(_self, _session, order_id):
+        assert order_id == "OID-1"
+        return [{"order_id": order_id, "trade_id": "T1"}]
+
+    monkeypatch.setattr(UpstoxAdapter, "limits", _limits, raising=False)
+    monkeypatch.setattr(UpstoxAdapter, "quote_details", _quote_details, raising=False)
+    monkeypatch.setattr(UpstoxAdapter, "scrip_master", _scrip_master, raising=False)
+    monkeypatch.setattr(UpstoxAdapter, "search_scrip", _search_scrip, raising=False)
+    monkeypatch.setattr(UpstoxAdapter, "order_history", _order_history, raising=False)
+    monkeypatch.setattr(UpstoxAdapter, "order_trades", _order_trades, raising=False)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXUSECASES", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    limits = c.get("/api/v1/native/accounts/upstox/UPXUSECASES/limits?segment=CASH&exchange=NSE&product=MIS")
+    details = c.get("/api/v1/native/accounts/upstox/UPXUSECASES/quote_details?symbol=INFY&exchange=NSE&type=ltp")
+    master = c.get("/api/v1/native/accounts/upstox/UPXUSECASES/scrip_master?exchange=NSE")
+    search = c.get(
+        "/api/v1/native/accounts/upstox/UPXUSECASES/search_scrip"
+        "?symbol=NIFTY&exchange=NFO&expiry=30JUL2026&option_type=ce&strike_price=25000&ignore_50multiple=false"
+    )
+    history = c.get("/api/v1/native/accounts/upstox/UPXUSECASES/orderhistory?orderId=OID-1")
+    trades = c.get("/api/v1/native/accounts/upstox/UPXUSECASES/ordertrades?order_id=OID-1")
+
+    assert limits.status_code == 200, limits.get_json()
+    assert details.status_code == 200, details.get_json()
+    assert master.status_code == 200, master.get_json()
+    assert search.status_code == 200, search.get_json()
+    assert history.status_code == 200, history.get_json()
+    assert trades.status_code == 200, trades.get_json()
+    assert limits.get_json()["data"]["product"] == "MIS"
+    assert details.get_json()["data"][0]["ltp"] == 1450.25
+    assert master.get_json()["data"]["segments"][0]["exchange"] == "NSE"
+    assert search.get_json()["data"][0]["token"] == "12345"
+    assert history.get_json()["data"][0]["status"] == "OPEN"
+    assert trades.get_json()["data"][0]["trade_id"] == "T1"
+
+
 def test_native_account_read_service_window_is_retryable_without_dropping_session(client, monkeypatch):
     """A broker service-hours outage is a read outage, not a re-auth signal."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
