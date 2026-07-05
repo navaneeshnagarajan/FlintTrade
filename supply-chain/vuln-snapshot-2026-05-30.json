@@ -1,9 +1,0 @@
-{
-  "_meta": {
-    "seed": true,
-    "generated": "2026-05-30",
-    "note": "BOOTSTRAP SEED. This is a pip-audit JSON report shape used by scripts/pip-audit-with-allowlist.py as the Security M8 offline fail-closed fallback. It is replaced with a REAL OSV-backed report by .github/workflows/refresh-vuln-snapshot.yml (weekly). 'dependencies: []' means 'no known HIGH/CRITICAL vulns recorded as of the generated date' — only consulted when OSV.dev is unreachable AND this file is <= 14 days old; otherwise the gate fails closed.",
-    "source": "seed (no live OSV query)"
-  },
-  "dependencies": []
-}
