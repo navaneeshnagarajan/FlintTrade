@@ -39,8 +39,21 @@ async function listBrokerAccounts(): Promise<BrokerAccount[]> {
       : new Error("Could not list broker accounts");
   }
 
-  const gatewayAccounts = gatewayResult.status === "fulfilled" ? gatewayResult.value : [];
-  const nativeAccounts = nativeResult.status === "fulfilled" ? nativeResult.value.map(nativeToBrokerAccount) : [];
+  // A *one-sided* failure must not drop the failing source's accounts. Both
+  // routes share the port-5100 backend, so a one-sided rejection is a
+  // transient/route-specific blip — returning a partial list would let
+  // setAccounts null the persisted activeAccountId if the active account
+  // belonged to that source, silently reverting write-targeting to OpenAlgo with
+  // no re-selection on recovery. Keep that source's last-good rows (from the
+  // store) until it recovers, so the surviving source stays live and the active
+  // account survives the blip.
+  const previous = useBrokerStore.getState().accounts;
+  const gatewayAccounts = gatewayResult.status === "fulfilled"
+    ? gatewayResult.value
+    : previous.filter((a) => a.source !== "native");
+  const nativeAccounts = nativeResult.status === "fulfilled"
+    ? nativeResult.value.map(nativeToBrokerAccount)
+    : previous.filter((a) => a.source === "native");
   return [...gatewayAccounts, ...nativeAccounts];
 }
 

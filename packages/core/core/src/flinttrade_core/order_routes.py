@@ -45,6 +45,22 @@ from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
 
+
+def _redact_exc(exc: object, account_id: object) -> str:
+    """Scrub a raw broker account id out of an exception message for logging.
+
+    Registry and session-provider errors embed the raw selector (for example
+    ``"Account 'D1' not found in registry."``); logging the exception tail
+    verbatim would re-leak the account id that :func:`account_ref` is meant to
+    keep out of runtime logs. Returns the message with any literal occurrence of
+    the account id replaced by its stable, non-reversible reference.
+    """
+    text = str(exc)
+    raw = str(account_id or "").strip()
+    if raw and raw in text:
+        text = text.replace(raw, account_ref(account_id))
+    return text
+
 # Frontend `api.ts` posts to `/ft-api/api/v1/orders/<X>` (→ `/api/v1/orders/<X>`
 # after the WSGI prefix strip). The blueprint must therefore live under
 # `/api/v1/orders`, not the project's general `/v1/X` convention. (Previously
@@ -514,6 +530,7 @@ def _dispatch_live_order(
     # the router re-verifies over the SAME typed_order object, keeping the
     # order-binding fingerprint consistent end-to-end.
     _t0 = time.perf_counter()
+    safe_account = account_ref(account_id)
     try:
         safety_ctx = gate_order(typed_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
         result = asyncio.run(
@@ -540,13 +557,13 @@ def _dispatch_live_order(
     except SafetyBypassError as exc:
         logger.warning(
             "Live order refused by safety gate | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, account_id, exc,
+            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({"status": "error", "message": "Order refused"}), 403
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning(
             "Live order — broker not connected | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, account_id, exc,
+            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",
@@ -561,7 +578,7 @@ def _dispatch_live_order(
         # A throttle refusal, not a safety bypass — map to 429 so callers retry.
         logger.warning(
             "Live order refused by algo-tag guard | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, account_id, exc,
+            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
@@ -571,7 +588,7 @@ def _dispatch_live_order(
         # available", not a server fault — map to 501 with the adapter message.
         logger.warning(
             "Live order — adapter capability not available | action=%s adapter=%s account=%s: %s",
-            ft_action, adapter_id, account_id, exc,
+            ft_action, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",
@@ -580,7 +597,7 @@ def _dispatch_live_order(
     except Exception:
         logger.exception(
             "Live order dispatch failed | action=%s adapter=%s account=%s",
-            ft_action, adapter_id, account_id,
+            ft_action, adapter_id, safe_account,
         )
         return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
 
@@ -609,7 +626,7 @@ def _dispatch_live_order(
 
     logger.info(
         "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
-        ft_action, adapter_id, account_id, body.get("symbol", "?"),
+        ft_action, adapter_id, safe_account, body.get("symbol", "?"),
     )
     # Return both keys: ``orderid`` (legacy OpenAlgo response shape the UI reads)
     # and ``data`` (the routed-path shape) so the frontend works either way.
@@ -751,7 +768,10 @@ def _gated_write_dispatch(
         logger.warning("Live %s refused by algo-tag guard | order=%s: %s", op, safe_order, exc)
         return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", op, adapter_id, safe_account, exc)
+        logger.warning(
+            "Live %s — broker not connected | adapter=%s account=%s: %s",
+            op, adapter_id, safe_account, _redact_exc(exc, account_id),
+        )
         return jsonify({
             "status": "error",
             "message": (
@@ -768,7 +788,7 @@ def _gated_write_dispatch(
             op,
             adapter_id,
             safe_account,
-            exc,
+            _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",
@@ -1713,7 +1733,7 @@ def _gated_verb_write(
             verb,
             adapter_id,
             safe_account,
-            exc,
+            _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",
@@ -1727,7 +1747,7 @@ def _gated_verb_write(
         # available" for this broker, not a server fault.
         logger.warning(
             "Live %s — adapter capability not available | adapter=%s account=%s: %s",
-            verb, adapter_id, safe_account, exc,
+            verb, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",
@@ -1739,7 +1759,7 @@ def _gated_verb_write(
         # so adapter tracebacks, paths, or tokens cannot reach HTTP callers.
         logger.warning(
             "Live %s rejected by broker/adapter | adapter=%s account=%s: %s",
-            verb, adapter_id, safe_account, exc,
+            verb, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({"status": "error", "message": fail_message}), 502
     except Exception:
@@ -1822,7 +1842,10 @@ def _gated_broker_read(
             )
         rows = asyncio.run(method(session))
     except SafetyBypassError as exc:
-        logger.warning("Broker read %s refused | adapter=%s account=%s: %s", read_verb, adapter_id, safe_account, exc)
+        logger.warning(
+            "Broker read %s refused | adapter=%s account=%s: %s",
+            read_verb, adapter_id, safe_account, _redact_exc(exc, account_id),
+        )
         return jsonify({"status": "error", "message": "Request refused"}), 403
     except (BrokerNotFoundError, KeyError) as exc:
         logger.warning(
@@ -1830,7 +1853,7 @@ def _gated_broker_read(
             read_verb,
             adapter_id,
             safe_account,
-            exc,
+            _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",
@@ -1842,7 +1865,7 @@ def _gated_broker_read(
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
         logger.warning(
             "Broker read %s — adapter capability not available | adapter=%s account=%s: %s",
-            read_verb, adapter_id, safe_account, exc,
+            read_verb, adapter_id, safe_account, _redact_exc(exc, account_id),
         )
         return jsonify({
             "status": "error",

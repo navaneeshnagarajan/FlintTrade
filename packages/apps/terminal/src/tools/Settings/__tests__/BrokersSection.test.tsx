@@ -18,6 +18,15 @@ vi.mock("@/services/ftApi.native", () => ({
   reloginNativeAccount: vi.fn(),
 }));
 
+vi.mock("@/services/gatewayApi", () => ({
+  gatewayApi: {
+    listAccounts: vi.fn(),
+    removeAccount: vi.fn(),
+    reconnectAccount: vi.fn(),
+    setPrimary: vi.fn(),
+  },
+}));
+
 import {
   listNativeBrokers,
   listBrokerMcpCatalogue,
@@ -28,6 +37,8 @@ import {
   setPrimaryNativeAccount,
   reloginNativeAccount,
 } from "@/services/ftApi.native";
+import { gatewayApi } from "@/services/gatewayApi";
+import { useBrokerStore } from "@/stores/brokerStore";
 import { BrokersSection } from "../BrokersSection";
 
 const BROKERS = [
@@ -237,6 +248,10 @@ describe("BrokersSection", () => {
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
     (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (gatewayApi.listAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    // The broker store is a module singleton; reset it so a seeded gateway
+    // account from one test never leaks into the next.
+    useBrokerStore.setState({ accounts: [], activeAccountId: null });
   });
 
   it("shows the section heading and empty connected-accounts state", async () => {
@@ -245,6 +260,30 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
     expect(screen.getByText(/not fully tested — use at your own risk/i)).toBeInTheDocument();
     expect(screen.getByText(/not been live-verified for any broker/i)).toBeInTheDocument();
+  });
+
+  it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {
+    (gatewayApi.listAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        account_id: "GW1",
+        broker: "zerodha",
+        label: "Zerodha Main",
+        status: "connected",
+        connected_at: null,
+        error_message: null,
+        is_primary: false,
+        source: "gateway",
+      },
+    ]);
+    (gatewayApi.removeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Gateway accounts")).toBeInTheDocument());
+    expect(screen.getByText("Zerodha Main")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /disconnect zerodha main/i }));
+    await waitFor(() => expect(gatewayApi.removeAccount).toHaveBeenCalledWith("GW1"));
   });
 
   it("shows hosted MCP setup without promoting Groww to native connect", async () => {

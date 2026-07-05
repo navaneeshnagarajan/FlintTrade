@@ -41,10 +41,15 @@ vi.mock("@/services/ftApi.native", () => ({
 }));
 
 const mockSetAccounts = vi.fn<(accounts: BrokerAccount[]) => void>();
+// Last-good store state read by listBrokerAccounts on a one-sided failure.
+let mockStoreAccounts: BrokerAccount[] = [];
 
 vi.mock("@/stores/brokerStore", () => ({
-  useBrokerStore: (selector: (s: { setAccounts: typeof mockSetAccounts }) => unknown) =>
-    selector({ setAccounts: mockSetAccounts }),
+  useBrokerStore: Object.assign(
+    (selector: (s: { setAccounts: typeof mockSetAccounts }) => unknown) =>
+      selector({ setAccounts: mockSetAccounts }),
+    { getState: (): { accounts: BrokerAccount[] } => ({ accounts: mockStoreAccounts }) },
+  ),
 }));
 
 // ---------------------------------------------------------------------------
@@ -102,6 +107,7 @@ beforeEach(() => {
   mockListNativeAccounts.mockReset();
   mockListNativeAccounts.mockResolvedValue([]);
   mockSetAccounts.mockReset();
+  mockStoreAccounts = [];
 });
 
 afterEach(() => {
@@ -287,6 +293,32 @@ describe("useBrokerAccounts — successful response", () => {
         source: "native",
       },
     ]);
+  });
+
+  it("preserves the failed source's last-good accounts so the active one is not dropped", async () => {
+    // Finding #5: a one-sided gateway failure must not drop a gateway account
+    // that is the active write target — that would null activeAccountId and
+    // revert targeting to OpenAlgo. Its last-good row is retained until recovery.
+    mockStoreAccounts = [
+      {
+        account_id: "GW1",
+        broker: "zerodha",
+        label: "Zerodha",
+        status: "connected",
+        connected_at: null,
+        error_message: null,
+        is_primary: true,
+        source: "gateway",
+      },
+    ];
+    mockListAccounts.mockRejectedValue(new Error("Gateway down"));
+    mockListNativeAccounts.mockResolvedValue([]);
+
+    renderHook(() => useBrokerAccounts(), { wrapper: makeWrapper(queryClient) });
+
+    await waitFor(() => expect(mockSetAccounts).toHaveBeenCalled());
+    const [synced] = mockSetAccounts.mock.calls[0] as [BrokerAccount[]];
+    expect(synced).toEqual([expect.objectContaining({ account_id: "GW1", source: "gateway" })]);
   });
 
   it("syncs an empty accounts array to the store when the API returns none", async () => {

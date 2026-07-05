@@ -9,7 +9,7 @@
  * the backend's loopback callback establishes the session.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
@@ -34,7 +34,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { BROKER_ACCOUNTS_QUERY_KEY } from "@/hooks/useBrokerAccounts";
+import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { gatewayApi } from "@/services/gatewayApi";
+import type { BrokerAccount } from "@/types/broker";
 import {
   listNativeBrokers,
   listBrokerMcpCatalogue,
@@ -276,6 +279,67 @@ export function BrokerConnect() {
       );
     },
   });
+
+  // Legacy gateway accounts (BROKER_CATALOG / OpenAlgo-bridge path) live in the
+  // unified broker store. They are not part of the native connect flow above,
+  // but they still need remove / reconnect / set-primary management — folding
+  // that here keeps a single brokers surface rather than a separate orphaned
+  // screen. The section renders only when such accounts exist, so the common
+  // native-only setup is visually unchanged. Triggering the shared poll here
+  // populates the store in both the app shell and the pre-app setup wizard.
+  useBrokerAccounts();
+  // Select the stable store array and filter via useMemo — filtering inside the
+  // Zustand selector would return a fresh array each call and loop under
+  // useSyncExternalStore.
+  const allAccounts = useBrokerStore((s) => s.accounts);
+  const gatewayAccounts = useMemo(
+    () => allAccounts.filter((a) => a.source !== "native"),
+    [allAccounts],
+  );
+
+  const gatewayRemoveMutation = useMutation({
+    mutationFn: (accountId: string) => gatewayApi.removeAccount(accountId),
+    onSuccess: (_r, accountId) => {
+      setError("");
+      setNotice(`Gateway account ${accountId} disconnected.`);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown, accountId) => {
+      setNotice("");
+      setError(e instanceof Error ? e.message : `Could not disconnect gateway account ${accountId}.`);
+    },
+  });
+
+  const gatewayReconnectMutation = useMutation({
+    mutationFn: (accountId: string) => gatewayApi.reconnectAccount(accountId),
+    onSuccess: (_r, accountId) => {
+      setError("");
+      setNotice(`Gateway account ${accountId} reconnected.`);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown, accountId) => {
+      setNotice("");
+      setError(e instanceof Error ? e.message : `Could not reconnect gateway account ${accountId}.`);
+    },
+  });
+
+  const gatewaySetPrimaryMutation = useMutation({
+    mutationFn: (accountId: string) => gatewayApi.setPrimary(accountId),
+    onSuccess: (_r, accountId) => {
+      setError("");
+      setNotice(`Gateway account ${accountId} set as primary.`);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown, accountId) => {
+      setNotice("");
+      setError(e instanceof Error ? e.message : `Could not set gateway account ${accountId} as primary.`);
+    },
+  });
+
+  const gatewayBusy =
+    gatewayRemoveMutation.isPending
+    || gatewayReconnectMutation.isPending
+    || gatewaySetPrimaryMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -533,6 +597,79 @@ export function BrokerConnect() {
           </ul>
         )}
       </div>
+
+      {/* Legacy gateway accounts — only shown when any exist. */}
+      {gatewayAccounts.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-text-secondary">Gateway accounts</h3>
+          <p className="text-xs text-text-muted">
+            Broker accounts connected through the FlintTrade gateway (OpenAlgo bridge / catalogue path).
+          </p>
+          <ul className="space-y-2">
+            {gatewayAccounts.map((a: BrokerAccount) => (
+              <li
+                key={`gateway:${a.broker}:${a.account_id}`}
+                className="flex items-center justify-between rounded-lg border border-border-default bg-surface-card p-3"
+              >
+                <div className="flex items-center gap-3">
+                  {a.is_primary && (
+                    <Star className="size-4 shrink-0 fill-accent text-accent" aria-label="Primary account" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text-primary truncate">
+                      {a.label || a.account_id}
+                    </div>
+                    <div className="text-xs text-text-muted capitalize">
+                      {a.broker}
+                      {a.is_primary ? " · primary" : ""}
+                    </div>
+                    {a.error_message && (
+                      <div className="text-xxs text-warning mt-0.5 truncate" title={a.error_message}>
+                        {a.error_message}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Badge variant="outline" className="text-xxs capitalize">{a.status}</Badge>
+                  {!a.is_primary && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Set ${a.label || a.account_id} as primary`}
+                      title="Set as primary"
+                      onClick={() => gatewaySetPrimaryMutation.mutate(a.account_id)}
+                      disabled={gatewayBusy}
+                    >
+                      <Star className="size-4" aria-hidden="true" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Reconnect ${a.label || a.account_id}`}
+                    title="Reconnect"
+                    onClick={() => gatewayReconnectMutation.mutate(a.account_id)}
+                    disabled={gatewayBusy}
+                  >
+                    <RefreshCw className="size-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Disconnect ${a.label || a.account_id}`}
+                    title="Remove account"
+                    onClick={() => gatewayRemoveMutation.mutate(a.account_id)}
+                    disabled={gatewayBusy}
+                  >
+                    <Trash2 className="size-4 text-loss" aria-hidden="true" />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Connect a new account */}
       <div className="space-y-4 rounded-lg border border-border-default bg-surface-card/60 p-4">

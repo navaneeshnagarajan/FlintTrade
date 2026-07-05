@@ -888,3 +888,65 @@ def test_gated_verb_write_returns_bounded_broker_error(flask_app, monkeypatch):
 
     assert status == 502
     assert response.get_json()["message"] == "Forever order cancel failed"
+
+
+def test_redact_exc_scrubs_raw_account_id():
+    """A registry error's embedded raw account id is replaced by its log ref."""
+    from flinttrade_core.order_routes import _redact_exc
+    from flinttrade_gateway.log_safety import account_ref
+
+    exc = ValueError("Account 'ACCT-SECRET-42' not found in registry.")
+    out = _redact_exc(exc, "ACCT-SECRET-42")
+
+    assert "ACCT-SECRET-42" not in out
+    assert account_ref("ACCT-SECRET-42") in out
+
+
+def test_redact_exc_leaves_unrelated_messages_untouched():
+    """An exception that does not embed the account id is logged verbatim."""
+    from flinttrade_core.order_routes import _redact_exc
+
+    assert _redact_exc(ValueError("rate limit exceeded"), "ACCT-SECRET-42") == "rate limit exceeded"
+
+
+def test_redact_exc_handles_empty_account():
+    """An empty/None account id must not blank out or corrupt the message."""
+    from flinttrade_core.order_routes import _redact_exc
+
+    assert _redact_exc(ValueError("boom"), "") == "boom"
+    assert _redact_exc(ValueError("boom"), None) == "boom"
+
+
+def test_gated_verb_write_keeps_raw_account_id_out_of_logs(flask_app, monkeypatch, caplog):
+    """Finding #7: a broker-not-connected error must not re-leak the raw account
+    id through the caught exception's message tail."""
+    import logging
+
+    from flinttrade_gateway.exceptions import BrokerNotFoundError
+    from flinttrade_gateway.log_safety import account_ref
+    from flinttrade_core import order_routes as routes
+
+    raw_account = "ACCT-SECRET-98765"
+
+    class MissingRouter:
+        async def execute_gated(self, *_args, **_kwargs):
+            raise BrokerNotFoundError(f"Account '{raw_account}' not found in registry.")
+
+    monkeypatch.setattr("flinttrade_engine.safety.gate_broker_write", lambda *_args, **_kwargs: object())
+    monkeypatch.setitem(flask_app.config, "BROKER_ROUTER", MissingRouter())
+
+    with flask_app.app_context(), caplog.at_level(logging.WARNING, logger="flinttrade.order_routes"):
+        _response, status = routes._gated_verb_write(
+            "cancel_forever",
+            {"order_id": "GTT-1"},
+            {"jti": "jti-1", "sub": "operator"},
+            adapter_id="dhan",
+            account_id=raw_account,
+            audit_event="FOREVER_CANCELLED",
+            fail_message="Forever order cancel failed",
+            ref="GTT-1",
+        )
+
+    assert status == 503
+    assert raw_account not in caplog.text
+    assert account_ref(raw_account) in caplog.text
