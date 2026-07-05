@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from flinttrade_core.workspace_migrations import default_workspace_config
 from flinttrade_engine.request_context import parse_selector
+from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES
 from flinttrade_gateway.routing_config import RoutingConfig
 
 # The bare adapter_id namespace the registry is expected to know (identity X7).
-_KNOWN_ADAPTERS = {"openalgo", "dhan", "upstox", "kotakneo", "indmoney"}
+_KNOWN_ADAPTERS = {"openalgo", *NATIVE_ADAPTER_CLASSES}
 
 
 def _all_selectors(cfg: RoutingConfig) -> list[str]:

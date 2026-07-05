@@ -180,6 +180,7 @@ def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
                 "upstox:U1",
                 "indmoney:I1",
                 "kotakneo:K1",
+                "groww:G1",
             ]
         },
     )
@@ -189,6 +190,7 @@ def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
     job_ids = {job.id for job in app.config["ROTATION_SCHEDULER"].get_jobs()}
     assert {"cred_refresh_dhan", "cred_refresh_upstox", "cred_refresh_indmoney"} <= job_ids
     assert "cred_refresh_kotakneo" not in job_ids
+    assert "cred_refresh_groww" not in job_ids
     assert "cred_refresh_openalgo" not in job_ids
 
 

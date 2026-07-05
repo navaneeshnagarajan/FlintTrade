@@ -72,10 +72,10 @@ def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch
             "upstox": object_marker["upstox"],
             "indmoney": object_marker["indmoney"],
         }
-        assert selectors == ["dhan:D1", "upstox:U1", "indmoney:I1", "kotakneo:K1"]
+        assert selectors == ["dhan:D1", "upstox:U1", "indmoney:I1", "kotakneo:K1", "groww:G1"]
         assert verify is True
         # establish_native_sessions skips selectors whose adapters are not
-        # active; Kotak is still coming-soon, so no status is returned for it.
+        # active; Kotak/Groww are still coming-soon, so no status is returned.
         return {"dhan:D1": "ok", "upstox:U1": "ok", "indmoney:I1": "ok"}
 
     object_marker = {"dhan": object(), "upstox": object(), "indmoney": object()}
@@ -93,7 +93,7 @@ def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch
     monkeypatch.setattr(
         app_module,
         "_read_workspace_brokers",
-        lambda: {"registered": ["dhan:D1", "upstox:U1", "indmoney:I1", "kotakneo:K1"]},
+        lambda: {"registered": ["dhan:D1", "upstox:U1", "indmoney:I1", "kotakneo:K1", "groww:G1"]},
     )
     monkeypatch.setattr("flinttrade_gateway.native_login.establish_native_sessions", fake_establish)
 
