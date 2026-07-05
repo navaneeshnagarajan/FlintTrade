@@ -566,17 +566,18 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "trading_supported": True,
         "login_steps": [
             "Add the Dhan remote MCP URL to a supported MCP client.",
-            "Complete the Dhan browser authorisation opened by that client.",
+            "Complete the Dhan browser authorisation and explicit consent flow opened by that client.",
             "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
         ],
         "use_cases": [
             "Portfolio and account review",
             "Order placement, modification, cancellation, and Super Orders in the external MCP client",
-            "Market data and historical data lookup",
-            "Margin, alerts, and instrument search",
+            "Market data, historical OHLC, option chain with Greeks, and live-feed lookup",
+            "Margin, funds, instruments, alerts, ScanX, options analysis, and backtesting workflows",
         ],
         "cautions": [
             "Broker MCP trade tools are outside FlintTrade's in-process safety gate; FlintTrade automation must still use gate_order or gate_broker_write through BrokerRouter.",
+            "Dhan's agent skill pack is reference/setup help; it does not establish a FlintTrade broker session or remove order-confirmation requirements.",
         ],
         "client_configs": [
             {
@@ -618,6 +619,12 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                     "oauth": True,
                 },
             },
+            {
+                "id": "dhanhq_skill_pack",
+                "label": "DhanHQ agent skill pack",
+                "command": "skills",
+                "args": ["add", "dhan-oss/dhanhq-skills", "--skill", "dhanhq"],
+            },
         ],
     },
     "upstox": {
@@ -629,36 +636,54 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "trading_supported": False,
         "daily_reauthorization": True,
         "login_steps": [
-            "Add the Upstox remote MCP URL to a supported MCP client.",
-            "Complete the browser authorisation opened by that client.",
+            "Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.",
+            "Complete the OAuth authorisation opened by that client.",
             "Repeat authorisation daily before relying on account context.",
         ],
         "use_cases": [
-            "Holdings review",
-            "Orders, positions, funds, mutual funds, and profile lookup",
-            "Read-only account context for analysis",
+            "Read-only holdings, orders, positions, mutual funds, funds, and profile lookup",
+            "Account-scoped portfolio composition, performance, risk, and buying-power analysis",
+            "Individual stock research in the context of current holdings",
+            "Technical indicator, chart, trend, and market-context analysis",
+            "Activity summaries, margins, P&L overviews, and portfolio correlation studies",
         ],
         "cautions": [
             "Upstox MCP cannot place, modify, or cancel orders.",
             "Use FlintTrade's native Upstox or OpenAlgo order path for live trading, with the normal safety gate.",
+            "Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.",
         ],
         "client_configs": [
             {
                 "id": "remote_url",
-                "label": "Direct remote URL",
+                "label": "ChatGPT / custom connector URL",
                 "url": "https://mcp.upstox.com/mcp",
-                "config": {"url": "https://mcp.upstox.com/mcp"},
+                "config": {"name": "Upstox MCP", "url": "https://mcp.upstox.com/mcp", "developer_mode": True},
             },
             {
-                "id": "mcp_remote",
-                "label": "mcp-remote",
+                "id": "claude_cursor_mcp_remote",
+                "label": "Claude Desktop / Cursor mcp-remote",
                 "command": "npx",
                 "args": ["mcp-remote", "https://mcp.upstox.com/mcp"],
                 "config": {
                     "mcpServers": {
-                        "upstox": {
+                        "Upstox MCP": {
                             "command": "npx",
                             "args": ["mcp-remote", "https://mcp.upstox.com/mcp"],
+                        },
+                    },
+                },
+            },
+            {
+                "id": "vscode_copilot",
+                "label": "VS Code GitHub Copilot",
+                "url": "https://mcp.upstox.com/mcp",
+                "config": {
+                    "mcp": {
+                        "inputs": [],
+                        "servers": {
+                            "Upstox MCP": {
+                                "url": "https://mcp.upstox.com/mcp",
+                            },
                         },
                     },
                 },
@@ -673,27 +698,28 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "read_only": False,
         "trading_supported": True,
         "login_steps": [
-            "Add the Groww remote MCP URL to a supported MCP client.",
-            "Complete the Groww authorisation opened by that client.",
+            "For Claude Pro, add a custom connector named GrowwMCP with the Groww MCP URL.",
+            "For Cursor or VS Code, add the mcp-remote configuration and install Node.js if needed.",
             "Confirm DDPI status before sell-order workflows.",
         ],
         "use_cases": [
-            "Portfolio intelligence",
-            "F&O analysis",
+            "Portfolio performance, exposure, benchmark, and market-fall analysis",
+            "F&O position, candle, expiry, and P&L analysis",
             "Smart order management in the external MCP client",
-            "Market context",
+            "Market context and holdings near 52-week highs",
+            "Stocks and F&O today; mutual funds, IPOs, bonds, and fundamental analysis are future broker scope",
         ],
         "cautions": [
             "Sell orders through Groww MCP require DDPI authorisation.",
-            "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP, and order-safety verification pass.",
-            "The Groww Trade API page still requires static IP setup for API-key order placement.",
+            "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
+            "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
         ],
         "client_configs": [
             {
                 "id": "remote_url",
-                "label": "Direct remote URL",
+                "label": "Claude Pro custom connector",
                 "url": "https://mcp.groww.in/mcp",
-                "config": {"url": "https://mcp.groww.in/mcp"},
+                "config": {"name": "GrowwMCP", "url": "https://mcp.groww.in/mcp"},
             },
             {
                 "id": "mcp_remote_cursor_vscode",
@@ -702,7 +728,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                 "args": ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
                 "config": {
                     "mcpServers": {
-                        "groww": {
+                        "growwmcp": {
                             "command": "npx",
                             "args": ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
                         },

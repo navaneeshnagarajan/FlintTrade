@@ -148,12 +148,33 @@ class TestCapabilitiesRoute:
             "url": "https://mcp.dhan.co/mcp",
             "oauth": True,
         }
+        assert dhan_configs["dhanhq_skill_pack"]["args"] == [
+            "add",
+            "dhan-oss/dhanhq-skills",
+            "--skill",
+            "dhanhq",
+        ]
+        assert "option chain with Greeks" in " ".join(brokers["dhan"]["mcp"]["use_cases"])
+        assert "order-confirmation" in " ".join(brokers["dhan"]["mcp"]["cautions"])
 
         for broker_id in ("upstox", "groww"):
             mcp = brokers[broker_id]["mcp"]
             command_config = next(c for c in mcp["client_configs"] if c.get("command") == "npx")
-            assert command_config["config"]["mcpServers"][broker_id]["command"] == "npx"
-            assert command_config["config"]["mcpServers"][broker_id]["args"] == command_config["args"]
+            server_config = next(iter(command_config["config"]["mcpServers"].values()))
+            assert server_config["command"] == "npx"
+            assert server_config["args"] == command_config["args"]
+
+        upstox_configs = {c["id"]: c for c in brokers["upstox"]["mcp"]["client_configs"]}
+        assert upstox_configs["remote_url"]["config"] == {
+            "name": "Upstox MCP",
+            "url": "https://mcp.upstox.com/mcp",
+            "developer_mode": True,
+        }
+        assert upstox_configs["vscode_copilot"]["config"]["mcp"]["servers"]["Upstox MCP"] == {
+            "url": "https://mcp.upstox.com/mcp",
+        }
+        assert "Technical indicator" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
+        assert "verify critical data" in " ".join(brokers["upstox"]["mcp"]["cautions"])
 
     def test_mcp_catalogue_supports_single_broker_lookup(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp?broker=groww")
@@ -165,11 +186,16 @@ class TestCapabilitiesRoute:
             "https://mcp.groww.in/mcp",
             "52155",
         ]
-        assert broker["mcp"]["client_configs"][1]["config"]["mcpServers"]["groww"]["args"] == [
+        assert broker["mcp"]["client_configs"][0]["config"] == {
+            "name": "GrowwMCP",
+            "url": "https://mcp.groww.in/mcp",
+        }
+        assert broker["mcp"]["client_configs"][1]["config"]["mcpServers"]["growwmcp"]["args"] == [
             "mcp-remote@0.1.18",
             "https://mcp.groww.in/mcp",
             "52155",
         ]
+        assert "early-stage" in " ".join(broker["mcp"]["cautions"])
 
     def test_all_brokers_have_broker_name(self, client) -> None:  # type: ignore[no-untyped-def]
         """Every broker entry in the full list contains broker_name."""

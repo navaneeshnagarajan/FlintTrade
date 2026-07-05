@@ -277,13 +277,20 @@ def test_list_native_brokers_catalogue(client):
         "https://mcp.dhan.co/mcp",
     ]
     assert dhan_mcp_configs["cursor"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
+    assert dhan_mcp_configs["dhanhq_skill_pack"]["command"] == "skills"
+    assert "option chain with Greeks" in " ".join(brokers["dhan"]["mcp"]["use_cases"])
     assert brokers["upstox"]["mcp"]["remote_url"] == "https://mcp.upstox.com/mcp"
     assert brokers["upstox"]["mcp"]["read_only"] is True
     assert brokers["upstox"]["mcp"]["trading_supported"] is False
+    upstox_mcp_configs = {c["id"]: c for c in brokers["upstox"]["mcp"]["client_configs"]}
+    assert upstox_mcp_configs["vscode_copilot"]["config"]["mcp"]["servers"]["Upstox MCP"] == {
+        "url": "https://mcp.upstox.com/mcp",
+    }
     assert brokers["indmoney"]["mcp"] is None
     assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
     assert brokers["groww"]["mcp"]["trading_supported"] is True
-    assert brokers["groww"]["mcp"]["client_configs"][1]["config"]["mcpServers"]["groww"]["args"] == [
+    assert brokers["groww"]["mcp"]["client_configs"][0]["config"]["name"] == "GrowwMCP"
+    assert brokers["groww"]["mcp"]["client_configs"][1]["config"]["mcpServers"]["growwmcp"]["args"] == [
         "mcp-remote@0.1.18",
         "https://mcp.groww.in/mcp",
         "52155",

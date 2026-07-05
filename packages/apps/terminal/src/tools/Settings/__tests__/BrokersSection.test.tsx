@@ -177,12 +177,22 @@ const MCP_BROKERS = [
       remote_url: "https://mcp.dhan.co/mcp",
       docs_url: "https://docs.dhanhq.co/mcp/",
       auth_mode: "Authorize through Dhan's hosted MCP flow from the client.",
-      reauth: "Re-authorize when Dhan prompts.",
+      reauth: "Re-authorize in the MCP client when Dhan prompts for a fresh session.",
       read_only: false,
       trading_supported: true,
-      login_steps: ["Add the Dhan remote MCP URL to a supported MCP client."],
-      use_cases: ["Portfolio and account review", "Super Orders"],
-      cautions: ["Broker MCP trade tools are outside FlintTrade's in-process safety gate."],
+      login_steps: [
+        "Add the Dhan remote MCP URL to a supported MCP client.",
+        "Complete the Dhan browser authorisation and explicit consent flow opened by that client.",
+        "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
+      ],
+      use_cases: [
+        "Portfolio and account review",
+        "Market data, historical OHLC, option chain with Greeks, and live-feed lookup",
+      ],
+      cautions: [
+        "Broker MCP trade tools are outside FlintTrade's in-process safety gate.",
+        "Dhan's agent skill pack is reference/setup help; it does not establish a FlintTrade broker session.",
+      ],
       client_configs: [
         { id: "remote_url", label: "Claude / ChatGPT / custom connector", url: "https://mcp.dhan.co/mcp" },
         {
@@ -218,6 +228,12 @@ const MCP_BROKERS = [
             oauth: true,
           },
         },
+        {
+          id: "dhanhq_skill_pack",
+          label: "DhanHQ agent skill pack",
+          command: "skills",
+          args: ["add", "dhan-oss/dhanhq-skills", "--skill", "dhanhq"],
+        },
       ],
     },
   },
@@ -234,20 +250,42 @@ const MCP_BROKERS = [
       read_only: true,
       trading_supported: false,
       daily_reauthorization: true,
-      login_steps: ["Repeat authorisation daily before relying on account context."],
-      use_cases: ["Holdings review", "Orders, positions, funds, mutual funds, and profile lookup"],
-      cautions: ["Upstox MCP cannot place, modify, or cancel orders."],
+      login_steps: [
+        "Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.",
+        "Complete the OAuth authorisation opened by that client.",
+        "Repeat authorisation daily before relying on account context.",
+      ],
+      use_cases: [
+        "Read-only holdings, orders, positions, mutual funds, funds, and profile lookup",
+        "Technical indicator, chart, trend, and market-context analysis",
+      ],
+      cautions: [
+        "Upstox MCP cannot place, modify, or cancel orders.",
+        "Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.",
+      ],
       client_configs: [
         {
-          id: "mcp_remote",
-          label: "mcp-remote",
+          id: "remote_url",
+          label: "ChatGPT / custom connector URL",
+          url: "https://mcp.upstox.com/mcp",
+          config: { name: "Upstox MCP", url: "https://mcp.upstox.com/mcp", developer_mode: true },
+        },
+        {
+          id: "claude_cursor_mcp_remote",
+          label: "Claude Desktop / Cursor mcp-remote",
           command: "npx",
           args: ["mcp-remote", "https://mcp.upstox.com/mcp"],
           config: {
             mcpServers: {
-              upstox: { command: "npx", args: ["mcp-remote", "https://mcp.upstox.com/mcp"] },
+              "Upstox MCP": { command: "npx", args: ["mcp-remote", "https://mcp.upstox.com/mcp"] },
             },
           },
+        },
+        {
+          id: "vscode_copilot",
+          label: "VS Code GitHub Copilot",
+          url: "https://mcp.upstox.com/mcp",
+          config: { mcp: { inputs: [], servers: { "Upstox MCP": { url: "https://mcp.upstox.com/mcp" } } } },
         },
       ],
     },
@@ -260,18 +298,33 @@ const MCP_BROKERS = [
     mcp: {
       remote_url: "https://mcp.groww.in/mcp",
       docs_url: "https://groww.in/updates/groww-mcp",
-      auth_mode: "Authorize through Groww's hosted MCP flow from the client.",
-      reauth: "Grant access when the MCP client asks.",
+      auth_mode: "Authorize through Groww's hosted MCP flow from the client with explicit account permission.",
+      reauth: "Grant access when the MCP client asks; Groww documents explicit permission rather than background sync.",
       read_only: false,
       trading_supported: true,
-      login_steps: ["Complete the Groww authorisation opened by that client."],
-      use_cases: ["Portfolio intelligence", "F&O analysis", "Smart order management", "Market context"],
+      login_steps: [
+        "For Claude Pro, add a custom connector named GrowwMCP with the Groww MCP URL.",
+        "For Cursor or VS Code, add the mcp-remote configuration and install Node.js if needed.",
+        "Confirm DDPI status before sell-order workflows.",
+      ],
+      use_cases: [
+        "Portfolio performance, exposure, benchmark, and market-fall analysis",
+        "F&O position, candle, expiry, and P&L analysis",
+        "Smart order management in the external MCP client",
+        "Market context and holdings near 52-week highs",
+      ],
       cautions: [
         "Sell orders through Groww MCP require DDPI authorisation.",
-        "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP, and order-safety verification pass.",
-        "The Groww Trade API page still requires static IP setup for API-key order placement.",
+        "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
+        "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
       ],
       client_configs: [
+        {
+          id: "remote_url",
+          label: "Claude Pro custom connector",
+          url: "https://mcp.groww.in/mcp",
+          config: { name: "GrowwMCP", url: "https://mcp.groww.in/mcp" },
+        },
         {
           id: "mcp_remote_cursor_vscode",
           label: "Cursor / VS Code mcp-remote",
@@ -279,7 +332,7 @@ const MCP_BROKERS = [
           args: ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
           config: {
             mcpServers: {
-              groww: {
+              growwmcp: {
                 command: "npx",
                 args: ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
               },
@@ -452,6 +505,7 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
       "Upstox MCP cannot place, modify, or cancel orders.",
     );
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("verify critical data");
     expect(screen.getByText("Add the Dhan remote MCP URL to a supported MCP client.")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-dhan-claude_code")).toHaveTextContent(
       "claude mcp add --transport http dhan https://mcp.dhan.co/mcp",
@@ -462,10 +516,17 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-dhan-cursor")).toHaveTextContent("mcpServers");
     expect(screen.getByTestId("broker-mcp-dhan-opencode")).toHaveTextContent("OpenCode remote OAuth");
     expect(screen.getByTestId("broker-mcp-dhan-opencode")).toHaveTextContent("oauth");
-    expect(screen.getByText("https://mcp.groww.in/mcp")).toBeInTheDocument();
+    expect(screen.getByTestId("broker-mcp-dhan-dhanhq_skill_pack")).toHaveTextContent(
+      "skills add dhan-oss/dhanhq-skills --skill dhanhq",
+    );
+    expect(screen.getByTestId("broker-mcp-upstox-vscode_copilot")).toHaveTextContent("VS Code GitHub Copilot");
+    expect(screen.getAllByText("https://mcp.groww.in/mcp").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("broker-mcp-groww-remote_url")).toHaveTextContent("GrowwMCP");
     expect(screen.getByText("npx mcp-remote@0.1.18 https://mcp.groww.in/mcp 52155")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("mcpServers");
+    expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("growwmcp");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
