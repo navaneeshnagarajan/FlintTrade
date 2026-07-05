@@ -131,6 +131,16 @@ fi
 
 ok "Python dependencies installed"
 
+# requirements.lock is registry-only; uv.lock carries exact operator-cleared git
+# pins for broker SDKs such as Kotak Neo. Sync the install-local .venv when uv is
+# available so every native broker SDK declared by the workspace is present.
+if command -v uv >/dev/null 2>&1; then
+    (cd "$INSTALL_DIR" && uv sync --frozen --all-packages --no-dev)
+    ok "Repo .venv synced with broker SDK pins"
+else
+    warn "uv not found; run 'uv sync --frozen --all-packages --no-dev' to install repo-local broker SDK pins such as Kotak Neo."
+fi
+
 # ── Step 4: Build React terminal ───────────────────────────────────────
 log "Building React terminal..."
 

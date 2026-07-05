@@ -80,6 +80,22 @@ def test_lock_file_is_hashed() -> None:
     assert "--hash=sha256:" in lock
 
 
+def test_install_paths_sync_uv_for_repo_local_broker_sdk_pins() -> None:
+    """Install scripts must sync uv.lock so git-pinned broker SDKs reach .venv."""
+    expected = {
+        "infra/scripts/setup.sh": "uv sync --frozen --all-packages",
+        "infra/install/update.sh": "uv sync --frozen --all-packages --no-dev",
+        "infra/install/install-native.sh": "uv sync --frozen --all-packages --no-dev",
+    }
+    missing = [
+        f"{path}: missing {snippet!r}"
+        for path, snippet in expected.items()
+        if snippet not in (_REPO_ROOT / path).read_text(encoding="utf-8")
+    ]
+
+    assert not missing, "Install paths must sync uv.lock broker SDK pins:\n" + "\n".join(missing)
+
+
 @pytest.mark.parametrize(
     "workflow", [".github/workflows/test.yml", ".github/workflows/nightly-cross-platform.yml"]
 )

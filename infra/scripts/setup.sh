@@ -158,6 +158,17 @@ pip3 install --require-hashes -r "$FLINTTRADE_DIR/requirements.lock" --break-sys
     pip3 install --require-hashes -r "$FLINTTRADE_DIR/requirements.lock" -q
 ok "Root requirements installed"
 
+# The hash-only requirements export cannot carry Kotak Neo's operator-cleared
+# git SDK. Keep the registry-only pip baseline above, then sync the repo-local
+# uv environment so every workspace dependency and broker SDK pin is installed
+# inside .venv for source development.
+if command -v uv >/dev/null 2>&1; then
+    uv sync --frozen --all-packages
+    ok "Repo .venv synced with workspace packages and broker SDK pins"
+else
+    warn "uv not found; run 'uv sync --frozen --all-packages' to install repo-local broker SDK pins such as Kotak Neo."
+fi
+
 # SC-07: per-package requirements.txt installs removed — requirements.lock is a
 # uv export across the whole workspace, so it already pins every package's
 # transitive third-party deps (hash-verified above). No unhashed per-package loop.
