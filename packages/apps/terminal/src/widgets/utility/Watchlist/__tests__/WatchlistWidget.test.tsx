@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -16,6 +16,16 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/services/api", () => ({
   getMultiQuotes: vi.fn().mockResolvedValue([]),
+  normaliseMultiQuotes: (raw: { results?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>) => {
+    const items = Array.isArray(raw) ? raw : raw.results ?? [];
+    return items.map((item) => {
+      const data = item.data;
+      if (data && typeof data === "object") {
+        return { ...(data as Record<string, unknown>), symbol: item.symbol, exchange: item.exchange };
+      }
+      return item;
+    });
+  },
   searchSymbol:   vi.fn().mockResolvedValue([]),
 }));
 
@@ -46,6 +56,9 @@ vi.stubGlobal("localStorage", {
 // ---------------------------------------------------------------------------
 
 import WatchlistWidget from "../WatchlistWidget";
+import { getMultiQuotes } from "@/services/api";
+
+const mockGetMultiQuotes = vi.mocked(getMultiQuotes);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -57,6 +70,8 @@ describe("WatchlistWidget", () => {
     // Clear stored watchlists so defaults are used
     delete mockLocalStorage["flinttrade:watchlists"];
     delete mockLocalStorage["flinttrade:watchlist"];
+    delete mockLocalStorage["flinttrade:watchlist:view"];
+    mockGetMultiQuotes.mockResolvedValue([]);
   });
 
   // --- Existing tests preserved ---
@@ -236,5 +251,71 @@ describe("WatchlistWidget", () => {
     // Symbol context menu should appear with Remove option
     expect(screen.getByRole("menu", { name: /actions for NIFTY/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /remove/i })).toBeInTheDocument();
+  });
+
+  it("opens the column manager and persists optional columns", async () => {
+    render(<WatchlistWidget />);
+
+    await userEvent.click(screen.getByLabelText("More options"));
+    await userEvent.click(screen.getByRole("menuitem", { name: /manage columns/i }));
+
+    expect(screen.getByRole("dialog", { name: /watchlist columns/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Volume column" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Formula column" }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(mockLocalStorage["flinttrade:watchlist:view"]);
+      expect(saved.visibleColumns).toEqual(expect.arrayContaining(["symbol", "volume", "formula"]));
+    });
+  });
+
+  it("formula selector enables the formula column", async () => {
+    render(<WatchlistWidget />);
+
+    await userEvent.click(screen.getByLabelText("More options"));
+    await userEvent.click(screen.getByRole("menuitem", { name: /manage columns/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Formula column" }), {
+      target: { value: "openGapPct" },
+    });
+
+    await waitFor(() => {
+      const saved = JSON.parse(mockLocalStorage["flinttrade:watchlist:view"]);
+      expect(saved.formula).toBe("openGapPct");
+      expect(saved.visibleColumns).toEqual(expect.arrayContaining(["symbol", "formula"]));
+    });
+  });
+
+  it("renders persisted computed formula and volume columns from live quote data", async () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [{ symbol: "SBIN", exchange: "NSE" }] },
+    ]);
+    mockLocalStorage["flinttrade:watchlist:view"] = JSON.stringify({
+      visibleColumns: ["symbol", "price", "volume", "formula"],
+      formula: "rangePct",
+    });
+    mockGetMultiQuotes.mockResolvedValue([
+      {
+        symbol: "SBIN",
+        exchange: "NSE",
+        data: {
+          symbol: "SBIN",
+          exchange: "NSE",
+          ltp: 100,
+          open: 98,
+          high: 110,
+          low: 90,
+          close: 99,
+          prev_close: 99,
+          volume: 123456,
+        },
+      },
+    ]);
+
+    render(<WatchlistWidget />);
+
+    expect(await screen.findByText("Range %")).toBeInTheDocument();
+    expect(screen.getByText("+20.00%")).toBeInTheDocument();
+    expect(screen.getByText("1.2L")).toBeInTheDocument();
   });
 });

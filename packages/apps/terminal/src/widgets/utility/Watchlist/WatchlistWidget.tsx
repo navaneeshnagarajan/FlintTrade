@@ -24,7 +24,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
-import { Plus, TrendingUp, Trash2, MoreVertical } from "lucide-react";
+import { Plus, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
 import { useSetAtom } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { Button } from "@/components/ui/button";
@@ -32,11 +32,17 @@ import { Button } from "@/components/ui/button";
 import {
   loadTabs,
   saveTabs,
+  loadViewSettings,
+  saveViewSettings,
   generateId,
   DEFAULT_SYMBOLS,
   MAX_TABS,
+  WATCHLIST_COLUMNS,
+  WATCHLIST_FORMULAS,
 } from "./types";
 import type {
+  WatchlistColumnId,
+  WatchlistFormulaId,
   WatchlistItem,
   WatchlistTab,
   SymbolContextMenuState,
@@ -60,9 +66,11 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [showSearch, setShowSearch]   = useState(false);
   const [showMenu, setShowMenu]       = useState(false);
+  const [showColumns, setShowColumns] = useState(false);
   const [symbolCtxMenu, setSymbolCtxMenu] = useState<SymbolContextMenuState | null>(null);
   const [tabCtxMenu, setTabCtxMenu]   = useState<TabContextMenuState | null>(null);
   const [renamingIdx, setRenamingIdx] = useState<number | null>(null);
+  const [viewSettings, setViewSettings] = useState(() => loadViewSettings());
   const menuRef                       = useRef<HTMLDivElement | null>(null);
 
   const setSelectedSymbol = useSetAtom(selectedSymbolAtom);
@@ -76,6 +84,10 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   useEffect(() => {
     saveTabs(tabs);
   }, [tabs]);
+
+  useEffect(() => {
+    saveViewSettings(viewSettings);
+  }, [viewSettings]);
 
   const activeTab = tabs[activeTabIdx] ?? tabs[0];
   const watchlist = activeTab?.symbols ?? [];
@@ -173,6 +185,25 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     );
     setShowMenu(false);
   }, [activeTabIdx]);
+
+  const toggleColumn = useCallback((column: WatchlistColumnId) => {
+    if (column === "symbol") return;
+    setViewSettings((prev) => {
+      const visible = new Set(prev.visibleColumns);
+      if (visible.has(column)) visible.delete(column);
+      else visible.add(column);
+      visible.add("symbol");
+      return { ...prev, visibleColumns: Array.from(visible) };
+    });
+  }, []);
+
+  const setFormula = useCallback((formula: WatchlistFormulaId) => {
+    setViewSettings((prev) => ({
+      ...prev,
+      formula,
+      visibleColumns: Array.from(new Set([...prev.visibleColumns, "symbol", "formula"])),
+    }));
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Context menus
@@ -277,6 +308,14 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
                 <TrendingUp size={10} />
                 Reset to defaults
               </button>
+              <button
+                role="menuitem"
+                onClick={() => { setShowColumns((v) => !v); setShowMenu(false); }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+              >
+                <SlidersHorizontal size={10} />
+                Manage columns
+              </button>
               <div className="border-t border-border-subtle my-1" />
               <button
                 role="menuitem"
@@ -290,6 +329,57 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
           )}
         </div>
       </div>
+
+      {showColumns && (
+        <div
+          role="dialog"
+          aria-label="Watchlist columns"
+          className="absolute right-2 top-8 z-40 w-60 rounded-md border border-border-default bg-surface-card p-3 shadow-2xl"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-text-secondary">Columns</span>
+            <button
+              type="button"
+              onClick={() => setShowColumns(false)}
+              className="flex h-5 w-5 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-primary"
+              aria-label="Close columns"
+            >
+              <X size={12} />
+            </button>
+          </div>
+          <div className="space-y-1">
+            {WATCHLIST_COLUMNS.map((column) => (
+              <label
+                key={column.id}
+                className="flex items-center justify-between gap-3 rounded px-1.5 py-1 text-xs text-text-secondary hover:bg-surface-hover"
+              >
+                <span>{column.label}</span>
+                <input
+                  type="checkbox"
+                  checked={viewSettings.visibleColumns.includes(column.id)}
+                  disabled={column.fixed}
+                  onChange={() => toggleColumn(column.id)}
+                  aria-label={`${column.label} column`}
+                  className="accent-accent"
+                />
+              </label>
+            ))}
+          </div>
+          <label className="mt-3 block text-xs text-text-secondary" htmlFor="watchlist-formula">
+            Formula column
+          </label>
+          <select
+            id="watchlist-formula"
+            value={viewSettings.formula}
+            onChange={(e) => setFormula(e.target.value as WatchlistFormulaId)}
+            className="mt-1 w-full rounded border border-border-default bg-surface-elevated px-2 py-1 text-xs text-text-primary"
+          >
+            {WATCHLIST_FORMULAS.map((formula) => (
+              <option key={formula.id} value={formula.id}>{formula.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* TAB BAR */}
       <div
@@ -364,6 +454,8 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
                 item={item}
                 quote={quotes[key] ?? null}
                 sparkPrices={sparkHistory[key] ?? []}
+                visibleColumns={viewSettings.visibleColumns}
+                formula={viewSettings.formula}
                 onSelect={handleSelect}
                 onRemove={openSymbolCtxMenu}
               />

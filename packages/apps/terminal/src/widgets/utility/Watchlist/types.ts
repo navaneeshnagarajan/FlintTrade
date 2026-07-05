@@ -48,12 +48,40 @@ export interface WatchlistTab {
   symbols: WatchlistItem[];
 }
 
+export type WatchlistColumnId =
+  | "symbol"
+  | "sparkline"
+  | "price"
+  | "changePct"
+  | "changeAbs"
+  | "volume"
+  | "formula";
+
+export type WatchlistFormulaId = "rangePct" | "openGapPct";
+
+export interface WatchlistColumnDef {
+  id: WatchlistColumnId;
+  label: string;
+  fixed?: boolean;
+}
+
+export interface WatchlistFormulaDef {
+  id: WatchlistFormulaId;
+  label: string;
+}
+
+export interface WatchlistViewSettings {
+  visibleColumns: WatchlistColumnId[];
+  formula: WatchlistFormulaId;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 export const LS_KEY_MULTI  = "flinttrade:watchlists";
 export const LS_KEY_LEGACY = "flinttrade:watchlist";
+export const LS_KEY_VIEW   = "flinttrade:watchlist:view";
 
 export const MAX_TABS = 5;
 
@@ -67,6 +95,26 @@ export const DEFAULT_SYMBOLS: WatchlistItem[] = [
 
 /** Max sparkline history samples per symbol */
 export const SPARK_MAX = 20;
+
+export const WATCHLIST_COLUMNS: WatchlistColumnDef[] = [
+  { id: "symbol", label: "Symbol", fixed: true },
+  { id: "sparkline", label: "Sparkline" },
+  { id: "price", label: "LTP" },
+  { id: "changePct", label: "% change" },
+  { id: "changeAbs", label: "Net change" },
+  { id: "volume", label: "Volume" },
+  { id: "formula", label: "Formula" },
+];
+
+export const WATCHLIST_FORMULAS: WatchlistFormulaDef[] = [
+  { id: "rangePct", label: "Range %" },
+  { id: "openGapPct", label: "Open gap %" },
+];
+
+export const DEFAULT_VIEW_SETTINGS: WatchlistViewSettings = {
+  visibleColumns: ["symbol", "sparkline", "price", "changePct"],
+  formula: "rangePct",
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,6 +136,34 @@ export function fmtPct(v: number | null | undefined): string | null {
   return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
 }
 
+export function fmtCompact(v: number | null | undefined): string {
+  if (v == null || isNaN(v)) return "—";
+  const n = Number(v);
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 100_000) return `${(n / 100_000).toFixed(1)}L`;
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+export function formulaLabel(id: WatchlistFormulaId): string {
+  return WATCHLIST_FORMULAS.find((formula) => formula.id === id)?.label ?? "Formula";
+}
+
+export function evaluateFormula(quote: PartialQuote | null, formula: WatchlistFormulaId): number | null {
+  if (!quote) return null;
+  const ltp = quote.ltp ?? quote.close ?? null;
+  if (formula === "rangePct") {
+    if (quote.high == null || quote.low == null || !ltp) return null;
+    return ((Number(quote.high) - Number(quote.low)) / Number(ltp)) * 100;
+  }
+  if (formula === "openGapPct") {
+    const prevClose = quote.prev_close ?? quote.close ?? null;
+    if (quote.open == null || !prevClose) return null;
+    return ((Number(quote.open) - Number(prevClose)) / Number(prevClose)) * 100;
+  }
+  return null;
+}
+
 export function generateId(): string {
   return Math.random().toString(36).slice(2, 9);
 }
@@ -106,6 +182,21 @@ const watchlistTabSchema = z.object({
   name: z.string(),
   symbols: z.array(watchlistItemSchema),
 }) satisfies z.ZodType<WatchlistTab>;
+
+const watchlistColumnIdSchema = z.enum([
+  "symbol",
+  "sparkline",
+  "price",
+  "changePct",
+  "changeAbs",
+  "volume",
+  "formula",
+]);
+
+const watchlistViewSchema = z.object({
+  visibleColumns: z.array(watchlistColumnIdSchema),
+  formula: z.enum(["rangePct", "openGapPct"]),
+}) satisfies z.ZodType<WatchlistViewSettings>;
 
 /** Load all watchlist tabs from localStorage. Migrates legacy single-list format. */
 export function loadTabs(): WatchlistTab[] {
@@ -126,6 +217,26 @@ export function loadTabs(): WatchlistTab[] {
 export function saveTabs(tabs: WatchlistTab[]): void {
   try {
     localStorage.setItem(LS_KEY_MULTI, JSON.stringify(tabs));
+  } catch {
+    // localStorage unavailable
+  }
+}
+
+export function loadViewSettings(): WatchlistViewSettings {
+  const parsed = safeParse(localStorage.getItem(LS_KEY_VIEW), watchlistViewSchema);
+  if (!parsed) return DEFAULT_VIEW_SETTINGS;
+  const columns: WatchlistColumnId[] = parsed.visibleColumns.includes("symbol")
+    ? parsed.visibleColumns
+    : ["symbol", ...parsed.visibleColumns];
+  return {
+    visibleColumns: Array.from(new Set(columns)),
+    formula: parsed.formula,
+  };
+}
+
+export function saveViewSettings(settings: WatchlistViewSettings): void {
+  try {
+    localStorage.setItem(LS_KEY_VIEW, JSON.stringify(settings));
   } catch {
     // localStorage unavailable
   }

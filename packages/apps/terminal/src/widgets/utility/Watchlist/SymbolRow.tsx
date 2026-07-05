@@ -3,30 +3,42 @@
  */
 
 import { Sparkline } from "./Sparkline";
-import { fmtPrice, fmtPct } from "./types";
-import type { WatchlistItem, PartialQuote } from "./types";
+import { evaluateFormula, fmtCompact, fmtPrice, fmtPct, formulaLabel } from "./types";
+import type { PartialQuote, WatchlistColumnId, WatchlistFormulaId, WatchlistItem } from "./types";
 
 export interface SymbolRowProps {
   item:        WatchlistItem;
   quote:       PartialQuote | null;
   sparkPrices: number[];
+  visibleColumns: WatchlistColumnId[];
+  formula: WatchlistFormulaId;
   onSelect:    (item: WatchlistItem) => void;
   onRemove:    (e: React.MouseEvent, item: WatchlistItem) => void;
 }
 
-export function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowProps) {
+export function SymbolRow({
+  item,
+  quote,
+  sparkPrices,
+  visibleColumns,
+  formula,
+  onSelect,
+  onRemove,
+}: SymbolRowProps) {
   const ltp       = quote?.ltp    ?? quote?.close ?? null;
   const prevClose = quote?.prev_close ?? quote?.close ?? null;
   const chgAbs    = ltp != null && prevClose != null ? ltp - prevClose : null;
   const chgPct    = chgAbs != null && prevClose ? (chgAbs / prevClose) * 100 : null;
   const isUp      = chgAbs == null ? null : chgAbs >= 0;
   const changeColor = isUp === true ? "text-profit" : isUp === false ? "text-loss" : "text-text-muted";
+  const visible = new Set(visibleColumns);
+  const formulaValue = evaluateFormula(quote, formula);
 
   return (
     <button
       type="button"
       aria-label={item.symbol}
-      className="w-full text-left flex items-center gap-1.5 px-2 py-1.5 hover:bg-surface-hover cursor-pointer border-b border-border-subtle transition-colors group"
+      className="w-full text-left flex items-center gap-2 px-2 py-1.5 hover:bg-surface-hover cursor-pointer border-b border-border-subtle transition-colors group"
       onClick={() => onSelect(item)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -57,17 +69,49 @@ export function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: Symb
       </div>
 
       {/* Sparkline */}
-      <Sparkline prices={sparkPrices} positive={isUp} />
+      {visible.has("sparkline") && <Sparkline prices={sparkPrices} positive={isUp} />}
 
-      {/* Price block */}
-      <div className="flex flex-col items-end shrink-0 min-w-16">
-        <span className="text-xs font-mono tabular-nums font-semibold text-text-primary leading-tight">
-          {fmtPrice(ltp)}
-        </span>
-        <span className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}>
-          {chgPct != null ? fmtPct(chgPct) : "—"}
-        </span>
-      </div>
+      {visible.has("volume") && (
+        <div className="hidden min-w-12 shrink-0 flex-col items-end sm:flex">
+          <span className="text-xxs text-text-muted leading-tight">Vol</span>
+          <span className="text-xxs font-mono tabular-nums text-text-secondary leading-tight">
+            {fmtCompact(quote?.volume)}
+          </span>
+        </div>
+      )}
+
+      {visible.has("changeAbs") && (
+        <div className="hidden min-w-14 shrink-0 flex-col items-end md:flex">
+          <span className="text-xxs text-text-muted leading-tight">Net</span>
+          <span className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}>
+            {chgAbs != null ? fmtPrice(chgAbs) : "—"}
+          </span>
+        </div>
+      )}
+
+      {visible.has("formula") && (
+        <div className="hidden min-w-16 shrink-0 flex-col items-end lg:flex">
+          <span className="text-xxs text-text-muted leading-tight">{formulaLabel(formula)}</span>
+          <span className="text-xxs font-mono tabular-nums text-text-secondary leading-tight">
+            {formulaValue != null ? fmtPct(formulaValue) : "—"}
+          </span>
+        </div>
+      )}
+
+      {(visible.has("price") || visible.has("changePct")) && (
+        <div className="flex min-w-16 shrink-0 flex-col items-end">
+          {visible.has("price") && (
+            <span className="text-xs font-mono tabular-nums font-semibold text-text-primary leading-tight">
+              {fmtPrice(ltp)}
+            </span>
+          )}
+          {visible.has("changePct") && (
+            <span className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}>
+              {chgPct != null ? fmtPct(chgPct) : "—"}
+            </span>
+          )}
+        </div>
+      )}
     </button>
   );
 }
