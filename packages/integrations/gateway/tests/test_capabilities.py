@@ -204,3 +204,14 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
         assert reg_caps.supports_multi_quote == adapter_caps.multi_quote_supported, name
         assert reg_caps.supports_multi_option_greeks == adapter_caps.multi_option_greeks_supported, name
     assert checked == 5  # all natives, including Groww, are seeded; guard the loop ran
+
+
+def test_native_capabilities_follow_adapter_registry() -> None:
+    """Native recommendations must rank the same adapters the factory can activate."""
+    from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES
+    from flinttrade_gateway.capabilities import native_capabilities_by_broker
+
+    natives = native_capabilities_by_broker()
+    assert set(natives) == set(NATIVE_ADAPTER_CLASSES)
+    for broker_id, cls in NATIVE_ADAPTER_CLASSES.items():
+        assert natives[broker_id] == cls().capabilities

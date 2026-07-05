@@ -196,20 +196,15 @@ class Capabilities:
 
 
 def native_capabilities_by_broker() -> dict[str, Capabilities]:
-    """Return the authoritative native capability constants keyed by broker id."""
-    from .brokers.dhan import DHAN_CAPABILITIES  # noqa: PLC0415
-    from .brokers.groww import GROWW_CAPABILITIES  # noqa: PLC0415
-    from .brokers.indmoney import INDMONEY_CAPABILITIES  # noqa: PLC0415
-    from .brokers.kotakneo import KOTAKNEO_CAPABILITIES  # noqa: PLC0415
-    from .brokers.upstox import UPSTOX_CAPABILITIES  # noqa: PLC0415
+    """Return the authoritative native capabilities keyed by broker id.
 
-    return {
-        "dhan": DHAN_CAPABILITIES,
-        "upstox": UPSTOX_CAPABILITIES,
-        "kotakneo": KOTAKNEO_CAPABILITIES,
-        "indmoney": INDMONEY_CAPABILITIES,
-        "groww": GROWW_CAPABILITIES,
-    }
+    Native membership comes from the activation registry. Instantiating these
+    adapters is SDK-safe: constructors only store injected factories/resolvers;
+    live SDK clients are built later during ``login()``.
+    """
+    from .brokers.native_factory import NATIVE_ADAPTER_CLASSES  # noqa: PLC0415
+
+    return {broker_id: cls().capabilities for broker_id, cls in NATIVE_ADAPTER_CLASSES.items()}
 
 
 def _native_to_broker_capabilities(broker_name: str, caps: Capabilities) -> BrokerCapabilities:
