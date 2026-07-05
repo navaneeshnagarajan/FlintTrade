@@ -351,7 +351,7 @@ class ChartInkWebhook:
         request_ctx = RequestContext(
             jti=f"chartink-{uuid.uuid4().hex}",
             actor_type="external_intent",
-            actor_id=f"external_intent:chartink:{scan_id}",
+            actor_id=self._actor_id,
             mode="live",
             intent_source="chartink",
             external_nonce_hash=nonce_hash,

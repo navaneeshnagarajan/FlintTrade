@@ -243,6 +243,45 @@ class TestNamedWebhookSecrets:
         assert replay.status_code == 409
         assert replay.get_json()["message"] == "Webhook replay rejected"
 
+    def test_signed_order_webhook_threads_verified_nonce_to_dispatcher(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookPayload, WebhookReceiver
+
+        captured: dict[str, WebhookPayload] = {}
+
+        def _place_dispatcher(payload: WebhookPayload) -> dict[str, object]:
+            captured["payload"] = payload
+            return {"status": "placed", "action": "place_order", "symbol": payload.symbol}
+
+        flask_app = Flask("signed_order_dispatch")
+        flask_app.config["TESTING"] = True
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret(
+            "/v1/webhook/tradingview/order-signal",
+            "tradingview",
+            "Order Signal",
+            _SECRET,
+        )
+        mod.init_webhook_routes(
+            WebhookReceiver(
+                WebhookConfig(secret="", rate_limit=100),
+                order_dispatcher=_place_dispatcher,
+            ),
+            secret_store=store,
+        )
+        flask_app.register_blueprint(mod.webhook_bp)
+
+        body = json.dumps({"action": "BUY", "symbol": "NIFTY", "exchange": "NSE"}).encode()
+        resp = flask_app.test_client().post(
+            "/v1/webhook/tradingview/order-signal",
+            data=body,
+            headers=self._headers(body, nonce="order-nonce-verified"),
+        )
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["status"] == "placed"
+        assert captured["payload"].webhook_nonce == "order-nonce-verified"
+        assert captured["payload"].webhook_path == "/v1/webhook/tradingview/order-signal"
+
     def test_signed_named_webhook_rejects_bad_signature(self, signed_client):
         body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
         headers = self._headers(body)

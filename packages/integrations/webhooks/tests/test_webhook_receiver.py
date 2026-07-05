@@ -363,6 +363,30 @@ class TestDispatch:
         assert result["action"] == "place_order"
         assert "no order was placed" in result["message"]
 
+    def test_place_order_uses_injected_gated_dispatcher(self):
+        async def _dispatcher(payload: WebhookPayload) -> dict[str, object]:
+            return {
+                "status": "placed",
+                "action": "place_order",
+                "symbol": payload.symbol,
+            }
+
+        r = WebhookReceiver(WebhookConfig(rate_limit=100), order_dispatcher=_dispatcher)
+        p = WebhookPayload(source="tradingview", action="place_order", symbol="NIFTY")
+        result = _run(r.dispatch(p))
+        assert result == {"status": "placed", "action": "place_order", "symbol": "NIFTY"}
+
+    def test_place_order_dispatcher_exception_fails_closed(self):
+        async def _dispatcher(_payload: WebhookPayload) -> dict[str, object]:
+            raise RuntimeError("router unavailable")
+
+        r = WebhookReceiver(WebhookConfig(rate_limit=100), order_dispatcher=_dispatcher)
+        p = WebhookPayload(source="tradingview", action="place_order", symbol="NIFTY")
+        result = _run(r.dispatch(p))
+        assert result["status"] == "error"
+        assert result["action"] == "place_order"
+        assert "failed before broker execution" in result["message"]
+
     def test_cancel_order_fails_honestly_when_ungated(self):
         r = _make_receiver()
         p = WebhookPayload(source="custom", action="cancel_order", symbol="RELIANCE")
@@ -370,6 +394,19 @@ class TestDispatch:
         assert result["status"] == "error"
         assert result["action"] == "cancel_order"
         assert "nothing was cancelled" in result["message"]
+
+    def test_cancel_order_uses_injected_gated_dispatcher(self):
+        def _dispatcher(payload: WebhookPayload) -> dict[str, object]:
+            return {
+                "status": "cancelled",
+                "action": "cancel_order",
+                "symbol": payload.symbol,
+            }
+
+        r = WebhookReceiver(WebhookConfig(rate_limit=100), cancel_dispatcher=_dispatcher)
+        p = WebhookPayload(source="custom", action="cancel_order", symbol="RELIANCE")
+        result = _run(r.dispatch(p))
+        assert result == {"status": "cancelled", "action": "cancel_order", "symbol": "RELIANCE"}
 
     def test_alert(self):
         r = _make_receiver()

@@ -96,7 +96,7 @@ def test_chartink_gated_dispatch_routes_through_router_as_external_intent() -> N
         # EXTERNAL-intent identity is stamped on the request context.
         assert ctx.actor_type == "external_intent"
         assert ctx.intent_source == "chartink"
-        assert ctx.actor_id.startswith("external_intent:chartink:")
+        assert ctx.actor_id == "external_intent:chartink"
         assert ctx.mode == "live"
         assert ctx.selector == "openalgo:acc1"
         assert ctx.external_nonce_hash == expected_hash

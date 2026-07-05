@@ -1842,10 +1842,16 @@ def create_flask_app(
     from flinttrade_webhooks.webhook_routes import init_webhook_routes, webhook_bp  # noqa: PLC0415
     from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore  # noqa: PLC0415
     from .operations_routes import webhook_endpoint_enabled  # noqa: PLC0415
+    from .webhook_dispatch import WebhookOrderDispatcher  # noqa: PLC0415
     webhook_secret_store = WebhookSecretStore(_workspace_dir() / "webhook_secrets.db", _get_master_password())
     app.config["WEBHOOK_SECRET_STORE"] = webhook_secret_store
+    webhook_order_dispatcher = WebhookOrderDispatcher(app)
     init_webhook_routes(
-        WebhookReceiver(WebhookConfig()),
+        WebhookReceiver(
+            WebhookConfig(),
+            order_dispatcher=webhook_order_dispatcher.place_order,
+            cancel_dispatcher=webhook_order_dispatcher.cancel_order,
+        ),
         secret_store=webhook_secret_store,
         endpoint_status_provider=webhook_endpoint_enabled,
     )

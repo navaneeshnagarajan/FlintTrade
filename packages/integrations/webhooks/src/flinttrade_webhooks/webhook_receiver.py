@@ -37,7 +37,9 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from inspect import isawaitable
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -90,6 +92,9 @@ class WebhookPayload(BaseModel):
         symbol: Optional instrument ticker.
         exchange: Optional exchange code.
         data: Additional key/value data from the raw webhook.
+        webhook_nonce: Verified replay nonce supplied by the route layer.
+        webhook_path: Mounted named endpoint path, when this came through the
+            endpoint registry.
         timestamp: UTC timestamp when the payload was received/created.
     """
 
@@ -98,6 +103,8 @@ class WebhookPayload(BaseModel):
     symbol: str | None = None
     exchange: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+    webhook_nonce: str | None = None
+    webhook_path: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("action")
@@ -192,6 +199,13 @@ class _SlidingWindowLimiter:
 # ---------------------------------------------------------------------------
 
 
+WebhookDispatchResult = dict[str, Any]
+WebhookActionDispatcher = Callable[
+    [WebhookPayload],
+    WebhookDispatchResult | Awaitable[WebhookDispatchResult],
+]
+
+
 class WebhookReceiver:
     """Parse, verify, and dispatch webhooks from external sources.
 
@@ -206,9 +220,17 @@ class WebhookReceiver:
 
     _LOG_CAPACITY = 1_000
 
-    def __init__(self, config: WebhookConfig) -> None:
+    def __init__(
+        self,
+        config: WebhookConfig,
+        *,
+        order_dispatcher: WebhookActionDispatcher | None = None,
+        cancel_dispatcher: WebhookActionDispatcher | None = None,
+    ) -> None:
         self._config = config
         self._limiter = _SlidingWindowLimiter(config.rate_limit)
+        self._order_dispatcher = order_dispatcher
+        self._cancel_dispatcher = cancel_dispatcher
         self.log: list[WebhookLogEntry] = []
 
         if not config.secret and not config.skip_verification:
@@ -472,21 +494,36 @@ class WebhookReceiver:
     async def _handle_place_order(
         self, payload: WebhookPayload
     ) -> dict[str, Any]:
-        """Handle a ``place_order`` action — honestly unsupported for now.
+        """Handle a ``place_order`` action.
 
-        Webhook-triggered order placement is not yet wired to the gated order
-        chain (SafetySystem -> ``gate_order`` -> ``BrokerRouter``; PLAN G23).
-        Until it is, this MUST fail loudly rather than pretend to queue: a fake
-        "queued" response would let an operator believe a TradingView signal
-        placed an order when nothing happened. Subclasses that wire the gated
-        dispatch override this.
+        Webhook-triggered order placement is supported only when the app injects
+        a gated dispatcher. Without that hook this receiver still fails loudly
+        rather than pretending to queue: a fake "queued" response would let an
+        operator believe a TradingView signal placed an order when nothing
+        happened.
 
         Args:
             payload: Parsed webhook payload.
 
         Returns:
-            Response dict with ``status: "error"`` — no order was placed.
+            Dispatcher result, or an honest fail-closed error when no gated
+            dispatcher is available.
         """
+        if self._order_dispatcher is not None:
+            try:
+                return await self._call_dispatcher(self._order_dispatcher, payload)
+            except Exception:
+                logger.exception(
+                    "place_order signal dispatcher failed before/inside gated routing"
+                )
+                return {
+                    "status": "error",
+                    "action": "place_order",
+                    "symbol": payload.symbol,
+                    "exchange": payload.exchange,
+                    "message": "Webhook order dispatch failed before broker execution.",
+                }
+
         logger.warning(
             "place_order signal received but webhook order dispatch is not "
             "wired to the gated router — REJECTED: %s %s via %s",
@@ -506,17 +543,32 @@ class WebhookReceiver:
     async def _handle_cancel_order(
         self, payload: WebhookPayload
     ) -> dict[str, Any]:
-        """Handle a ``cancel_order`` action — honestly unsupported for now.
+        """Handle a ``cancel_order`` action.
 
-        Same contract as :meth:`_handle_place_order`: no gated wiring yet, so
-        fail loudly instead of returning a fake "queued".
+        Same fail-closed contract as :meth:`_handle_place_order`: cancellation is
+        supported only when the app injects a gated cancel dispatcher.
 
         Args:
             payload: Parsed webhook payload.
 
         Returns:
-            Response dict with ``status: "error"`` — nothing was cancelled.
+            Dispatcher result, or an honest fail-closed error when no gated
+            dispatcher is available.
         """
+        if self._cancel_dispatcher is not None:
+            try:
+                return await self._call_dispatcher(self._cancel_dispatcher, payload)
+            except Exception:
+                logger.exception(
+                    "cancel_order signal dispatcher failed before/inside gated routing"
+                )
+                return {
+                    "status": "error",
+                    "action": "cancel_order",
+                    "symbol": payload.symbol,
+                    "message": "Webhook order cancel failed before broker execution.",
+                }
+
         logger.warning(
             "cancel_order signal received but webhook order dispatch is not "
             "wired to the gated router — REJECTED: %s via %s",
@@ -556,3 +608,17 @@ class WebhookReceiver:
             "symbol": payload.symbol,
             "message": "Signal logged",
         }
+
+    async def _call_dispatcher(
+        self,
+        dispatcher: WebhookActionDispatcher,
+        payload: WebhookPayload,
+    ) -> dict[str, Any]:
+        result = dispatcher(payload)
+        if isawaitable(result):
+            result = await result
+        if not isinstance(result, dict):
+            raise TypeError(
+                f"webhook dispatcher returned {type(result).__name__}; expected dict"
+            )
+        return result

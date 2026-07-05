@@ -288,6 +288,7 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
         logger.warning("Signature verification failed for source=%s", source)
         return jsonify({"status": "error", "message": "Signature verification failed"}), 401
 
+    verified_replay_nonce: str | None = None
     if mounted_path and signing_secret and _secret_store is not None:
         replay_fields = _extract_replay_fields(body_dict)
         if replay_fields is None:
@@ -310,6 +311,7 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             return jsonify({"status": "error", "message": "Webhook replay rejected"}), 409
         if reason == REASON_STALE:
             return jsonify({"status": "error", "message": "Webhook timestamp is stale"}), 400
+        verified_replay_nonce = nonce
 
     # Parse
     try:
@@ -322,6 +324,8 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
     except Exception as exc:
         logger.warning("Webhook parse error for source=%s: %s", source, exc)
         return jsonify({"status": "error", "message": "Webhook parse failed"}), 422
+    payload.webhook_nonce = verified_replay_nonce
+    payload.webhook_path = mounted_path
 
     # Dispatch
     try:
