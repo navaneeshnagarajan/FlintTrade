@@ -13,18 +13,13 @@ vi.mock("@/services/ftApi.native", () => ({
   listNativeAccounts: vi.fn(),
   connectNativeAccount: vi.fn(),
   oauthStartNativeAccount: vi.fn(),
-  removeNativeAccount: vi.fn(),
-  setPrimaryNativeAccount: vi.fn(),
-  reloginNativeAccount: vi.fn(),
 }));
 
-vi.mock("@/services/gatewayApi", () => ({
-  gatewayApi: {
-    listAccounts: vi.fn(),
-    removeAccount: vi.fn(),
-    reconnectAccount: vi.fn(),
-    setPrimary: vi.fn(),
-  },
+vi.mock("@/services/brokerAccountsApi", () => ({
+  listGatewayBrokerAccounts: vi.fn(),
+  removeBrokerAccount: vi.fn(),
+  reconnectBrokerAccount: vi.fn(),
+  setPrimaryBrokerAccount: vi.fn(),
 }));
 
 import {
@@ -33,11 +28,13 @@ import {
   listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
-  removeNativeAccount,
-  setPrimaryNativeAccount,
-  reloginNativeAccount,
 } from "@/services/ftApi.native";
-import { gatewayApi } from "@/services/gatewayApi";
+import {
+  listGatewayBrokerAccounts,
+  removeBrokerAccount,
+  reconnectBrokerAccount,
+  setPrimaryBrokerAccount,
+} from "@/services/brokerAccountsApi";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { BrokersSection } from "../BrokersSection";
 
@@ -413,7 +410,7 @@ describe("BrokersSection", () => {
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
     (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (gatewayApi.listAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (listGatewayBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     // The broker store is a module singleton; reset it so a seeded gateway
     // account from one test never leaks into the next.
     useBrokerStore.setState({ accounts: [], activeAccountId: null });
@@ -433,7 +430,7 @@ describe("BrokersSection", () => {
   });
 
   it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {
-    (gatewayApi.listAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+    (listGatewayBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         account_id: "GW1",
         broker: "zerodha",
@@ -445,7 +442,7 @@ describe("BrokersSection", () => {
         source: "gateway",
       },
     ]);
-    (gatewayApi.removeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
     renderSection();
 
@@ -453,7 +450,11 @@ describe("BrokersSection", () => {
     expect(screen.getByText("Zerodha Main")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /disconnect zerodha main/i }));
-    await waitFor(() => expect(gatewayApi.removeAccount).toHaveBeenCalledWith("GW1"));
+    await waitFor(() =>
+      expect(removeBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "gateway", broker: "zerodha", account_id: "GW1" }),
+      ),
+    );
   });
 
   it("removing a gateway account never evicts a same-id native write target", async () => {
@@ -461,7 +462,7 @@ describe("BrokersSection", () => {
     // BOTH the native adapter and the OpenAlgo bridge. Removing the gateway row
     // must use a source-qualified key so it cannot cross-evict the native row
     // (and silently null the active native write target).
-    (gatewayApi.listAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+    (listGatewayBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         account_id: "SHARED",
         broker: "upstox",
@@ -473,7 +474,7 @@ describe("BrokersSection", () => {
         source: "gateway",
       },
     ]);
-    (gatewayApi.removeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     useBrokerStore.setState({
       accounts: [
         {
@@ -505,7 +506,11 @@ describe("BrokersSection", () => {
     const disconnect = await screen.findByRole("button", { name: /disconnect upstox bridge/i });
     fireEvent.click(disconnect);
 
-    await waitFor(() => expect(gatewayApi.removeAccount).toHaveBeenCalledWith("SHARED"));
+    await waitFor(() =>
+      expect(removeBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "gateway", broker: "upstox", account_id: "SHARED" }),
+      ),
+    );
     await waitFor(() => {
       const accts = useBrokerStore.getState().accounts;
       expect(accts).toHaveLength(1);
@@ -522,7 +527,7 @@ describe("BrokersSection", () => {
     (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
       { adapter_id: "dhan", account_id: "D1", label: "Dhan", has_session: true, is_primary: false },
     ]);
-    (removeNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     useBrokerStore.setState({
       accounts: [
         {
@@ -544,7 +549,11 @@ describe("BrokersSection", () => {
     const disconnect = await screen.findByRole("button", { name: /disconnect dhan d1/i });
     fireEvent.click(disconnect);
 
-    await waitFor(() => expect(removeNativeAccount).toHaveBeenCalledWith("dhan", "D1"));
+    await waitFor(() =>
+      expect(removeBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "native", broker: "dhan", account_id: "D1" }),
+      ),
+    );
     await waitFor(() => expect(useBrokerStore.getState().accounts).toHaveLength(0));
     expect(useBrokerStore.getState().activeAccountId).toBeNull();
   });
@@ -765,13 +774,15 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
   });
 
   it("one-click re-authenticate replays the stored credentials", async () => {
-    (reloginNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ has_session: true });
+    (reconnectBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/re-authenticate dhan/i)).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText(/re-authenticate dhan/i));
     await waitFor(() =>
-      expect(reloginNativeAccount).toHaveBeenCalledWith("dhan", "1234567890"),
+      expect(reconnectBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "native", broker: "dhan", account_id: "1234567890" }),
+      ),
     );
     await waitFor(() =>
       expect(screen.getByText(/re-authenticated/i)).toBeInTheDocument(),
@@ -779,7 +790,7 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
   });
 
   it("prefills the connect form when the stored material is stale", async () => {
-    (reloginNativeAccount as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (reconnectBrokerAccount as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Re-login did not establish a session — enter fresh credentials."),
     );
     renderSection();
@@ -811,13 +822,17 @@ describe("BrokersSection — primary account selection", () => {
   });
 
   it("can set a connected native account as primary", async () => {
-    (setPrimaryNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (setPrimaryBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/set upstox UPX1 as primary/i)).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText(/set upstox UPX1 as primary/i));
 
-    await waitFor(() => expect(setPrimaryNativeAccount).toHaveBeenCalledWith("upstox", "UPX1"));
+    await waitFor(() =>
+      expect(setPrimaryBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "native", broker: "upstox", account_id: "UPX1" }),
+      ),
+    );
     await waitFor(() => expect(screen.getByText(/set as primary/i)).toBeInTheDocument());
   });
 });
@@ -839,18 +854,22 @@ describe("BrokersSection — disconnect feedback", () => {
   });
 
   it("shows a confirmation after disconnecting an account", async () => {
-    (removeNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/disconnect upstox UPX1/i)).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText(/disconnect upstox UPX1/i));
 
-    await waitFor(() => expect(removeNativeAccount).toHaveBeenCalledWith("upstox", "UPX1"));
+    await waitFor(() =>
+      expect(removeBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "native", broker: "upstox", account_id: "UPX1" }),
+      ),
+    );
     expect(await screen.findByText(/upstox account UPX1 disconnected/i)).toBeInTheDocument();
   });
 
   it("surfaces disconnect failures instead of failing silently", async () => {
-    (removeNativeAccount as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Vault is locked"));
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Vault is locked"));
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/disconnect upstox UPX1/i)).toBeInTheDocument());
 

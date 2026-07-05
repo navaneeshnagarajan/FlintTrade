@@ -5,12 +5,9 @@ import type { BrokerAccount } from "@/types/broker";
 const mocks = vi.hoisted(() => ({
   accounts: [] as BrokerAccount[],
   refetch: vi.fn(),
-  gatewayRemove: vi.fn(),
-  gatewayReconnect: vi.fn(),
-  gatewaySetPrimary: vi.fn(),
-  removeNative: vi.fn(),
-  reloginNative: vi.fn(),
-  setPrimaryNative: vi.fn(),
+  removeBroker: vi.fn(),
+  reconnectBroker: vi.fn(),
+  setPrimaryBroker: vi.fn(),
 }));
 
 vi.mock("@/hooks/useBrokerAccounts", () => ({
@@ -27,18 +24,10 @@ vi.mock("@/stores/brokerStore", () => ({
     selector({ accounts: mocks.accounts }),
 }));
 
-vi.mock("@/services/gatewayApi", () => ({
-  gatewayApi: {
-    removeAccount: mocks.gatewayRemove,
-    reconnectAccount: mocks.gatewayReconnect,
-    setPrimary: mocks.gatewaySetPrimary,
-  },
-}));
-
-vi.mock("@/services/ftApi.native", () => ({
-  removeNativeAccount: mocks.removeNative,
-  reloginNativeAccount: mocks.reloginNative,
-  setPrimaryNativeAccount: mocks.setPrimaryNative,
+vi.mock("@/services/brokerAccountsApi", () => ({
+  removeBrokerAccount: mocks.removeBroker,
+  reconnectBrokerAccount: mocks.reconnectBroker,
+  setPrimaryBrokerAccount: mocks.setPrimaryBroker,
 }));
 
 import { ConnectedAccounts } from "./ConnectedAccounts";
@@ -47,12 +36,9 @@ describe("ConnectedAccounts", () => {
   beforeEach(() => {
     mocks.accounts = [];
     mocks.refetch.mockReset().mockResolvedValue({});
-    mocks.gatewayRemove.mockReset().mockResolvedValue({});
-    mocks.gatewayReconnect.mockReset().mockResolvedValue({});
-    mocks.gatewaySetPrimary.mockReset().mockResolvedValue({});
-    mocks.removeNative.mockReset().mockResolvedValue(undefined);
-    mocks.reloginNative.mockReset().mockResolvedValue({ has_session: true });
-    mocks.setPrimaryNative.mockReset().mockResolvedValue(undefined);
+    mocks.removeBroker.mockReset().mockResolvedValue(undefined);
+    mocks.reconnectBroker.mockReset().mockResolvedValue(undefined);
+    mocks.setPrimaryBroker.mockReset().mockResolvedValue(undefined);
   });
 
   it("routes native account actions through the native broker API", async () => {
@@ -72,12 +58,10 @@ describe("ConnectedAccounts", () => {
     expect(screen.queryByLabelText(/Set Upstox main as primary account/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText(/Reconnect Upstox main/i));
-    await waitFor(() => expect(mocks.reloginNative).toHaveBeenCalledWith("upstox", "UPX-1"));
-    expect(mocks.gatewayReconnect).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.reconnectBroker).toHaveBeenCalledWith(mocks.accounts[0]));
 
     fireEvent.click(screen.getByLabelText(/Remove Upstox main/i));
-    await waitFor(() => expect(mocks.removeNative).toHaveBeenCalledWith("upstox", "UPX-1"));
-    expect(mocks.gatewayRemove).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.removeBroker).toHaveBeenCalledWith(mocks.accounts[0]));
     expect(mocks.refetch).toHaveBeenCalledTimes(2);
   });
 
@@ -97,8 +81,7 @@ describe("ConnectedAccounts", () => {
 
     fireEvent.click(screen.getByLabelText(/Set Upstox main as primary account/i));
 
-    await waitFor(() => expect(mocks.setPrimaryNative).toHaveBeenCalledWith("upstox", "UPX-1"));
-    expect(mocks.gatewaySetPrimary).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.setPrimaryBroker).toHaveBeenCalledWith(mocks.accounts[0]));
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,8 +10,11 @@ import { useState } from "react";
 import { Trash2, RefreshCw, Star } from "lucide-react";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
-import { gatewayApi } from "@/services/gatewayApi";
-import { removeNativeAccount, reloginNativeAccount, setPrimaryNativeAccount } from "@/services/ftApi.native";
+import {
+  reconnectBrokerAccount,
+  removeBrokerAccount,
+  setPrimaryBrokerAccount,
+} from "@/services/brokerAccountsApi";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { BrokerAccount, AccountStatus } from "@/types/broker";
@@ -71,11 +74,7 @@ export function ConnectedAccounts() {
   const handleRemove = async (account: BrokerAccount) => {
     try {
       setError(null);
-      if (account.source === "native") {
-        await removeNativeAccount(account.broker, account.account_id);
-      } else {
-        await gatewayApi.removeAccount(account.account_id);
-      }
+      await removeBrokerAccount(account);
       await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to remove account");
@@ -85,11 +84,7 @@ export function ConnectedAccounts() {
   const handleReconnect = async (account: BrokerAccount) => {
     try {
       setError(null);
-      if (account.source === "native") {
-        await reloginNativeAccount(account.broker, account.account_id);
-      } else {
-        await gatewayApi.reconnectAccount(account.account_id);
-      }
+      await reconnectBrokerAccount(account);
       await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reconnect account");
@@ -99,11 +94,7 @@ export function ConnectedAccounts() {
   const handleSetPrimary = async (account: BrokerAccount) => {
     try {
       setError(null);
-      if (account.source === "native") {
-        await setPrimaryNativeAccount(account.broker, account.account_id);
-      } else {
-        await gatewayApi.setPrimary(account.account_id);
-      }
+      await setPrimaryBrokerAccount(account);
       await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set primary account");

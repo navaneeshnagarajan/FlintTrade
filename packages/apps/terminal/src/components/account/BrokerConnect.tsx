@@ -36,17 +36,19 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { BROKER_ACCOUNTS_QUERY_KEY } from "@/hooks/useBrokerAccounts";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
-import { gatewayApi } from "@/services/gatewayApi";
 import type { BrokerAccount } from "@/types/broker";
+import {
+  listGatewayBrokerAccounts,
+  reconnectBrokerAccount,
+  removeBrokerAccount,
+  setPrimaryBrokerAccount,
+} from "@/services/brokerAccountsApi";
 import {
   listNativeBrokers,
   listBrokerMcpCatalogue,
   listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
-  removeNativeAccount,
-  setPrimaryNativeAccount,
-  reloginNativeAccount,
   type McpClientConfig,
   type NativeAuthMethod,
 } from "@/services/ftApi.native";
@@ -238,7 +240,8 @@ export function BrokerConnect() {
   }
 
   const removeMutation = useMutation({
-    mutationFn: (sel: { adapter: string; account: string }) => removeNativeAccount(sel.adapter, sel.account),
+    mutationFn: (sel: { adapter: string; account: string }) =>
+      removeBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} disconnected.`);
@@ -261,7 +264,8 @@ export function BrokerConnect() {
   });
 
   const setPrimaryMutation = useMutation({
-    mutationFn: (sel: { adapter: string; account: string }) => setPrimaryNativeAccount(sel.adapter, sel.account),
+    mutationFn: (sel: { adapter: string; account: string }) =>
+      setPrimaryBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} set as primary.`);
@@ -280,7 +284,8 @@ export function BrokerConnect() {
   const reloginMutation = useMutation({
     // Replay the stored (replayable) material first — a one-click morning
     // re-auth for accounts whose vault token is still valid (G5).
-    mutationFn: (sel: { adapter: string; account: string }) => reloginNativeAccount(sel.adapter, sel.account),
+    mutationFn: (sel: { adapter: string; account: string }) =>
+      reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
@@ -313,12 +318,13 @@ export function BrokerConnect() {
   // — it works standalone in the pre-app setup wizard too.
   const gatewayAccountsQuery = useQuery({
     queryKey: GATEWAY_ACCOUNTS_KEY,
-    queryFn: () => gatewayApi.listAccounts(),
+    queryFn: listGatewayBrokerAccounts,
   });
   const gatewayAccounts = gatewayAccountsQuery.data ?? [];
 
   const gatewayRemoveMutation = useMutation({
-    mutationFn: (sel: { accountId: string; broker: string }) => gatewayApi.removeAccount(sel.accountId),
+    mutationFn: (sel: { accountId: string; broker: string }) =>
+      removeBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`Gateway account ${sel.accountId} disconnected.`);
@@ -338,28 +344,30 @@ export function BrokerConnect() {
   });
 
   const gatewayReconnectMutation = useMutation({
-    mutationFn: (accountId: string) => gatewayApi.reconnectAccount(accountId),
-    onSuccess: (_r, accountId) => {
+    mutationFn: (sel: { accountId: string; broker: string }) =>
+      reconnectBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
+    onSuccess: (_r, sel) => {
       setError("");
-      setNotice(`Gateway account ${accountId} reconnected.`);
+      setNotice(`Gateway account ${sel.accountId} reconnected.`);
       invalidateAccountQueries();
     },
-    onError: (e: unknown, accountId) => {
+    onError: (e: unknown, sel) => {
       setNotice("");
-      setError(e instanceof Error ? e.message : `Could not reconnect gateway account ${accountId}.`);
+      setError(e instanceof Error ? e.message : `Could not reconnect gateway account ${sel.accountId}.`);
     },
   });
 
   const gatewaySetPrimaryMutation = useMutation({
-    mutationFn: (accountId: string) => gatewayApi.setPrimary(accountId),
-    onSuccess: (_r, accountId) => {
+    mutationFn: (sel: { accountId: string; broker: string }) =>
+      setPrimaryBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
+    onSuccess: (_r, sel) => {
       setError("");
-      setNotice(`Gateway account ${accountId} set as primary.`);
+      setNotice(`Gateway account ${sel.accountId} set as primary.`);
       invalidateAccountQueries();
     },
-    onError: (e: unknown, accountId) => {
+    onError: (e: unknown, sel) => {
       setNotice("");
-      setError(e instanceof Error ? e.message : `Could not set gateway account ${accountId} as primary.`);
+      setError(e instanceof Error ? e.message : `Could not set gateway account ${sel.accountId} as primary.`);
     },
   });
 
@@ -668,7 +676,7 @@ export function BrokerConnect() {
                       size="sm"
                       aria-label={`Set ${a.label || a.account_id} as primary`}
                       title="Set as primary"
-                      onClick={() => gatewaySetPrimaryMutation.mutate(a.account_id)}
+                      onClick={() => gatewaySetPrimaryMutation.mutate({ accountId: a.account_id, broker: a.broker })}
                       disabled={gatewayBusy}
                     >
                       <Star className="size-4" aria-hidden="true" />
@@ -679,7 +687,7 @@ export function BrokerConnect() {
                     size="sm"
                     aria-label={`Reconnect ${a.label || a.account_id}`}
                     title="Reconnect"
-                    onClick={() => gatewayReconnectMutation.mutate(a.account_id)}
+                    onClick={() => gatewayReconnectMutation.mutate({ accountId: a.account_id, broker: a.broker })}
                     disabled={gatewayBusy}
                   >
                     <RefreshCw className="size-4" aria-hidden="true" />
