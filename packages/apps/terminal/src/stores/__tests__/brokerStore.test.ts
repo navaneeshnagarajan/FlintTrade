@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { brokerAccountKey, useBrokerStore } from "../brokerStore";
+import { brokerAccountKey, migrateBrokerPersist, useBrokerStore } from "../brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 
 const makeAccount = (overrides: Partial<BrokerAccount> = {}): BrokerAccount => ({
@@ -22,6 +22,36 @@ describe("brokerStore", () => {
     const state = useBrokerStore.getState();
     expect(state.accounts).toEqual([]);
     expect(state.activeAccountId).toBeNull();
+  });
+
+  describe("migrateBrokerPersist", () => {
+    it("drops a legacy v0 bare activeAccountId (prevents wrong-source first-match)", () => {
+      const out = migrateBrokerPersist({ accounts: [], activeAccountId: "CLIENT123" }, 0) as {
+        activeAccountId: string | null;
+      };
+      expect(out.activeAccountId).toBeNull();
+    });
+
+    it("keeps a composite-key activeAccountId untouched", () => {
+      for (const key of ["native:dhan:D1", "gateway:upstox:U1"]) {
+        const out = migrateBrokerPersist({ accounts: [], activeAccountId: key }, 0) as {
+          activeAccountId: string | null;
+        };
+        expect(out.activeAccountId).toBe(key);
+      }
+    });
+
+    it("leaves already-migrated (version >= 1) state untouched", () => {
+      const state = { accounts: [], activeAccountId: "CLIENT123" };
+      expect(migrateBrokerPersist(state, 1)).toBe(state);
+    });
+
+    it("leaves a null active account alone", () => {
+      const out = migrateBrokerPersist({ accounts: [], activeAccountId: null }, 0) as {
+        activeAccountId: string | null;
+      };
+      expect(out.activeAccountId).toBeNull();
+    });
   });
 
   it("setAccounts replaces all", () => {

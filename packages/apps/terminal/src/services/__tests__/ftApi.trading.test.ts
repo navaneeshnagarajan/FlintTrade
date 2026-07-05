@@ -163,4 +163,20 @@ describe("startSmartRoute", () => {
     expect(requestBody(fetchMock)).not.toHaveProperty("broker");
     expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
   });
+
+  it("fails closed instead of retargeting when the active native account is not yet connected", async () => {
+    // Round-4 finding: the smart-route path must fail closed like postOrder — a
+    // selected-but-unconfirmed native account (e.g. the post-reload window) must
+    // not fall through to the bare path and be silently routed to
+    // brokers.execution.default.
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "disconnected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    await expect(startSmartRoute(BASE_PARAMS)).rejects.toThrow(/isn't connected yet/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

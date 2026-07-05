@@ -81,6 +81,24 @@ export function nativeActiveWriteTargetIsUnconfirmed(mode: string, apiKey: strin
   return hasUnconfirmedNativeActiveWriteTarget(mode, apiKey, accounts, activeAccountId);
 }
 
+/** Standard fail-closed message shown when a native write target isn't ready. */
+export const NATIVE_TARGET_NOT_READY_MESSAGE =
+  "Your selected native broker isn't connected yet — its session is still being "
+  + "established (this can happen right after a reload). Wait a moment and retry, or "
+  + "reconnect it in Settings → Brokers.";
+
+/**
+ * Fail closed on EVERY live-order entrypoint: throw if the operator's selected
+ * active account is native but not confirmed connected, so no order path silently
+ * falls through to the bare route (which the backend resolves to
+ * brokers.execution.default — a different target than the operator chose).
+ */
+export function assertNativeWriteTargetReadyOrThrow(mode: string, apiKey: string): void {
+  if (nativeActiveWriteTargetIsUnconfirmed(mode, apiKey)) {
+    throw new Error(NATIVE_TARGET_NOT_READY_MESSAGE);
+  }
+}
+
 export function pickNativeBrokerOrderTarget(
   mode: string,
   apiKey: string,

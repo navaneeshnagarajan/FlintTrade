@@ -17,6 +17,34 @@ export function isBrokerAccountMatch(account: BrokerAccountIdentity, selector: s
   return brokerAccountKey(account) === selector || account.account_id === selector;
 }
 
+/**
+ * Persist migration for the broker store.
+ *
+ * v0 (pre-composite-key builds) persisted `activeAccountId` as a BARE
+ * account_id. Because {@link isBrokerAccountMatch} also matches on account_id
+ * alone, a rehydrated bare id can first-match a same-id row of the WRONG source
+ * (e.g. a gateway row for a dual-linked account), making native write-targeting
+ * resolve the wrong account and silently bypass the live-order fail-closed
+ * guard. Drop any legacy `activeAccountId` that is not a recognised composite
+ * key (`source:broker:account_id`) — the live poll repopulates accounts and the
+ * operator re-selects safely.
+ */
+export function migrateBrokerPersist(persistedState: unknown, version: number): unknown {
+  if (version < 1 && persistedState && typeof persistedState === "object") {
+    const state = persistedState as { activeAccountId?: unknown };
+    const active = state.activeAccountId;
+    if (
+      typeof active === "string"
+      && active.length > 0
+      && !active.startsWith("native:")
+      && !active.startsWith("gateway:")
+    ) {
+      return { ...state, activeAccountId: null };
+    }
+  }
+  return persistedState;
+}
+
 interface BrokerState {
   accounts: BrokerAccount[];
   activeAccountId: string | null;
@@ -77,6 +105,8 @@ export const useBrokerStore = create<BrokerState>()(
       }),
       {
         name: "flinttrade:brokers",
+        version: 1,
+        migrate: migrateBrokerPersist,
         // Only persist non-sensitive display fields. Credentials and session
         // tokens must never be written to localStorage.
         partialize: (state) => ({

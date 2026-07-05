@@ -1,5 +1,5 @@
 import { buildHeaders, get, getBase, isDemoAuthSession, post, del } from "./ftApi.helpers";
-import { pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
+import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -152,11 +152,15 @@ export interface SmartRouteParams {
 function withSmartRouteBrokerTarget(params: SmartRouteParams): SmartRouteParams {
   if (params.broker || params.account_id) return params;
 
-  const nativeTarget = pickNativeBrokerOrderTarget(
-    useModeStore.getState().mode,
-    useConnectionStore.getState().apiKey,
-  );
-  return nativeTarget ? { ...params, ...nativeTarget } : params;
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  const nativeTarget = pickNativeBrokerOrderTarget(mode, apiKey);
+  if (nativeTarget) return { ...params, ...nativeTarget };
+  // Fail closed like postOrder: a native active account that isn't confirmed
+  // connected must not fall through to the bare smart-route path (backend
+  // brokers.execution.default) and silently retarget this live order.
+  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  return params;
 }
 
 /**
