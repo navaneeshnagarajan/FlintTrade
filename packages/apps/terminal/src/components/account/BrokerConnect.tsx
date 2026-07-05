@@ -1,12 +1,12 @@
 /**
  * BrokerConnect — shared native broker connect surface.
  *
- * Lets the operator connect Dhan / Upstox / Kotak Neo / IndMoney using their
- * preferred login method (access token, PIN+TOTP, OAuth, TOTP+MPIN). The method
- * catalogue + form fields come from the backend (`/native/brokers`), so the UI
- * stays in lockstep with what each adapter supports. Credentials are POSTed to
- * the local backend only. OAuth opens the broker's approval page in a new tab;
- * the backend's loopback callback establishes the session.
+ * Lets the operator connect catalogue-backed native brokers using their
+ * preferred login method. The method catalogue + form fields come from the
+ * backend (`/native/brokers`), so the UI stays in lockstep with what each
+ * adapter supports. Credentials are POSTed to the local backend only. OAuth
+ * opens the broker's approval page in a new tab; the backend's loopback callback
+ * establishes the session.
  */
 
 import { useState } from "react";
@@ -75,6 +75,12 @@ function mcpConfigJson(config: McpClientConfig): string {
   return JSON.stringify(config.config, null, 2);
 }
 
+function joinBrokerNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
 function McpSetupValue({
   label,
   copyLabel,
@@ -129,6 +135,15 @@ export function BrokerConnect() {
 
   const brokers = brokersQuery.data ?? [];
   const mcpBrokers = mcpQuery.data ?? [];
+  const connectableNativeNames = brokers
+    .filter((b) => b.connectable)
+    .map((b) => b.display_name);
+  const connectableNativeLabel = joinBrokerNames(connectableNativeNames);
+  const unavailableNativeNames = brokers
+    .filter((b) => !b.connectable)
+    .map((b) => b.display_name);
+  const unavailableNativeLabel = joinBrokerNames(unavailableNativeNames);
+  const unavailableNativeVerb = unavailableNativeNames.length === 1 ? "stays" : "stay";
   const [selectedBroker, setSelectedBroker] = useState<string>("");
   const [selectedMethodId, setSelectedMethodId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
@@ -367,11 +382,14 @@ export function BrokerConnect() {
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <p>
           <strong className="text-text-primary">Native adapters are not fully tested — use at your own risk.</strong>{" "}
-          Login and account reads are verified for Dhan, Upstox, and INDmoney, but native order
+          Login and account reads are verified for{" "}
+          {connectableNativeLabel || "the currently selectable native brokers"}, but native order
           placement (place / modify / cancel) has{" "}
           <strong className="text-text-primary">not been live-verified for any broker</strong> yet —
-          OpenAlgo is the recommended, community-tested path. Kotak Neo and Groww stay visible as
-          catalogued adapters and remain disabled until their live checks pass.
+          OpenAlgo is the recommended, community-tested path.{" "}
+          {unavailableNativeLabel
+            ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their live checks pass.`
+            : "Unavailable adapters stay disabled until their live checks pass."}
         </p>
       </div>
 

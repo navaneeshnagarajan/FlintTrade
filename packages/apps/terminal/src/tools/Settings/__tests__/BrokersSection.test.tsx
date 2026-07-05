@@ -134,6 +134,26 @@ const BROKERS = [
       },
     ],
   },
+  {
+    adapter_id: "groww",
+    display_name: "Groww",
+    connectable: false,
+    auth_methods: [
+      {
+        id: "api_key_secret",
+        label: "API key + secret",
+        kind: "direct" as const,
+        description: (
+          "Enter the Groww Trade API key and secret from Groww Cloud/API Keys. Live order placement still " +
+          "requires static outbound IP setup."
+        ),
+        fields: [
+          { name: "api_key", label: "Groww Trade API key", secret: true, required: true, help: "" },
+          { name: "api_secret", label: "Groww Trade API secret", secret: true, required: true, help: "" },
+        ],
+      },
+    ],
+  },
 ];
 
 const MCP_BROKERS = [
@@ -275,7 +295,12 @@ describe("BrokersSection", () => {
     expect(screen.getByRole("heading", { name: "Brokers" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
     expect(screen.getByText(/not fully tested — use at your own risk/i)).toBeInTheDocument();
-    expect(screen.getByText(/not been live-verified for any broker/i)).toBeInTheDocument();
+    await waitFor(() => {
+      const nativeWarning = screen.getByText(/Login and account reads are verified for/i);
+      expect(nativeWarning).toHaveTextContent("Dhan, Upstox, and INDmoney");
+      expect(nativeWarning).toHaveTextContent("Kotak Neo and Groww stay visible");
+      expect(nativeWarning).toHaveTextContent("not been live-verified for any broker");
+    });
   });
 
   it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {
@@ -420,7 +445,8 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    expect(screen.queryByRole("option", { name: "Groww" })).not.toBeInTheDocument();
+    const groww = await screen.findByRole("option", { name: /Groww.*Coming soon/i });
+    expect(groww).toHaveAttribute("aria-disabled", "true");
   });
 
   it("shows retry-later broker login failures without asking for fresh login", async () => {

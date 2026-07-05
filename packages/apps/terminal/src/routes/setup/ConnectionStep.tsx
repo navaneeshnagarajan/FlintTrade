@@ -3,7 +3,7 @@
  *
  * Two modes toggled via tabs:
  *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server (primary)
- *   - "FlintTrade Native"  — pick a native broker adapter, enter credentials, manage accounts
+ *   - "FlintTrade Native"  — use the catalogue-driven native broker surface
  *
  * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
  */
@@ -311,8 +311,9 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         </p>
       ) : (
         <p className="text-xs text-text-muted">
-          Connect a FlintTrade native adapter directly (Dhan, Upstox, INDmoney). Secondary path —
-          native order placement is not fully live-tested; use at your own risk.
+          Connect a FlintTrade native adapter directly. Availability and login fields come from the
+          broker catalogue. Secondary path — native order placement is not fully live-tested; use at
+          your own risk.
         </p>
       )}
 

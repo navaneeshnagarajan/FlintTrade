@@ -45,7 +45,9 @@ describe("ConnectionStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByText("Native brokers section")).toBeInTheDocument();
+    expect(screen.getByText(/availability and login fields come from the broker catalogue/i)).toBeInTheDocument();
     expect(screen.getByText(/use at your own risk/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /connect at least one broker/i })).toBeDisabled();
   });
 
