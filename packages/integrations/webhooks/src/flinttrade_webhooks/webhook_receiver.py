@@ -223,7 +223,7 @@ class WebhookReceiver:
     # Signature verification
     # ------------------------------------------------------------------
 
-    def verify_signature(self, payload: bytes, signature: str) -> bool:
+    def verify_signature(self, payload: bytes, signature: str, *, secret: str | None = None) -> bool:
         """Verify HMAC-SHA256 webhook signature.
 
         Accepts signatures in the format ``sha256=<hex>`` (GitHub style)
@@ -242,9 +242,12 @@ class WebhookReceiver:
             ``True`` if the signature is valid or verification is explicitly
             skipped via ``skip_verification=True``.  ``False`` otherwise.
         """
-        if not self._config.secret:
+        signing_secret = self._config.secret if secret is None else secret
+        skip_verification = self._config.skip_verification if secret is None else False
+
+        if not signing_secret:
             # Explicit opt-out: caller has acknowledged there is no secret.
-            if self._config.skip_verification:
+            if skip_verification:
                 return True
             # Secret is absent and skip_verification is False — reject.
             logger.warning(
@@ -258,7 +261,7 @@ class WebhookReceiver:
         sig_hex = signature.removeprefix("sha256=")
 
         expected = hmac.new(
-            self._config.secret.encode("utf-8"),
+            signing_secret.encode("utf-8"),
             payload,
             hashlib.sha256,
         ).hexdigest()

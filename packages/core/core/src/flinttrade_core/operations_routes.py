@@ -577,6 +577,11 @@ def _save_webhook_registry(workspace: Any, rows: list[dict[str, Any]]) -> None:
     workspace.set(_WEBHOOK_REGISTRY_KEY, payload)
 
 
+def _get_webhook_secret_store() -> Any | None:
+    """Return the app-injected encrypted webhook store, if available."""
+    return current_app.config.get("WEBHOOK_SECRET_STORE")
+
+
 @operations_bp.route("/webhooks", methods=["GET"])
 def webhooks_list() -> tuple[Any, int]:
     """Return all registered webhook endpoints and their status.
@@ -602,8 +607,8 @@ def webhooks_create() -> tuple[Any, int]:
         path (str): URL path for the webhook (e.g. ``"/webhook/custom/my_signal"``).
             Stored as the mounted receiver path ``"/v1/webhook/<source>/<slug>"``.
         name (str): Human-readable name.
-        secret (str, optional): currently rejected until the encrypted
-            per-webhook secret + replay layer is wired into the receiver.
+        secret (str, optional): signing secret stored in the encrypted
+            per-webhook receiver store. Never persisted to workspace.json.
 
     Returns:
         JSON with ``status`` and the registered webhook details.
@@ -613,29 +618,30 @@ def webhooks_create() -> tuple[Any, int]:
         path_raw = str(body.get("path") or "").strip()
         name = str(body.get("name") or "").strip()
         source = str(body.get("type") or "custom").strip().lower()
-        secret = str(body.get("secret") or "").strip()
+        secret_raw = body.get("secret")
+        secret = secret_raw if isinstance(secret_raw, str) else ""
 
         if not path_raw or not name:
             return jsonify({"status": "error", "message": "path and name are required"}), 400
-        if secret:
-            return jsonify({
-                "status": "error",
-                "message": (
-                    "Per-webhook secrets are not wired to the mounted receiver yet; "
-                    "create the webhook without a secret or wait for the encrypted secret/replay merge."
-                ),
-            }), 501
-
         try:
             path = _normalise_webhook_path(path_raw, source)
         except ValueError as exc:
             return jsonify({"status": "error", "message": str(exc)}), 400
+
+        secret_store = _get_webhook_secret_store()
+        if secret and secret_store is None:
+            return jsonify({
+                "status": "error",
+                "message": "Encrypted webhook secret store is unavailable.",
+            }), 503
 
         workspace, rows = _load_webhook_registry()
         row = _webhook_dict(path, name, bool(body.get("enabled", True)))
         rows = [existing for existing in rows if existing["path"] != path]
         rows.append(row)
         _save_webhook_registry(workspace, rows)
+        if secret and secret_store is not None:
+            secret_store.store_secret(path, row["type"], row["name"], secret)
         return jsonify({
             "status": "success",
             "data": row,
@@ -675,6 +681,9 @@ def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
             kept.append(row)
         if removed is not None:
             _save_webhook_registry(workspace, kept)
+            secret_store = _get_webhook_secret_store()
+            if secret_store is not None:
+                secret_store.delete_secret(removed["path"])
             return jsonify({
                 "status": "success",
                 "data": {"message": f"Webhook '{removed['path']}' removed"},

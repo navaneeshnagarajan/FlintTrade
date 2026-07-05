@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,6 +11,7 @@ from flask import Flask
 
 import flinttrade_webhooks.webhook_routes as mod
 from flinttrade_webhooks.webhook_receiver import WebhookConfig
+from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
 
 
 # ---------------------------------------------------------------------------
@@ -151,3 +153,82 @@ def test_log_ok(client):
     body = resp.get_json()
     assert body["status"] == "success"
     assert "entries" in body["data"]
+
+
+class TestNamedWebhookSecrets:
+    @pytest.fixture()
+    def signed_client(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        flask_app = Flask("signed_webhooks")
+        flask_app.config["TESTING"] = True
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret(
+            "/v1/webhook/custom/signed",
+            "custom",
+            "Signed",
+            _SECRET,
+        )
+        store.store_secret(
+            "/v1/webhook/tradingview/order-signal",
+            "tradingview",
+            "Order Signal",
+            _SECRET,
+        )
+        mod.init_webhook_routes(
+            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
+            secret_store=store,
+        )
+        flask_app.register_blueprint(mod.webhook_bp)
+        return flask_app.test_client()
+
+    def _headers(self, body: bytes, nonce: str = "nonce-1", timestamp: float | None = None) -> dict[str, str]:
+        import hashlib
+        import hmac
+
+        ts = time.time() if timestamp is None else timestamp
+        return {
+            "Content-Type": "application/json",
+            "X-Signature": "sha256=" + hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest(),
+            "X-Webhook-Nonce": nonce,
+            "X-Webhook-Timestamp": str(ts),
+        }
+
+    def test_signed_named_webhook_dispatches_and_replay_is_rejected(self, signed_client):
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        headers = self._headers(body)
+        first = signed_client.post("/v1/webhook/custom/signed", data=body, headers=headers)
+        assert first.status_code == 200
+        assert first.get_json()["data"]["status"] == "received"
+
+        replay = signed_client.post("/v1/webhook/custom/signed", data=body, headers=headers)
+        assert replay.status_code == 409
+        assert replay.get_json()["message"] == "Webhook replay rejected"
+
+    def test_signed_named_webhook_rejects_bad_signature(self, signed_client):
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        headers = self._headers(body)
+        headers["X-Signature"] = "sha256=" + "0" * 64
+        resp = signed_client.post("/v1/webhook/custom/signed", data=body, headers=headers)
+        assert resp.status_code == 401
+
+    def test_signed_named_webhook_requires_nonce_and_timestamp(self, signed_client):
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        headers = self._headers(body)
+        headers.pop("X-Webhook-Nonce")
+        resp = signed_client.post("/v1/webhook/custom/signed", data=body, headers=headers)
+        assert resp.status_code == 400
+        assert "nonce and timestamp" in resp.get_json()["message"]
+
+    def test_signed_place_order_still_fails_honestly(self, signed_client):
+        body = json.dumps({"action": "BUY", "symbol": "NIFTY", "exchange": "NSE"}).encode()
+        resp = signed_client.post(
+            "/v1/webhook/tradingview/order-signal",
+            data=body,
+            headers=self._headers(body, nonce="order-nonce-1"),
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["status"] == "error"
+        assert data["action"] == "place_order"
+        assert "no order was placed" in data["message"]

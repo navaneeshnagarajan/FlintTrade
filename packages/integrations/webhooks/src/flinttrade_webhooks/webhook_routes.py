@@ -14,9 +14,9 @@ Blueprint registered at ``/v1/webhook`` (post-strip form).
 Authentication: HMAC-SHA256 via ``X-Signature: sha256=<hex>`` header.
 Rate limiting: 60 requests/minute per :class:`WebhookConfig` default.
 
-The Blueprint exposes ``init_webhook_routes(receiver)`` for injecting a
-pre-configured :class:`WebhookReceiver` instance (useful for testing and
-for the main app factory).
+The Blueprint exposes ``init_webhook_routes(receiver, secret_store=...)`` for
+injecting a pre-configured :class:`WebhookReceiver` plus the optional encrypted
+per-webhook secret/replay store used by named endpoints.
 
 Example (in app factory)::
 
@@ -35,16 +35,22 @@ Example (in app factory)::
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
 
 try:
     from .webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver
+    from .webhook_replay import REASON_REPLAY, REASON_STALE
+    from .webhook_secret_store import WebhookSecretStore
 except ImportError:
     from webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver  # type: ignore[no-redef]
+    from webhook_replay import REASON_REPLAY, REASON_STALE  # type: ignore[no-redef]
+    from webhook_secret_store import WebhookSecretStore  # type: ignore[no-redef]
 
 logger = logging.getLogger("flinttrade.integration.webhook_routes")
 
@@ -56,17 +62,26 @@ webhook_bp = Blueprint(
 
 # Module-level receiver singleton (injected via init_webhook_routes or lazily created)
 _receiver: WebhookReceiver | None = None
+_secret_store: WebhookSecretStore | None = None
 
 
-def init_webhook_routes(receiver: WebhookReceiver) -> None:
-    """Inject a :class:`WebhookReceiver` instance into the Blueprint.
+def init_webhook_routes(
+    receiver: WebhookReceiver,
+    *,
+    secret_store: WebhookSecretStore | None = None,
+) -> None:
+    """Inject a receiver and optional per-webhook secret store.
 
     Args:
         receiver: Pre-configured :class:`WebhookReceiver` to use for all
             incoming webhook requests.
+        secret_store: Encrypted store for named webhook signing secrets and
+            replay nonces. When omitted, routes keep the receiver's legacy
+            global-secret behaviour.
     """
-    global _receiver  # noqa: PLW0603
+    global _receiver, _secret_store  # noqa: PLW0603
     _receiver = receiver
+    _secret_store = secret_store
     logger.info("WebhookReceiver injected into webhook_routes")
 
 
@@ -99,6 +114,59 @@ def _parse_request_body() -> tuple[bytes, dict[str, Any] | None]:
     except (json.JSONDecodeError, UnicodeDecodeError):
         parsed = None
     return raw, parsed
+
+
+def _mounted_webhook_path(source: str, webhook_id: str | None) -> str | None:
+    if not webhook_id:
+        return None
+    return f"/v1/webhook/{source}/{'/'.join(part for part in webhook_id.split('/') if part)}"
+
+
+def _parse_replay_timestamp(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
+def _extract_replay_fields(body: dict[str, Any]) -> tuple[str, float] | None:
+    nonce = (
+        request.headers.get("X-Webhook-Nonce")
+        or request.headers.get("X-Nonce")
+        or body.get("nonce")
+        or body.get("webhook_nonce")
+    )
+    timestamp = (
+        request.headers.get("X-Webhook-Timestamp")
+        or request.headers.get("X-Timestamp")
+        or body.get("timestamp")
+        or body.get("webhook_timestamp")
+    )
+    nonce_text = str(nonce or "").strip()
+    payload_ts = _parse_replay_timestamp(timestamp)
+    if not nonce_text or payload_ts is None:
+        return None
+    return nonce_text, payload_ts
+
+
+def _source_ip_hash() -> str | None:
+    if not request.remote_addr:
+        return None
+    return hashlib.sha256(request.remote_addr.encode("utf-8")).hexdigest()
 
 
 def _run_dispatch(receiver: WebhookReceiver, payload: WebhookPayload) -> dict[str, Any]:
@@ -185,9 +253,41 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
 
     # Signature verification
     sig_header = request.headers.get("X-Signature", "")
-    if not receiver.verify_signature(raw, sig_header):
+    mounted_path = _mounted_webhook_path(source, webhook_id)
+    signing_secret: str | None = None
+    if mounted_path and _secret_store is not None:
+        try:
+            signing_secret = _secret_store.get_secret(mounted_path)
+        except Exception:
+            logger.exception("Webhook secret lookup failed for source=%s", source)
+            return jsonify({"status": "error", "message": "Webhook secret store unavailable"}), 503
+
+    if not receiver.verify_signature(raw, sig_header, secret=signing_secret):
         logger.warning("Signature verification failed for source=%s", source)
         return jsonify({"status": "error", "message": "Signature verification failed"}), 401
+
+    if mounted_path and signing_secret and _secret_store is not None:
+        replay_fields = _extract_replay_fields(body_dict)
+        if replay_fields is None:
+            return jsonify({
+                "status": "error",
+                "message": "Signed webhooks require a nonce and timestamp",
+            }), 400
+        nonce, payload_ts = replay_fields
+        try:
+            reason = _secret_store.check_and_record_nonce(
+                mounted_path,
+                nonce,
+                payload_ts,
+                source_ip_hash=_source_ip_hash(),
+            )
+        except Exception:
+            logger.exception("Webhook replay check failed for source=%s", source)
+            return jsonify({"status": "error", "message": "Webhook replay check unavailable"}), 503
+        if reason == REASON_REPLAY:
+            return jsonify({"status": "error", "message": "Webhook replay rejected"}), 409
+        if reason == REASON_STALE:
+            return jsonify({"status": "error", "message": "Webhook timestamp is stale"}), 400
 
     # Parse
     try:

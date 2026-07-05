@@ -831,7 +831,7 @@ class TestWebhooksManagement:
         assert data["path"] == "/v1/webhook/tradingview/nifty-breakout"
         assert data["type"] == "tradingview"
 
-    def test_rejects_secret_until_encrypted_receiver_store_exists(self, client):
+    def test_create_with_secret_uses_encrypted_store_without_echoing_secret(self, flask_app, client):
         resp = self._create(
             client,
             path="/webhook/chartink/scan1",
@@ -839,10 +839,21 @@ class TestWebhooksManagement:
             webhook_type="chartink",
             secret="do-not-store-in-workspace-json",
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 201
         body = resp.get_json()
-        assert body["status"] == "error"
-        assert "Per-webhook secrets are not wired" in body["message"]
+        assert body["status"] == "success"
+        data = body["data"]
+        assert data["path"] == "/v1/webhook/chartink/scan1"
+        assert "secret" not in data
+
+        from flinttrade_core.workspace import Workspace
+
+        workspace_rows = Workspace().get("automation.webhooks", [])
+        assert workspace_rows
+        assert all("secret" not in row for row in workspace_rows)
+
+        store = flask_app.config["WEBHOOK_SECRET_STORE"]
+        assert store.get_secret("/v1/webhook/chartink/scan1") == "do-not-store-in-workspace-json"
 
     def test_list_id_round_trips_through_delete(self, client):
         """The id the list emits must, URL-encoded as the frontend does, delete
@@ -869,3 +880,26 @@ class TestWebhooksManagement:
 
         remaining = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
         assert all(w["name"] != "My Signal" for w in remaining)
+
+    def test_delete_removes_matching_webhook_secret(self, flask_app, client):
+        from urllib.parse import quote
+
+        created = self._create(
+            client,
+            path="/webhook/custom/private_signal",
+            name="Private Signal",
+            webhook_type="custom",
+            secret="delete-me-too",
+        )
+        assert created.status_code == 201
+        target = created.get_json()["data"]
+
+        store = flask_app.config["WEBHOOK_SECRET_STORE"]
+        assert store.has_secret(target["path"]) is True
+
+        resp = client.delete(
+            f"/api/v1/webhooks/{quote(target['id'], safe='')}",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        assert store.has_secret(target["path"]) is False

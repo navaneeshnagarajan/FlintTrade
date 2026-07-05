@@ -1836,7 +1836,12 @@ def create_flask_app(
     #                               form, so these route additions reduce the
     #                               apparent 404 surface today.)
     # ------------------------------------------------------------------
-    from flinttrade_webhooks.webhook_routes import webhook_bp  # noqa: PLC0415
+    from flinttrade_webhooks.webhook_receiver import WebhookConfig, WebhookReceiver  # noqa: PLC0415
+    from flinttrade_webhooks.webhook_routes import init_webhook_routes, webhook_bp  # noqa: PLC0415
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore  # noqa: PLC0415
+    webhook_secret_store = WebhookSecretStore(_workspace_dir() / "webhook_secrets.db", _get_master_password())
+    app.config["WEBHOOK_SECRET_STORE"] = webhook_secret_store
+    init_webhook_routes(WebhookReceiver(WebhookConfig()), secret_store=webhook_secret_store)
     app.register_blueprint(webhook_bp)
 
     from flinttrade_screener.payoff_routes import payoff_bp  # noqa: PLC0415
