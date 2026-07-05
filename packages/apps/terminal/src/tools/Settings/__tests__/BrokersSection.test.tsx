@@ -304,8 +304,11 @@ const MCP_BROKERS = [
         "Read-only holdings, orders, positions, mutual funds, funds, and profile lookup",
         "Account-scoped portfolio composition, performance, risk, and buying-power analysis",
         "Individual stock research in the context of current holdings",
-        "Technical indicator, chart, trend, and market-context analysis",
-        "Activity summaries, margins, P&L overviews, and portfolio correlation studies",
+        "Technical indicator, chart, trend, market-quote, and market-context analysis",
+        "Activity summaries, margins, historical trading information, and P&L overviews",
+        "Portfolio beta and correlation studies against NIFTY over multi-year windows",
+        "Professional investment-model reviews over the operator's current portfolio",
+        "Board-meeting, AGM/EGM, corporate-governance, and hold-or-sell context checks",
       ],
       cautions: [
         "Upstox MCP cannot place, modify, or cancel orders.",
@@ -431,9 +434,17 @@ function makeGatewayAccount(overrides: Partial<BrokerAccount> = {}): BrokerAccou
   };
 }
 
+function setClipboard(writeText?: unknown) {
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: writeText ? { writeText } : undefined,
+  });
+}
+
 describe("BrokersSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setClipboard();
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
     (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -554,7 +565,11 @@ describe("BrokersSection", () => {
       "not treat the hosted MCP as a FlintTrade live order path",
     );
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("verify critical data");
-    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("portfolio correlation studies");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("market-quote");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("historical trading information");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Portfolio beta");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Professional investment-model");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("corporate-governance");
     expect(screen.getByText("Add the Dhan remote MCP URL to a supported MCP client.")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-dhan-claude_code")).toHaveTextContent(
       "claude mcp add --transport http dhan https://mcp.dhan.co/mcp",
@@ -586,6 +601,34 @@ describe("BrokersSection", () => {
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
     const groww = await screen.findByRole("option", { name: /Groww.*Coming soon/i });
     expect(groww).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("reports MCP setup copy success only after the clipboard write succeeds", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard(writeText);
+
+    renderSection();
+    await screen.findByText("Broker MCP assistants");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Upstox MCP URL" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("https://mcp.upstox.com/mcp"));
+    expect(await screen.findByText("Upstox MCP URL copied.")).toBeInTheDocument();
+  });
+
+  it("does not claim MCP setup copy success when the clipboard write fails", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
+    setClipboard(writeText);
+
+    renderSection();
+    await screen.findByText("Broker MCP assistants");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Upstox MCP URL" }));
+
+    expect(
+      await screen.findByText("Upstox MCP URL could not be copied. Select and copy it manually."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Upstox MCP URL copied.")).not.toBeInTheDocument();
   });
 
   it("shows retry-later broker login failures without asking for fresh login", async () => {

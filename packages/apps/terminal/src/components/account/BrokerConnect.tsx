@@ -90,7 +90,7 @@ function McpSetupValue({
   copyLabel: string;
   value: string;
   multiline?: boolean;
-  onCopy: (label: string, value: string) => void;
+  onCopy: (label: string, value: string) => void | Promise<void>;
 }) {
   return (
     <div className="grid grid-cols-[1fr_auto] items-start gap-2">
@@ -117,7 +117,9 @@ function McpSetupValue({
         variant="ghost"
         size="sm"
         aria-label={`Copy ${copyLabel}`}
-        onClick={() => onCopy(copyLabel, value)}
+        onClick={() => {
+          void onCopy(copyLabel, value);
+        }}
       >
         <Copy className="size-4" aria-hidden="true" />
       </Button>
@@ -230,10 +232,18 @@ export function BrokerConnect() {
     },
   });
 
-  function copySetupUrl(label: string, value: string) {
-    void navigator.clipboard?.writeText(value);
-    setError("");
-    setNotice(`${label} copied.`);
+  async function copySetupUrl(label: string, value: string) {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(value);
+      setError("");
+      setNotice(`${label} copied.`);
+    } catch {
+      setNotice("");
+      setError(`${label} could not be copied. Select and copy it manually.`);
+    }
   }
 
   const removeMutation = useMutation({
@@ -457,7 +467,9 @@ export function BrokerConnect() {
                       variant="ghost"
                       size="sm"
                       aria-label={`Copy ${entry.display_name} MCP URL`}
-                      onClick={() => copySetupUrl(`${entry.display_name} MCP URL`, entry.mcp.remote_url)}
+                      onClick={() => {
+                        void copySetupUrl(`${entry.display_name} MCP URL`, entry.mcp.remote_url);
+                      }}
                     >
                       <Copy className="size-4" aria-hidden="true" />
                     </Button>
@@ -509,17 +521,21 @@ export function BrokerConnect() {
                     </div>
                   )}
 
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    {entry.mcp.use_cases.map((useCase) => (
-                      <Badge
-                        key={useCase}
-                        variant="secondary"
-                        className="max-w-full whitespace-normal break-words text-left text-xxs leading-snug"
-                      >
-                        {useCase}
-                      </Badge>
-                    ))}
-                  </div>
+                  {entry.mcp.use_cases.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="text-xs font-medium text-text-secondary">Use cases</div>
+                      <ul className="space-y-1 text-xxs text-text-muted">
+                        {entry.mcp.use_cases.map((useCase, index) => (
+                          <li
+                            key={`${entry.adapter_id}-mcp-use-case-${index}`}
+                            className="break-words leading-snug"
+                          >
+                            {useCase}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {cautions.length > 0 && (
                     <ul className="mt-2 space-y-1 text-xxs text-warning">
@@ -777,7 +793,9 @@ export function BrokerConnect() {
                       variant="ghost"
                       size="sm"
                       aria-label={`Copy ${label.toLowerCase()}`}
-                      onClick={() => copySetupUrl(label, value)}
+                      onClick={() => {
+                        void copySetupUrl(label, value);
+                      }}
                     >
                       <Copy className="size-4" aria-hidden="true" />
                     </Button>
