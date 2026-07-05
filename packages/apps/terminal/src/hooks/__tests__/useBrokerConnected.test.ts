@@ -3,11 +3,12 @@
  *
  * Strategy:
  *   - useBrokerConnected combines two independent connection paths:
- *       1. Gateway mode: any BrokerAccount in brokerStore with status "connected"
+ *       1. Direct broker mode: any unified BrokerAccount in brokerStore with status "connected"
  *       2. Legacy mode: OpenAlgo connection in connectionStore with status "connected"
- *       3. Native mode: any native account with `has_session: true`
  *   - Both stores are mocked at the module level so we control the state returned
  *     by each selector call without spinning up Zustand's persist/devtools layers.
+ *   - useBrokerAccounts is mocked separately; this hook must trigger that
+ *     unified gateway/native poll instead of running its own source-specific query.
  *   - renderHook renders the hook in a minimal React environment.
  *   - rerender() is used to verify reactive updates when store state changes.
  *
@@ -21,14 +22,18 @@ import { renderHook } from "@testing-library/react";
 // Store mocks — defined BEFORE importing the hook so vi.mock hoisting works.
 // ---------------------------------------------------------------------------
 
+const mocks = vi.hoisted(() => ({
+  useBrokerAccounts: vi.fn(() => ({ isLoading: false, error: null, refetch: vi.fn() })),
+}));
+
 // Module-level variables that drive both mock selectors.
-let _brokerAccounts: Array<{ status: string }> = [];
+let _brokerAccounts: Array<{ status: string; source?: "gateway" | "native" }> = [];
 let _legacyStatus = "disconnected";
-let _nativeAccounts: Array<{ has_session?: boolean }> = [];
 
 vi.mock("@/stores/brokerStore", () => ({
-  useBrokerStore: (selector: (s: { accounts: Array<{ status: string }> }) => unknown) =>
-    selector({ accounts: _brokerAccounts }),
+  useBrokerStore: (
+    selector: (s: { accounts: Array<{ status: string; source?: "gateway" | "native" }> }) => unknown,
+  ) => selector({ accounts: _brokerAccounts }),
 }));
 
 vi.mock("@/stores/connectionStore", () => ({
@@ -36,12 +41,8 @@ vi.mock("@/stores/connectionStore", () => ({
     selector({ status: _legacyStatus }),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: _nativeAccounts, isLoading: false, isError: false }),
-}));
-
-vi.mock("@/services/ftApi.native", () => ({
-  listNativeAccounts: vi.fn(),
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: mocks.useBrokerAccounts,
 }));
 
 // useShallow is a pass-through in tests — the mock already handles the selector.
@@ -59,12 +60,12 @@ import { useBrokerConnected, useDirectBrokerConnected } from "../useBrokerConnec
 // Helpers
 // ---------------------------------------------------------------------------
 
-function connectedAccount() {
-  return { status: "connected" } as const;
+function connectedAccount(source: "gateway" | "native" = "gateway") {
+  return { status: "connected", source } as const;
 }
 
-function disconnectedAccount() {
-  return { status: "disconnected" } as const;
+function disconnectedAccount(source: "gateway" | "native" = "gateway") {
+  return { status: "disconnected", source } as const;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,9 +74,9 @@ function disconnectedAccount() {
 
 describe("useBrokerConnected — initial / disconnected state", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     _brokerAccounts = [];
     _legacyStatus = "disconnected";
-    _nativeAccounts = [];
   });
 
   it("returns false on initial state (no accounts, legacy disconnected)", () => {
@@ -115,9 +116,9 @@ describe("useBrokerConnected — initial / disconnected state", () => {
 
 describe("useBrokerConnected — legacy (OpenAlgo) connection path", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     _brokerAccounts = [];
     _legacyStatus = "disconnected";
-    _nativeAccounts = [];
   });
 
   it("returns true when connectionStore status is 'connected'", () => {
@@ -156,9 +157,9 @@ describe("useBrokerConnected — legacy (OpenAlgo) connection path", () => {
 
 describe("useBrokerConnected — gateway (broker account) connection path", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     _brokerAccounts = [];
     _legacyStatus = "disconnected";
-    _nativeAccounts = [];
   });
 
   it("returns true when at least one BrokerAccount has status 'connected'", () => {
@@ -197,9 +198,9 @@ describe("useBrokerConnected — gateway (broker account) connection path", () =
 
 describe("useBrokerConnected — OR logic between both paths", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     _brokerAccounts = [];
     _legacyStatus = "disconnected";
-    _nativeAccounts = [];
   });
 
   it("returns true when both paths are connected simultaneously", () => {
@@ -238,9 +239,9 @@ describe("useBrokerConnected — OR logic between both paths", () => {
     expect(result.current).toBe(true);
   });
 
-  it("returns true when only native path has a live session", () => {
+  it("returns true when only a native unified-account row is connected", () => {
     // Arrange
-    _nativeAccounts = [{ has_session: true }];
+    _brokerAccounts = [connectedAccount("native")];
 
     // Act
     const { result } = renderHook(() => useBrokerConnected());
@@ -249,9 +250,9 @@ describe("useBrokerConnected — OR logic between both paths", () => {
     expect(result.current).toBe(true);
   });
 
-  it("returns false when native accounts exist but none have a live session", () => {
+  it("returns false when native unified-account rows exist but none are connected", () => {
     // Arrange
-    _nativeAccounts = [{ has_session: false }, {}];
+    _brokerAccounts = [disconnectedAccount("native"), { status: "token_expired", source: "native" }];
 
     // Act
     const { result } = renderHook(() => useBrokerConnected());
@@ -263,9 +264,9 @@ describe("useBrokerConnected — OR logic between both paths", () => {
 
 describe("useDirectBrokerConnected — excludes legacy OpenAlgo store status", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     _brokerAccounts = [];
     _legacyStatus = "disconnected";
-    _nativeAccounts = [];
   });
 
   it("returns false when only the legacy OpenAlgo status is connected", () => {
@@ -285,19 +286,25 @@ describe("useDirectBrokerConnected — excludes legacy OpenAlgo store status", (
   });
 
   it("returns true for a live native session", () => {
-    _nativeAccounts = [{ has_session: true }];
+    _brokerAccounts = [connectedAccount("native")];
 
     const { result } = renderHook(() => useDirectBrokerConnected());
 
     expect(result.current).toBe(true);
   });
+
+  it("uses the unified broker-account poll instead of a source-specific account query", () => {
+    renderHook(() => useDirectBrokerConnected());
+
+    expect(mocks.useBrokerAccounts).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("useBrokerConnected — reactivity on state change", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     _brokerAccounts = [];
     _legacyStatus = "disconnected";
-    _nativeAccounts = [];
   });
 
   it("updates from false to true when legacy status changes to connected", () => {
@@ -359,12 +366,12 @@ describe("useBrokerConnected — reactivity on state change", () => {
 
   it("updates from false to true when a native account establishes a session", () => {
     // Arrange — start with no native session
-    _nativeAccounts = [];
+    _brokerAccounts = [];
     const { result, rerender } = renderHook(() => useBrokerConnected());
     expect(result.current).toBe(false);
 
     // Act — native account now has a live broker session
-    _nativeAccounts = [{ has_session: true }];
+    _brokerAccounts = [connectedAccount("native")];
     rerender();
 
     // Assert
