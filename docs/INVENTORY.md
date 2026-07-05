@@ -13,8 +13,10 @@ after live login/read verification; Kotak Neo and Groww are built and catalogued
 but stay `connectable=false` until their remaining live blockers clear. Groww's
 official `growwapi` SDK is pinned for attestation/reference parity while the
 adapter keeps using FlintTrade's tested REST transport; INDmoney is the only
-REST-only native with no SDK pin. Closed-market/no-funds verification does not
-prove funded live order execution.
+REST-only native with no SDK pin. INDstocks' own FAQ advertises
+`indstocks-sdk`, but PyPI and npm currently have no matching package, so the
+adapter stays REST-native until a real SDK distribution can be pinned.
+Closed-market/no-funds verification does not prove funded live order execution.
 
 ## Legend
 
