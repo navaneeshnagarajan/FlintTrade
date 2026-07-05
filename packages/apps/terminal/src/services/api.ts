@@ -1406,6 +1406,8 @@ export const splitOrder = (params: SplitOrderParams) =>
 export interface PlaceGttParams extends BrokerTarget {
   /** Trigger type — SINGLE for one-leg, OCO for stoploss + target. */
   trigger_type: "SINGLE" | "OCO";
+  /** Broker-specific entry condition for Upstox GTT rules. */
+  entry_trigger_type?: "ABOVE" | "BELOW" | "IMMEDIATE";
   symbol: string;
   exchange: string;
   action: "BUY" | "SELL";
@@ -1499,6 +1501,9 @@ function legacyGttPlaceParams(params: PlaceGttParams): ForeverOrderPlaceParams {
     trigger_price: triggerPrice,
     validity: "DAY",
   };
+  if (params.entry_trigger_type !== undefined) {
+    payload.entry_trigger_type = params.entry_trigger_type;
+  }
 
   if (
     params.triggerprice_sl !== undefined &&
@@ -1523,6 +1528,7 @@ function legacyGttChanges(params: ModifyGttParams): OrderChanges {
   const limitPrice = firstFiniteNumber(params.stoploss, params.target, params.price);
   if (triggerPrice !== undefined) changes.trigger_price = triggerPrice;
   if (limitPrice !== undefined) changes.price = limitPrice;
+  if (params.entry_trigger_type !== undefined) changes.entry_trigger_type = params.entry_trigger_type;
   return changes;
 }
 

@@ -1,4 +1,4 @@
-"""Order model — optional validity + OCO leg fields (None defaults).
+"""Order model — optional validity, GTT trigger, and OCO leg fields.
 
 These fields ride the existing place/modify path (Dhan forever OCO, Kotak Neo
 validity pass-through). They MUST stay optional so every existing constructor
@@ -22,6 +22,9 @@ def test_new_fields_default_to_none() -> None:
     assert order.price1 is None
     assert order.trigger_price1 is None
     assert order.quantity1 is None
+    assert order.entry_trigger_type is None
+    assert order.stop_loss_trigger_type is None
+    assert order.target_trigger_type is None
 
 
 def test_old_payloads_without_new_fields_still_construct() -> None:
@@ -32,18 +35,24 @@ def test_old_payloads_without_new_fields_still_construct() -> None:
     }
     order = Order(**legacy)
     assert order.validity is None and order.price1 is None
+    assert order.entry_trigger_type is None
 
 
 def test_new_fields_round_trip_through_model_dump() -> None:
     order = Order(
         symbol="RELIANCE", action="BUY", variety="gtt", trigger_price="2890",
         validity="IOC", price1="2800", trigger_price1="2805", quantity1="5",
+        entry_trigger_type="BELOW", stop_loss_trigger_type="IMMEDIATE",
+        target_trigger_type="IMMEDIATE",
     )
     dumped = order.model_dump()
     assert dumped["validity"] == "IOC"
     assert dumped["price1"] == "2800"
     assert dumped["trigger_price1"] == "2805"
     assert dumped["quantity1"] == "5"
+    assert dumped["entry_trigger_type"] == "BELOW"
+    assert dumped["stop_loss_trigger_type"] == "IMMEDIATE"
+    assert dumped["target_trigger_type"] == "IMMEDIATE"
     assert Order(**dumped) == order
 
 
@@ -51,9 +60,16 @@ def test_new_fields_are_in_instance_dict_for_hashing() -> None:
     """The SafetyContext canonicaliser hashes ``order.__dict__`` — the new
     fields must live there (set OR unset) or they would escape the HMAC."""
     unset = Order(symbol="RELIANCE", action="BUY")
-    set_ = Order(symbol="RELIANCE", action="BUY", validity="DAY",
-                 price1="1", trigger_price1="2", quantity1="3")
-    for field in ("validity", "price1", "trigger_price1", "quantity1"):
+    set_ = Order(
+        symbol="RELIANCE", action="BUY", validity="DAY",
+        price1="1", trigger_price1="2", quantity1="3",
+        entry_trigger_type="ABOVE", stop_loss_trigger_type="IMMEDIATE",
+        target_trigger_type="IMMEDIATE",
+    )
+    for field in (
+        "validity", "price1", "trigger_price1", "quantity1",
+        "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+    ):
         assert field in unset.__dict__
         assert field in set_.__dict__
 
@@ -63,5 +79,8 @@ def test_exclude_none_dump_omits_unset_new_fields() -> None:
     legacy orders — the new fields only appear when explicitly set."""
     order = Order(symbol="RELIANCE", action="BUY")
     dumped = order.model_dump(exclude_none=True)
-    for field in ("validity", "price1", "trigger_price1", "quantity1"):
+    for field in (
+        "validity", "price1", "trigger_price1", "quantity1",
+        "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+    ):
         assert field not in dumped

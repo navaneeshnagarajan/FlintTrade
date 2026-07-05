@@ -129,6 +129,16 @@ class Order(BaseModel):
     """OCO second-leg trigger price (Dhan forever ``triggerPrice1``)."""
     quantity1: str | None = None
     """OCO second-leg quantity (Dhan forever ``quantity1``)."""
+    entry_trigger_type: str | None = None
+    """Broker-specific GTT entry condition (for example Upstox ABOVE/BELOW/IMMEDIATE).
+
+    ``None`` lets each adapter choose its documented default. When set, the value
+    is part of the SafetyContext HMAC just like trigger_price and the leg fields.
+    """
+    stop_loss_trigger_type: str | None = None
+    """Broker-specific stop-loss trigger-type override for GTT-capable adapters."""
+    target_trigger_type: str | None = None
+    """Broker-specific target trigger-type override for GTT-capable adapters."""
 
 
 class SmartOrder(Order):

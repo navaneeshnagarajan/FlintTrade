@@ -1548,6 +1548,7 @@ describe("OpenAlgo API client (api.ts)", () => {
 
     await placeGtt({
       trigger_type: "OCO",
+      entry_trigger_type: "BELOW",
       symbol: "RELIANCE",
       exchange: "NSE",
       action: "BUY",
@@ -1569,6 +1570,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       broker: "upstox",
       account_id: "U1",
       variety: "gtt",
+      entry_trigger_type: "BELOW",
       trigger_price: 95,
       price: 94,
       trigger_price1: 110,
@@ -1579,6 +1581,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     await modifyGtt({
       trigger_id: "GTT-1",
       trigger_type: "SINGLE",
+      entry_trigger_type: "IMMEDIATE",
       symbol: "RELIANCE",
       exchange: "NSE",
       action: "BUY",
@@ -1594,7 +1597,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(JSON.parse(modifyInit.body as string)).toMatchObject({
       broker: "upstox",
       account_id: "U1",
-      changes: { quantity: 2, trigger_price: 96, price: 101 },
+      changes: { quantity: 2, trigger_price: 96, price: 101, entry_trigger_type: "IMMEDIATE" },
     });
 
     await cancelGtt({ trigger_id: "GTT-1" });

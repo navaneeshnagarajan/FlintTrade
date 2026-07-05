@@ -155,6 +155,7 @@ describe("forever orders", () => {
       quantity: 10,
       price: 2900,
       trigger_price: 2895,
+      entry_trigger_type: "BELOW",
       product: "CNC",
       pricetype: "LIMIT",
       validity: "DAY",
@@ -173,6 +174,7 @@ describe("forever orders", () => {
     expect(body.variety).toBe("gtt");
     expect(body.symbol).toBe("RELIANCE");
     expect(body.trigger_price).toBe(2895);
+    expect(body.entry_trigger_type).toBe("BELOW");
     expect(body.price1).toBe(3100);
     expect(body.trigger_price1).toBe(3105);
     expect(body.quantity1).toBe(10);

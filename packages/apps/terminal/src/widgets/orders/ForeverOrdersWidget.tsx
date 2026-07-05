@@ -51,6 +51,8 @@ const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
 const PRODUCTS = ["CNC", "NRML"] as const;
 const PRICE_TYPES = ["LIMIT", "MARKET", "SL", "SL-M"] as const;
 const VALIDITIES = ["DAY", "IOC"] as const;
+const ENTRY_TRIGGER_TYPES = ["ABOVE", "BELOW", "IMMEDIATE"] as const;
+const MODIFY_ENTRY_TRIGGER_TYPES = ["UNCHANGED", ...ENTRY_TRIGGER_TYPES] as const;
 
 const ORDER_ID_KEYS = ["order_id", "orderid", "orderId", "id", "trigger_id", "gtt_order_id"];
 
@@ -70,6 +72,7 @@ export default function ForeverOrdersWidget() {
   const [product, setProduct] = useState<string>("CNC");
   const [priceType, setPriceType] = useState<string>("LIMIT");
   const [validity, setValidity] = useState<string>("DAY");
+  const [entryTriggerType, setEntryTriggerType] = useState<(typeof ENTRY_TRIGGER_TYPES)[number]>("ABOVE");
   const [ocoEnabled, setOcoEnabled] = useState(false);
   const [ocoPrice, setOcoPrice] = useState("");
   const [ocoTriggerPrice, setOcoTriggerPrice] = useState("");
@@ -79,6 +82,8 @@ export default function ForeverOrdersWidget() {
   const [modifyingId, setModifyingId] = useState<string | null>(null);
   const [modPrice, setModPrice] = useState("");
   const [modTriggerPrice, setModTriggerPrice] = useState("");
+  const [modEntryTriggerType, setModEntryTriggerType] =
+    useState<(typeof MODIFY_ENTRY_TRIGGER_TYPES)[number]>("UNCHANGED");
   const [modQuantity, setModQuantity] = useState("");
 
   const listQuery = useForeverOrders(target, { enabled: isLive });
@@ -116,6 +121,7 @@ export default function ForeverOrdersWidget() {
       quantity: qty,
       price: limitPrice ?? 0,
       trigger_price: trigger,
+      entry_trigger_type: entryTriggerType,
       product,
       pricetype: priceType,
       validity,
@@ -141,6 +147,7 @@ export default function ForeverOrdersWidget() {
     const newQty = parseWholeNumber(modQuantity);
     if (newPrice !== null) changes.price = newPrice;
     if (newTrigger !== null) changes.trigger_price = newTrigger;
+    if (modEntryTriggerType !== "UNCHANGED") changes.entry_trigger_type = modEntryTriggerType;
     if (newQty !== null) changes.quantity = newQty;
     if (Object.keys(changes).length === 0) return;
     modifyMutation.mutate(
@@ -161,6 +168,7 @@ export default function ForeverOrdersWidget() {
             setModifyingId(orderId);
             setModPrice("");
             setModTriggerPrice("");
+            setModEntryTriggerType("UNCHANGED");
             setModQuantity("");
           }}
           className="h-5 px-1.5 text-xxs"
@@ -315,6 +323,23 @@ export default function ForeverOrdersWidget() {
                 ))}
               </SelectContent>
             </Select>
+            <Select
+              value={entryTriggerType}
+              onValueChange={(value) =>
+                setEntryTriggerType(value as (typeof ENTRY_TRIGGER_TYPES)[number])
+              }
+            >
+              <SelectTrigger className="h-7 w-28 text-xs" aria-label="Entry trigger type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ENTRY_TRIGGER_TYPES.map((x) => (
+                  <SelectItem key={x} value={x} className="text-xs">
+                    {x}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <label className="flex items-center gap-1.5 text-xxs text-text-muted">
               <Switch
                 checked={ocoEnabled}
@@ -388,6 +413,23 @@ export default function ForeverOrdersWidget() {
               aria-label="New trigger price"
               className="h-7 w-24 text-xs font-mono"
             />
+            <Select
+              value={modEntryTriggerType}
+              onValueChange={(value) =>
+                setModEntryTriggerType(value as (typeof MODIFY_ENTRY_TRIGGER_TYPES)[number])
+              }
+            >
+              <SelectTrigger className="h-7 w-32 text-xs" aria-label="New entry trigger type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODIFY_ENTRY_TRIGGER_TYPES.map((x) => (
+                  <SelectItem key={x} value={x} className="text-xs">
+                    {x}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               value={modPrice}
               onChange={(e) => setModPrice(e.target.value)}

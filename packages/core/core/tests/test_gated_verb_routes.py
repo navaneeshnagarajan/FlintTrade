@@ -145,6 +145,8 @@ def test_forever_place_routes_variety_gtt_with_oco_fields() -> None:
         "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1,
         "pricetype": "LIMIT", "price": "2900", "trigger_price": "2890",
         "product": "CNC", "validity": "DAY",
+        "entry_trigger_type": "BELOW", "stop_loss_trigger_type": "IMMEDIATE",
+        "target_trigger_type": "IMMEDIATE",
         "price1": "2800", "trigger_price1": "2805", "quantity1": "5",
         "broker": "dhan",
     }
@@ -156,6 +158,9 @@ def test_forever_place_routes_variety_gtt_with_oco_fields() -> None:
     assert order.variety == "gtt"
     assert order.validity == "DAY"
     assert (order.price1, order.trigger_price1, order.quantity1) == ("2800", "2805", "5")
+    assert order.entry_trigger_type == "BELOW"
+    assert order.stop_loss_trigger_type == "IMMEDIATE"
+    assert order.target_trigger_type == "IMMEDIATE"
     assert kw["hint"].adapter_id == "dhan"
 
 

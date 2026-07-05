@@ -278,9 +278,10 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         body: Decoded JSON request body.
         variety: When set (e.g. ``"gtt"`` for the forever route), the built order
             carries this variety plus the variety-specific pass-throughs from the
-            body (``validity`` and the OCO second-leg trio ``price1`` /
-            ``trigger_price1`` / ``quantity1``). ``None`` (the default) keeps the
-            legacy regular-order shape so the existing ``/place`` behaviour is
+            body (``validity``, the OCO second-leg trio ``price1`` /
+            ``trigger_price1`` / ``quantity1`` and broker-specific GTT
+            ``*_trigger_type`` fields). ``None`` (the default) keeps the legacy
+            regular-order shape so the existing ``/place`` behaviour is
             byte-identical.
     """
     from flinttrade_core.models import (  # noqa: PLC0415
@@ -304,9 +305,13 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
     extra: dict[str, Any] = {}
     if variety is not None:
         extra["variety"] = variety
-        # Variety-specific pass-throughs (Dhan forever OCO + validity). They live
-        # on the Order model, so the SafetyContext canonical hash covers them.
-        for key in ("validity", "price1", "trigger_price1", "quantity1"):
+        # Variety-specific pass-throughs (Dhan forever OCO, Upstox GTT trigger
+        # conditions + validity). They live on the Order model, so the
+        # SafetyContext canonical hash covers them.
+        for key in (
+            "validity", "price1", "trigger_price1", "quantity1",
+            "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
+        ):
             value = body.get(key)
             if value is not None:
                 extra[key] = str(value)
@@ -1966,12 +1971,12 @@ def _check_legs_through_safety(legs: list[Any], adapter_id: str, *, account_id: 
 def forever_place() -> tuple[Any, int]:
     """Place a forever (GTT) order through the gated place path (live only).
 
-    Builds a typed ``Order`` with ``variety="gtt"`` — including the optional
-    OCO second-leg trio (``price1`` / ``trigger_price1`` / ``quantity1``) and
-    ``validity`` — and dispatches it through the SAME channel as a regular
-    placement: SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter.place_order``.
-    The variety and leg fields live on the Order, so the SafetyContext HMAC
-    covers them.
+    Builds a typed ``Order`` with ``variety="gtt"`` — including optional
+    OCO second-leg fields, ``validity``, and broker-specific GTT trigger-type
+    fields — and dispatches it through the SAME channel as a regular placement:
+    SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter.place_order``. The
+    variety and leg fields live on the Order, so the SafetyContext HMAC covers
+    them.
 
     Request JSON: standard order fields plus ``trigger_price`` (required by the
     broker), optional OCO trio, optional ``broker`` and ``account_id``. With no

@@ -546,30 +546,33 @@ def extract_access_token(resp: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-# GttRule.trigger_type enum (SDK model): ABOVE / BELOW / IMMEDIATE. The ENTRY
-# leg fires as soon as its trigger price is touched (IMMEDIATE); the protective
-# STOPLOSS/TARGET legs fire directionally relative to the entry side.
+# GttRule.trigger_type enum (SDK model): ABOVE / BELOW / IMMEDIATE. Upstox's
+# place/modify GTT examples use ABOVE for ENTRY and IMMEDIATE for TARGET and
+# STOPLOSS. ENTRY can be overridden by callers that need BELOW/IMMEDIATE.
 _GTT_TRIGGER_TYPES = frozenset({"ABOVE", "BELOW", "IMMEDIATE"})
+_GTT_PROTECTIVE_TRIGGER_TYPES = frozenset({"IMMEDIATE"})
 
 
-def _protective_trigger_type(side: str, strategy: str) -> str:
-    """Derive a protective GTT leg's ``trigger_type`` (ABOVE/BELOW) from the side.
+def _gtt_trigger_type(override: Any, *, allowed: frozenset[str] = _GTT_TRIGGER_TYPES, default: str) -> str:
+    """Resolve a GTT ``trigger_type`` with an allow-list and default."""
+    if override is not None and str(override).strip():
+        code = str(override).strip().upper()
+        if code not in allowed:
+            raise UpstoxMappingError(
+                f"Upstox GTT trigger_type must be one of {sorted(allowed)}, "
+                f"got {override!r}"
+            )
+        return code
+    return default
 
-    A long (BUY entry) book exits its STOPLOSS when price falls (``BELOW``) and
-    its TARGET when price rises (``ABOVE``); a short (SELL entry) book is the
-    mirror. Callers may override this by supplying an explicit ``trigger_type``.
 
-    Args:
-        side: The entry transaction side (``BUY``/``SELL``).
-        strategy: The leg strategy (``STOPLOSS``/``TARGET``).
-
-    Returns:
-        ``"ABOVE"`` or ``"BELOW"``.
-    """
-    is_buy = str(side).upper() == "BUY"
-    if str(strategy).upper() == "STOPLOSS":
-        return "BELOW" if is_buy else "ABOVE"
-    return "ABOVE" if is_buy else "BELOW"
+def _entry_trigger_override(order: Any) -> Any:
+    """Return the ENTRY trigger override from current or legacy field names."""
+    for field in ("entry_trigger_type", "gtt_entry_trigger_type", "trigger_type"):
+        value = getattr(order, field, None)
+        if value is not None and str(value).strip():
+            return value
+    return None
 
 
 def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]]:
@@ -578,23 +581,18 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
     ``trigger_price`` is the ENTRY rule (mandatory); ``stop_loss_price`` and
     ``target_price`` add STOPLOSS / TARGET rules, upgrading the GTT to MULTIPLE.
 
-    The ENTRY leg uses ``IMMEDIATE`` (it activates the moment its price is
-    touched). The protective STOPLOSS/TARGET legs use ``ABOVE``/``BELOW`` derived
-    from ``side`` (see :func:`_protective_trigger_type`) rather than ``IMMEDIATE``
-    — a protective leg that fires immediately would defeat its purpose. An
-    explicit per-leg override may be supplied via ``stop_loss_trigger_type`` /
-    ``target_trigger_type`` on the order/changes object.
-
-    LIVE-VERIFY: the exact trigger_type Upstox expects for protective GTT legs is
-    not pinned down in the captured docs (see ``.local/audits/broker-parity/
-    upstox.md`` §3) — confirm against a live GTT placement before trusting the
-    derived direction.
+    Upstox models ENTRY, TARGET and STOPLOSS as separate ``GttRule`` rows. The
+    current v3 examples use ``trigger_type=ABOVE`` for ENTRY and
+    ``trigger_type=IMMEDIATE`` for TARGET/STOPLOSS; the latter two are therefore
+    pinned to IMMEDIATE unless a caller explicitly supplies the same value.
+    ``entry_trigger_type`` may be set to ``ABOVE``, ``BELOW`` or ``IMMEDIATE`` to
+    express the entry condition.
 
     Args:
         order: The order (or changes shim) carrying the leg prices and any
             explicit ``*_trigger_type`` overrides.
-        side: The entry transaction side (``BUY``/``SELL``), driving the
-            protective-leg direction.
+        side: The entry transaction side (``BUY``/``SELL``); kept for call-site
+            readability and future broker-specific validation.
 
     Returns:
         ``(gtt_type, rules)`` where ``gtt_type`` is ``SINGLE`` or ``MULTIPLE``.
@@ -603,40 +601,35 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
     if entry <= 0:
         raise UpstoxMappingError("An Upstox GTT order needs a trigger_price (the ENTRY rule)")
     rules: list[dict[str, Any]] = [
-        {"strategy": "ENTRY", "trigger_type": "IMMEDIATE", "trigger_price": entry},
+        {
+            "strategy": "ENTRY",
+            "trigger_type": _gtt_trigger_type(_entry_trigger_override(order), default="ABOVE"),
+            "trigger_price": entry,
+        },
     ]
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     target = _num(getattr(order, "target_price", 0))
     if stop_loss > 0:
         rules.append({
             "strategy": "STOPLOSS",
-            "trigger_type": _leg_trigger_type(
-                getattr(order, "stop_loss_trigger_type", None), side, "STOPLOSS"
+            "trigger_type": _gtt_trigger_type(
+                getattr(order, "stop_loss_trigger_type", None),
+                allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
+                default="IMMEDIATE",
             ),
             "trigger_price": stop_loss,
         })
     if target > 0:
         rules.append({
             "strategy": "TARGET",
-            "trigger_type": _leg_trigger_type(
-                getattr(order, "target_trigger_type", None), side, "TARGET"
+            "trigger_type": _gtt_trigger_type(
+                getattr(order, "target_trigger_type", None),
+                allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
+                default="IMMEDIATE",
             ),
             "trigger_price": target,
         })
     return ("MULTIPLE" if len(rules) > 1 else "SINGLE"), rules
-
-
-def _leg_trigger_type(override: Any, side: str, strategy: str) -> str:
-    """Resolve a protective leg's trigger_type: explicit override or derived."""
-    if override is not None and str(override).strip():
-        code = str(override).strip().upper()
-        if code not in _GTT_TRIGGER_TYPES:
-            raise UpstoxMappingError(
-                f"Upstox GTT trigger_type must be one of {sorted(_GTT_TRIGGER_TYPES)}, "
-                f"got {override!r}"
-            )
-        return code
-    return _protective_trigger_type(side, strategy)
 
 
 def to_gtt_place_params(order: Any, instrument_token: str) -> dict[str, Any]:
@@ -669,6 +662,9 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
 
     class _Changes:
         trigger_price = changes.get("trigger_price", 0)
+        entry_trigger_type = changes.get("entry_trigger_type")
+        gtt_entry_trigger_type = changes.get("gtt_entry_trigger_type")
+        trigger_type = changes.get("trigger_type")
         stop_loss_price = changes.get("stop_loss_price", 0)
         target_price = changes.get("target_price", 0)
         stop_loss_trigger_type = changes.get("stop_loss_trigger_type")

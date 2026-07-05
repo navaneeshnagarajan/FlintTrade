@@ -225,7 +225,7 @@ def test_to_gtt_place_params_single_entry_rule():
     p = m.to_gtt_place_params(_order(variety="gtt", trigger_price="2850"), "NSE_EQ|X")
     assert p["type"] == "SINGLE" and p["instrument_token"] == "NSE_EQ|X"
     assert p["transaction_type"] == "BUY" and p["product"] == "I" and p["quantity"] == 10
-    assert p["rules"] == [{"strategy": "ENTRY", "trigger_type": "IMMEDIATE", "trigger_price": 2850.0}]
+    assert p["rules"] == [{"strategy": "ENTRY", "trigger_type": "ABOVE", "trigger_price": 2850.0}]
 
 
 def test_to_gtt_place_params_multiple_with_stoploss_and_target():
@@ -243,26 +243,28 @@ def test_to_gtt_place_params_requires_trigger_price():
 
 
 def test_to_gtt_modify_params_rebuilds_rules():
-    p = m.to_gtt_modify_params("GTT-1", {"quantity": 20, "trigger_price": 100, "target_price": 110})
+    p = m.to_gtt_modify_params(
+        "GTT-1",
+        {"quantity": 20, "trigger_price": 100, "entry_trigger_type": "BELOW", "target_price": 110},
+    )
     assert p["gtt_order_id"] == "GTT-1" and p["quantity"] == 20 and p["type"] == "MULTIPLE"
     assert [r["strategy"] for r in p["rules"]] == ["ENTRY", "TARGET"]
+    assert p["rules"][0]["trigger_type"] == "BELOW"
+    assert p["rules"][1]["trigger_type"] == "IMMEDIATE"
     with pytest.raises(m.UpstoxMappingError, match="gtt_order_id"):
         m.to_gtt_modify_params("", {"trigger_price": 100})
 
 
-def test_gtt_protective_legs_use_directional_trigger_type_not_immediate():
-    # ENTRY stays IMMEDIATE; the protective STOPLOSS/TARGET legs must NOT be
-    # hardcoded IMMEDIATE — they fire directionally (ABOVE/BELOW) by side.
+def test_gtt_protective_legs_use_immediate_trigger_type_from_docs():
     buy = m.to_gtt_place_params(
         _order(variety="gtt", action="BUY", trigger_price="2850",
                stop_loss_price="2800", target_price="2950"),
         "NSE_EQ|X",
     )
     by_strategy = {r["strategy"]: r for r in buy["rules"]}
-    assert by_strategy["ENTRY"]["trigger_type"] == "IMMEDIATE"
-    # Long book: stop fires when price falls (BELOW), target when it rises (ABOVE).
-    assert by_strategy["STOPLOSS"]["trigger_type"] == "BELOW"
-    assert by_strategy["TARGET"]["trigger_type"] == "ABOVE"
+    assert by_strategy["ENTRY"]["trigger_type"] == "ABOVE"
+    assert by_strategy["STOPLOSS"]["trigger_type"] == "IMMEDIATE"
+    assert by_strategy["TARGET"]["trigger_type"] == "IMMEDIATE"
 
     sell = m.to_gtt_place_params(
         _order(variety="gtt", action="SELL", trigger_price="2850",
@@ -270,21 +272,27 @@ def test_gtt_protective_legs_use_directional_trigger_type_not_immediate():
         "NSE_EQ|X",
     )
     by_strategy = {r["strategy"]: r for r in sell["rules"]}
-    # Short book is the mirror.
-    assert by_strategy["STOPLOSS"]["trigger_type"] == "ABOVE"
-    assert by_strategy["TARGET"]["trigger_type"] == "BELOW"
+    assert by_strategy["STOPLOSS"]["trigger_type"] == "IMMEDIATE"
+    assert by_strategy["TARGET"]["trigger_type"] == "IMMEDIATE"
 
 
-def test_gtt_explicit_trigger_type_override_and_validation():
+def test_gtt_entry_trigger_type_override_and_validation():
     order = _order(variety="gtt", action="BUY", trigger_price="2850", stop_loss_price="2800")
-    object.__setattr__(order, "stop_loss_trigger_type", "ABOVE")
+    object.__setattr__(order, "entry_trigger_type", "BELOW")
     p = m.to_gtt_place_params(order, "NSE_EQ|X")
-    sl = next(r for r in p["rules"] if r["strategy"] == "STOPLOSS")
-    assert sl["trigger_type"] == "ABOVE"  # explicit override wins over the derived BELOW
+    entry = next(r for r in p["rules"] if r["strategy"] == "ENTRY")
+    assert entry["trigger_type"] == "BELOW"
 
     bad = _order(variety="gtt", action="BUY", trigger_price="2850", stop_loss_price="2800")
-    object.__setattr__(bad, "stop_loss_trigger_type", "SIDEWAYS")
+    object.__setattr__(bad, "entry_trigger_type", "SIDEWAYS")
     with pytest.raises(m.UpstoxMappingError, match="trigger_type"):
+        m.to_gtt_place_params(bad, "NSE_EQ|X")
+
+
+def test_gtt_protective_trigger_type_rejects_non_immediate_override():
+    bad = _order(variety="gtt", action="BUY", trigger_price="2850", stop_loss_price="2800")
+    object.__setattr__(bad, "stop_loss_trigger_type", "BELOW")
+    with pytest.raises(m.UpstoxMappingError, match="IMMEDIATE"):
         m.to_gtt_place_params(bad, "NSE_EQ|X")
 
 

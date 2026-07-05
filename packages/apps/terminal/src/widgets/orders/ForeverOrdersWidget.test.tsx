@@ -195,6 +195,7 @@ describe("ForeverOrdersWidget", () => {
     expect(body.action).toBe("BUY");
     expect(body.quantity).toBe(10);
     expect(body.trigger_price).toBe(2895);
+    expect(body.entry_trigger_type).toBe("ABOVE");
     expect(body.price).toBe(2900);
     expect(body.product).toBe("CNC");
     expect(body.pricetype).toBe("LIMIT");

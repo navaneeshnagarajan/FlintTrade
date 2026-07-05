@@ -70,6 +70,9 @@ export interface TypedOrderFields {
   quantity: number;
   price?: number;
   trigger_price?: number;
+  entry_trigger_type?: "ABOVE" | "BELOW" | "IMMEDIATE";
+  stop_loss_trigger_type?: "IMMEDIATE";
+  target_trigger_type?: "IMMEDIATE";
   product?: string;
   pricetype?: string;
   validity?: string;
