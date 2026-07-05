@@ -1,8 +1,8 @@
 """Native broker account capture + activation (Phase 1 G4).
 
 The interactive counterpart to the boot-time credential-replay login step
-(``flinttrade_gateway.native_login``). Connecting a native broker
-(Dhan/Upstox/Kotak Neo/IndMoney/Groww) is a four-step transaction, all fail-closed:
+(``flinttrade_gateway.native_login``). Connecting a currently connectable native
+broker is a four-step transaction, all fail-closed:
 
   1. Encrypt + persist the broker credentials to the vault, keyed by the
      composite ``(adapter_id, account_id)`` selector.

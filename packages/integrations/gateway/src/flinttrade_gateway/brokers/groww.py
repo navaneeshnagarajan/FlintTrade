@@ -4,7 +4,9 @@ Groww publishes a Trade API with REST endpoints for orders, smart orders,
 portfolio, margins, live market data, historical candles and user profile. This
 adapter keeps the broker as a native FlintTrade target behind the existing
 encrypted vault and ``BrokerRouter`` gates, but the catalogue still marks Groww
-``connectable=False`` until a real account login/read probe is completed.
+``connectable=False`` until the remaining live blockers clear. Account reads and
+margin estimation have live proof; market-data/API permissions, static-IP
+registration, and order-safety smoke evidence are still pending.
 
 Safety: every write requires the router's shared ``_ROUTER_TOKEN``. A direct
 ``adapter.place_order`` call raises before any Groww HTTP request is made.

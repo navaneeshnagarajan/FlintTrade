@@ -4,7 +4,8 @@ Upstox (its direct access-token method) is the exercise broker: ``login()`` buil
 a session from any non-empty access token WITHOUT calling the broker (validation is
 lazy, on the first API call), so the full connect -> register -> rebuild -> login ->
 session path runs offline. Dhan, Upstox, and INDmoney are connectable natives;
-Kotak Neo is catalogued 'coming soon' and rejected on connect until live-verified.
+Kotak Neo and Groww are catalogued 'coming soon' and rejected on connect until
+their remaining live blockers clear.
 
 G9: every WRITE on these routes requires a valid operator session JWT — the
 fixture mints one and ``_h()`` attaches it; the dedicated G9 tests pin the
@@ -1520,29 +1521,31 @@ def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
     assert bool(row["is_primary"]) is True
 
 
-def test_connect_rejects_coming_soon_native(client):
+@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww"])
+def test_connect_rejects_coming_soon_native(client, adapter_id):
     """A native broker that is catalogued but not yet tried-and-tested
-    (connectable=False, e.g. Kotak Neo) is rejected on connect with a
+    (connectable=False, e.g. Kotak Neo or Groww) is rejected on connect with a
     'coming soon' message."""
     c, _app, _tmp = client
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
-        json={"adapter_id": "kotakneo", "account_id": "CS1", "credentials": {"access_token": "x"}},
+        json={"adapter_id": adapter_id, "account_id": "CS1", "credentials": {"access_token": "x"}},
     )
     assert resp.status_code == 400
     assert "coming soon" in resp.get_json()["message"].lower()
 
 
-def test_relogin_rejects_coming_soon_native_even_if_vault_row_exists(client):
+@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww"])
+def test_relogin_rejects_coming_soon_native_even_if_vault_row_exists(client, adapter_id):
     """A stale/local vault row must not turn a catalogued-but-unverified native
     into an active connectable broker."""
     c, app, _tmp = client
     store = app.config["CREDENTIAL_STORE"]
     store.store(
-        "CSRELOGIN", "kotakneo", "Kotak Neo stale",
-        {"access_token": "tok"}, is_primary=False, adapter_id="kotakneo",
+        "CSRELOGIN", adapter_id, "Coming-soon stale",
+        {"access_token": "tok"}, is_primary=False, adapter_id=adapter_id,
     )
-    resp = c.post("/api/v1/native/accounts/kotakneo/CSRELOGIN/login", headers=_h())
+    resp = c.post(f"/api/v1/native/accounts/{adapter_id}/CSRELOGIN/login", headers=_h())
     assert resp.status_code == 400
     assert "coming soon" in resp.get_json()["message"].lower()
