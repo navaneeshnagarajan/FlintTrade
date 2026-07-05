@@ -260,7 +260,8 @@ def test_kotak_probe_prompts_for_docs_token_once() -> None:
 
 def test_resolve_reads_is_broker_specific() -> None:
     assert "market_depth" not in probe._resolve_reads("dhan", ["all"])
-    assert "depth" in probe._resolve_reads("dhan", ["default"])
+    assert "depth" not in probe._resolve_reads("dhan", ["all"])
+    assert "depth" not in probe._resolve_reads("dhan", ["default"])
     assert "quotes" in probe._resolve_reads("groww", ["default"])
     assert "ltp" in probe._resolve_reads("groww", ["default"])
     assert "depth" not in probe._resolve_reads("groww", ["all"])

@@ -178,6 +178,11 @@ class Capabilities:
     # without a caller injecting a test/feed-factory shim. ``streaming_supported``
     # records broker/API capability; this records product readiness.
     streaming_runtime_ready: bool = False
+    # True only when FlintTrade can return a depth snapshot through the current
+    # read route/probe surface. Some brokers document depth only through a feed
+    # path that is not wired into runtime yet; keep their documented
+    # ``depth_levels`` without recommending an unavailable snapshot read.
+    market_depth_runtime_ready: bool = True
     streaming_max_connections_per_user: int | None = None
     streaming_max_symbols_per_connection: int | None = None
     streaming_max_total_symbols: int | None = None

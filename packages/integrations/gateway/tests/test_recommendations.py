@@ -98,6 +98,30 @@ def test_streaming_requires_runtime_wiring() -> None:
     assert "not enabled yet" in by_broker["dhan"].rationale
 
 
+def test_market_depth_requires_runtime_snapshot_readiness() -> None:
+    by_broker = {r.broker_id: r for r in recommend(BrokerUseCase.MARKET_DEPTH)}
+
+    assert by_broker["dhan"].raw_score == 0.0
+    assert by_broker["groww"].raw_score == 0.0
+    assert "snapshot reads are not enabled yet" in by_broker["dhan"].rationale
+    assert by_broker["upstox"].raw_score > 0.0
+    assert by_broker["indmoney"].raw_score > 0.0
+    assert by_broker["kotakneo"].raw_score > 0.0
+
+
+def test_market_depth_scorer_rewards_ready_snapshot_reads() -> None:
+    blocked, blocked_msg = _SCORERS[BrokerUseCase.MARKET_DEPTH](
+        _bare(depth_levels=DepthLevels.L20, market_depth_runtime_ready=False)
+    )
+    ready, ready_msg = _SCORERS[BrokerUseCase.MARKET_DEPTH](
+        _bare(depth_levels=DepthLevels.L5, market_depth_runtime_ready=True)
+    )
+
+    assert ready > blocked == 0.0
+    assert "not enabled yet" in blocked_msg
+    assert "5-level market depth" in ready_msg
+
+
 def test_streaming_scorer_rewards_runtime_ready_feeds() -> None:
     blocked, blocked_msg = _SCORERS[BrokerUseCase.STREAMING](
         _bare(streaming_supported=True, streaming_runtime_ready=False)

@@ -84,6 +84,8 @@ def _score_historical(c: Capabilities) -> tuple[float, str]:
 
 
 def _score_market_depth(c: Capabilities) -> tuple[float, str]:
+    if not c.market_depth_runtime_ready:
+        return 0.0, "Broker depth feed documented, but FlintTrade depth snapshot reads are not enabled yet."
     level = int(c.depth_levels)
     return float(level), f"{level}-level market depth."
 

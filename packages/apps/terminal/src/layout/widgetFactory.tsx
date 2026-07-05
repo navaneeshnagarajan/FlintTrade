@@ -196,7 +196,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "historicalchain", name: "Historical Chain", icon: "Archive", category: "Analysis", description: "Browse archived (expired) option chains — strike-level OI, volume, LTP, and IV per past expiry" },
   { id: "oichart", name: "OI Chart", icon: "BarChart3", category: "Analysis", description: "Open interest change chart across strikes for a selected expiry" },
   { id: "straddle", name: "Straddle", icon: "Activity", category: "Analysis", description: "Straddle and strangle builder with premium, breakeven, and IV display" },
-  { id: "depth", name: "Depth", icon: "Layers", category: "Analysis", description: "Level-2 market depth showing top 5 or 50 bid/ask levels" },
+  { id: "depth", name: "Depth", icon: "Layers", category: "Analysis", description: "Level-2 bid/ask depth from the active broker snapshot feed" },
   { id: "greeks", name: "Greeks", icon: "Sigma", category: "Analysis", description: "Position-level Delta, Gamma, Theta, Vega, and Rho summary" },
   { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis", description: "Colour-coded sector tree map showing intraday performance by industry" },
   { id: "gex", name: "GEX Dashboard", icon: "BarChart2", category: "Analysis", description: "Gamma Exposure (GEX) by strike to identify key support and resistance levels" },

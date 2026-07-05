@@ -104,6 +104,7 @@ class TestCapabilitiesRoute:
         assert caps["supports_market_orders"] is True
         assert caps["supports_options"] is True
         assert caps["historical_intraday_intervals_minutes"] == [1, 5, 10, 60, 240]
+        assert caps["market_depth_runtime_ready"] is False
         assert caps["option_chain_supported"] is True
         assert caps["option_chain_greeks_supported"] is True
         assert caps["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
@@ -255,8 +256,13 @@ class TestRecommendationsRoute:
             "/api/v1/broker/recommendations?use_case=market_depth&brokers=upstox,dhan"
         )
         assert response.status_code == 200
-        ids = {r["broker_id"] for r in response.get_json()["recommendations"]}
+        recommendations = response.get_json()["recommendations"]
+        ids = {r["broker_id"] for r in recommendations}
         assert ids == {"upstox", "dhan"}
+        by_id = {r["broker_id"]: r for r in recommendations}
+        assert by_id["upstox"]["raw_score"] > 0
+        assert by_id["dhan"]["raw_score"] == 0
+        assert "snapshot reads are not enabled yet" in by_id["dhan"]["rationale"]
 
     def test_unknown_broker_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/recommendations?brokers=dhan,wakanda")

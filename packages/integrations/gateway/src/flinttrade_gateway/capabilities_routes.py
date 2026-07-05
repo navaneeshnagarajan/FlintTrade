@@ -67,6 +67,7 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         "historical_max_lookback_days_intraday": native.historical_max_lookback_days_intraday,
         "historical_max_lookback_days_daily": native.historical_max_lookback_days_daily,
         "historical_max_candles_per_request": native.historical_max_candles_per_request,
+        "market_depth_runtime_ready": native.market_depth_runtime_ready,
         "option_chain_supported": native.option_chain_supported,
         "option_chain_greeks_supported": native.option_chain_greeks_supported,
     }

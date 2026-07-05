@@ -101,6 +101,7 @@ DHAN_CAPABILITIES = Capabilities(
     options_history_supported=True,
     options_history_rolling=True,
     streaming_supported=True,
+    market_depth_runtime_ready=False,
     streaming_max_connections_per_user=5,
     streaming_max_symbols_per_connection=5000,
     streaming_max_total_symbols=25_000,

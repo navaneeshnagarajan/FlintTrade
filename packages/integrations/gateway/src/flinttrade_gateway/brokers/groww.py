@@ -71,6 +71,7 @@ GROWW_CAPABILITIES = Capabilities(
     option_chain_greeks_supported=True,
     streaming_supported=True,
     streaming_runtime_ready=False,
+    market_depth_runtime_ready=False,
     gtt_native=True,
     modify_qty_supported=True,
 )

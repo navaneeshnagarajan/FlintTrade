@@ -80,7 +80,7 @@ identically to regular orders.
 |---|---|
 | `quotes` | Single-symbol quote (LTP, OHLC, OI). |
 | `multiquotes` | Quote for a list of symbols in one request. |
-| `depth` | Level-2 market depth (5 or 20 levels depending on broker). |
+| `depth` | Level-2 market depth from brokers with a wired FlintTrade snapshot read; documented feed-only depth is not exposed here until the adapter bridge is wired. |
 | `history` | Historical OHLCV bars. |
 | `optionchain` | Full option chain for a symbol and expiry. |
 | `optiongreeks` | Greeks for a specific strike. |

@@ -44,6 +44,7 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
+DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "margin", "history")
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
@@ -69,7 +70,7 @@ KOTAK_READ_CHOICES = (
     "market_depth",
 )
 READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
-    "dhan": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("expiry", "optionchain"),
+    "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES + ("expiry", "optionchain"),
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES + ("optionchain",),
     "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
     "kotakneo": KOTAK_READ_CHOICES,
@@ -84,7 +85,7 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
 }
 READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
-    "dhan": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
+    "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES,
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
     "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,

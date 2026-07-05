@@ -45,7 +45,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 |---|---|---|
 | OpenAlgo bridge adapter (orders + market data) | ✅ | First-class optional bridge path; ~45 endpoints |
 | Smart routing suggestions | ✅ | Capability metadata + recommendation engine + Account-Manager UI |
-| — Dhan: rolling-options history + multi-level depth (L20) | ✅ | Encoded as routing capabilities (`options_history_*`, `depth_levels`) |
+| — Dhan: rolling-options history + documented L20 depth feed | 🟡 | Rolling-options history is encoded in routing capabilities; Dhan's L20 depth remains feed-only until FlintTrade wires a runtime depth snapshot bridge (`market_depth_runtime_ready=false`). |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
 | Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan, Upstox, and INDmoney are connectable after live login/read verification; Kotak Neo remains coming soon until a live adapter login/read probe passes, and Groww remains coming soon until market-data/API permission, static-IP, and order-safety proof land. |
