@@ -106,7 +106,7 @@ The chain to prove: signal → SafetySystem L1–L5 → `gate_order` → `Broker
 
 - [ ] G10 verification under load — the rate limiting built in Phase 1 is exercised by the full-day loop (order bursts throttled on every path, no bypass).
 - [ ] G11 — Feed L4 from local tradebook-computed daily P&L (broker PNL unreliable); feed L3 from native option-chain greeks when available.
-- [ ] G12 — Close the grep-guard blind spots (`.route_order(`, raw `OpenAlgoClient.modify/cancel_order`, loose `\w*router` regex; add ditto + MCP coverage).
+- [x] G12 — Grep-guard blind spots CLOSED: `test_no_legacy_order_path.py` now refuses new `.route_order(` dispatchers outside an explicit shrinking legacy allowlist, pins raw `OpenAlgoClient.modify/cancel_order` debt, replaces the loose `\w*router` receiver match with audited BrokerRouter receiver names, keeps Ditto in the scan, and asserts broker MCP support is GET-only setup metadata rather than a local order-tool proxy. Verified 2026-07-05: focused safety suite 17 passed; Ruff clean.
 - [ ] G13 — Refactor basket/split/bracket executors through the gate (they'd go live SafetySystem-only if wired today); fix ditto mirror hardcoded `mode='live'`; retire the mirror's ungated httpx fallback.
 - [ ] G14 — Sandbox fill realism: feed LTP at dispatch; reject 0.0-price MARKET fills outside tests.
 - [ ] Wire the learning tier honestly (reference-map backlog items AI1–AI3): the "self-learning" story (auto_retrain, trade_reflection, memory managers, TradedMemory, SkillRegistry — all library-only today) gets a minimal wired loop: journal → reflection → strategy/parameter update, spec'd first in `.local/specs/`.

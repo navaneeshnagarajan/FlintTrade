@@ -22,14 +22,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _ORDER_WRITE_RE = re.compile(
     r"\.(place_order|placeorder|placesmartorder|close_position|closeposition)\s*\("
 )
-# A call is GATED/legitimate when it delegates to a *_router (the gating
-# chokepoint — gate_order -> BrokerRouter) or to the isolated sandbox engine
-# (Practice mode, never a live broker).
-_GATED_RECEIVER_RE = re.compile(
-    r"(\w*router\.(place_order|close_position)"
-    r"|sandbox\w*\.\w*\.?place_order"
-    r"|\.engine\.place_order)"
+# A call is GATED/legitimate only when it delegates to one of the audited
+# BrokerRouter receivers. Do not use a loose ``\w*router`` regex here: that was
+# a G12 blind spot because any object whose name merely ended in ``router`` could
+# pass the guard even when it was not the gate_order -> BrokerRouter chokepoint.
+_CANONICAL_GATED_RECEIVER_RE = re.compile(
+    r"(?<![\w.])(?:router|broker_router|_broker_router|self\._broker_router)"
+    r"\.(place_order|modify_order|cancel_order|close_position)\s*\("
 )
+_GATED_RECEIVER_BY_FILE: dict[str, re.Pattern[str]] = {
+    # _GatedSmartExecutor stores the real BrokerRouter on self._router and mints
+    # gate_order immediately before this dispatch.
+    "packages/core/core/src/flinttrade_core/smart_order_routes.py": re.compile(
+        r"self\._router\.place_order\s*\("
+    ),
+}
 
 # Modules that legitimately contain a RAW (non-router) broker order-write. This
 # is the SHRINKING debt allowlist: every entry is either a known-dormant native
@@ -44,11 +51,38 @@ _RAW_ORDER_ALLOWLIST = {
     "packages/services/engine/src/flinttrade_engine/bracket_order.py",
     "packages/services/engine/src/flinttrade_engine/router.py",
     "packages/services/engine/src/flinttrade_engine/strategies/wheel_live.py",
+    # Dormant automation service, not mounted by the FlintTrade core app. It
+    # accepts an arbitrary ``order_router`` object and must be folded into the
+    # canonical gated router before becoming reachable.
+    "packages/services/automation/src/flinttrade_automation/voice_order_bridge.py",
     # L5 emergency close (acceptable un-gated — gating an emergency exit could
     # deadlock the very safety action it protects):
     "packages/services/automation/src/flinttrade_automation/telegram_bot.py",
     "packages/services/engine/src/flinttrade_engine/safety.py",
 }
+
+# Legacy engine/AI stacks that dispatch through their own ``route_order`` API
+# instead of the canonical gate_order -> BrokerRouter surface. Keep this
+# allowlist explicit and shrinking; a new ``.route_order(`` call must prove it is
+# canonical before being added.
+_RAW_ROUTE_ORDER_ALLOWLIST = {
+    "packages/services/engine/src/flinttrade_engine/router.py",
+    "packages/services/engine/src/flinttrade_engine/smart_router.py",
+    "packages/services/engine/src/flinttrade_engine/basket_orders.py",
+    "packages/services/engine/src/flinttrade_engine/split_orders.py",
+    "packages/services/engine/src/flinttrade_engine/strategies/ema_crossover.py",
+    "packages/services/ai/src/flinttrade_ai/autonomous_agent.py",
+}
+_ROUTE_ORDER_RE = re.compile(r"\.route_order\s*\(")
+
+# Raw OpenAlgoClient modify/cancel calls were another G12 blind spot: the older
+# guard watched place-order-ish attributes and endpoint strings, so a direct
+# ``client.cancel_order(...)`` could slip through. One pre-existing bracket-order
+# service still owns best-effort leg cancellation and is tracked as debt.
+_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST = {
+    "packages/services/engine/src/flinttrade_engine/bracket_order.py",
+}
+_OPENALGO_MOD_CANCEL_RE = re.compile(r"\b(?:self\.)?[_\w]*client\.(modify_order|cancel_order)\s*\(")
 
 _GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "flinttrade_gateway"
 _WRITE_METHODS = (
@@ -72,6 +106,14 @@ _WRITE_METHODS = (
     "place_multi_order",
     "cancel_smart_order",
 )
+
+
+def _is_gated_receiver(rel: str, line: str) -> bool:
+    """Return whether *line* dispatches through the audited BrokerRouter path."""
+    if _CANONICAL_GATED_RECEIVER_RE.search(line):
+        return True
+    scoped = _GATED_RECEIVER_BY_FILE.get(rel)
+    return bool(scoped and scoped.search(line))
 
 # Extended adapter write verbs (contract §8.1) and the raw-call tripwire for
 # them. Any `.modify_forever(` etc. outside the BrokerRouter is a bypass —
@@ -279,7 +321,7 @@ def test_no_new_ungated_order_paths_in_services_and_webhooks():
     # The data sandbox's paper engine is order-shaped but broker-free: routes
     # call ``engine.place_order`` on the SandboxEngine pulled from app config.
     sandbox_receiver_re = re.compile(
-        r"((?<![\w.])engine\.place_order|SandboxEngine\.place_order)"
+        r"((?<![\w.])(?:engine|sandbox)\.place_order|SandboxEngine\.place_order)"
     )
     scan_dirs = [
         _REPO_ROOT / "packages" / "services",
@@ -301,7 +343,7 @@ def test_no_new_ungated_order_paths_in_services_and_webhooks():
                     continue
                 if not _ORDER_WRITE_RE.search(line):
                     continue
-                if _GATED_RECEIVER_RE.search(line):
+                if _is_gated_receiver(rel, line):
                     continue  # delegates to the router / sandbox — legitimate
                 if sandbox_receiver_re.search(line):
                     continue  # the broker-free paper engine
@@ -392,13 +434,123 @@ def test_raw_order_allowlist_has_no_stale_entries():
             stale.append(f"{rel} (file gone)")
             continue
         has_raw = any(
-            _ORDER_WRITE_RE.search(line) and not _GATED_RECEIVER_RE.search(line)
+            _ORDER_WRITE_RE.search(line) and not _is_gated_receiver(rel, line)
             and "def " not in line and not line.strip().startswith("#")
             for line in path.read_text(encoding="utf-8").splitlines()
         )
         if not has_raw:
             stale.append(f"{rel} (no raw order-write left — remove from allowlist)")
     assert not stale, "Stale _RAW_ORDER_ALLOWLIST entries (the allowlist must shrink):\n" + "\n".join(stale)
+
+
+def test_no_new_raw_route_order_dispatchers():
+    """G12 tripwire: no new calls into the legacy ``OrderRouter.route_order`` API.
+
+    The canonical broker-write path is ``gate_order -> BrokerRouter``. Several
+    older engine/AI modules still call their own ``route_order`` API and are
+    tracked as explicit consolidation debt. A new call site must fail here
+    instead of passing because ``route_order`` was absent from the older grep
+    guard.
+    """
+    scan_dirs = [
+        _REPO_ROOT / "packages" / "services",
+        _REPO_ROOT / "packages" / "integrations" / "webhooks",
+        _REPO_ROOT / "packages" / "core",
+    ]
+    offenders: list[str] = []
+    for root in scan_dirs:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            parts = path.parts
+            if "tests" in parts or path.name.startswith("test_"):
+                continue
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if rel in _RAW_ROUTE_ORDER_ALLOWLIST:
+                continue
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#") or "def " in stripped:
+                    continue
+                if _ROUTE_ORDER_RE.search(line):
+                    offenders.append(f"{rel}:{n}: {stripped}")
+    assert not offenders, (
+        "Raw route_order dispatcher outside the canonical gate_order -> BrokerRouter path "
+        "(contract §8.1 / G12). Route it through BrokerRouter, or add a shrinking "
+        "debt entry with justification:\n" + "\n".join(offenders)
+    )
+
+
+def test_raw_route_order_allowlist_has_no_stale_entries():
+    """Every allowed legacy ``route_order`` module must still contain that debt."""
+    stale: list[str] = []
+    for rel in sorted(_RAW_ROUTE_ORDER_ALLOWLIST):
+        path = _REPO_ROOT / rel
+        if not path.exists():
+            stale.append(f"{rel} (file gone)")
+            continue
+        has_raw = any(
+            _ROUTE_ORDER_RE.search(line)
+            and "def " not in line and not line.strip().startswith("#")
+            for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        if not has_raw:
+            stale.append(f"{rel} (no raw route_order call left — remove from allowlist)")
+    assert not stale, (
+        "Stale _RAW_ROUTE_ORDER_ALLOWLIST entries (the allowlist must shrink):\n"
+        + "\n".join(stale)
+    )
+
+
+def test_no_new_raw_openalgo_modify_cancel_calls():
+    """G12 tripwire: raw OpenAlgoClient modify/cancel calls are not hidden by place-order scans."""
+    scan_dirs = [
+        _REPO_ROOT / "packages" / "services",
+        _REPO_ROOT / "packages" / "integrations" / "webhooks",
+        _REPO_ROOT / "packages" / "core",
+    ]
+    offenders: list[str] = []
+    for root in scan_dirs:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            parts = path.parts
+            if "tests" in parts or path.name.startswith("test_"):
+                continue
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if rel in _RAW_OPENALGO_MOD_CANCEL_ALLOWLIST:
+                continue
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#") or "def " in stripped:
+                    continue
+                if _OPENALGO_MOD_CANCEL_RE.search(line):
+                    offenders.append(f"{rel}:{n}: {stripped}")
+    assert not offenders, (
+        "Raw OpenAlgoClient modify/cancel call outside the gated BrokerRouter path "
+        "(contract §8.1 / G12):\n" + "\n".join(offenders)
+    )
+
+
+def test_raw_openalgo_modify_cancel_allowlist_has_no_stale_entries():
+    """Every raw OpenAlgo modify/cancel debt entry must stay justified by code."""
+    stale: list[str] = []
+    for rel in sorted(_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST):
+        path = _REPO_ROOT / rel
+        if not path.exists():
+            stale.append(f"{rel} (file gone)")
+            continue
+        has_raw = any(
+            _OPENALGO_MOD_CANCEL_RE.search(line)
+            and "def " not in line and not line.strip().startswith("#")
+            for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        if not has_raw:
+            stale.append(f"{rel} (no raw OpenAlgo modify/cancel call left — remove from allowlist)")
+    assert not stale, (
+        "Stale _RAW_OPENALGO_MOD_CANCEL_ALLOWLIST entries (the allowlist must shrink):\n"
+        + "\n".join(stale)
+    )
 
 
 def test_only_gate_order_mints_safety_context():
@@ -471,3 +623,25 @@ def test_no_raw_order_write_urls_in_services_and_webhooks():
         "(contract §8.1 / G12). Order writes must traverse gate_order -> "
         "BrokerRouter — never a hand-built endpoint POST:\n" + "\n".join(offenders)
     )
+
+
+def test_broker_mcp_surface_is_metadata_only():
+    """Broker-hosted MCP support must stay setup metadata, not an order proxy.
+
+    Dhan and Groww MCP servers may expose trade tools externally, but FlintTrade
+    must not add a local POST/PATCH/DELETE route that forwards MCP tool calls
+    around ``gate_order`` / ``gate_broker_write`` -> ``BrokerRouter``. The local
+    route is therefore GET-only catalogue metadata.
+    """
+    from flask import Flask
+
+    from flinttrade_gateway.capabilities_routes import capabilities_bp
+
+    app = Flask(__name__)
+    app.register_blueprint(capabilities_bp)
+    mcp_rules = sorted(
+        (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
+        for rule in app.url_map.iter_rules()
+        if "mcp" in rule.rule
+    )
+    assert mcp_rules == [("/api/v1/broker/mcp", ["GET"])]
