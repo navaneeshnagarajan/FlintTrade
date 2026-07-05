@@ -228,6 +228,52 @@ def test_native_connect_routes_reject_coming_soon_native(client, route, extra_bo
     assert "coming soon" in response.get_json()["message"].lower(), (route, broker)
 
 
+@pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
+@pytest.mark.parametrize("broker", ["kotakneo", "groww"])
+def test_legacy_account_id_routes_reject_existing_coming_soon_native(app, client, route_suffix, broker) -> None:
+    """Existing stale native rows must not bypass the current connectable gate."""
+    account_id = f"STALE_{broker.upper()}"
+    with app.app_context():
+        app.config["REGISTRY"].add_account(account_id, broker, "Stale native", {"access_token": "old"})
+        app.config["CREDENTIAL_STORE"].store(account_id, broker, "Stale native", {"access_token": "old"})
+
+    response = client.post(f"/v1/accounts/{account_id}/{route_suffix}")
+
+    assert response.status_code == 400
+    assert "coming soon" in response.get_json()["message"].lower()
+
+
+def test_oauth_callback_rejects_state_for_broker_demoted_to_coming_soon(app, client, monkeypatch) -> None:
+    """A pre-existing OAuth state must not connect a native broker after demotion."""
+    from flinttrade_gateway import auth
+
+    broker = "upstox"
+    state = "state-from-before-demotion"
+    with app.app_context():
+        app.config["OAUTH_STATES"][state] = {
+            "broker": broker,
+            "label": "Upstox stale state",
+            "account_id": "UPX_DEMOTED",
+            "timestamp": time.time(),
+        }
+
+    original_gate = auth._reject_coming_soon_native
+
+    def fake_demoted_gate(candidate: str):
+        if candidate == broker:
+            return ({"status": "error", "message": "coming soon"}, 400)
+        return original_gate(candidate)
+
+    monkeypatch.setattr(auth, "_reject_coming_soon_native", fake_demoted_gate)
+
+    response = client.get("/v1/auth/oauth/callback", query_string={"state": state, "code": "valid_auth_code"})
+
+    assert response.status_code in (301, 302)
+    assert "auth=error" in response.headers.get("Location", "")
+    with app.app_context():
+        assert app.config["REGISTRY"].list_accounts() == []
+
+
 # ---------------------------------------------------------------------------
 # 5. test_remove_account
 # ---------------------------------------------------------------------------

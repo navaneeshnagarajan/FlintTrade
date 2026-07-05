@@ -148,6 +148,26 @@ def _reject_coming_soon_native(broker: str) -> Any | None:
     return None
 
 
+def _reject_coming_soon_native_account(account_id: str) -> Any | None:
+    """Reject account-id operations when the existing account is disabled native.
+
+    Legacy gateway operations such as reconnect and set-primary receive only an
+    ``account_id``. If a native broker is later demoted back to
+    ``connectable=False`` after an old account row already exists, those routes
+    must honour the same gate as fresh connect routes instead of reactivating or
+    promoting a coming-soon adapter.
+    """
+    try:
+        accounts = _registry().list_accounts()
+    except Exception:
+        logger.exception("Failed to inspect account %s before broker gate", account_ref(account_id))
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+    for account in accounts:
+        if str(account.account_id) == str(account_id):
+            return _reject_coming_soon_native(str(account.broker))
+    return None
+
+
 @gateway_bp.route("/accounts", methods=["POST"])
 def add_account() -> Any:
     """Add a new broker account.
@@ -225,6 +245,10 @@ def reconnect_account(account_id: str) -> Any:
     body: dict[str, Any] = request.get_json(silent=True) or {}
     credentials: dict[str, Any] | None = body.get("credentials") or None
 
+    coming_soon = _reject_coming_soon_native_account(account_id)
+    if coming_soon is not None:
+        return coming_soon
+
     try:
         info = _registry().reconnect_account(
             account_id,
@@ -253,6 +277,10 @@ def set_primary(account_id: str) -> Any:
     Returns:
         JSON with ``status`` on success, or an error response.
     """
+    coming_soon = _reject_coming_soon_native_account(account_id)
+    if coming_soon is not None:
+        return coming_soon
+
     try:
         _registry().set_primary(account_id)
         return jsonify({"status": "success"})
@@ -351,6 +379,10 @@ def oauth_callback() -> Any:
     broker: str = state_data["broker"]
     label: str = state_data["label"]
     account_id: str = state_data["account_id"] or secrets.token_hex(8)
+
+    coming_soon = _reject_coming_soon_native(broker)
+    if coming_soon is not None:
+        return redirect("/setup?auth=error")
 
     try:
         # Authenticate via the registry/adapter
