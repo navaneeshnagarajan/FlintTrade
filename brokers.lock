@@ -7,7 +7,7 @@ licence_source = "dhanhq-2.2.0.dist-info/LICENSE"
 homepage = "https://github.com/dhan-oss/dhanhq-py"
 sandbox_tested = "2026-05-23"
 approved_by = "navaneeshnagarajan"
-notes = "wave 1 baseline; placeholder hash is refused until requirements.lock is generated with broker SDK pins."
+notes = "wave 1 baseline. Repo-managed through flinttrade-gateway's dhanhq==2.2.0 dependency and requirements.lock; runtime attestation gates on the installed distribution version."
 
 [[broker]]
 name = "upstox-python-sdk"
