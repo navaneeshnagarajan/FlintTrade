@@ -28,48 +28,56 @@ const mockOAuthBroker: BrokerInfo = {
 };
 
 describe("AuthFlowState transitions", () => {
-  it("TOTP broker starts at entering_credentials", () => {
-    const expected = initialAuthFlowState(mockTOTPBroker);
-    expect(expected.step).toBe("entering_credentials");
-    if (expected.step !== "entering_credentials") {
-      throw new Error("expected entering_credentials state");
+  it("TOTP brokers fail closed into the shared broker surface", () => {
+    const state = initialAuthFlowState(mockTOTPBroker);
+
+    expect(state.step).toBe("error");
+    if (state.step !== "error") {
+      throw new Error("expected retired connector error state");
     }
-    expect(expected.fields.totp).toBe(true);
+    expect(state.message).toContain("legacy gateway connector");
+    expect(state.message).toContain("Settings -> Brokers");
+    expect(state.message).toContain("connectable gate");
   });
 
-  it("OAuth broker starts at awaiting_redirect", () => {
-    const expected = initialAuthFlowState(mockOAuthBroker);
-    expect(expected.step).toBe("awaiting_redirect");
+  it("OAuth brokers fail closed instead of opening the legacy redirect flow", () => {
+    const state = initialAuthFlowState(mockOAuthBroker);
+
+    expect(state.step).toBe("error");
+    if (state.step !== "error") {
+      throw new Error("expected retired connector error state");
+    }
+    expect(state.message).toContain("Zerodha");
   });
 
-  it("API key broker starts at entering_credentials without password/totp", () => {
+  it("API key brokers fail closed instead of opening the legacy credential flow", () => {
     const apiKeyBroker: BrokerInfo = {
       ...mockTOTPBroker,
       name: "groww",
+      display_name: "Groww",
       auth_flow: "api_key_direct",
     };
     const state = initialAuthFlowState(apiKeyBroker);
-    expect(apiKeyBroker.auth_flow).toBe("api_key_direct");
-    expect(state.step).toBe("entering_credentials");
-    if (state.step !== "entering_credentials") {
-      throw new Error("expected entering_credentials state");
+
+    expect(state.step).toBe("error");
+    if (state.step !== "error") {
+      throw new Error("expected retired connector error state");
     }
-    expect(state.fields.api_key).toBe(true);
-    expect(state.fields.api_secret).toBe(true);
-    expect(state.fields.client_id).toBeUndefined();
+    expect(state.message).toContain("Groww");
   });
 
-  it("OTP broker starts at awaiting_otp", () => {
+  it("OTP brokers fail closed instead of opening the legacy OTP flow", () => {
     const otpBroker: BrokerInfo = {
       ...mockTOTPBroker,
       name: "definedge",
       auth_flow: "otp_sms",
     };
     const state = initialAuthFlowState(otpBroker);
-    expect(state.step).toBe("awaiting_otp");
+
+    expect(state.step).toBe("error");
   });
 
-  it("multi-step OTP brokers fail explicitly in the legacy connector", () => {
+  it("multi-step OTP brokers use the same retired connector message", () => {
     const samcoBroker: BrokerInfo = {
       ...mockTOTPBroker,
       name: "samco",
@@ -84,7 +92,6 @@ describe("AuthFlowState transitions", () => {
     if (state.step !== "error") {
       throw new Error("expected error state");
     }
-    expect(state.message).toContain("multi-step OTP");
     expect(state.message).toContain("legacy gateway connector");
   });
 
