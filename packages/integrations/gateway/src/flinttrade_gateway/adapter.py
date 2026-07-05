@@ -509,6 +509,24 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
             ],
         },
     ],
+    "groww": [
+        {
+            "id": "access_token", "label": "Access token", "kind": "direct",
+            "description": (
+                "Generate a Groww Trade API access token from Groww Cloud/API Keys and paste it here. "
+                "Groww tokens expire at 06:00 IST and live order placement still requires static outbound IP setup."
+            ),
+            "fields": [
+                _f("user_id", "User ID", required=False),
+                _f(
+                    "access_token",
+                    "Access token",
+                    secret=True,
+                    help_="Generate a fresh Groww Trade API token after the 06:00 IST expiry window.",
+                ),
+            ],
+        },
+    ],
 }
 
 
@@ -606,7 +624,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         ],
         "cautions": [
             "Sell orders through Groww MCP require DDPI authorisation.",
-            "Groww is not a FlintTrade connectable native broker until a native adapter is built and live-tested.",
+            "Groww native adapter code exists but remains disabled until live login/read verification passes.",
             "The Groww Trade API page still requires static IP setup for API-key order placement.",
         ],
         "client_configs": [
@@ -809,6 +827,9 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         display_name="Groww",
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
+        native=True,
+        connectable=False,
+        auth_methods=_NATIVE_AUTH["groww"],
         mcp=_BROKER_MCP["groww"],
     ),
     "wisdom": BrokerInfo(

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .brokers.dhan import DHAN_CAPABILITIES
+from .brokers.groww import GROWW_CAPABILITIES
 from .brokers.indmoney import INDMONEY_CAPABILITIES
 from .brokers.kotakneo import KOTAKNEO_CAPABILITIES
 from .brokers.upstox import UPSTOX_CAPABILITIES
@@ -35,6 +36,7 @@ NATIVE_BROKER_CAPABILITIES: dict[str, Capabilities] = {
     "upstox": UPSTOX_CAPABILITIES,
     "kotakneo": KOTAKNEO_CAPABILITIES,
     "indmoney": INDMONEY_CAPABILITIES,
+    "groww": GROWW_CAPABILITIES,
 }
 
 

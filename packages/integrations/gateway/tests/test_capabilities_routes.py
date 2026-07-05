@@ -106,10 +106,11 @@ class TestCapabilitiesRoute:
         assert brokers["dhan"]["mcp"]["trading_supported"] is True
         assert brokers["upstox"]["mcp"]["read_only"] is True
         assert brokers["upstox"]["mcp"]["daily_reauthorization"] is True
-        assert brokers["groww"]["native"] is False
+        assert brokers["groww"]["native"] is True
         assert brokers["groww"]["connectable"] is False
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
         assert "DDPI" in " ".join(brokers["groww"]["mcp"]["cautions"])
+        assert "disabled until live login/read verification" in " ".join(brokers["groww"]["mcp"]["cautions"])
 
     def test_mcp_catalogue_supports_single_broker_lookup(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp?broker=groww")
@@ -157,16 +158,16 @@ class TestRecommendationsRoute:
         display_names = {r["broker_id"]: r["display_name"] for r in data["recommendations"]}
         assert display_names["indmoney"] == "INDmoney"
 
-    def test_include_coming_soon_keeps_kotak_capability_metadata(self, client) -> None:  # type: ignore[no-untyped-def]
+    def test_include_coming_soon_keeps_disabled_native_capability_metadata(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get(
             "/api/v1/broker/recommendations?use_case=low_cost_execution&include_coming_soon=true"
         )
         assert response.status_code == 200
         data = response.get_json()
-        # Kotak Neo still wins all-capability metadata, but is marked unavailable
-        # for user-facing native connect until live verification passes.
-        assert data["recommendations"][0]["broker_id"] == "kotakneo"
-        assert data["recommendations"][0]["connectable"] is False
+        by_id = {r["broker_id"]: r for r in data["recommendations"]}
+        assert {"kotakneo", "groww"} <= set(by_id)
+        assert by_id["kotakneo"]["connectable"] is False
+        assert by_id["groww"]["connectable"] is False
 
     def test_unknown_use_case_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/recommendations?use_case=teleport")
@@ -200,3 +201,10 @@ class TestRecommendationsRoute:
         ids = {r["broker_id"] for r in recommendations}
         assert ids == {"indmoney"}
         assert recommendations[0]["connectable"] is True
+
+    def test_groww_broker_subset_accepted_but_marked_unavailable(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/recommendations?use_case=historical_data&brokers=groww")
+        assert response.status_code == 200
+        recommendations = response.get_json()["recommendations"]
+        assert [r["broker_id"] for r in recommendations] == ["groww"]
+        assert recommendations[0]["connectable"] is False

@@ -184,6 +184,10 @@ _NATIVE_ADAPTER_WRITE_METHODS: dict[str, tuple[str, tuple[str, ...]]] = {
         "IndMoneyAdapter",
         ("place_order", "modify_order", "cancel_order", "cancel_smart_order"),
     ),
+    "groww.py": (
+        "GrowwAdapter",
+        ("place_order", "modify_order", "cancel_order", "cancel_smart_order"),
+    ),
 }
 
 

@@ -56,8 +56,9 @@ class TestBrokerCatalog:
 
         31 track OpenAlgo upstream exactly (upstream gained ``iiflcapital`` in
         v2.0.1.1) plus 1 FlintTrade-native-only entry, ``kotakneo`` (Kotak Neo) —
-        distinct from the upstream ``kotak`` (Kotak Securities). A future addition
-        on either side trips this assertion.
+        distinct from the upstream ``kotak`` (Kotak Securities). Groww remains an
+        upstream OpenAlgo entry too, now with FlintTrade-native metadata attached.
+        A future addition on either side trips this assertion.
         """
         live = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
         assert len(live) == 32, (
@@ -191,6 +192,14 @@ class TestBrokerCatalog:
             assert BROKER_CATALOG[name].auth_flow == AuthFlowType.api_key_direct, (
                 f"Expected {name} to be api_key_direct"
             )
+
+    def test_groww_native_metadata_is_disabled_until_live_verification(self):
+        entry = BROKER_CATALOG["groww"]
+        assert entry.native is True
+        assert entry.connectable is False
+        assert entry.mcp is not None
+        assert entry.mcp.remote_url == "https://mcp.groww.in/mcp"
+        assert {m.id for m in entry.auth_methods} == {"access_token"}
 
 
 # ---------------------------------------------------------------------------

@@ -240,8 +240,8 @@ export function BrokerConnect() {
       <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-secondary">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <p>
-          Native broker login and reads are verified for Dhan, Upstox, and INDmoney. Kotak Neo stays
-          visible here as a catalogued adapter and remains disabled until its live checks pass.
+          Native broker login and reads are verified for Dhan, Upstox, and INDmoney. Kotak Neo and
+          Groww stay visible here as catalogued adapters and remain disabled until their live checks pass.
         </p>
       </div>
 
@@ -269,8 +269,8 @@ export function BrokerConnect() {
                         <Badge variant="outline" className="text-xxs">
                           {entry.mcp.read_only ? "Read-only" : "MCP trade tools"}
                         </Badge>
-                        {!entry.native && (
-                          <Badge variant="outline" className="text-xxs">No native connect</Badge>
+                        {!entry.connectable && (
+                          <Badge variant="outline" className="text-xxs">Native unavailable</Badge>
                         )}
                       </div>
                     </div>

@@ -6,13 +6,13 @@ untested or only partially wired**, or **(c) referenced but not built / blocked*
 It is a living document — update it in the same change that moves a feature
 between buckets.
 
-`v0.6.0-beta.1` is not production ready. The native adapter code for the four
-founder brokers (Dhan / Upstox / Kotak Neo / INDmoney) is present and
+`v0.6.0-beta.1` is not production ready. The native adapter code for the five
+founder brokers (Dhan / Upstox / Kotak Neo / INDmoney / Groww) is present and
 mock-tested. Dhan, Upstox, and INDmoney are the current connectable native set
-after live login/read verification; Kotak Neo is built and catalogued but stays
-`connectable=false` until its live adapter login/read checks pass. INDmoney is
-REST-only and has no SDK pin. Closed-market/no-funds verification does not prove
-funded live order execution.
+after live login/read verification; Kotak Neo and Groww are built and catalogued
+but stay `connectable=false` until their live adapter login/read checks pass.
+INDmoney and Groww are REST-only and have no SDK pin. Closed-market/no-funds
+verification does not prove funded live order execution.
 
 ## Legend
 

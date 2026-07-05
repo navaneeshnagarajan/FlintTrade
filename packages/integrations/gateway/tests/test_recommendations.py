@@ -143,6 +143,14 @@ def test_indmoney_is_registered_and_ranked() -> None:
     assert "indmoney" in ranked_ids
 
 
+def test_groww_is_registered_and_ranked() -> None:
+    # Groww now has a native REST adapter and capability metadata, but remains
+    # connectable=false in the public catalogue until live login/read verification.
+    assert "groww" in NATIVE_BROKER_CAPABILITIES
+    ranked_ids = {r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)}
+    assert "groww" in ranked_ids
+
+
 def test_dhan_beats_indmoney_on_documented_intraday_depth() -> None:
     # The honest invariant the scorer must defend: deep DOCUMENTED intraday
     # lookback (Dhan, ~5 years) outranks a broad-but-shallow interval menu
@@ -156,15 +164,16 @@ def test_dhan_beats_indmoney_on_documented_intraday_depth() -> None:
 
 
 def test_historical_data_full_ranking_with_indmoney() -> None:
-    # Pin the exact HISTORICAL_DATA order with all four natives registered:
+    # Pin the exact HISTORICAL_DATA order with all natives registered:
     #   dhan (5 intervals + 1825-day lookback = 70.83)
+    #   > groww (5 intervals + 1080-day lookback = 46.0)
     #   > indmoney (12 intervals * 2 = 24.0; lookback honestly unset)
     #   > upstox (5 intervals + 31-day lookback = 11.03)
     #   > kotakneo (no candle API = 0.0).
-    # IndMoney displaces Upstox at #2 on documented interval breadth, but Dhan's
-    # real ~5-year intraday depth keeps it #1 — the doc-honest outcome.
+    # Groww's captured docs advertise broad intraday history, but Dhan's real
+    # ~5-year intraday depth keeps it #1 — the doc-honest outcome.
     ranked_ids = [r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)]
-    assert ranked_ids == ["dhan", "indmoney", "upstox", "kotakneo"]
+    assert ranked_ids == ["dhan", "groww", "indmoney", "upstox", "kotakneo"]
 
 
 def test_indmoney_scores_zero_for_options() -> None:

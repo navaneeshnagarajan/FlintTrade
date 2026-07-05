@@ -2,7 +2,7 @@
 
 The interactive counterpart to the boot-time credential-replay login step
 (``flinttrade_gateway.native_login``). Connecting a native broker
-(Dhan/Upstox/Kotak Neo/IndMoney) is a four-step transaction, all fail-closed:
+(Dhan/Upstox/Kotak Neo/IndMoney/Groww) is a four-step transaction, all fail-closed:
 
   1. Encrypt + persist the broker credentials to the vault, keyed by the
      composite ``(adapter_id, account_id)`` selector.

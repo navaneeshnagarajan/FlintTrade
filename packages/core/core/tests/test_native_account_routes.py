@@ -240,7 +240,7 @@ def test_list_native_brokers_catalogue(client):
     c, _app, _tmp = client
     data = c.get("/api/v1/native/brokers").get_json()["data"]
     brokers = {b["adapter_id"]: b for b in data["brokers"]}
-    assert set(brokers) == {"dhan", "upstox", "kotakneo", "indmoney"}
+    assert set(brokers) == {"dhan", "upstox", "kotakneo", "indmoney", "groww"}
     # Proper display names — not .capitalize() ("Kotakneo"/"Indmoney").
     assert brokers["kotakneo"]["display_name"] == "Kotak Neo"
     assert brokers["indmoney"]["display_name"] == "INDmoney"
@@ -253,12 +253,15 @@ def test_list_native_brokers_catalogue(client):
     assert brokers["upstox"]["connectable"] is True
     assert brokers["indmoney"]["connectable"] is True
     assert brokers["kotakneo"]["connectable"] is False
+    assert brokers["groww"]["connectable"] is False
     assert brokers["dhan"]["mcp"]["remote_url"] == "https://mcp.dhan.co/mcp"
     assert brokers["dhan"]["mcp"]["trading_supported"] is True
     assert brokers["upstox"]["mcp"]["remote_url"] == "https://mcp.upstox.com/mcp"
     assert brokers["upstox"]["mcp"]["read_only"] is True
     assert brokers["upstox"]["mcp"]["trading_supported"] is False
     assert brokers["indmoney"]["mcp"] is None
+    assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
+    assert brokers["groww"]["mcp"]["trading_supported"] is True
     indmoney = next(m for m in brokers["indmoney"]["auth_methods"] if m["id"] == "access_token")
     assert "INDstocks API dashboard" in indmoney["description"]
     assert "static outbound IP" in indmoney["description"]
@@ -266,6 +269,12 @@ def test_list_native_brokers_catalogue(client):
     assert "five active tokens" in indmoney["description"]
     indmoney_fields = {f["name"]: f for f in indmoney["fields"]}
     assert "daily 06:00 IST reset" in indmoney_fields["access_token"]["help"]
+    groww = next(m for m in brokers["groww"]["auth_methods"] if m["id"] == "access_token")
+    assert "Groww Cloud/API Keys" in groww["description"]
+    assert "06:00 IST" in groww["description"]
+    groww_fields = {f["name"]: f for f in groww["fields"]}
+    assert groww_fields["access_token"]["secret"] is True
+    assert "06:00 IST expiry" in groww_fields["access_token"]["help"]
     # Secret fields are flagged for masking.
     kotak = next(m for m in brokers["kotakneo"]["auth_methods"] if m["id"] == "totp_mpin")
     assert any(f["secret"] for f in kotak["fields"])

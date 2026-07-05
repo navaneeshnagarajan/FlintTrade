@@ -79,12 +79,12 @@ flowchart LR
 The terminal always talks to FlintTrade on port 5100 through `/ft-api`.
 OpenAlgo on 5000 and its WebSocket on 8765 are optional external integration
 origins, proxied through Vite only when that bridge is enabled. The native
-gateway contract and routing are present, and the four founder-broker adapters
-(Dhan, Upstox, Kotak Neo, INDmoney) remain dormant unless their activation gates
-pass. The current connectable native set is Dhan, Upstox, and INDmoney after
-live login/read verification. Kotak Neo is built and catalogued but kept
-`connectable=false` until its live adapter login/read checks pass; its portal
-consumer-key/static-IP evidence is not enough by itself to promote it.
+gateway contract and routing are present, and the five founder-broker adapters
+(Dhan, Upstox, Kotak Neo, INDmoney, Groww) remain dormant unless their activation
+gates pass. The current connectable native set is Dhan, Upstox, and INDmoney
+after live login/read verification. Kotak Neo and Groww are built and catalogued
+but kept `connectable=false` until their live adapter login/read checks pass;
+portal/static-IP evidence is not enough by itself to promote them.
 
 ---
 

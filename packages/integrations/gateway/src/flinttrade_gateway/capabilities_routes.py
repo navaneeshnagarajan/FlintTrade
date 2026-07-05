@@ -41,6 +41,7 @@ _NATIVE_HISTORY_DAY_INTERVALS: dict[str, list[str]] = {
     "dhan": ["1D"],
     "upstox": ["1D", "1W", "1M"],
     "indmoney": ["1D", "1W", "1M"],
+    "groww": ["1D", "1W"],
 }
 
 
@@ -244,8 +245,8 @@ def get_recommendations() -> tuple[Any, int]:
             ranking to (e.g. the operator's connected brokers). When omitted,
             only login/read-verified connectable native brokers are ranked.
         include_coming_soon (bool, optional): When true and ``brokers`` is not
-            supplied, include built-but-disabled native brokers such as Kotak
-            Neo in the capability metadata ranking.
+        supplied, include built-but-disabled native brokers such as Kotak Neo
+        and Groww in the capability metadata ranking.
 
     Returns:
         Single use-case: ``{"status": "success", "use_case": "...",
