@@ -499,7 +499,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("broker", choices=sorted(ADAPTER_FACTORIES))
     parser.add_argument(
         "--method",
-        help="Credential method. Defaults per broker: dhan/groww/indmoney/upstox access_token, kotakneo totp_mpin.",
+        help=(
+            "Credential method. Defaults per broker: dhan/upstox/indmoney access_token, "
+            "groww api_key_secret, kotakneo totp_mpin."
+        ),
     )
     parser.add_argument(
         "--environment",

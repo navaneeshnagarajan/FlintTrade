@@ -176,6 +176,27 @@ def test_run_probe_dispatches_dhan_profile_and_common_reads(monkeypatch, capsys)
     assert "TOKEN1" not in out
 
 
+def test_run_probe_dispatches_dhan_oauth_token_id(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["CLIENT1", "APPID", "APPSECRET", "TOKENID1"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "dhan", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("dhan", "oauth_token_id", ["profile"]))
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert code == 0
+    assert fake.credentials == {
+        "client_id": "CLIENT1",
+        "app_id": "APPID",
+        "app_secret": "APPSECRET",
+        "token_id": "TOKENID1",
+    }
+    assert "profile: ok object_keys=1" in out
+    assert "APPSECRET" not in out
+    assert "TOKENID1" not in out
+
+
 def test_run_probe_logout_is_explicit_opt_in(monkeypatch, capsys) -> None:
     fake = _FakeAdapter()
     values = iter(["CLIENT1", "TOKEN1"])
@@ -348,6 +369,21 @@ def test_kotak_wrapper_help_is_kotak_specific(capsys) -> None:
     assert "Read-only Kotak Neo native adapter probe" in out
     assert "market_depth" in out
     assert "{dhan,indmoney,kotakneo,upstox}" not in out
+
+
+def test_shared_probe_help_lists_current_method_defaults(capsys) -> None:
+    try:
+        probe.parse_args(["--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:  # pragma: no cover - argparse always exits on --help
+        raise AssertionError("--help should exit")
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "dhan/upstox/indmoney access_token" in out
+    assert "groww api_key_secret" in out
+    assert "kotakneo totp_mpin" in out
+    assert "groww/indmoney/upstox access_token" not in out
 
 
 def test_kotak_wrapper_dispatches_to_shared_probe(monkeypatch) -> None:
