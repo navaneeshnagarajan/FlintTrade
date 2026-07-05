@@ -146,6 +146,7 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     streaming_supported=True,
     bracket_order_native=True,
     cover_order_native=True,
+    multi_quote_supported=True,
     modify_qty_supported=True,
 )
 

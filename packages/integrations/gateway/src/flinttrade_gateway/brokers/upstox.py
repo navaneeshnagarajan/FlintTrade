@@ -108,6 +108,9 @@ UPSTOX_CAPABILITIES = Capabilities(
     # dispatch below, so both are advertised. The capability-honesty test in
     # tests/test_upstox_mapping.py pins cover to False and these two to True.
     cover_order_native=False,
+    basket_order_native=True,
+    multi_quote_supported=True,
+    multi_option_greeks_supported=True,
     iceberg_native=True,
     gtt_native=True,
     modify_qty_supported=True,

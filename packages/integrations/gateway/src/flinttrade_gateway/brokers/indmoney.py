@@ -109,6 +109,7 @@ INDMONEY_CAPABILITIES = Capabilities(
     gtt_native=True,
     bracket_order_native=False,
     cover_order_native=False,
+    multi_quote_supported=True,
     iceberg_native=False,
     modify_qty_supported=True,
 )

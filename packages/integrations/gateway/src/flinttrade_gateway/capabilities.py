@@ -185,11 +185,69 @@ class Capabilities:
     streaming_disconnect_timeout_seconds: int | None = None
     bracket_order_native: bool = False
     cover_order_native: bool = False
+    basket_order_native: bool = False
+    multi_quote_supported: bool = False
+    multi_option_greeks_supported: bool = False
     iceberg_native: bool = False
     gtt_native: bool = False
     modify_qty_supported: bool = False
     modify_after_partial_fill: bool = False
     reconcile_recommended_seconds: int = 300
+
+
+def native_capabilities_by_broker() -> dict[str, Capabilities]:
+    """Return the authoritative native capability constants keyed by broker id."""
+    from .brokers.dhan import DHAN_CAPABILITIES  # noqa: PLC0415
+    from .brokers.groww import GROWW_CAPABILITIES  # noqa: PLC0415
+    from .brokers.indmoney import INDMONEY_CAPABILITIES  # noqa: PLC0415
+    from .brokers.kotakneo import KOTAKNEO_CAPABILITIES  # noqa: PLC0415
+    from .brokers.upstox import UPSTOX_CAPABILITIES  # noqa: PLC0415
+
+    return {
+        "dhan": DHAN_CAPABILITIES,
+        "upstox": UPSTOX_CAPABILITIES,
+        "kotakneo": KOTAKNEO_CAPABILITIES,
+        "indmoney": INDMONEY_CAPABILITIES,
+        "groww": GROWW_CAPABILITIES,
+    }
+
+
+def _native_to_broker_capabilities(broker_name: str, caps: Capabilities) -> BrokerCapabilities:
+    """Project adapter-native capability metadata onto the legacy route shape."""
+    return BrokerCapabilities(
+        broker_name=broker_name,
+        supports_market_orders=bool(caps.order_types & OrderTypes.MARKET),
+        supports_limit_orders=bool(caps.order_types & OrderTypes.LIMIT),
+        supports_sl_orders=bool(caps.order_types & OrderTypes.SL),
+        supports_sl_m_orders=bool(caps.order_types & OrderTypes.SLM),
+        supports_bracket_orders=caps.bracket_order_native or bool(caps.order_types & OrderTypes.BO),
+        supports_cover_orders=caps.cover_order_native or bool(caps.order_types & OrderTypes.CO),
+        supports_basket_orders=caps.basket_order_native,
+        supports_options=bool(caps.segments & (Segments.NFO | Segments.BFO)),
+        supports_futures=bool(caps.segments & (Segments.NFO | Segments.BFO)),
+        supports_commodities=bool(caps.segments & (Segments.MCX | Segments.NCDEX)),
+        supports_currency=bool(caps.segments & (Segments.CDS | Segments.BCD)),
+        supports_equity=bool(caps.segments & (Segments.NSE_EQ | Segments.BSE_EQ)),
+        supports_mis=bool(caps.order_types & OrderTypes.MIS),
+        supports_cnc=bool(caps.order_types & OrderTypes.CNC),
+        supports_nrml=bool(caps.order_types & OrderTypes.NRML),
+        supports_websocket=caps.streaming_supported,
+        supports_multi_quote=caps.multi_quote_supported,
+        supports_multi_option_greeks=caps.multi_option_greeks_supported,
+        order_rate_limit_per_sec=caps.rate_limit_orders_per_sec or 10,
+        quote_rate_limit_per_sec=(
+            caps.rate_limit_quote_per_sec
+            or caps.rate_limit_data_per_sec
+            or caps.rate_limit_non_trading_per_sec
+            or 50
+        ),
+    )
+
+
+def _register_native_capability_views(reg: CapabilityRegistry) -> None:
+    """Register native brokers from adapter constants, overriding stale rows."""
+    for broker_name, caps in native_capabilities_by_broker().items():
+        reg.register(_native_to_broker_capabilities(broker_name, caps))
 
 
 class CapabilityRegistry:
@@ -208,8 +266,16 @@ class CapabilityRegistry:
 
     _instance: ClassVar[CapabilityRegistry | None] = None
 
-    def __init__(self) -> None:
+    def __init__(self, *, auto_native: bool = False) -> None:
         self._store: dict[str, BrokerCapabilities] = {}
+        self._auto_native = auto_native
+        self._native_synced = False
+
+    def _ensure_native_synced(self) -> None:
+        if not self._auto_native or self._native_synced:
+            return
+        self._native_synced = True
+        _register_native_capability_views(self)
 
     # ------------------------------------------------------------------
     # Public API
@@ -232,6 +298,7 @@ class CapabilityRegistry:
         Returns:
             :class:`BrokerCapabilities` or ``None`` if not found.
         """
+        self._ensure_native_synced()
         return self._store.get(broker_name)
 
     def all(self) -> list[BrokerCapabilities]:
@@ -240,6 +307,7 @@ class CapabilityRegistry:
         Returns:
             List of :class:`BrokerCapabilities` sorted by broker name.
         """
+        self._ensure_native_synced()
         return sorted(self._store.values(), key=lambda c: c.broker_name)
 
     def broker_names(self) -> list[str]:
@@ -248,6 +316,7 @@ class CapabilityRegistry:
         Returns:
             List of broker name strings.
         """
+        self._ensure_native_synced()
         return sorted(self._store.keys())
 
 
@@ -262,7 +331,7 @@ def _build_default_registry() -> CapabilityRegistry:
     Returns:
         :class:`CapabilityRegistry` pre-populated with known Indian brokers.
     """
-    reg = CapabilityRegistry()
+    reg = CapabilityRegistry(auto_native=True)
 
     # -- Zerodha (Kite) ---------------------------------------------------
     reg.register(BrokerCapabilities(

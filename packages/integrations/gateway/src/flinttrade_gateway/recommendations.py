@@ -19,25 +19,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
-from .brokers.dhan import DHAN_CAPABILITIES
-from .brokers.groww import GROWW_CAPABILITIES
-from .brokers.indmoney import INDMONEY_CAPABILITIES
-from .brokers.kotakneo import KOTAKNEO_CAPABILITIES
-from .brokers.upstox import UPSTOX_CAPABILITIES
-from .capabilities import Capabilities
+from .capabilities import Capabilities, native_capabilities_by_broker
 
 # Native broker capabilities keyed by ``broker_id``. Every full-parity native
 # adapter belongs here so the engine and the ``?brokers=`` route filter agree on
 # what a valid native broker is. The OpenAlgo bridge is deliberately excluded —
 # it is a meta-adapter whose real capabilities depend on the underlying broker,
 # so it cannot be ranked as a single broker here.
-NATIVE_BROKER_CAPABILITIES: dict[str, Capabilities] = {
-    "dhan": DHAN_CAPABILITIES,
-    "upstox": UPSTOX_CAPABILITIES,
-    "kotakneo": KOTAKNEO_CAPABILITIES,
-    "indmoney": INDMONEY_CAPABILITIES,
-    "groww": GROWW_CAPABILITIES,
-}
+NATIVE_BROKER_CAPABILITIES: dict[str, Capabilities] = native_capabilities_by_broker()
 
 
 class BrokerUseCase(str, Enum):

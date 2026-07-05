@@ -94,6 +94,20 @@ class TestCapabilitiesRoute:
         assert caps["mcp"]["read_only"] is True
         assert caps["mcp"]["trading_supported"] is False
 
+    def test_groww_native_capabilities_are_catalogued(self, client) -> None:  # type: ignore[no-untyped-def]
+        """Groww must not disappear from the legacy capability endpoint."""
+        response = client.get("/api/v1/broker/capabilities?broker=groww")
+        assert response.status_code == 200
+        caps = response.get_json()["capabilities"]
+        assert caps["broker_name"] == "groww"
+        assert caps["connectable"] is False
+        assert caps["supports_market_orders"] is True
+        assert caps["supports_options"] is True
+        assert caps["historical_intraday_intervals_minutes"] == [1, 5, 10, 60, 240]
+        assert caps["option_chain_supported"] is True
+        assert caps["option_chain_greeks_supported"] is True
+        assert caps["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
+
     def test_mcp_catalogue_lists_hosted_broker_mcp_servers(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp")
         assert response.status_code == 200

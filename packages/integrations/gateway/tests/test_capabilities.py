@@ -114,10 +114,9 @@ def test_registry_register_overwrites_existing() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_default_registry_contains_13_brokers() -> None:
-    """The default REGISTRY contains exactly 13 seeded brokers (the original
-    11 plus the kotakneo + indmoney native-wave entries)."""
-    assert len(REGISTRY.all()) == 13
+def test_default_registry_contains_14_brokers() -> None:
+    """The default REGISTRY contains the 13 seeded brokers plus Groww native."""
+    assert len(REGISTRY.all()) == 14
 
 
 def test_default_registry_zerodha_websocket() -> None:
@@ -183,22 +182,25 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
     bracket/cover natively via super_order. This tripwire fails if any native
     broker present in BOTH systems disagrees again.
     """
-    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
-    from flinttrade_gateway.brokers.indmoney import INDMONEY_CAPABILITIES
-    from flinttrade_gateway.brokers.kotakneo import KOTAKNEO_CAPABILITIES
-    from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
+    from flinttrade_gateway.capabilities import (
+        OrderTypes,
+        Segments,
+        native_capabilities_by_broker,
+    )
 
-    natives = {
-        "dhan": DHAN_CAPABILITIES,
-        "upstox": UPSTOX_CAPABILITIES,
-        "kotakneo": KOTAKNEO_CAPABILITIES,
-        "indmoney": INDMONEY_CAPABILITIES,
-    }
+    natives = native_capabilities_by_broker()
     checked = 0
     for name, adapter_caps in natives.items():
         reg_caps = REGISTRY.get(name)
         assert reg_caps is not None, f"{name} missing from the seeded registry"
         checked += 1
+        assert reg_caps.supports_market_orders == bool(adapter_caps.order_types & OrderTypes.MARKET), name
+        assert reg_caps.supports_limit_orders == bool(adapter_caps.order_types & OrderTypes.LIMIT), name
         assert reg_caps.supports_bracket_orders == adapter_caps.bracket_order_native, name
         assert reg_caps.supports_cover_orders == adapter_caps.cover_order_native, name
-    assert checked == 4  # all four natives are seeded; guard the loop ran
+        assert reg_caps.supports_basket_orders == adapter_caps.basket_order_native, name
+        assert reg_caps.supports_options == bool(adapter_caps.segments & (Segments.NFO | Segments.BFO)), name
+        assert reg_caps.supports_equity == bool(adapter_caps.segments & (Segments.NSE_EQ | Segments.BSE_EQ)), name
+        assert reg_caps.supports_multi_quote == adapter_caps.multi_quote_supported, name
+        assert reg_caps.supports_multi_option_greeks == adapter_caps.multi_option_greeks_supported, name
+    assert checked == 5  # all natives, including Groww, are seeded; guard the loop ran
