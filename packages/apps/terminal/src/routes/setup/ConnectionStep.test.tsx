@@ -1,25 +1,23 @@
+import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
+import { useBrokerStore } from "@/stores/brokerStore";
 import { ConnectionStep } from "./ConnectionStep";
 
-let _nativeAccounts: Array<{ has_session?: boolean }> = [];
-
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: _nativeAccounts, isLoading: false, isError: false }),
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ isLoading: false, error: null, refetch: vi.fn() }),
 }));
 
 vi.mock("@/components/account/BrokerConnect", () => ({
   BrokerConnect: () => <div>Native brokers section</div>,
 }));
 
-vi.mock("@/services/ftApi.native", () => ({
-  listNativeAccounts: vi.fn(),
-}));
-
 describe("ConnectionStep", () => {
   beforeEach(() => {
-    _nativeAccounts = [];
+    act(() => {
+      useBrokerStore.setState({ accounts: [], activeAccountId: null });
+    });
   });
 
   it("defaults to the OpenAlgo (primary) connect tab", () => {
@@ -52,11 +50,77 @@ describe("ConnectionStep", () => {
   });
 
   it("allows continuing when a native broker has a live session", () => {
-    _nativeAccounts = [{ has_session: true }];
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "U1",
+            broker: "upstox",
+            label: "Upstox",
+            status: "connected",
+            connected_at: null,
+            error_message: null,
+            is_primary: true,
+            source: "native",
+          },
+        ],
+      });
+    });
 
     render(<ConnectionStep onComplete={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
+  });
+
+  it("allows continuing when a gateway broker account is connected", () => {
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "OA1",
+            broker: "zerodha",
+            label: "OpenAlgo Zerodha",
+            status: "connected",
+            connected_at: null,
+            error_message: null,
+            is_primary: true,
+            source: "gateway",
+          },
+        ],
+      });
+    });
+
+    render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
+
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
+  });
+
+  it("keeps continuing disabled for stale broker accounts", () => {
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "U1",
+            broker: "upstox",
+            label: "Upstox",
+            status: "token_expired",
+            connected_at: null,
+            error_message: "Needs fresh login",
+            is_primary: true,
+            source: "native",
+          },
+        ],
+      });
+    });
+
+    render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
+
+    expect(screen.getByRole("button", { name: /connect at least one broker/i })).toBeDisabled();
   });
 });

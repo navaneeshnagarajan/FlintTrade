@@ -20,14 +20,14 @@ import {
   ArrowRight,
   CheckCheck,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { ping } from "@/services/api";
 import { BrokerConnect } from "@/components/account/BrokerConnect";
-import { listNativeAccounts } from "@/services/ftApi.native";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -247,13 +247,8 @@ interface DirectConnectPanelProps {
 }
 
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
-  const accountsQuery = useQuery({
-    queryKey: ["native", "accounts"],
-    queryFn: listNativeAccounts,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-  });
-  const hasNativeSession = (accountsQuery.data ?? []).some((account) => account.has_session === true);
+  useBrokerAccounts();
+  const hasConnectedBroker = useBrokerStore((s) => s.accounts.some((account) => account.status === "connected"));
 
   return (
     <div className="space-y-4">
@@ -262,12 +257,12 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
       <Button
         type="button"
         className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-        disabled={!hasNativeSession}
+        disabled={!hasConnectedBroker}
         onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
       >
         <CheckCheck className="size-4 mr-2" />
-        {hasNativeSession ? "Continue" : "Connect at least one broker"}
-        {hasNativeSession && <ArrowRight className="size-4 ml-2" />}
+        {hasConnectedBroker ? "Continue" : "Connect at least one broker"}
+        {hasConnectedBroker && <ArrowRight className="size-4 ml-2" />}
       </Button>
     </div>
   );
