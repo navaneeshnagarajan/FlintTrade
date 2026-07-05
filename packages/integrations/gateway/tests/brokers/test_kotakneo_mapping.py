@@ -78,6 +78,20 @@ def test_place_order_validity_invalid_raises():
         to_place_order_params(order, "IDEA-EQ")
 
 
+@pytest.mark.parametrize(("exchange", "expected"), [("BCD", "bcs-fo"), ("MCX", "mcx_fo")])
+def test_place_order_maps_documented_derivative_segments(exchange, expected):
+    order = Order(
+        symbol="SENSEX25JULFUT",
+        action="BUY",
+        exchange=exchange,
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="7000",
+    )
+    assert to_place_order_params(order, "SENSEX25JULFUT")["exchange_segment"] == expected
+
+
 # ---------------------------------------------------------------------------
 # Modify: full documented param surface
 # ---------------------------------------------------------------------------

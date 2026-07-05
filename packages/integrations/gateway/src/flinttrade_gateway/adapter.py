@@ -838,7 +838,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         # bridge "kotak" (Kotak Securities) above. Built + mock-tested, not yet
         # login/read verified → native but "coming soon" (connectable=False).
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "NSE_INDEX", "BSE_INDEX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
         native=True,
         connectable=False,
         auth_methods=_NATIVE_AUTH["kotakneo"],

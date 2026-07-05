@@ -587,6 +587,7 @@ def list_native_brokers() -> Any:
             "adapter_id": info.name,
             "display_name": info.display_name,
             "connectable": info.connectable,
+            "exchanges": list(info.exchanges),
             "auth_methods": [m.model_dump() for m in info.auth_methods],
             "mcp": info.mcp.model_dump() if info.mcp is not None else None,
             "oauth_redirect_uri": _default_oauth_redirect_uri(),

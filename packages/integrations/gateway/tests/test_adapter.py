@@ -201,6 +201,15 @@ class TestBrokerCatalog:
         assert entry.mcp.remote_url == "https://mcp.groww.in/mcp"
         assert {m.id for m in entry.auth_methods} == {"api_key_totp", "api_key_secret", "access_token"}
 
+    def test_kotakneo_catalogue_matches_native_segment_map_but_stays_disabled(self):
+        """Kotak Neo metadata must expose every segment the native mapper supports."""
+        from flinttrade_gateway.brokers.kotakneo_mapping import EXCHANGE_TO_KOTAK
+
+        entry = BROKER_CATALOG["kotakneo"]
+        assert entry.native is True
+        assert entry.connectable is False
+        assert set(EXCHANGE_TO_KOTAK) <= set(entry.exchanges)
+
 
 # ---------------------------------------------------------------------------
 # Bootstrap tests

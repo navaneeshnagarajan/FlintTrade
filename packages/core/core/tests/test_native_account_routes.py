@@ -253,6 +253,7 @@ def test_list_native_brokers_catalogue(client):
     assert brokers["upstox"]["connectable"] is True
     assert brokers["indmoney"]["connectable"] is True
     assert brokers["kotakneo"]["connectable"] is False
+    assert {"BCD", "MCX"} <= set(brokers["kotakneo"]["exchanges"])
     assert brokers["groww"]["connectable"] is False
     assert brokers["dhan"]["mcp"]["remote_url"] == "https://mcp.dhan.co/mcp"
     assert brokers["dhan"]["mcp"]["trading_supported"] is True
