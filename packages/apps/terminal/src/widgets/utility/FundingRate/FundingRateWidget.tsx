@@ -268,16 +268,18 @@ function FundingRateWidget() {
           {sortLabel[sortMode]}
         </Button>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
-          aria-label="Refresh funding rates"
-        >
-          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-        </Button>
+        {isConnected && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
+            aria-label="Refresh funding rates"
+          >
+            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+          </Button>
+        )}
       </div>
 
       {/* Error banner */}

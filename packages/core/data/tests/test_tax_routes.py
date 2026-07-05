@@ -72,10 +72,19 @@ class TestTaxSummaryEndpoint:
             "fy", "equity_ltcg", "equity_stcg", "intraday_pnl",
             "fno_pnl", "commodity_pnl", "stt_paid", "turnover",
             "tax_liability_estimated", "ltcg_exemption_used",
-            "needs_audit", "trade_count",
+            "needs_audit", "trade_count", "is_sample_data", "data_source",
         ]
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
+
+    def test_summary_declares_sample_source(self, app_client) -> None:
+        resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
+        envelope = json.loads(resp.data)
+        data = envelope["data"]
+        assert envelope["is_sample_data"] is True
+        assert envelope["data_source"] == "sample"
+        assert data["is_sample_data"] is True
+        assert data["data_source"] == "sample"
 
     def test_fy_matches_request(self, app_client) -> None:
         resp = _get(app_client, "/v1/tax/summary?fy=2024-25")
@@ -122,6 +131,17 @@ class TestTaxReportEndpoint:
         data = json.loads(resp.data)["data"]
         assert "summary" in data
         assert "segments" in data
+
+    def test_report_declares_sample_source(self, app_client) -> None:
+        resp = _get(app_client, "/v1/tax/report?fy=2025-26")
+        envelope = json.loads(resp.data)
+        data = envelope["data"]
+        assert envelope["is_sample_data"] is True
+        assert envelope["data_source"] == "sample"
+        assert data["is_sample_data"] is True
+        assert data["data_source"] == "sample"
+        assert data["summary"]["is_sample_data"] is True
+        assert data["summary"]["data_source"] == "sample"
 
     def test_all_segments_present(self, app_client) -> None:
         resp = _get(app_client, "/v1/tax/report?fy=2025-26")

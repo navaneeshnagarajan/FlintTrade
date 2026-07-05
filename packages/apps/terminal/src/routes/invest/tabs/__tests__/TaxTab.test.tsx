@@ -65,6 +65,8 @@ const mockSummary = {
   ltcg_exemption_used: 75000,
   needs_audit: false,
   trade_count: 50,
+  is_sample_data: true,
+  data_source: "sample",
 };
 
 const mockReport = {
@@ -136,6 +138,11 @@ describe("TaxTab", () => {
     renderWithProviders();
     // Trade count appears in both header subtitle and hero card
     expect(screen.getAllByText(/50 trades/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows the sample data banner when the tax API marks the payload as sample", () => {
+    renderWithProviders();
+    expect(screen.getByText(/showing sample data/i)).toBeInTheDocument();
   });
 
   it("shows audit status badge", () => {

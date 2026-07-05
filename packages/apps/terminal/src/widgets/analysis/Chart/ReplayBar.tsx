@@ -1,6 +1,6 @@
 // ReplayBar — slim control bar rendered below the chart during replay mode.
 //
-// Layout:  [Play/Pause] [|] [speed pills] [|] [progress scrubber] [|] [Reset] [Live]
+// Layout:  [Play/Pause] [|] [speed pills] [|] [progress scrubber] [|] [Reset] [Full chart]
 //
 // Accessibility:
 // - role="toolbar" on the outer wrapper
@@ -10,7 +10,7 @@
 // - 1/2/3/4 numpad keys set speed 1x/2x/5x/10x
 
 import { useEffect, useRef, useCallback } from "react";
-import { Play, Pause, RotateCcw, Radio } from "lucide-react";
+import { Play, Pause, RotateCcw, Maximize2 } from "lucide-react";
 import type { ReplaySpeed } from "./useChartReplay";
 
 // ---------------------------------------------------------------------------
@@ -242,15 +242,15 @@ export function ReplayBar({
       {/* Divider */}
       <div className="w-px h-4 bg-border-default" aria-hidden="true" />
 
-      {/* Live button */}
+      {/* Exit replay button */}
       <button
         onClick={onExitReplay}
-        aria-label="Exit replay and resume live data"
-        title="Exit replay and resume live data"
+        aria-label="Exit replay and restore the full loaded chart"
+        title="Exit replay and restore the full loaded chart"
         className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-text-secondary hover:text-profit hover:bg-surface-hover transition-colors shrink-0"
       >
-        <Radio size={11} />
-        <span>Live</span>
+        <Maximize2 size={11} />
+        <span>Full chart</span>
       </button>
     </div>
   );

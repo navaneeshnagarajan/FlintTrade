@@ -6,7 +6,7 @@
  *   - Inputs: underlying, expiry, long strike, short strike
  *   - Computed: max profit, max loss, breakeven, net premium, margin required
  *   - Payoff diagram: SVG line showing P&L at expiry vs underlying price
- *   - Quick-execute button: places a 2-leg basket order via OpenAlgo
+ *   - Deferred quick-execute button until a gated basket order route is wired
  */
 
 import { useState, useMemo, memo, useCallback } from "react";
@@ -285,7 +285,6 @@ function SpreadViewWidget() {
   const [shortStrike, setShortStrike] = useState(DEFAULTS["bull-call"].shortStrike ?? 24200);
   const [premium, setPremium] = useState(DEFAULTS["bull-call"].premium ?? 45);
   const [lotSize, setLotSize] = useState(DEFAULTS["bull-call"].lotSize ?? 25);
-  const [isExecuting, setIsExecuting] = useState(false);
 
   const handleSpreadTypeChange = useCallback((t: SpreadType) => {
     setSpreadType(t);
@@ -304,18 +303,6 @@ function SpreadViewWidget() {
   const payoffChart = useMemo(() => buildPayoffChart(payoff), [payoff]);
 
   const spreadInfo = SPREAD_TYPES.find((s) => s.id === spreadType);
-
-  const handleExecute = async () => {
-    if (!isConnected) return;
-    setIsExecuting(true);
-    try {
-      // Live: POST /api/v1/basketorder with 2 legs
-      await new Promise<void>((resolve) => setTimeout(resolve, 400));
-      track("trade", "spreadview_execute");
-    } finally {
-      setIsExecuting(false);
-    }
-  };
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Options Spread View widget">
@@ -446,15 +433,18 @@ function SpreadViewWidget() {
         {/* Execute button */}
         <div className="flex items-center gap-3 pt-1">
           <button
-            onClick={() => void handleExecute()}
-            disabled={!isConnected || isExecuting}
-            aria-label={`Execute ${spreadInfo?.label ?? "spread"} spread`}
+            disabled
+            aria-label={`Execute ${spreadInfo?.label ?? "spread"} spread unavailable`}
+            title="Basket execution is not wired yet."
             className="px-3 py-1.5 text-xs font-medium bg-accent/90 hover:bg-accent text-white rounded disabled:opacity-40 transition-colors"
           >
-            {isExecuting ? "Placing..." : `Execute ${spreadInfo?.label ?? "Spread"}`}
+            Execution not wired
           </button>
           {!isConnected && (
             <span className="text-xxs text-text-muted">Connect broker to execute</span>
+          )}
+          {isConnected && (
+            <span className="text-xxs text-text-muted">Basket execution not wired yet</span>
           )}
         </div>
       </div>

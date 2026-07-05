@@ -82,6 +82,12 @@ _SAMPLE_TRADES: list[TaxableTransaction] = [
 ]
 
 _generator = TaxReportGenerator()
+_TAX_DATA_SOURCE = "sample"
+
+
+def _sample_meta() -> dict[str, Any]:
+    """Return source metadata for the current built-in tax ledger."""
+    return {"is_sample_data": True, "data_source": _TAX_DATA_SOURCE}
 
 
 def _get_trades_for_fy(fy: str) -> list[TaxableTransaction]:
@@ -117,14 +123,18 @@ def tax_summary() -> tuple[Any, int]:
             ``_current_fy()`` — see that helper for FY-rollover semantics.
 
     Returns:
-        JSON ``{"status": "success", "data": {...}}`` with TaxSummary fields.
+        JSON ``{"status": "success", "is_sample_data": true, "data": {...}}``
+        with TaxSummary fields. The tax dataset is still the built-in sample
+        ledger, so both the envelope and payload declare that explicitly.
     """
     fy = request.args.get("fy", _current_fy())
     trades = _get_trades_for_fy(fy)
     summary = _generator.compute_pnl_by_segment(trades, fy)
+    sample_meta = _sample_meta()
 
     return jsonify({
         "status": "success",
+        **sample_meta,
         "data": {
             "fy": summary.fy,
             "equity_ltcg": summary.equity_ltcg,
@@ -138,6 +148,7 @@ def tax_summary() -> tuple[Any, int]:
             "ltcg_exemption_used": summary.ltcg_exemption_used,
             "needs_audit": summary.needs_audit,
             "trade_count": summary.trade_count,
+            **sample_meta,
         },
     }), 200
 
@@ -151,10 +162,20 @@ def tax_report() -> tuple[Any, int]:
             currently-active Indian fiscal year.
 
     Returns:
-        JSON ``{"status": "success", "data": {...}}`` with summary and segments.
+        JSON ``{"status": "success", "is_sample_data": true, "data": {...}}``
+        with summary and segments from the built-in sample ledger.
     """
     fy = request.args.get("fy", _current_fy())
     trades = _get_trades_for_fy(fy)
     report = _generator.generate_report(trades, fy)
+    sample_meta = _sample_meta()
+    report = {
+        **report,
+        **sample_meta,
+        "summary": {
+            **report["summary"],
+            **sample_meta,
+        },
+    }
 
-    return jsonify({"status": "success", "data": report}), 200
+    return jsonify({"status": "success", **sample_meta, "data": report}), 200

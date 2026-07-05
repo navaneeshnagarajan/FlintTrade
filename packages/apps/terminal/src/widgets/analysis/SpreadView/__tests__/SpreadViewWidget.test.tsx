@@ -20,6 +20,8 @@ import SpreadViewWidget from "../SpreadViewWidget";
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  mockUseBrokerConnected.mockReturnValue(false);
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -86,6 +88,14 @@ describe("SpreadViewWidget", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<SpreadViewWidget />);
     expect(screen.getByText("Connect broker to execute")).toBeTruthy();
+  });
+
+  it("keeps execution disabled when connected until basket routing is wired", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<SpreadViewWidget />);
+    const btn = screen.getByLabelText(/Execute.*spread unavailable/i);
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Basket execution not wired yet")).toBeTruthy();
   });
 
   it("renders number inputs for strikes and premium", () => {

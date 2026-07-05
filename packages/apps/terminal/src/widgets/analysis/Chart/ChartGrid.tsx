@@ -422,7 +422,7 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
               ? "bg-accent/15 text-accent border border-accent/40"
               : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
           }`}
-          title={isReplaying ? "Exit replay" : "Replay mode"}
+          title={isReplaying ? "Exit replay" : "Replay loaded OHLCV bars"}
         >
           <span>{isReplaying ? "Exit Replay" : "Replay"}</span>
         </Button>

@@ -1314,7 +1314,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
         <Button
           variant="ghost"
           onClick={isReplaying ? exitReplay : enterReplay}
-          title={isReplaying ? "Exit replay mode" : "Enter replay mode"}
+          title={isReplaying ? "Exit replay mode" : "Replay loaded OHLCV bars"}
           disabled={barsRef.current.length === 0}
           className={`flex items-center gap-1 px-2 py-1 h-auto rounded text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             isReplaying

@@ -46,7 +46,7 @@ export type AuthStatus = z.infer<typeof AuthStatusSchema>;
 
 // ---------------------------------------------------------------------------
 // GET /ft-api/v1/tax/summary — packages/core/data/src/tax_routes.py → tax_summary()
-// { status: "success", data: { fy, equity_ltcg, ..., needs_audit, trade_count } }
+// { status: "success", is_sample_data, data: { fy, equity_ltcg, ..., is_sample_data } }
 //
 // GET /ft-api/v1/tax/report  — tax_report()
 // { status: "success", data: <report dict> }
@@ -66,11 +66,15 @@ const TaxSummaryDataSchema = z
     ltcg_exemption_used: z.number(),
     needs_audit: z.boolean(),
     trade_count: z.number(),
+    is_sample_data: z.boolean().optional(),
+    data_source: z.string().optional(),
   })
   .passthrough();
 
 export const TaxSummarySchema = z.object({
   status: z.string(),
+  is_sample_data: z.boolean().optional(),
+  data_source: z.string().optional(),
   data: TaxSummaryDataSchema,
 });
 export type TaxSummary = z.infer<typeof TaxSummaryDataSchema>;
@@ -99,6 +103,8 @@ const TaxSegmentSchema = z
 
 export const TaxReportSchema = z.object({
   status: z.string(),
+  is_sample_data: z.boolean().optional(),
+  data_source: z.string().optional(),
   data: z
     .object({
       summary: TaxSummaryDataSchema,

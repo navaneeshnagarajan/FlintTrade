@@ -136,7 +136,7 @@ describe("ChartGrid", () => {
     const twoHBtn = screen.getByTitle("Two charts side by side");
     expect(twoHBtn).toHaveAttribute("aria-pressed", "true");
     // Two cells => two Replay buttons shown in cell footers
-    const replayBtns = screen.getAllByTitle("Replay mode");
+    const replayBtns = screen.getAllByTitle("Replay loaded OHLCV bars");
     expect(replayBtns).toHaveLength(2);
   });
 
@@ -146,7 +146,7 @@ describe("ChartGrid", () => {
     fireEvent.click(singleBtn);
     expect(singleBtn).toHaveAttribute("aria-pressed", "true");
     // Only one Replay button should be present
-    const replayBtns = screen.getAllByTitle("Replay mode");
+    const replayBtns = screen.getAllByTitle("Replay loaded OHLCV bars");
     expect(replayBtns).toHaveLength(1);
   });
 
@@ -155,7 +155,7 @@ describe("ChartGrid", () => {
     const fourBtn = screen.getByTitle("Four charts");
     fireEvent.click(fourBtn);
     expect(fourBtn).toHaveAttribute("aria-pressed", "true");
-    const replayBtns = screen.getAllByTitle("Replay mode");
+    const replayBtns = screen.getAllByTitle("Replay loaded OHLCV bars");
     expect(replayBtns).toHaveLength(4);
   });
 

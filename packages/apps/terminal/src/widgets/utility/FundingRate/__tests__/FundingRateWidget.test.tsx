@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -57,6 +57,11 @@ beforeAll(() => {
     unobserve() {}
     disconnect() {}
   };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockUseBrokerConnected.mockReturnValue(false);
 });
 
 
@@ -167,12 +172,23 @@ describe("FundingRateWidget", () => {
     expect(sortBtn.textContent).toContain("Sort: Magnitude");
   });
 
-  it("refresh button is present", () => {
+  it("hides refresh while showing disconnected sample data", () => {
     mockUseBrokerConnected.mockReturnValue(false);
 
     render(<FundingRateWidget />, { wrapper });
 
-    expect(screen.getByLabelText("Refresh funding rates")).toBeTruthy();
+    expect(screen.queryByLabelText("Refresh funding rates")).toBeNull();
+  });
+
+  it("shows refresh when connected to the live funding endpoint", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockGetCryptoFundingRates.mockResolvedValue(SAMPLE_FUNDING_RATES);
+
+    render(<FundingRateWidget />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Refresh funding rates")).toBeTruthy();
+    });
   });
 
   it("renders sparklines for each row", () => {

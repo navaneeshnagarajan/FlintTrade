@@ -68,6 +68,8 @@ const DEMO_TAX_SUMMARY: TaxSummary = {
   ltcg_exemption_used: 45000,
   needs_audit: false,
   trade_count: 342,
+  is_sample_data: true,
+  data_source: "sample",
 };
 import { exportToCSV, printCurrentView } from "@/lib/exportUtils";
 
@@ -249,9 +251,11 @@ export function TaxTab() {
 
   const isLoading = summaryLoading || reportLoading;
 
-  // Fall back to demo data when API fails or returns empty
-  const isDemo = summaryError || (!isLoading && !liveSummary);
-  const summary = isDemo ? DEMO_TAX_SUMMARY : liveSummary;
+  // Fall back to demo data when API fails or returns empty. A successful
+  // sample response still uses the server payload, but keeps the demo banner.
+  const shouldUseDemoFallback = summaryError || (!isLoading && !liveSummary);
+  const summary = shouldUseDemoFallback ? DEMO_TAX_SUMMARY : liveSummary;
+  const isDemo = shouldUseDemoFallback || Boolean(summary?.is_sample_data);
 
   // Compute total P&L for display
   const totalPnl = useMemo(() => {
