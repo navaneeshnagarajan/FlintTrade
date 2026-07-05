@@ -478,23 +478,15 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
             ),
             "fields": [
                 _f(
-                    "consumer_key",
-                    "Trade API access token (consumer key)",
+                    "access_token",
+                    "Trade API access token",
                     secret=True,
-                    required=False,
-                    help_="Kotak's docs call this the Trade API access token; the SDK sends it as consumer_key.",
+                    help_="Kotak's docs call this the Trade API access token; FlintTrade maps it to the SDK's consumer_key field internally.",
                 ),
                 _f("mobile_number", "Mobile number (with country code)"),
                 _f("ucc", "UCC (client code)"),
                 _f("totp", "6-digit TOTP"),
                 _f("mpin", "MPIN", secret=True),
-                _f(
-                    "access_token",
-                    "Trade API access token alias",
-                    secret=True,
-                    required=False,
-                    help_="Accepted as the same Authorization token if consumer key is left blank; retained for older captures.",
-                ),
                 _f("neo_fin_key", "Neo fin key", required=False),
             ],
         },
@@ -577,21 +569,29 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "client_configs": [
             {
                 "id": "remote_url",
-                "label": "Direct remote URL",
+                "label": "Claude / ChatGPT custom connector",
                 "url": "https://mcp.dhan.co/mcp",
                 "config": {"url": "https://mcp.dhan.co/mcp"},
             },
             {
-                "id": "mcp_remote",
-                "label": "mcp-remote",
-                "command": "npx",
-                "args": ["mcp-remote", "https://mcp.dhan.co/mcp"],
+                "id": "claude_code",
+                "label": "Claude Code CLI",
+                "command": "claude",
+                "args": ["mcp", "add", "--transport", "http", "dhan", "https://mcp.dhan.co/mcp"],
+            },
+            {
+                "id": "codex_cli",
+                "label": "Codex CLI",
+                "command": "codex",
+                "args": ["mcp", "add", "dhan", "--url", "https://mcp.dhan.co/mcp"],
+            },
+            {
+                "id": "cursor",
+                "label": "Cursor direct URL",
+                "url": "https://mcp.dhan.co/mcp",
                 "config": {
                     "mcpServers": {
-                        "dhan": {
-                            "command": "npx",
-                            "args": ["mcp-remote", "https://mcp.dhan.co/mcp"],
-                        },
+                        "dhan": {"url": "https://mcp.dhan.co/mcp"},
                     },
                 },
             },

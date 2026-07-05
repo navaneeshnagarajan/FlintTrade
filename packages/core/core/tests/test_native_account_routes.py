@@ -256,6 +256,25 @@ def test_list_native_brokers_catalogue(client):
     assert brokers["groww"]["connectable"] is False
     assert brokers["dhan"]["mcp"]["remote_url"] == "https://mcp.dhan.co/mcp"
     assert brokers["dhan"]["mcp"]["trading_supported"] is True
+    dhan_mcp_configs = {c["id"]: c for c in brokers["dhan"]["mcp"]["client_configs"]}
+    assert dhan_mcp_configs["claude_code"]["command"] == "claude"
+    assert dhan_mcp_configs["claude_code"]["args"] == [
+        "mcp",
+        "add",
+        "--transport",
+        "http",
+        "dhan",
+        "https://mcp.dhan.co/mcp",
+    ]
+    assert dhan_mcp_configs["codex_cli"]["command"] == "codex"
+    assert dhan_mcp_configs["codex_cli"]["args"] == [
+        "mcp",
+        "add",
+        "dhan",
+        "--url",
+        "https://mcp.dhan.co/mcp",
+    ]
+    assert dhan_mcp_configs["cursor"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
     assert brokers["upstox"]["mcp"]["remote_url"] == "https://mcp.upstox.com/mcp"
     assert brokers["upstox"]["mcp"]["read_only"] is True
     assert brokers["upstox"]["mcp"]["trading_supported"] is False
@@ -284,10 +303,10 @@ def test_list_native_brokers_catalogue(client):
     kotak = next(m for m in brokers["kotakneo"]["auth_methods"] if m["id"] == "totp_mpin")
     assert any(f["secret"] for f in kotak["fields"])
     kotak_fields = {f["name"]: f for f in kotak["fields"]}
-    assert kotak_fields["consumer_key"]["required"] is False
-    assert "Trade API access token" in kotak_fields["consumer_key"]["label"]
     assert kotak_fields["access_token"]["secret"] is True
-    assert kotak_fields["access_token"]["required"] is False
+    assert kotak_fields["access_token"]["required"] is True
+    assert "SDK's consumer_key" in kotak_fields["access_token"]["help"]
+    assert "consumer_key" not in kotak_fields
 
 
 def test_oauth_start_returns_auth_url_and_state(client):

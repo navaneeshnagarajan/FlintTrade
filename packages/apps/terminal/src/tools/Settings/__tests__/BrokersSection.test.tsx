@@ -92,12 +92,17 @@ const BROKERS = [
         kind: "direct" as const,
         description: "Kotak NEO two-step 2FA.",
         fields: [
-          { name: "consumer_key", label: "Consumer key", secret: true, required: true, help: "" },
+          {
+            name: "access_token",
+            label: "Trade API access token",
+            secret: true,
+            required: true,
+            help: "Maps to the SDK consumer_key internally.",
+          },
           { name: "mobile_number", label: "Mobile number", secret: false, required: true, help: "" },
           { name: "ucc", label: "UCC", secret: false, required: true, help: "" },
           { name: "totp", label: "TOTP", secret: false, required: true, help: "" },
           { name: "mpin", label: "MPIN", secret: true, required: true, help: "" },
-          { name: "access_token", label: "Portal access token", secret: true, required: false, help: "" },
         ],
       },
     ],
@@ -148,15 +153,26 @@ const MCP_BROKERS = [
       use_cases: ["Portfolio and account review", "Super Orders"],
       cautions: ["Broker MCP trade tools are outside FlintTrade's in-process safety gate."],
       client_configs: [
-        { id: "remote_url", label: "Direct remote URL", url: "https://mcp.dhan.co/mcp" },
+        { id: "remote_url", label: "Claude / ChatGPT custom connector", url: "https://mcp.dhan.co/mcp" },
         {
-          id: "mcp_remote",
-          label: "mcp-remote",
-          command: "npx",
-          args: ["mcp-remote", "https://mcp.dhan.co/mcp"],
+          id: "claude_code",
+          label: "Claude Code CLI",
+          command: "claude",
+          args: ["mcp", "add", "--transport", "http", "dhan", "https://mcp.dhan.co/mcp"],
+        },
+        {
+          id: "codex_cli",
+          label: "Codex CLI",
+          command: "codex",
+          args: ["mcp", "add", "dhan", "--url", "https://mcp.dhan.co/mcp"],
+        },
+        {
+          id: "cursor",
+          label: "Cursor direct URL",
+          url: "https://mcp.dhan.co/mcp",
           config: {
             mcpServers: {
-              dhan: { command: "npx", args: ["mcp-remote", "https://mcp.dhan.co/mcp"] },
+              dhan: { url: "https://mcp.dhan.co/mcp" },
             },
           },
         },
@@ -390,10 +406,13 @@ describe("BrokersSection", () => {
       "Upstox MCP cannot place, modify, or cancel orders.",
     );
     expect(screen.getByText("Add the Dhan remote MCP URL to a supported MCP client.")).toBeInTheDocument();
-    expect(screen.getByTestId("broker-mcp-dhan-mcp_remote")).toHaveTextContent(
-      "npx mcp-remote https://mcp.dhan.co/mcp",
+    expect(screen.getByTestId("broker-mcp-dhan-claude_code")).toHaveTextContent(
+      "claude mcp add --transport http dhan https://mcp.dhan.co/mcp",
     );
-    expect(screen.getByTestId("broker-mcp-dhan-mcp_remote")).toHaveTextContent("mcpServers");
+    expect(screen.getByTestId("broker-mcp-dhan-codex_cli")).toHaveTextContent(
+      "codex mcp add dhan --url https://mcp.dhan.co/mcp",
+    );
+    expect(screen.getByTestId("broker-mcp-dhan-cursor")).toHaveTextContent("mcpServers");
     expect(screen.getByText("https://mcp.groww.in/mcp")).toBeInTheDocument();
     expect(screen.getByText("npx mcp-remote@0.1.18 https://mcp.groww.in/mcp 52155")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("mcpServers");

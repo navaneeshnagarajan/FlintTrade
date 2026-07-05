@@ -160,6 +160,22 @@ def test_run_probe_keeps_session_on_service_window_read_error(monkeypatch, capsy
     assert "TOKEN1" not in out
 
 
+def test_kotak_probe_prompts_for_docs_token_once() -> None:
+    fields = probe.CREDENTIAL_FIELDS["kotakneo"]["totp_mpin"]
+
+    assert [field.name for field in fields] == [
+        "access_token",
+        "mobile_number",
+        "ucc",
+        "totp",
+        "mpin",
+        "neo_fin_key",
+    ]
+    assert fields[0].required is True
+    assert fields[-1].required is False
+    assert "consumer_key" not in {field.name for field in fields}
+
+
 def test_run_probe_dispatches_groww_access_token_reads(monkeypatch, capsys) -> None:
     fake = _FakeAdapter()
     values = iter(["GROWW-TOKEN-SECRET", "GROWWUSER1"])

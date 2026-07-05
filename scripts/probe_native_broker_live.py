@@ -101,16 +101,11 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
     },
     "kotakneo": {
         "totp_mpin": (
-            CredentialField(
-                "consumer_key",
-                "Kotak Neo Trade API access token (SDK consumer_key)",
-                required=False,
-            ),
+            CredentialField("access_token", "Kotak Neo Trade API access token"),
             CredentialField("mobile_number", "Kotak Neo mobile number"),
             CredentialField("ucc", "Kotak Neo UCC"),
             CredentialField("totp", "Current Kotak Neo TOTP"),
             CredentialField("mpin", "Kotak Neo MPIN"),
-            CredentialField("access_token", "Kotak Neo Trade API access token alias", required=False),
             CredentialField("neo_fin_key", "Optional Kotak neo_fin_key", required=False),
         ),
     },

@@ -111,7 +111,25 @@ class TestCapabilitiesRoute:
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
         assert "DDPI" in " ".join(brokers["groww"]["mcp"]["cautions"])
         assert "market-data/API permissions" in " ".join(brokers["groww"]["mcp"]["cautions"])
-        for broker_id in ("dhan", "upstox", "groww"):
+        dhan_configs = {c["id"]: c for c in brokers["dhan"]["mcp"]["client_configs"]}
+        assert dhan_configs["claude_code"]["args"] == [
+            "mcp",
+            "add",
+            "--transport",
+            "http",
+            "dhan",
+            "https://mcp.dhan.co/mcp",
+        ]
+        assert dhan_configs["codex_cli"]["args"] == [
+            "mcp",
+            "add",
+            "dhan",
+            "--url",
+            "https://mcp.dhan.co/mcp",
+        ]
+        assert dhan_configs["cursor"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
+
+        for broker_id in ("upstox", "groww"):
             mcp = brokers[broker_id]["mcp"]
             command_config = next(c for c in mcp["client_configs"] if c.get("command") == "npx")
             assert command_config["config"]["mcpServers"][broker_id]["command"] == "npx"
