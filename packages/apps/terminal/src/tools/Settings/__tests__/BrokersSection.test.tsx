@@ -286,6 +286,65 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(gatewayApi.removeAccount).toHaveBeenCalledWith("GW1"));
   });
 
+  it("removing a gateway account never evicts a same-id native write target", async () => {
+    // Round-3 finding: the same broker-supplied client code can be linked via
+    // BOTH the native adapter and the OpenAlgo bridge. Removing the gateway row
+    // must use a source-qualified key so it cannot cross-evict the native row
+    // (and silently null the active native write target).
+    (gatewayApi.listAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        account_id: "SHARED",
+        broker: "upstox",
+        label: "Upstox Bridge",
+        status: "connected",
+        connected_at: null,
+        error_message: null,
+        is_primary: false,
+        source: "gateway",
+      },
+    ]);
+    (gatewayApi.removeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    useBrokerStore.setState({
+      accounts: [
+        {
+          account_id: "SHARED",
+          broker: "upstox",
+          label: "Upstox Native",
+          status: "connected",
+          connected_at: null,
+          error_message: null,
+          is_primary: false,
+          source: "native",
+        },
+        {
+          account_id: "SHARED",
+          broker: "upstox",
+          label: "Upstox Bridge",
+          status: "connected",
+          connected_at: null,
+          error_message: null,
+          is_primary: false,
+          source: "gateway",
+        },
+      ],
+      activeAccountId: "native:upstox:SHARED",
+    });
+
+    renderSection();
+
+    const disconnect = await screen.findByRole("button", { name: /disconnect upstox bridge/i });
+    fireEvent.click(disconnect);
+
+    await waitFor(() => expect(gatewayApi.removeAccount).toHaveBeenCalledWith("SHARED"));
+    await waitFor(() => {
+      const accts = useBrokerStore.getState().accounts;
+      expect(accts).toHaveLength(1);
+      expect(accts[0].source).toBe("native");
+    });
+    // The operator's active native write target must survive the gateway removal.
+    expect(useBrokerStore.getState().activeAccountId).toBe("native:upstox:SHARED");
+  });
+
   it("optimistically drops a removed native account from the store (finding #2 — no resurrection)", async () => {
     // A removed native account must leave the write-target store immediately so
     // the next account poll's last-good preservation cannot resurrect it as a

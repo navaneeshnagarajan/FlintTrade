@@ -303,16 +303,22 @@ export function BrokerConnect() {
   const gatewayAccounts = gatewayAccountsQuery.data ?? [];
 
   const gatewayRemoveMutation = useMutation({
-    mutationFn: (accountId: string) => gatewayApi.removeAccount(accountId),
-    onSuccess: (_r, accountId) => {
+    mutationFn: (sel: { accountId: string; broker: string }) => gatewayApi.removeAccount(sel.accountId),
+    onSuccess: (_r, sel) => {
       setError("");
-      setNotice(`Gateway account ${accountId} disconnected.`);
-      useBrokerStore.getState().removeAccount(accountId);
+      setNotice(`Gateway account ${sel.accountId} disconnected.`);
+      // Remove by a source-qualified key, never the bare id: isBrokerAccountMatch
+      // also matches on account_id alone, so a bare id would cross-evict a native
+      // row that shares this broker-supplied client code (dual-linked account) and
+      // silently null the active native write target.
+      useBrokerStore.getState().removeAccount(
+        brokerAccountKey({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
+      );
       invalidateAccountQueries();
     },
-    onError: (e: unknown, accountId) => {
+    onError: (e: unknown, sel) => {
       setNotice("");
-      setError(e instanceof Error ? e.message : `Could not disconnect gateway account ${accountId}.`);
+      setError(e instanceof Error ? e.message : `Could not disconnect gateway account ${sel.accountId}.`);
     },
   });
 
@@ -665,7 +671,7 @@ export function BrokerConnect() {
                     size="sm"
                     aria-label={`Disconnect ${a.label || a.account_id}`}
                     title="Remove account"
-                    onClick={() => gatewayRemoveMutation.mutate(a.account_id)}
+                    onClick={() => gatewayRemoveMutation.mutate({ accountId: a.account_id, broker: a.broker })}
                     disabled={gatewayBusy}
                   >
                     <Trash2 className="size-4 text-loss" aria-hidden="true" />
