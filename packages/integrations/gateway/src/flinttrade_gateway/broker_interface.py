@@ -35,6 +35,8 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
+from .log_safety import log_ref
+
 logger = logging.getLogger("flinttrade.gateway.broker_interface")
 
 
@@ -630,7 +632,7 @@ class OpenAlgoBroker:
                 raw=raw if isinstance(raw, dict) else {},
             )
         except Exception as exc:
-            logger.exception("modify_order failed for order_id=%s", order_id)
+            logger.exception("modify_order failed for order_id=%s", log_ref(order_id, kind="order"))
             return OrderResponse(
                 success=False,
                 order_id=order_id,
@@ -650,7 +652,7 @@ class OpenAlgoBroker:
             raw = self._client.cancel_order(orderid=order_id)
             return isinstance(raw, dict) and raw.get("status") == "success"
         except Exception:
-            logger.exception("cancel_order failed for order_id=%s", order_id)
+            logger.exception("cancel_order failed for order_id=%s", log_ref(order_id, kind="order"))
             return False
 
     # ------------------------------------------------------------------

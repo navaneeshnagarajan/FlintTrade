@@ -14,6 +14,7 @@ from .session import BrokerSession
 from .models import BrokerInfo, BrokerAccountInfo
 from .adapter import BROKER_CATALOG
 from .exceptions import BrokerNotFoundError, SessionError
+from .log_safety import account_ref, selector_ref
 
 logger = logging.getLogger("flinttrade.gateway.registry")
 
@@ -107,8 +108,8 @@ class BrokerRegistry:
         with self._lock:
             self._sessions[account_id] = session
             logger.info(
-                "Account %r (%s) added to registry",
-                account_id,
+                "Account %s (%s) added to registry",
+                account_ref(account_id),
                 broker_name,
             )
 
@@ -140,7 +141,7 @@ class BrokerRegistry:
                 del self._adapter_sessions[key]
             if self._primary == account_id:
                 self._primary = None
-            logger.info("Account %r removed from registry", account_id)
+            logger.info("Account %s removed from registry", account_ref(account_id))
 
     def reconnect_account(
         self,
@@ -187,7 +188,7 @@ class BrokerRegistry:
             credentials = credential_store.retrieve(account_id)
 
         session.authenticate(credentials)
-        logger.info("Account %r reconnected", account_id)
+        logger.info("Account %s reconnected", account_ref(account_id))
         return self._build_info(session)
 
     def set_primary(self, account_id: str) -> None:
@@ -208,7 +209,7 @@ class BrokerRegistry:
                     f"Account '{account_id}' not found in registry."
                 )
             self._primary = account_id
-            logger.info("Primary account set to %r", account_id)
+            logger.info("Primary account set to %s", account_ref(account_id))
 
     # ------------------------------------------------------------------
     # Session lookup (read-only, no lock needed for dict reads in CPython,
@@ -254,7 +255,7 @@ class BrokerRegistry:
         """
         with self._lock:
             self._adapter_sessions[(adapter_id, account_id)] = session
-            logger.info("Session registered for selector %s:%s", adapter_id, account_id)
+            logger.info("Session registered for selector %s", selector_ref(adapter_id, account_id))
 
     def get_session_for(self, adapter_id: str, account_id: str) -> Any:
         """Look up an adapter-layer session by its composite selector key.
@@ -290,7 +291,8 @@ class BrokerRegistry:
         with self._lock:
             if self._adapter_sessions.pop((adapter_id, account_id), None) is not None:
                 logger.info(
-                    "Session evicted for selector %s:%s", adapter_id, account_id
+                    "Session evicted for selector %s",
+                    selector_ref(adapter_id, account_id),
                 )
 
     def get_primary_session(self) -> BrokerSession:

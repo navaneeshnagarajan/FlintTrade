@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from flinttrade_gateway.log_safety import log_ref
+
 logger = logging.getLogger("flinttrade.security")
 
 
@@ -186,7 +188,7 @@ class SecurityMonitor:
                 rec.is_banned = False
                 rec.ban_reason = None
                 rec.ban_expires = None
-                logger.info("Unbanned IP %s", ip)
+                logger.info("Unbanned IP %s", log_ref(ip, kind="ip"))
 
     def is_banned(self, ip: str) -> bool:
         """Check whether *ip* is currently banned.
@@ -209,7 +211,7 @@ class SecurityMonitor:
                     rec.is_banned = False
                     rec.ban_reason = None
                     rec.ban_expires = None
-                    logger.debug("Ban on %s has expired — lifted automatically", ip)
+                    logger.debug("Ban on %s has expired — lifted automatically", log_ref(ip, kind="ip"))
             return rec.is_banned
 
     # ------------------------------------------------------------------
@@ -296,7 +298,7 @@ class SecurityMonitor:
         rec.ban_reason = reason
         rec.ban_expires = (time.time() + duration) if duration is not None else None
         expires_in = f"{duration}s" if duration is not None else "permanent"
-        logger.warning("Banned IP %s — reason: %s — duration: %s", rec.ip, reason, expires_in)
+        logger.warning("Banned IP %s — reason: %s — duration: %s", log_ref(rec.ip, kind="ip"), reason, expires_in)
 
     def _expire_all_bans(self) -> None:
         """Lift all expired timed bans.

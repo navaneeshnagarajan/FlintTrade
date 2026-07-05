@@ -13,6 +13,7 @@ from typing import Any
 from .adapter import load_broker_adapter, BrokerAdapter
 from .models import BrokerAccountInfo, AccountStatus
 from .exceptions import SessionError, AuthFlowError
+from .log_safety import account_ref
 
 logger = logging.getLogger("flinttrade.gateway.session")
 
@@ -103,8 +104,8 @@ class BrokerSession:
         if self._adapter is None:
             self._adapter = load_broker_adapter(self._broker_name)
             logger.debug(
-                "Adapter loaded for account %r (broker=%r)",
-                self._account_id,
+                "Adapter loaded for account %s (broker=%r)",
+                account_ref(self._account_id),
                 self._broker_name,
             )
         return self._adapter
@@ -118,7 +119,7 @@ class BrokerSession:
         """
         if not self.is_connected:
             raise SessionError(
-                f"Session for account {self._account_id!r} is not connected "
+                f"Session for account {account_ref(self._account_id)} is not connected "
                 f"(current status: {self._status!r}). "
                 "Call authenticate() first."
             )
@@ -147,8 +148,8 @@ class BrokerSession:
         self._status = AccountStatus.authenticating
         self._error_message = None
         logger.info(
-            "Authenticating account %r with broker %r",
-            self._account_id,
+            "Authenticating account %s with broker %r",
+            account_ref(self._account_id),
             self._broker_name,
         )
 
@@ -161,8 +162,8 @@ class BrokerSession:
             self._connected_at = datetime.now(tz=timezone.utc)
             self._error_message = None
             logger.info(
-                "Account %r connected to %r at %s",
-                self._account_id,
+                "Account %s connected to %r at %s",
+                account_ref(self._account_id),
                 self._broker_name,
                 self._connected_at.isoformat(),
             )
@@ -172,8 +173,8 @@ class BrokerSession:
             self._error_message = error_msg
             self._auth_token = None
             logger.warning(
-                "Authentication failed for account %r: %s",
-                self._account_id,
+                "Authentication failed for account %s: %s",
+                account_ref(self._account_id),
                 error_msg,
             )
             raise AuthFlowError(error_msg)
@@ -189,8 +190,8 @@ class BrokerSession:
         self._connected_at = None
         self._error_message = None
         logger.info(
-            "Account %r disconnected from %r",
-            self._account_id,
+            "Account %s disconnected from %r",
+            account_ref(self._account_id),
             self._broker_name,
         )
 

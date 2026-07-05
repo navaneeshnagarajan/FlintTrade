@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
+from flinttrade_gateway.log_safety import log_ref
 
 logger = logging.getLogger("flinttrade.ip_whitelist")
 
@@ -125,7 +126,12 @@ class IPWhitelist:
             if any(e.network == network for e in cfg.entries):
                 return
             cfg.entries.append(_WhitelistEntry(ip=ip, label=label, network=network))
-        logger.debug("Added IP %s (%s) to whitelist for user %s", ip, label, user_id)
+        logger.debug(
+            "Added IP %s (%s) to whitelist for user %s",
+            log_ref(ip, kind="ip"),
+            log_ref(label, kind="label"),
+            log_ref(user_id, kind="user"),
+        )
 
     def remove_ip(self, user_id: str, ip: str) -> bool:
         """Remove an IP/CIDR from a user's whitelist.
@@ -151,7 +157,11 @@ class IPWhitelist:
             cfg.entries = [e for e in cfg.entries if e.network != network]
             removed = len(cfg.entries) < before
         if removed:
-            logger.debug("Removed IP %s from whitelist for user %s", ip, user_id)
+            logger.debug(
+                "Removed IP %s from whitelist for user %s",
+                log_ref(ip, kind="ip"),
+                log_ref(user_id, kind="user"),
+            )
         return removed
 
     def enable(self, user_id: str) -> None:
@@ -162,7 +172,7 @@ class IPWhitelist:
         """
         with self._lock:
             self._get_or_create(user_id).enabled = True
-        logger.info("IP whitelist ENABLED for user %s", user_id)
+        logger.info("IP whitelist ENABLED for user %s", log_ref(user_id, kind="user"))
 
     def disable(self, user_id: str) -> None:
         """Deactivate whitelist enforcement for a user.
@@ -175,7 +185,7 @@ class IPWhitelist:
         """
         with self._lock:
             self._get_or_create(user_id).enabled = False
-        logger.info("IP whitelist DISABLED for user %s", user_id)
+        logger.info("IP whitelist DISABLED for user %s", log_ref(user_id, kind="user"))
 
     # ------------------------------------------------------------------
     # Query

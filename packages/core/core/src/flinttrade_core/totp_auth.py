@@ -41,6 +41,7 @@ import pyotp
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from flinttrade_gateway.log_safety import log_ref
 
 if TYPE_CHECKING:
     pass
@@ -244,7 +245,8 @@ class TOTPAuth:
             )
             backup_codes.append(code)
 
-        logger.info("TOTP secret generated for user=%s", user_id)
+        safe_user = log_ref(user_id, kind="user")
+        logger.info("TOTP secret generated for user=%s", safe_user)
         return totp_secret, backup_codes
 
     def provisioning_uri(
@@ -311,12 +313,13 @@ class TOTPAuth:
             ``True`` if the token is valid and 2FA is enabled for *user_id*.
         """
         secret = self._get_decrypted_secret(user_id)
+        safe_user = log_ref(user_id, kind="user")
         if secret is None:
-            logger.warning("verify_token called for unknown or disabled user=%s", user_id)
+            logger.warning("verify_token called for unknown or disabled user=%s", safe_user)
             return False
         totp = pyotp.TOTP(secret)
         result = totp.verify(token, valid_window=1)
-        logger.debug("verify_token user=%s result=%s", user_id, result)
+        logger.debug("verify_token user=%s result=%s", safe_user, result)
         return result
 
     def consume_backup_code(self, user_id: str, code: str) -> bool:
@@ -344,7 +347,7 @@ class TOTPAuth:
                         "UPDATE backup_codes SET used = TRUE WHERE id = ?",
                         [row_id],
                     )
-                    logger.info("Backup code consumed for user=%s", user_id)
+                    logger.info("Backup code consumed for user=%s", log_ref(user_id, kind="user"))
                     return True
             except argon2.exceptions.VerifyMismatchError:
                 continue
@@ -360,14 +363,15 @@ class TOTPAuth:
         Returns:
             ``True`` if 2FA was disabled, ``False`` if the token was invalid.
         """
+        safe_user = log_ref(user_id, kind="user")
         if not self.verify_token(user_id, token):
-            logger.warning("disable: invalid token for user=%s", user_id)
+            logger.warning("disable: invalid token for user=%s", safe_user)
             return False
         self._db.execute(
             "UPDATE totp_secrets SET enabled = FALSE WHERE user_id = ?",
             [user_id],
         )
-        logger.info("TOTP disabled for user=%s", user_id)
+        logger.info("TOTP disabled for user=%s", safe_user)
         return True
 
     def is_enabled(self, user_id: str) -> bool:
@@ -426,5 +430,5 @@ class TOTPAuth:
         try:
             return fernet.decrypt(bytes(encrypted)).decode("utf-8")
         except InvalidToken:
-            logger.error("Failed to decrypt TOTP secret for user=%s", user_id)
+            logger.error("Failed to decrypt TOTP secret for user=%s", log_ref(user_id, kind="user"))
             return None

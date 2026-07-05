@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from flinttrade_gateway.log_safety import log_ref
 
 logger = logging.getLogger("flinttrade.shortcuts")
 
@@ -278,7 +279,7 @@ def reset_shortcuts() -> Any:
 
     try:
         count = _delete_overrides(user_id, conn)
-        logger.info("Reset %d shortcut overrides for user %s", count, user_id)
+        logger.info("Reset %d shortcut overrides for user %s", count, log_ref(user_id, kind="user"))
         return jsonify({"status": "ok", "deleted": count})
     except Exception as exc:
         logger.error("Failed to reset shortcuts: %s", exc)

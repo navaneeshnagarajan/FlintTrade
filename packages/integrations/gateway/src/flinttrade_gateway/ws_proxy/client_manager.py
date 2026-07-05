@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from flinttrade_gateway.log_safety import log_ref
+
 logger = logging.getLogger("flinttrade.gateway.ws_proxy.client_manager")
 
 
@@ -115,7 +117,11 @@ class ClientManager:
             remote_addr=remote_addr,
         )
         self._sessions[client_id] = session
-        logger.debug("ClientManager: added client '%s' (%s)", client_id, remote_addr)
+        logger.debug(
+            "ClientManager: added client '%s' (%s)",
+            log_ref(client_id, kind="client"),
+            log_ref(remote_addr, kind="remote"),
+        )
         return session
 
     def remove(self, client_id: str) -> ClientSession | None:
@@ -129,7 +135,7 @@ class ClientManager:
         """
         session = self._sessions.pop(client_id, None)
         if session is not None:
-            logger.debug("ClientManager: removed client '%s'", client_id)
+            logger.debug("ClientManager: removed client '%s'", log_ref(client_id, kind="client"))
         return session
 
     def get(self, client_id: str) -> ClientSession | None:

@@ -39,6 +39,8 @@ import httpx
 import jwt
 from flask import Blueprint, current_app, jsonify, request
 
+from flinttrade_gateway.log_safety import account_ref, log_ref
+
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
@@ -733,21 +735,23 @@ def _gated_write_dispatch(
         mode=_MODE_LIVE,
         selector=f"{adapter_id}:{account_id}",
     )
+    safe_account = account_ref(account_id)
+    safe_order = log_ref(order_id, kind="order")
 
     try:
         safety_ctx = gate_order(canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
         asyncio.run(dispatch(router, request_ctx, safety_ctx))
     except SafetyBypassError as exc:
-        logger.warning("Live %s refused by safety gate | order=%s: %s", op, order_id, exc)
+        logger.warning("Live %s refused by safety gate | order=%s: %s", op, safe_order, exc)
         return jsonify({"status": "error", "message": "Order refused"}), 403
     except AlgoTagLimitError as exc:
         # The router's algo-tag guard refused the dispatch (per-(broker,
         # exchange) per-second algo-order ceiling). A throttle refusal callers
         # should retry — 429, mirroring the place path; never a 500.
-        logger.warning("Live %s refused by algo-tag guard | order=%s: %s", op, order_id, exc)
+        logger.warning("Live %s refused by algo-tag guard | order=%s: %s", op, safe_order, exc)
         return jsonify({"status": "error", "message": "Order refused by rate guard"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
+        logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", op, adapter_id, safe_account, exc)
         return jsonify({
             "status": "error",
             "message": (
@@ -759,17 +763,23 @@ def _gated_write_dispatch(
         # Gated-skeleton adapters raise NotImplementedError for un-built write
         # paths; UnsupportedCapabilityError signals a capability the adapter does
         # not advertise. Both are an honest "not yet available" — map to 501.
-        logger.warning("Live %s — adapter capability not available | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
+        logger.warning(
+            "Live %s — adapter capability not available | adapter=%s account=%s: %s",
+            op,
+            adapter_id,
+            safe_account,
+            exc,
+        )
         return jsonify({
             "status": "error",
             "message": f"This operation ({op}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except Exception:
-        logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, order_id, adapter_id)
+        logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, safe_order, adapter_id)
         return jsonify({"status": "error", "message": fail_message}), 500
 
     _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, order_id)
-    logger.info("Live %s dispatched | order=%s adapter=%s account=%s", op, order_id, adapter_id, account_id)
+    logger.info("Live %s dispatched | order=%s adapter=%s account=%s", op, safe_order, adapter_id, safe_account)
     return jsonify({"status": "success", "orderid": order_id}), 200
 
 
@@ -814,10 +824,11 @@ def _dispatch_live_modify(
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
+    safe_order = log_ref(order_id, kind="order")
 
     blocked = _live_kill_switch_block()
     if blocked is not None:
-        logger.warning("Live modify blocked by kill switch | order=%s: %s", order_id, blocked.reason)
+        logger.warning("Live modify blocked by kill switch | order=%s: %s", safe_order, blocked.reason)
         return jsonify({
             "status": "error",
             "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
@@ -827,7 +838,7 @@ def _dispatch_live_modify(
     try:
         ModifyOrder(orderid=order_id, **changes)  # validate up-front; no gate consumed on bad input
     except (ValueError, ValidationError) as exc:
-        logger.warning("Live modify rejected by order-model validation | order=%s: %s", order_id, exc)
+        logger.warning("Live modify rejected by order-model validation | order=%s: %s", safe_order, exc)
         return jsonify({"status": "error", "message": "Modify validation failed"}), 400
 
     canonical = {"_op": "modify", "order_id": order_id, **changes}
@@ -1504,7 +1515,10 @@ def _configured_execution_target() -> tuple[str, str]:
 
             return parse_selector(selector)
         except ValueError:
-            logger.warning("Ignoring malformed brokers.execution.default selector: %s", selector)
+            logger.warning(
+                "Ignoring malformed brokers.execution.default selector: %s",
+                log_ref(selector, kind="selector"),
+            )
     return "openalgo", "default"
 
 
@@ -1621,10 +1635,11 @@ def _gated_verb_write(
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
+    safe_ref = log_ref(ref or "none", kind="ref")
     if kill_switch_gated:
         blocked = _live_kill_switch_block()
         if blocked is not None:
-            logger.warning("Live %s blocked by kill switch | ref=%s: %s", verb, ref, blocked.reason)
+            logger.warning("Live %s blocked by kill switch | ref=%s: %s", verb, safe_ref, blocked.reason)
             return jsonify({
                 "status": "error",
                 "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
@@ -1648,6 +1663,7 @@ def _gated_verb_write(
         mode=_MODE_LIVE,
         selector=f"{adapter_id}:{account_id}",
     )
+    safe_account = account_ref(account_id)
 
     canonical: dict[str, Any] = {"_op": verb, **fields}
     try:
@@ -1662,15 +1678,21 @@ def _gated_verb_write(
             )
         )
     except SafetyBypassError as exc:
-        logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, ref, exc)
+        logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, safe_ref, exc)
         return jsonify({"status": "error", "message": "Request refused"}), 403
     except AlgoTagLimitError as exc:
         # Algo-tag guard ceiling breach — a throttle refusal callers should
         # retry (429), never the generic 500 (audit fix); mirrors the place path.
-        logger.warning("Live %s refused by algo-tag guard | ref=%s: %s", verb, ref, exc)
+        logger.warning("Live %s refused by algo-tag guard | ref=%s: %s", verb, safe_ref, exc)
         return jsonify({"status": "error", "message": "Request refused by rate guard"}), 429
     except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", verb, adapter_id, account_id, exc)
+        logger.warning(
+            "Live %s — broker not connected | adapter=%s account=%s: %s",
+            verb,
+            adapter_id,
+            safe_account,
+            exc,
+        )
         return jsonify({
             "status": "error",
             "message": (
@@ -1683,7 +1705,7 @@ def _gated_verb_write(
         # available" for this broker, not a server fault.
         logger.warning(
             "Live %s — adapter capability not available | adapter=%s account=%s: %s",
-            verb, adapter_id, account_id, exc,
+            verb, adapter_id, safe_account, exc,
         )
         return jsonify({
             "status": "error",
@@ -1695,15 +1717,15 @@ def _gated_verb_write(
         # so adapter tracebacks, paths, or tokens cannot reach HTTP callers.
         logger.warning(
             "Live %s rejected by broker/adapter | adapter=%s account=%s: %s",
-            verb, adapter_id, account_id, exc,
+            verb, adapter_id, safe_account, exc,
         )
         return jsonify({"status": "error", "message": fail_message}), 502
     except Exception:
-        logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, ref, adapter_id)
+        logger.exception("Live %s dispatch failed | ref=%s adapter=%s", verb, safe_ref, adapter_id)
         return jsonify({"status": "error", "message": fail_message}), 500
 
     _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, ref)
-    logger.info("Live %s dispatched | ref=%s adapter=%s account=%s", verb, ref, adapter_id, account_id)
+    logger.info("Live %s dispatched | ref=%s adapter=%s account=%s", verb, safe_ref, adapter_id, safe_account)
     response: dict[str, Any] = {"status": "success", "data": result}
     if ref:
         response["orderid"] = ref
@@ -1761,6 +1783,7 @@ def _gated_broker_read(
         mode=_MODE_LIVE,
         selector=f"{adapter_id}:{account_id}",
     )
+    safe_account = account_ref(account_id)
 
     try:
         # Private access mirrors BrokerRouter.quotes — the session provider IS
@@ -1777,10 +1800,16 @@ def _gated_broker_read(
             )
         rows = asyncio.run(method(session))
     except SafetyBypassError as exc:
-        logger.warning("Broker read %s refused | adapter=%s account=%s: %s", read_verb, adapter_id, account_id, exc)
+        logger.warning("Broker read %s refused | adapter=%s account=%s: %s", read_verb, adapter_id, safe_account, exc)
         return jsonify({"status": "error", "message": "Request refused"}), 403
     except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning("Broker read %s — not connected | adapter=%s account=%s: %s", read_verb, adapter_id, account_id, exc)
+        logger.warning(
+            "Broker read %s — not connected | adapter=%s account=%s: %s",
+            read_verb,
+            adapter_id,
+            safe_account,
+            exc,
+        )
         return jsonify({
             "status": "error",
             "message": (
@@ -1791,14 +1820,14 @@ def _gated_broker_read(
     except (NotImplementedError, UnsupportedCapabilityError) as exc:
         logger.warning(
             "Broker read %s — adapter capability not available | adapter=%s account=%s: %s",
-            read_verb, adapter_id, account_id, exc,
+            read_verb, adapter_id, safe_account, exc,
         )
         return jsonify({
             "status": "error",
             "message": f"This listing ({read_verb}) is not yet available for broker '{adapter_id}'.",
         }), 501
     except Exception:
-        logger.exception("Broker read %s failed | adapter=%s account=%s", read_verb, adapter_id, account_id)
+        logger.exception("Broker read %s failed | adapter=%s account=%s", read_verb, adapter_id, safe_account)
         return jsonify({"status": "error", "message": f"Failed to fetch {read_verb}"}), 500
 
     return jsonify({"status": "success", "data": rows}), 200

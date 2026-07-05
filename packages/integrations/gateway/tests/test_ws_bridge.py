@@ -228,14 +228,14 @@ def test_broker_ticker_on_tick() -> None:
 
 
 def test_broker_ticker_on_error_logs(caplog: pytest.LogCaptureFixture) -> None:
-    """BrokerTicker.on_error logs an error message containing account_id and error text."""
+    """BrokerTicker.on_error logs a redacted account ref and the error text."""
     mock_dispatcher = MagicMock()
     ticker = BrokerTicker("ACC002", mock_dispatcher)
 
     with caplog.at_level(logging.ERROR, logger="flinttrade.gateway.ticker"):
         ticker.on_error("Connection reset by peer")
 
-    assert any(
-        "ACC002" in record.message and "Connection reset by peer" in record.message
-        for record in caplog.records
-    )
+    messages = "\n".join(record.message for record in caplog.records)
+    assert "ACC002" not in messages
+    assert "account#" in messages
+    assert "Connection reset by peer" in messages

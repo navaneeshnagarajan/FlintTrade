@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from flinttrade_gateway.log_safety import log_ref
 
 logger = logging.getLogger("flinttrade.core.chart_prefs")
 
@@ -153,7 +154,7 @@ class ChartPreferences:
             """,
             [user_id, json.dumps(theme), now],
         )
-        logger.debug("ChartPreferences.set_theme: user=%s", user_id)
+        logger.debug("ChartPreferences.set_theme: user=%s", log_ref(user_id, kind="user"))
 
     def get_theme(self, user_id: str) -> dict[str, Any] | None:
         """Return the stored chart theme for a user.
@@ -262,7 +263,11 @@ class ChartPreferences:
             "DELETE FROM chart_prefs_indicators WHERE user_id = ? AND set_name = ?",
             [user_id, name],
         )
-        logger.debug("ChartPreferences.delete_indicator_set: user=%s name=%s", user_id, name)
+        logger.debug(
+            "ChartPreferences.delete_indicator_set: user=%s name=%s",
+            log_ref(user_id, kind="user"),
+            log_ref(name, kind="name"),
+        )
         return True
 
     # ------------------------------------------------------------------
@@ -354,5 +359,9 @@ class ChartPreferences:
             "DELETE FROM chart_prefs_layout WHERE user_id = ? AND layout_name = ?",
             [user_id, layout_name],
         )
-        logger.debug("ChartPreferences.delete_layout: user=%s layout=%s", user_id, layout_name)
+        logger.debug(
+            "ChartPreferences.delete_layout: user=%s layout=%s",
+            log_ref(user_id, kind="user"),
+            log_ref(layout_name, kind="layout"),
+        )
         return True

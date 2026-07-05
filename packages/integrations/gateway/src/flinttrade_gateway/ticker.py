@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .log_safety import account_ref
+
 logger = logging.getLogger("flinttrade.gateway.ticker")
 
 
@@ -50,8 +52,8 @@ class BrokerTicker:
         Args:
             error: Human-readable error description from the broker SDK.
         """
-        logger.error("[%s] Streaming error: %s", self.account_id, error)
+        logger.error("[%s] Streaming error: %s", account_ref(self.account_id), error)
 
     def on_disconnect(self) -> None:
         """Called when the broker streaming adapter disconnects."""
-        logger.warning("[%s] Streaming disconnected", self.account_id)
+        logger.warning("[%s] Streaming disconnected", account_ref(self.account_id))

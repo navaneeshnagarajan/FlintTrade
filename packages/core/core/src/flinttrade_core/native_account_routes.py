@@ -44,6 +44,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from flinttrade_core.models import Order
 from flinttrade_gateway.adapter import BROKER_CATALOG
+from flinttrade_gateway.log_safety import selector_ref
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 from .workspace import workspace_dir
 
@@ -1330,13 +1331,13 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         else:
             store.remove(account_id)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Credential delete failed for %s:%s: %s", adapter_id, account_id, exc)
+        logger.warning("Credential delete failed for %s: %s", selector_ref(adapter_id, account_id), exc)
 
     # Deregister the selector from workspace.json.
     try:
         _deregister_selector_in_workspace(adapter_id, account_id)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Selector deregister failed for %s:%s: %s", adapter_id, account_id, exc)
+        logger.warning("Selector deregister failed for %s: %s", selector_ref(adapter_id, account_id), exc)
 
     # Drop any stale login-status entry so a later re-add of the same selector
     # doesn't inherit a phantom "needs fresh login" from the removed account.

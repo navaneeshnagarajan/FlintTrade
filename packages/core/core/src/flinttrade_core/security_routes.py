@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from flask import Blueprint, Flask, current_app, jsonify, request
+from flinttrade_gateway.log_safety import log_ref
 
 from .security import SecurityMonitor
 
@@ -68,7 +69,7 @@ def register_security_middleware(app: Flask, monitor: SecurityMonitor | None = N
             # Exempt auth and health endpoints from ban enforcement
             if any(request.path.startswith(p) for p in _BAN_EXEMPT_PREFIXES):
                 return None
-            logger.warning("Blocked request from banned IP %s → %s", ip, request.path)
+            logger.warning("Blocked request from banned IP %s → %s", log_ref(ip, kind="ip"), request.path)
             return jsonify({
                 "status": "error",
                 "message": "Your IP address has been blocked.",

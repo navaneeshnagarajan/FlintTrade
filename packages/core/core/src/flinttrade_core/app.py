@@ -172,6 +172,7 @@ def _reconnect_saved_accounts(
         reconnect_logger: Logger instance to use for progress messages.
     """
     from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
+    from flinttrade_gateway.log_safety import account_ref  # noqa: PLC0415
     from flinttrade_gateway.session import BrokerSession  # noqa: PLC0415
 
     saved = credential_store.list_accounts()
@@ -186,8 +187,9 @@ def _reconnect_saved_accounts(
         adapter_id = str(acct.get("adapter_id") or broker)
         label: str = acct["label"]
         info = BROKER_CATALOG.get(adapter_id) or BROKER_CATALOG.get(broker)
+        safe_account = account_ref(account_id)
         if info is not None and info.native:
-            reconnect_logger.info("  Skipped native account: %s (%s)", label, adapter_id)
+            reconnect_logger.info("  Skipped native account: %s (%s)", safe_account, adapter_id)
             continue
         try:
             creds = credential_store.retrieve(account_id)
@@ -196,9 +198,9 @@ def _reconnect_saved_accounts(
             registry._sessions[account_id] = session
             if acct.get("is_primary"):
                 registry._primary = account_id
-            reconnect_logger.info("  Connected: %s (%s)", label, broker)
+            reconnect_logger.info("  Connected: %s (%s)", safe_account, broker)
         except Exception as exc:
-            reconnect_logger.warning("  Failed: %s (%s): %s", label, broker, exc)
+            reconnect_logger.warning("  Failed: %s (%s): %s", safe_account, broker, exc)
 
 
 def _read_version() -> str:

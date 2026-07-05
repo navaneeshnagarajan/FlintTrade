@@ -39,6 +39,8 @@ import secrets
 import time
 from typing import Any
 
+from flinttrade_gateway.log_safety import log_ref
+
 from .auth import ApiKeyValidator
 from .broker_adapter import AbstractBrokerAdapter
 from .client_manager import ClientManager, ClientSession
@@ -196,7 +198,11 @@ class WSProxyServer:
         remote_str = f"{remote[0]}:{remote[1]}" if isinstance(remote, tuple) else str(remote)
 
         session = self._client_manager.add(client_id, remote_addr=remote_str)
-        logger.debug("WSProxyServer: client '%s' connected from %s", client_id, remote_str)
+        logger.debug(
+            "WSProxyServer: client '%s' connected from %s",
+            log_ref(client_id, kind="client"),
+            log_ref(remote_str, kind="remote"),
+        )
 
         # Background pump: session.queue → websocket
         pump_task = asyncio.create_task(
@@ -215,7 +221,11 @@ class WSProxyServer:
                 await self._dispatch_message(session, websocket, msg)
 
         except Exception as exc:
-            logger.debug("WSProxyServer: client '%s' connection closed: %s", client_id, exc)
+            logger.debug(
+                "WSProxyServer: client '%s' connection closed: %s",
+                log_ref(client_id, kind="client"),
+                exc,
+            )
         finally:
             pump_task.cancel()
             try:
@@ -231,7 +241,7 @@ class WSProxyServer:
                     self._router.unsubscribe(sym, exch, mode, session.queue)
 
             self._client_manager.remove(client_id)
-            logger.debug("WSProxyServer: client '%s' cleaned up", client_id)
+            logger.debug("WSProxyServer: client '%s' cleaned up", log_ref(client_id, kind="client"))
 
     async def _dispatch_message(
         self,
@@ -292,7 +302,10 @@ class WSProxyServer:
         if valid:
             session.authenticated = True
             await self._send(websocket, {"type": "auth", "status": "authenticated"})
-            logger.debug("WSProxyServer: client '%s' authenticated", session.client_id)
+            logger.debug(
+                "WSProxyServer: client '%s' authenticated",
+                log_ref(session.client_id, kind="client"),
+            )
         else:
             await self._send(
                 websocket,

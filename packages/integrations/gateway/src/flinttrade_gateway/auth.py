@@ -22,6 +22,7 @@ from flask import Blueprint, current_app, jsonify, redirect, request
 
 from .adapter import BROKER_CATALOG
 from .exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
+from .log_safety import account_ref
 from .models import AuthFlowType
 
 logger = logging.getLogger("flinttrade.gateway.auth")
@@ -182,7 +183,7 @@ def remove_account(account_id: str) -> Any:
     except BrokerNotFoundError:
         return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
     except Exception:
-        logger.exception("Failed to remove account %r", account_id)
+        logger.exception("Failed to remove account %s", account_ref(account_id))
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
@@ -216,7 +217,7 @@ def reconnect_account(account_id: str) -> Any:
     except CredentialError:
         return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
     except Exception:
-        logger.exception("Failed to reconnect account %r", account_id)
+        logger.exception("Failed to reconnect account %s", account_ref(account_id))
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
@@ -236,7 +237,7 @@ def set_primary(account_id: str) -> Any:
     except BrokerNotFoundError:
         return jsonify({"status": "error", "message": _ACCOUNT_NOT_FOUND_MESSAGE}), 404
     except Exception:
-        logger.exception("Failed to set primary account %r", account_id)
+        logger.exception("Failed to set primary account %s", account_ref(account_id))
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
@@ -484,7 +485,7 @@ def otp_verify() -> Any:
     except CredentialError:
         return jsonify({"status": "error", "message": _CREDENTIALS_INVALID_MESSAGE}), 400
     except Exception:
-        logger.exception("OTP verify failed for broker=%r account=%r", broker, account_id)
+        logger.exception("OTP verify failed for broker=%r account=%s", broker, account_ref(account_id))
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 

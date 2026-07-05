@@ -225,7 +225,7 @@ def test_reconnect_partial_failure(caplog: pytest.LogCaptureFixture) -> None:
         return _session_map[account_id]
 
     with patch("flinttrade_gateway.session.BrokerSession", side_effect=_make_session):
-        with caplog.at_level(logging.WARNING, logger="test.reconnect.partial"):
+        with caplog.at_level(logging.INFO, logger="test.reconnect.partial"):
             # Must not raise even though FAIL001 fails
             _reconnect_saved_accounts(registry, cs, reconnect_logger)
 
@@ -236,3 +236,9 @@ def test_reconnect_partial_failure(caplog: pytest.LogCaptureFixture) -> None:
     assert "FAIL001" not in registry._sessions
     # Primary should be set to OK001 (is_primary=True in saved accounts)
     assert registry._primary == "OK001"
+    logs = "\n".join(caplog.messages)
+    assert "FAIL001" not in logs
+    assert "OK001" not in logs
+    assert "Bad Account" not in logs
+    assert "Good Account" not in logs
+    assert "account#" in logs
