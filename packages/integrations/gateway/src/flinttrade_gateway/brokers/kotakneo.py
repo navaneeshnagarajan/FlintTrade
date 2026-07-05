@@ -156,6 +156,7 @@ class KotakNeoClient:
             neo_fin_key=credentials.get("neo_fin_key"),
             consumer_key=credentials.get("consumer_key"),
         )
+        self._install_post_login_fin_key_header(self._neo)
         M.ensure_ok(
             self._neo.totp_login(
                 mobile_number=credentials.get("mobile_number"),
@@ -164,6 +165,45 @@ class KotakNeoClient:
             )
         )
         M.ensure_ok(self._neo.totp_validate(mpin=credentials.get("mpin")))
+
+    @staticmethod
+    def _install_post_login_fin_key_header(neo: Any) -> None:
+        """Patch the SDK REST client to send ``neo-fin-key`` on session calls.
+
+        The current Kotak docs require ``neo-fin-key`` on post-login
+        Auth/Sid-backed order/report/portfolio/limits/margin calls, while
+        quotes and scrip-master remain Authorization-only. Some SDK modules omit
+        the fin-key header, so the facade adds it only when the outgoing request
+        already carries ``Auth`` or ``Sid``. This keeps the SDK surface intact
+        and avoids adding the header to quotes/scrip-master.
+        """
+        api_client = getattr(neo, "api_client", None)
+        rest_client = getattr(api_client, "rest_client", None)
+        original = getattr(rest_client, "request", None)
+        configuration = getattr(neo, "configuration", None)
+        fin_key = getattr(configuration, "get_neo_fin_key", None)
+        if not callable(original) or not callable(fin_key):
+            return
+        if getattr(rest_client, "_flinttrade_fin_key_wrapped", False):
+            return
+
+        def request(*args: Any, **kwargs: Any) -> Any:
+            mutable_args = list(args)
+            positional_headers = len(mutable_args) >= 4 and "headers" not in kwargs
+            headers = mutable_args[3] if positional_headers else kwargs.get("headers")
+            if isinstance(headers, dict):
+                patched = dict(headers)
+                lower = {str(key).lower() for key in patched}
+                if ("auth" in lower or "sid" in lower) and "neo-fin-key" not in lower:
+                    patched["neo-fin-key"] = fin_key()
+                if positional_headers:
+                    mutable_args[3] = patched
+                else:
+                    kwargs["headers"] = patched
+            return original(*mutable_args, **kwargs)
+
+        rest_client.request = request
+        rest_client._flinttrade_fin_key_wrapped = True
 
     # -- gated writes -------------------------------------------------------
 
@@ -769,6 +809,10 @@ class KotakNeoAdapter(BrokerAdapter):
             raise NotImplementedError(
                 "Kotak Neo live order feed needs the HSI socket (inject order_feed_factory)"
             )
+        starter = getattr(self._client(session), "subscribe_to_orderfeed", None)
+        if not callable(starter):
+            raise BrokerError("Kotak Neo client does not expose subscribe_to_orderfeed")
+        M.ensure_ok(await self._call(starter))
         async for frame in self._order_feed_factory(session):
             update = M.decode_kotak_order_feed(frame)
             if update is not None:

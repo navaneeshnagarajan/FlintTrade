@@ -18,7 +18,7 @@ import pytest
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
-from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, _ROUTER_TOKEN
+from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, KotakNeoClient, _ROUTER_TOKEN
 from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 
 pytestmark = pytest.mark.unit
@@ -128,6 +128,10 @@ class MockNeoFull:
     def un_subscribe(self, instrument_tokens, is_index, is_depth):
         self.calls.append(("un_subscribe", (instrument_tokens, is_index, is_depth)))
 
+    def subscribe_to_orderfeed(self):
+        self.calls.append(("subscribe_orderfeed", None))
+        return None
+
     def logout(self):
         self.calls.append(("logout", None))
         return {"State": "OK"}
@@ -177,6 +181,37 @@ async def test_logout_tolerates_facade_without_logout():
     adapter = KotakNeoAdapter(client_factory=lambda _s: Bare())
     session = await _session(adapter)
     await adapter.logout(session)  # must not raise
+
+
+def test_sdk_rest_wrapper_adds_fin_key_only_to_session_calls():
+    class FakeRest:
+        def __init__(self) -> None:
+            self.headers: list[dict[str, str]] = []
+
+        def request(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            self.headers.append(dict(kwargs.get("headers") or {}))
+            return {"ok": True}
+
+    class FakeConfig:
+        def get_neo_fin_key(self) -> str:
+            return "neotradeapi"
+
+    class FakeNeo:
+        def __init__(self) -> None:
+            self.configuration = FakeConfig()
+            self.api_client = type("ApiClient", (), {"rest_client": FakeRest()})()
+
+    neo = FakeNeo()
+    KotakNeoClient._install_post_login_fin_key_header(neo)
+    rest = neo.api_client.rest_client
+
+    rest.request(method="POST", url="https://example/orders", headers={"Auth": "A", "Sid": "S"})
+    rest.request(method="GET", url="https://example/quotes", headers={"Authorization": "plain-token"})
+    rest.request(method="POST", url="https://example/orders", headers={"Auth": "A", "neo-fin-key": "custom"})
+
+    assert rest.headers[0]["neo-fin-key"] == "neotradeapi"
+    assert "neo-fin-key" not in rest.headers[1]
+    assert rest.headers[2]["neo-fin-key"] == "custom"
 
 
 # ---------------------------------------------------------------------------
@@ -537,9 +572,11 @@ def _order_frames(_session: Any) -> AsyncIterator[Any]:
 
 @pytest.mark.asyncio
 async def test_order_stream_decodes_updates():
-    adapter = _adapter(MockNeoFull(), order_feed_factory=_order_frames)
+    mock = MockNeoFull()
+    adapter = _adapter(mock, order_feed_factory=_order_frames)
     session = await _session(adapter)
     updates = [u async for u in adapter.order_stream(session)]
+    assert mock.calls[0] == ("subscribe_orderfeed", None)
     assert len(updates) == 1
     assert updates[0]["orderid"] == "250122000624384" and updates[0]["status"] == "complete"
 
