@@ -136,7 +136,20 @@ const MCP_BROKERS = [
       login_steps: ["Add the Dhan remote MCP URL to a supported MCP client."],
       use_cases: ["Portfolio and account review", "Super Orders"],
       cautions: ["Broker MCP trade tools are outside FlintTrade's in-process safety gate."],
-      client_configs: [{ id: "remote_url", label: "Direct remote URL", url: "https://mcp.dhan.co/mcp" }],
+      client_configs: [
+        { id: "remote_url", label: "Direct remote URL", url: "https://mcp.dhan.co/mcp" },
+        {
+          id: "mcp_remote",
+          label: "mcp-remote",
+          command: "npx",
+          args: ["mcp-remote", "https://mcp.dhan.co/mcp"],
+          config: {
+            mcpServers: {
+              dhan: { command: "npx", args: ["mcp-remote", "https://mcp.dhan.co/mcp"] },
+            },
+          },
+        },
+      ],
     },
   },
   {
@@ -161,6 +174,11 @@ const MCP_BROKERS = [
           label: "mcp-remote",
           command: "npx",
           args: ["mcp-remote", "https://mcp.upstox.com/mcp"],
+          config: {
+            mcpServers: {
+              upstox: { command: "npx", args: ["mcp-remote", "https://mcp.upstox.com/mcp"] },
+            },
+          },
         },
       ],
     },
@@ -190,6 +208,14 @@ const MCP_BROKERS = [
           label: "Cursor / VS Code mcp-remote",
           command: "npx",
           args: ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
+          config: {
+            mcpServers: {
+              groww: {
+                command: "npx",
+                args: ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
+              },
+            },
+          },
         },
       ],
     },
@@ -231,8 +257,13 @@ describe("BrokersSection", () => {
       "Upstox MCP cannot place, modify, or cancel orders.",
     );
     expect(screen.getByText("Add the Dhan remote MCP URL to a supported MCP client.")).toBeInTheDocument();
+    expect(screen.getByTestId("broker-mcp-dhan-mcp_remote")).toHaveTextContent(
+      "npx mcp-remote https://mcp.dhan.co/mcp",
+    );
+    expect(screen.getByTestId("broker-mcp-dhan-mcp_remote")).toHaveTextContent("mcpServers");
     expect(screen.getByText("https://mcp.groww.in/mcp")).toBeInTheDocument();
     expect(screen.getByText("npx mcp-remote@0.1.18 https://mcp.groww.in/mcp 52155")).toBeInTheDocument();
+    expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("mcpServers");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("disabled until live login/read verification");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");

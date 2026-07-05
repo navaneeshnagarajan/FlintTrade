@@ -44,7 +44,7 @@ import {
   removeNativeAccount,
   setPrimaryNativeAccount,
   reloginNativeAccount,
-  type BrokerMcpCatalogueEntry,
+  type McpClientConfig,
   type NativeAuthMethod,
 } from "@/services/ftApi.native";
 
@@ -59,6 +59,62 @@ function expiryLabel(expiresAt?: number | null): string {
   const hours = Math.floor(ms / 3_600_000);
   const mins = Math.floor((ms % 3_600_000) / 60_000);
   return hours > 0 ? `expires in ${hours}h ${mins}m` : `expires in ${mins}m`;
+}
+
+function mcpCommand(config: McpClientConfig): string {
+  if (!config.command) return "";
+  return [config.command, ...(config.args ?? [])].join(" ");
+}
+
+function mcpConfigJson(config: McpClientConfig): string {
+  if (!config.config || Object.keys(config.config).length === 0) return "";
+  return JSON.stringify(config.config, null, 2);
+}
+
+function McpSetupValue({
+  label,
+  copyLabel,
+  value,
+  multiline = false,
+  onCopy,
+}: {
+  label: string;
+  copyLabel: string;
+  value: string;
+  multiline?: boolean;
+  onCopy: (label: string, value: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-start gap-2">
+      <div className="min-w-0">
+        <Label className="mb-1.5 block text-xs text-text-secondary">{label}</Label>
+        {multiline ? (
+          <pre
+            aria-label={`${copyLabel} value`}
+            className="max-h-36 min-h-9 overflow-auto rounded-md border border-border-default bg-surface-elevated px-3 py-2 font-mono text-xs leading-relaxed text-text-primary whitespace-pre-wrap break-words"
+          >
+            {value}
+          </pre>
+        ) : (
+          <code
+            aria-label={`${copyLabel} value`}
+            className="block min-h-9 rounded-md border border-border-default bg-surface-elevated px-3 py-2 font-mono text-xs text-text-primary break-all"
+          >
+            {value}
+          </code>
+        )}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={`Copy ${copyLabel}`}
+        onClick={() => onCopy(copyLabel, value)}
+      >
+        <Copy className="size-4" aria-hidden="true" />
+      </Button>
+    </div>
+  );
 }
 
 export function BrokerConnect() {
@@ -161,12 +217,6 @@ export function BrokerConnect() {
     setNotice(`${label} copied.`);
   }
 
-  function mcpCommand(entry: BrokerMcpCatalogueEntry): string {
-    const runnable = entry.mcp.client_configs.find((config) => config.command);
-    if (!runnable?.command) return "";
-    return [runnable.command, ...(runnable.args ?? [])].join(" ");
-  }
-
   const removeMutation = useMutation({
     mutationFn: (sel: { adapter: string; account: string }) => removeNativeAccount(sel.adapter, sel.account),
     onSuccess: (_r, sel) => {
@@ -253,9 +303,11 @@ export function BrokerConnect() {
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
             {mcpBrokers.map((entry) => {
-              const command = mcpCommand(entry);
               const loginSteps = entry.mcp.login_steps.slice(0, 3);
               const cautions = entry.mcp.cautions.slice(0, 3);
+              const clientConfigs = entry.mcp.client_configs.filter((config) => (
+                config.url || mcpCommand(config) || mcpConfigJson(config)
+              ));
               return (
                 <article
                   key={entry.adapter_id}
@@ -322,26 +374,49 @@ export function BrokerConnect() {
                     </Button>
                   </div>
 
-                  {command && (
-                    <div className="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
-                      <div>
-                        <Label className="text-xs text-text-secondary mb-1.5 block">Command</Label>
-                        <code
-                          aria-label={`${entry.display_name} MCP command value`}
-                          className="block min-h-9 rounded-md border border-border-default bg-surface-elevated px-3 py-2 font-mono text-xs text-text-primary break-all"
-                        >
-                          {command}
-                        </code>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Copy ${entry.display_name} MCP command`}
-                        onClick={() => copySetupUrl(`${entry.display_name} MCP command`, command)}
-                      >
-                        <Copy className="size-4" aria-hidden="true" />
-                      </Button>
+                  {clientConfigs.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <div className="text-xs font-medium text-text-secondary">Client setup</div>
+                      {clientConfigs.map((config) => {
+                        const command = mcpCommand(config);
+                        const configJson = mcpConfigJson(config);
+                        return (
+                          <div
+                            key={`${entry.adapter_id}-${config.id}`}
+                            className="space-y-2 border-t border-border-subtle pt-2"
+                            data-testid={`broker-mcp-${entry.adapter_id}-${config.id}`}
+                          >
+                            <div className="break-words text-xs font-medium text-text-primary">
+                              {config.label}
+                            </div>
+                            {config.url && (
+                              <McpSetupValue
+                                label="URL"
+                                copyLabel={`${entry.display_name} ${config.label} URL`}
+                                value={config.url}
+                                onCopy={copySetupUrl}
+                              />
+                            )}
+                            {command && (
+                              <McpSetupValue
+                                label="Command"
+                                copyLabel={`${entry.display_name} ${config.label} command`}
+                                value={command}
+                                onCopy={copySetupUrl}
+                              />
+                            )}
+                            {configJson && (
+                              <McpSetupValue
+                                label="JSON config"
+                                copyLabel={`${entry.display_name} ${config.label} JSON config`}
+                                value={configJson}
+                                multiline
+                                onCopy={copySetupUrl}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 

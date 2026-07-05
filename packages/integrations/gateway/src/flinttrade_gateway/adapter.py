@@ -564,6 +564,14 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                 "label": "mcp-remote",
                 "command": "npx",
                 "args": ["mcp-remote", "https://mcp.dhan.co/mcp"],
+                "config": {
+                    "mcpServers": {
+                        "dhan": {
+                            "command": "npx",
+                            "args": ["mcp-remote", "https://mcp.dhan.co/mcp"],
+                        },
+                    },
+                },
             },
         ],
     },
@@ -601,6 +609,14 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                 "label": "mcp-remote",
                 "command": "npx",
                 "args": ["mcp-remote", "https://mcp.upstox.com/mcp"],
+                "config": {
+                    "mcpServers": {
+                        "upstox": {
+                            "command": "npx",
+                            "args": ["mcp-remote", "https://mcp.upstox.com/mcp"],
+                        },
+                    },
+                },
             },
         ],
     },
@@ -639,6 +655,14 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                 "label": "Cursor / VS Code mcp-remote",
                 "command": "npx",
                 "args": ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
+                "config": {
+                    "mcpServers": {
+                        "groww": {
+                            "command": "npx",
+                            "args": ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
+                        },
+                    },
+                },
             },
         ],
     },

@@ -262,6 +262,11 @@ def test_list_native_brokers_catalogue(client):
     assert brokers["indmoney"]["mcp"] is None
     assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
     assert brokers["groww"]["mcp"]["trading_supported"] is True
+    assert brokers["groww"]["mcp"]["client_configs"][1]["config"]["mcpServers"]["groww"]["args"] == [
+        "mcp-remote@0.1.18",
+        "https://mcp.groww.in/mcp",
+        "52155",
+    ]
     indmoney = next(m for m in brokers["indmoney"]["auth_methods"] if m["id"] == "access_token")
     assert "INDstocks API dashboard" in indmoney["description"]
     assert "static outbound IP" in indmoney["description"]

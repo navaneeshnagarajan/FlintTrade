@@ -111,6 +111,11 @@ class TestCapabilitiesRoute:
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
         assert "DDPI" in " ".join(brokers["groww"]["mcp"]["cautions"])
         assert "disabled until live login/read verification" in " ".join(brokers["groww"]["mcp"]["cautions"])
+        for broker_id in ("dhan", "upstox", "groww"):
+            mcp = brokers[broker_id]["mcp"]
+            command_config = next(c for c in mcp["client_configs"] if c.get("command") == "npx")
+            assert command_config["config"]["mcpServers"][broker_id]["command"] == "npx"
+            assert command_config["config"]["mcpServers"][broker_id]["args"] == command_config["args"]
 
     def test_mcp_catalogue_supports_single_broker_lookup(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp?broker=groww")
@@ -118,6 +123,11 @@ class TestCapabilitiesRoute:
         broker = response.get_json()["broker"]
         assert broker["adapter_id"] == "groww"
         assert broker["mcp"]["client_configs"][1]["args"] == [
+            "mcp-remote@0.1.18",
+            "https://mcp.groww.in/mcp",
+            "52155",
+        ]
+        assert broker["mcp"]["client_configs"][1]["config"]["mcpServers"]["groww"]["args"] == [
             "mcp-remote@0.1.18",
             "https://mcp.groww.in/mcp",
             "52155",
