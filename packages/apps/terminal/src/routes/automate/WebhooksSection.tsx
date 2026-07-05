@@ -11,7 +11,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Loader2, Trash2, Play, Copy, Check } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Trash2, Copy, Check } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -35,84 +36,32 @@ import {
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { AlertTemplateBrowser } from "@/components/tradingview/AlertTemplateBrowser";
-
-// ---------------------------------------------------------------------------
-// Dev-mode sample data — never shown in production builds
-// ---------------------------------------------------------------------------
-
-const IS_DEV = import.meta.env.DEV;
-
-interface WebhookEndpoint {
-  id: string;
-  name: string;
-  url: string;
-  strategy: string;
-  type: "tradingview" | "chartink" | "custom";
-  status: "active" | "paused";
-  lastTriggered: string | null;
-}
-
-const DEV_SAMPLE_ENDPOINTS: WebhookEndpoint[] = [
-  {
-    id: "wh-001",
-    name: "NIFTY Trend Signal",
-    url: "/webhook/tradingview/nifty-trend-v1",
-    strategy: "nifty-trend-v1",
-    type: "tradingview",
-    status: "active",
-    lastTriggered: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "wh-002",
-    name: "BankNifty Momentum",
-    url: "/webhook/tradingview/bnf-momentum",
-    strategy: "bnf-momentum",
-    type: "tradingview",
-    status: "paused",
-    lastTriggered: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "wh-003",
-    name: "ChartInk Breakout Scanner",
-    url: "/webhook/chartink/breakout-scanner",
-    strategy: "breakout-scanner",
-    type: "chartink",
-    status: "active",
-    lastTriggered: null,
-  },
-];
+import {
+  createWebhook,
+  deleteWebhook,
+  getWebhooks,
+  type WebhookConfig,
+} from "@/services/ftApi";
+import { InlineToast, useInlineToast } from "./shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatLastTriggered(val: string | null): string {
-  if (!val) return "Never";
-  try {
-    const diff = Math.round((Date.now() - new Date(val).getTime()) / 1000);
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return new Date(val).toLocaleString("en-IN", {
-      timeZone: "Asia/Kolkata",
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  } catch {
-    return val;
-  }
-}
-
-function typeBadgeClass(type: WebhookEndpoint["type"]): string {
+function typeBadgeClass(type: WebhookConfig["type"]): string {
   if (type === "tradingview") return "bg-blue-500/10 text-blue-400 border-0";
   if (type === "chartink") return "bg-purple-500/10 text-purple-400 border-0";
   return "bg-surface-base text-text-muted border-0";
 }
 
-function typeLabel(type: WebhookEndpoint["type"]): string {
+function typeLabel(type: WebhookConfig["type"]): string {
   if (type === "tradingview") return "TradingView";
   if (type === "chartink") return "ChartInk";
   return "Custom";
+}
+
+function slugFromPath(path: string): string {
+  return path.split("/").filter(Boolean).slice(2).join("/") || path;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,16 +102,36 @@ function CopyableUrl({ url }: { url: string }) {
 // ActiveWebhooksTab
 // ---------------------------------------------------------------------------
 
-function ActiveWebhooksTab() {
-  const endpoints: WebhookEndpoint[] = IS_DEV ? DEV_SAMPLE_ENDPOINTS : [];
+interface ActiveWebhooksTabProps {
+  endpoints: WebhookConfig[];
+  isLoading: boolean;
+  isError: boolean;
+  deletingId: string | null;
+  onDelete: (id: string) => void;
+}
 
-  const [testingId, setTestingId] = useState<string | null>(null);
+function ActiveWebhooksTab({
+  endpoints,
+  isLoading,
+  isError,
+  deletingId,
+  onDelete,
+}: ActiveWebhooksTabProps) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10">
+        <Loader2 size={18} className="animate-spin text-text-muted" />
+      </div>
+    );
+  }
 
-  const handleTest = (id: string) => {
-    setTestingId(id);
-    // In production this would POST to /ft-api/v1/webhooks/{id}/test
-    setTimeout(() => setTestingId(null), 1500);
-  };
+  if (isError) {
+    return (
+      <p className="py-10 text-center text-xs text-loss">
+        Failed to load webhooks. Backend may be offline.
+      </p>
+    );
+  }
 
   if (endpoints.length === 0) {
     return (
@@ -179,10 +148,9 @@ function ActiveWebhooksTab() {
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>URL</TableHead>
-            <TableHead>Strategy</TableHead>
+            <TableHead>Slug</TableHead>
             <TableHead>Type</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Last Triggered</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -193,10 +161,10 @@ function ActiveWebhooksTab() {
                 {ep.name}
               </TableCell>
               <TableCell>
-                <CopyableUrl url={ep.url} />
+                <CopyableUrl url={ep.path} />
               </TableCell>
               <TableCell className="font-mono text-xs text-text-secondary">
-                {ep.strategy}
+                {slugFromPath(ep.path)}
               </TableCell>
               <TableCell>
                 <Badge className={`text-xs ${typeBadgeClass(ep.type)}`}>
@@ -204,42 +172,31 @@ function ActiveWebhooksTab() {
                 </Badge>
               </TableCell>
               <TableCell>
-                {ep.status === "active" ? (
+                {ep.enabled ? (
                   <Badge className="text-xs bg-profit/10 text-profit border-0">
                     Active
                   </Badge>
                 ) : (
-                  <Badge className="text-xs bg-atm-bg text-warning border-0">
-                    Paused
+                  <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">
+                    Disabled
                   </Badge>
                 )}
-              </TableCell>
-              <TableCell className="text-xs text-text-muted">
-                {formatLastTriggered(ep.lastTriggered)}
               </TableCell>
               <TableCell>
                 <div className="flex items-center justify-end gap-1">
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => handleTest(ep.id)}
-                    disabled={testingId === ep.id}
-                    title="Send test payload"
-                    className="h-7 w-7 p-0 text-text-muted hover:text-text-primary"
-                  >
-                    {testingId === ep.id ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
-                      <Play size={12} />
-                    )}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
+                    onClick={() => onDelete(ep.id)}
+                    disabled={deletingId === ep.id}
                     title="Delete endpoint"
                     className="h-7 w-7 p-0 text-text-muted hover:text-loss"
                   >
-                    <Trash2 size={12} />
+                    {deletingId === ep.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={12} />
+                    )}
                   </Button>
                 </div>
               </TableCell>
@@ -271,7 +228,11 @@ const createSchema = z.object({
 
 type CreateFormValues = z.infer<typeof createSchema>;
 
-function CreateWebhookTab() {
+interface CreateWebhookTabProps {
+  onCreate: (values: CreateFormValues) => Promise<void>;
+}
+
+function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
   const {
     register,
     handleSubmit,
@@ -289,12 +250,11 @@ function CreateWebhookTab() {
 
   const previewUrl =
     watchedStrategyId.trim()
-      ? `/webhook/${watchedType}/${watchedStrategyId.trim()}`
-      : `/webhook/${watchedType}/<strategy-id>`;
+      ? `/v1/webhook/${watchedType}/${watchedStrategyId.trim()}`
+      : `/v1/webhook/${watchedType}/<strategy-id>`;
 
-  const onSubmit = async (_values: CreateFormValues) => {
-    // In production this would POST to /ft-api/v1/webhooks
-    await new Promise((r) => setTimeout(r, 800));
+  const onSubmit = async (values: CreateFormValues) => {
+    await onCreate(values);
     reset();
   };
 
@@ -399,6 +359,55 @@ function CreateWebhookTab() {
 // ---------------------------------------------------------------------------
 
 export default function WebhooksSection() {
+  const queryClient = useQueryClient();
+  const { toast, setToast, dismissToast } = useInlineToast();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const webhooksQuery = useQuery({
+    queryKey: ["webhooks"],
+    queryFn: getWebhooks,
+  });
+
+  const webhooks = webhooksQuery.data?.webhooks ?? [];
+
+  const createMutation = useMutation({
+    mutationFn: (values: CreateFormValues) => createWebhook({
+      name: values.name.trim(),
+      type: values.type,
+      path: `/v1/webhook/${values.type}/${values.strategyId.trim()}`,
+      enabled: true,
+      ...(values.secret?.trim() ? { secret: values.secret.trim() } : {}),
+    }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      setToast({ msg: "Webhook created", variant: "success" });
+    },
+    onError: (err: Error) => {
+      setToast({ msg: err.message || "Failed to create webhook", variant: "error" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteWebhook(id),
+    onMutate: (id) => {
+      setDeletingId(id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      setToast({ msg: "Webhook deleted", variant: "success" });
+    },
+    onError: (err: Error) => {
+      setToast({ msg: err.message || "Failed to delete webhook", variant: "error" });
+    },
+    onSettled: () => {
+      setDeletingId(null);
+    },
+  });
+
+  const handleCreate = async (values: CreateFormValues) => {
+    await createMutation.mutateAsync(values);
+  };
+
   return (
     <div className="space-y-4">
       <GlassCard className="p-6">
@@ -411,6 +420,12 @@ export default function WebhooksSection() {
             integrations. Each endpoint forwards payloads to the configured strategy.
           </p>
         </div>
+
+        {toast && (
+          <div className="mb-4">
+            <InlineToast message={toast.msg} variant={toast.variant} onDismiss={dismissToast} />
+          </div>
+        )}
 
         <Tabs defaultValue="active">
           <TabsList className="mb-5">
@@ -426,11 +441,17 @@ export default function WebhooksSection() {
           </TabsList>
 
           <TabsContent value="active">
-            <ActiveWebhooksTab />
+            <ActiveWebhooksTab
+              endpoints={webhooks}
+              isLoading={webhooksQuery.isLoading}
+              isError={webhooksQuery.isError}
+              deletingId={deletingId}
+              onDelete={(id) => deleteMutation.mutate(id)}
+            />
           </TabsContent>
 
           <TabsContent value="create">
-            <CreateWebhookTab />
+            <CreateWebhookTab onCreate={handleCreate} />
           </TabsContent>
 
           <TabsContent value="templates">
