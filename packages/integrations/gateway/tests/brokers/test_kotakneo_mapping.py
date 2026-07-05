@@ -54,6 +54,16 @@ def test_place_order_regular_defaults_amo_no():
     assert to_place_order_params(order, "IDEA-EQ")["amo"] == "NO"
 
 
+def test_place_order_forwards_explicit_market_protection_only():
+    base = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET",
+                 product="CNC", quantity="10")
+    assert "market_protection" not in to_place_order_params(base, "IDEA-EQ")
+    protected = base.model_copy(update={"market_protection": True})
+    disabled = base.model_copy(update={"market_protection": False})
+    assert to_place_order_params(protected, "IDEA-EQ")["market_protection"] == "1"
+    assert to_place_order_params(disabled, "IDEA-EQ")["market_protection"] == "0"
+
+
 # ---------------------------------------------------------------------------
 # Place: validity pass-through (Order.validity)
 # ---------------------------------------------------------------------------
@@ -67,8 +77,8 @@ def test_place_order_validity_defaults_to_day_when_unset():
 def test_place_order_validity_passes_through_when_set():
     order = Order(symbol="GOLDPETAL25JUNFUT", action="BUY", exchange="MCX",
                   pricetype="LIMIT", product="NRML", quantity="1", price="7000",
-                  validity="GTC")
-    assert to_place_order_params(order, "GOLDPETAL25JUNFUT")["validity"] == "GTC"
+                  validity="IOC")
+    assert to_place_order_params(order, "GOLDPETAL25JUNFUT")["validity"] == "IOC"
 
 
 def test_place_order_validity_invalid_raises():
@@ -76,6 +86,14 @@ def test_place_order_validity_invalid_raises():
                   product="CNC", quantity="10", price="9.4", validity="FOREVER")
     with pytest.raises(KotakNeoMappingError, match="validity"):
         to_place_order_params(order, "IDEA-EQ")
+
+
+def test_place_order_rejects_legacy_validity_before_sdk():
+    order = Order(symbol="GOLDPETAL25JUNFUT", action="BUY", exchange="MCX",
+                  pricetype="LIMIT", product="NRML", quantity="1", price="7000",
+                  validity="GTC")
+    with pytest.raises(KotakNeoMappingError, match="validity"):
+        to_place_order_params(order, "GOLDPETAL25JUNFUT")
 
 
 @pytest.mark.parametrize(("exchange", "expected"), [("BCD", "bcs-fo"), ("MCX", "mcx_fo")])
@@ -128,9 +146,9 @@ def test_modify_amo_string_passthrough():
 
 
 def test_modify_validity_validated():
-    assert to_modify_order_params("1", {"validity": "GTC"})["validity"] == "GTC"
+    assert to_modify_order_params("1", {"validity": "IOC"})["validity"] == "IOC"
     with pytest.raises(KotakNeoMappingError, match="validity"):
-        to_modify_order_params("1", {"validity": "FOREVER"})
+        to_modify_order_params("1", {"validity": "GTC"})
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +371,7 @@ def test_stock_feed_decode_reads_long_name_sell_quantity():
 def test_ensure_ok_passes_ok_envelopes():
     assert ensure_ok({"stat": "Ok", "nOrdNo": "1", "stCode": 200})["nOrdNo"] == "1"
     assert ensure_ok({"stat": "ok", "data": []})  # OMS lower-case variant
+    assert ensure_ok({"data": {"status": "success", "token": "view-token"}})
     assert ensure_ok([1, 2]) == [1, 2]  # non-dict passes through
 
 
@@ -365,6 +384,8 @@ def test_ensure_ok_raises_on_each_error_shape():
         ensure_ok({"error": [{"message": "Any of Mobile Number, UCC or totp is missing"}]})
     with pytest.raises(KotakNeoMappingError, match="rejected"):
         ensure_ok({"stat": "Not_Ok", "errMsg": "Invalid session"})
+    with pytest.raises(KotakNeoMappingError, match="Invalid MPIN"):
+        ensure_ok({"status": "error", "message": "Invalid MPIN.", "errorCode": "401"})
 
 
 # ---------------------------------------------------------------------------

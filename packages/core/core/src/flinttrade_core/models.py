@@ -112,13 +112,13 @@ class Order(BaseModel):
     broker's default behaviour.
     """
     validity: str | None = None
-    """Order validity pass-through (``DAY``/``IOC``/``GTC``/``GTD``/``EOS``).
+    """Order validity pass-through (for example ``DAY`` or ``IOC``).
 
-    ``None`` (default) keeps each adapter's default (``DAY``). GTC/GTD are
-    MCX-only and EOS is BSE/MCX-only on Kotak Neo — broker-side constraints are
-    enforced by the adapter mappings. Because the field lives on the Order it is
-    covered by the SafetyContext HMAC: changing it after the gate is minted
-    invalidates the gate."""
+    ``None`` (default) keeps each adapter's default (usually ``DAY``). Each
+    native mapping enforces the broker-specific allowed set before a request can
+    reach the SDK. Because the field lives on the Order it is covered by the
+    SafetyContext HMAC: changing it after the gate is minted invalidates the gate.
+    """
     price1: str | None = None
     """OCO second-leg limit price (Dhan forever ``price1``). ``None`` = no OCO.
 

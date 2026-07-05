@@ -58,9 +58,8 @@ KOTAK_TO_ORDER_TYPE = {"MKT": "MARKET", "L": "LIMIT", "SL": "SL", "SL-M": "SL-M"
 SIDE_TO_KOTAK = {"BUY": "B", "SELL": "S"}
 KOTAK_TO_SIDE = {"B": "BUY", "S": "SELL"}
 
-# Order validity codes (Place_Order.md): DAY everywhere, IOC (not for CO),
-# GTC/GTD (MCX only), EOS (BSE + MCX only).
-VALIDITY_ALLOWED = frozenset({"DAY", "IOC", "GTC", "EOS", "GTD"})
+# Order validity codes in the current public docs and pinned SDK validation.
+VALIDITY_ALLOWED = frozenset({"DAY", "IOC"})
 
 # limits() filter enums (settings.segment_limits / exchange_limits / product_limits).
 LIMITS_SEGMENTS = frozenset({"CASH", "CUR", "FO", "ALL"})
@@ -164,6 +163,13 @@ def _norm(value: Any, default: str = "") -> str:
     return str(value).upper() if value is not None else default
 
 
+def _market_protection_value(value: Any) -> str:
+    """Return NEO's string ``mp`` value for FlintTrade's optional MPP flag."""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
 def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = None) -> dict[str, Any]:
     """Translate a FlintTrade ``Order`` into ``NeoAPI.place_order`` kwargs.
 
@@ -216,6 +222,8 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
     elif variety not in ("regular", ""):
         raise KotakNeoMappingError(f"Kotak Neo does not support order variety {variety!r}")
 
+    if getattr(order, "market_protection", None) is not None:
+        params["market_protection"] = _market_protection_value(order.market_protection)
     if tag:
         params["tag"] = str(tag)
     return params
@@ -354,16 +362,23 @@ def ensure_ok(resp: Any) -> Any:
 
     The neo-api-client returns errors as data, never raises: ``{"Error": ...}``
     (SDK exception wrapper), ``{"Error Message": ...}`` (2FA not complete),
-    ``{"error": [...]}`` (validation) and ``{"stat": "Not_Ok", "errMsg": ...}``
-    (OMS reject). Writes MUST surface those instead of silently succeeding.
+    ``{"error": [...]}`` (validation), ``{"status": "error", "message": ...}``
+    (TOTP/MPIN login reject) and ``{"stat": "Not_Ok", "errMsg"/"emsg": ...}``
+    (OMS reject). Writes and login MUST surface those instead of silently
+    succeeding.
     """
     if isinstance(resp, dict):
         for key in ("Error", "Error Message", "error"):
             if resp.get(key):
                 raise KotakNeoMappingError(f"Kotak Neo error: {resp[key]!r}")
+        data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+        status = resp.get("status", data.get("status"))
+        if status is not None and str(status).lower() not in ("success", "ok", ""):
+            message = resp.get("message") or data.get("message") or resp.get("emsg") or resp.get("errMsg") or resp
+            raise KotakNeoMappingError(f"Kotak Neo rejected the request: {message!r}")
         if str(resp.get("stat", "Ok")).lower() not in ("ok", ""):
             raise KotakNeoMappingError(
-                f"Kotak Neo rejected the request: {resp.get('errMsg', resp)!r}"
+                f"Kotak Neo rejected the request: {resp.get('errMsg') or resp.get('emsg') or resp!r}"
             )
     return resp
 

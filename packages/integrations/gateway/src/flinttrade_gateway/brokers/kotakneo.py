@@ -105,8 +105,8 @@ KOTAKNEO_CAPABILITIES = Capabilities(
         | Segments.MCX
     ),
     # Native bracket (BO) and cover (CO) orders; no GTT and no iceberg
-    # (only disclosed-quantity). Market orders are auto-converted to a protected
-    # limit per SEBI retail-algo rules — handled at the adapter layer when wired.
+    # (only disclosed-quantity). NEO's optional market-protection value is
+    # forwarded when the caller explicitly sets ``Order.market_protection``.
     order_types=(
         OrderTypes.MARKET
         | OrderTypes.LIMIT
