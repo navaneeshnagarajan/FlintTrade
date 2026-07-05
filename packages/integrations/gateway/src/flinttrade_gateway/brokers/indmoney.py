@@ -158,10 +158,11 @@ class IndMoneyAdapter(BrokerAdapter):
             transport is called as ``transport(method, url, headers=...,
             params=..., json_body=...)`` and returns ``(status_code, payload)``.
             When omitted, ``login`` builds the default httpx transport.
-        security_resolver: ``(symbol, exchange) -> security_id`` — IndMoney
-            trades by instrument token from the instruments master, so the
-            operator supplies a scrip-master resolver. Numeric symbols pass
-            through unchanged (already-resolved ids).
+        security_resolver: Optional ``(symbol, exchange) -> security_id``
+            override. IndMoney trades by instrument token from the instruments
+            master; when no resolver is supplied, the adapter downloads and
+            caches the documented instruments CSV per session/source. Numeric
+            symbols pass through unchanged (already-resolved ids).
         feed_factory: ``session -> AsyncIterator[str | bytes]`` yielding raw
             price-feed JSON frames. The live socket is NOT bundled (no WS client
             dependency); without an injected factory ``stream`` raises.
@@ -267,6 +268,108 @@ class IndMoneyAdapter(BrokerAdapter):
         )
 
     @staticmethod
+    def _instrument_source_for_exchange(exchange: str) -> str:
+        """Map a canonical exchange to the INDstocks instruments ``source``."""
+        exch = str(exchange).strip().upper()
+        if exch in {"NFO", "BFO"}:
+            return "fno"
+        if exch in {"NSE_INDEX", "BSE_INDEX"}:
+            return "index"
+        return "equity"
+
+    @staticmethod
+    def _row_value(row: dict[str, Any], names: set[str]) -> str:
+        """Return the first non-empty row value whose key matches ``names``."""
+        for key, value in row.items():
+            if str(key).strip().upper() in names and value not in (None, ""):
+                return str(value).strip()
+        return ""
+
+    @staticmethod
+    def _symbol_keys(value: Any) -> set[str]:
+        """Normalise symbol aliases from instrument rows and user input."""
+        raw = str(value or "").strip().upper()
+        if not raw:
+            return set()
+        keys = {raw}
+        compact = raw.replace(" ", "")
+        if compact:
+            keys.add(compact)
+        for key in list(keys):
+            if key.endswith("-EQ"):
+                keys.add(key[:-3])
+            if key.endswith(".EQ"):
+                keys.add(key[:-3])
+        return keys
+
+    @staticmethod
+    def _row_matches_exchange(row: dict[str, Any], exchange: str) -> bool:
+        """True when an instrument row belongs to the requested canonical exchange."""
+        canonical = str(exchange).strip().upper()
+        expected_exchange = {
+            "NSE": "NSE",
+            "NFO": "NSE",
+            "NSE_INDEX": "NSE",
+            "BSE": "BSE",
+            "BFO": "BSE",
+            "BSE_INDEX": "BSE",
+        }.get(canonical, canonical)
+        row_exchange = IndMoneyAdapter._row_value(row, {"EXCH", "EXCHANGE"})
+        if row_exchange and row_exchange.upper() != expected_exchange:
+            return False
+
+        segment = IndMoneyAdapter._row_value(row, {"SEGMENT", "EXCHANGE_SEGMENT"}).upper()
+        if not segment:
+            return True
+        expected_segments = {
+            "NSE": {"E", "EQ", "EQUITY", "NSE_EQ"},
+            "BSE": {"E", "EQ", "EQUITY", "BSE_EQ"},
+            "NFO": {"FNO", "D", "DERIVATIVE", "NSE_FNO"},
+            "BFO": {"FNO", "D", "DERIVATIVE", "BSE_FNO"},
+            "NSE_INDEX": {"I", "IDX", "INDEX", "NIDX", "NSE_INDEX"},
+            "BSE_INDEX": {"I", "IDX", "INDEX", "BIDX", "BSE_INDEX"},
+        }.get(canonical)
+        return expected_segments is None or segment in expected_segments
+
+    async def _instrument_index(self, session: Session, source: str) -> dict[str, list[tuple[dict[str, Any], str]]]:
+        """Return a cached symbol -> ``(row, security_id)`` index for ``source``."""
+        cache = session.extra.setdefault("indmoney_instrument_index", {})
+        if source in cache:
+            return cache[source]
+
+        rows = await self.instruments(session, source)
+        index: dict[str, list[tuple[dict[str, Any], str]]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            security_id = self._row_value(row, {"SECURITY_ID", "SECURITYID", "INSTRUMENT_TOKEN", "TOKEN"})
+            if not security_id:
+                continue
+            for field in ("TRADING_SYMBOL", "SYMBOL_NAME", "CUSTOM_SYMBOL"):
+                for key in self._symbol_keys(row.get(field)):
+                    index.setdefault(key, []).append((row, security_id))
+        cache[source] = index
+        return index
+
+    async def _resolve_security_for_session(self, session: Session, symbol: str, exchange: str) -> str:
+        """Resolve an INDstocks security id using override, numeric token, or cached instruments CSV."""
+        try:
+            return self._resolve_security(symbol, exchange)
+        except BrokerError as exc:
+            if self._security_resolver is not None:
+                raise
+            source = self._instrument_source_for_exchange(exchange)
+            index = await self._instrument_index(session, source)
+            candidates = self._symbol_keys(symbol)
+            for key in candidates:
+                for row, security_id in index.get(key, []):
+                    if self._row_matches_exchange(row, exchange):
+                        return str(security_id)
+            raise BrokerError(
+                f"Cannot resolve IndMoney security_id for {symbol}/{exchange} from instruments source {source!r}"
+            ) from exc
+
+    @staticmethod
     def _split_symbol(raw: str) -> tuple[str, str]:
         """Split an ``"EXCHANGE:SYMBOL"`` quote key (defaults exchange to NSE)."""
         if ":" in raw:
@@ -323,7 +426,7 @@ class IndMoneyAdapter(BrokerAdapter):
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        security_id = self._resolve_security(order.symbol, str(order.exchange))
+        security_id = await self._resolve_security_for_session(session, order.symbol, str(order.exchange))
         algo_id = session.algo_id or None
         # Dispatch on order variety. Every variety travels this SAME gated method
         # (the router token is already required above and the variety + leg
@@ -473,7 +576,7 @@ class IndMoneyAdapter(BrokerAdapter):
 
         A read-only estimate — it places nothing, so it needs no gate.
         """
-        security_id = self._resolve_security(order.symbol, str(order.exchange))
+        security_id = await self._resolve_security_for_session(session, order.symbol, str(order.exchange))
         body = M.to_margin_params(order, security_id)
         data = await self._request(session, "GET", "/margin", json_body=body)
         return M.from_indmoney_margin({"data": data})
@@ -509,7 +612,7 @@ class IndMoneyAdapter(BrokerAdapter):
         resolved: list[tuple[str, str, str]] = []  # (symbol, exchange, scrip)
         for raw in symbols:
             exchange, name = self._split_symbol(raw)
-            scrip = M.to_scrip_code(exchange, self._resolve_security(name, exchange))
+            scrip = M.to_scrip_code(exchange, await self._resolve_security_for_session(session, name, exchange))
             resolved.append((name, exchange, scrip))
         data = await self._request(
             session, "GET", "/market/quotes/full",
@@ -527,7 +630,7 @@ class IndMoneyAdapter(BrokerAdapter):
         resolved: list[tuple[str, str]] = []  # (key, scrip)
         for raw in symbols:
             exchange, name = self._split_symbol(raw)
-            scrip = M.to_scrip_code(exchange, self._resolve_security(name, exchange))
+            scrip = M.to_scrip_code(exchange, await self._resolve_security_for_session(session, name, exchange))
             resolved.append((f"{exchange}:{name}", scrip))
         data = await self._request(
             session, "GET", "/market/quotes/ltp",
@@ -544,7 +647,7 @@ class IndMoneyAdapter(BrokerAdapter):
         resolved: list[tuple[str, str]] = []
         for raw in symbols:
             exchange, name = self._split_symbol(raw)
-            scrip = M.to_scrip_code(exchange, self._resolve_security(name, exchange))
+            scrip = M.to_scrip_code(exchange, await self._resolve_security_for_session(session, name, exchange))
             resolved.append((f"{exchange}:{name}", scrip))
         data = await self._request(
             session, "GET", "/market/quotes/mkt",
@@ -569,7 +672,7 @@ class IndMoneyAdapter(BrokerAdapter):
         label, max_days = M.interval_to_indmoney(interval)
         start_ms, end_ms = M.to_epoch_ms(start), M.to_epoch_ms(end)
         M.validate_history_range(start_ms, end_ms, max_days)
-        scrip = M.to_scrip_code(exchange, self._resolve_security(symbol, exchange))
+        scrip = M.to_scrip_code(exchange, await self._resolve_security_for_session(session, symbol, exchange))
         data = await self._request(
             session, "GET", f"/market/historical/{label}",
             params={"scrip-codes": scrip, "start_time": start_ms, "end_time": end_ms},
@@ -604,7 +707,7 @@ class IndMoneyAdapter(BrokerAdapter):
         # whatever owns the live socket — the injected feed factory.
         for raw in symbols:
             exchange, name = self._split_symbol(raw)
-            security_id = self._resolve_security(name, exchange)
+            security_id = await self._resolve_security_for_session(session, name, exchange)
             M.ws_instrument(exchange, security_id)  # validates the segment early
             self._feed_map[str(security_id)] = (name, exchange)
             self._feed_modes[str(security_id)] = mode
@@ -613,7 +716,7 @@ class IndMoneyAdapter(BrokerAdapter):
         for raw in symbols:
             exchange, name = self._split_symbol(raw)
             try:
-                security_id = self._resolve_security(name, exchange)
+                security_id = await self._resolve_security_for_session(session, name, exchange)
             except BrokerError:
                 continue
             self._feed_map.pop(str(security_id), None)

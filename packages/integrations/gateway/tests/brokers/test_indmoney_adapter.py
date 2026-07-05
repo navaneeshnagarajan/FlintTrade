@@ -133,7 +133,7 @@ def _order(**overrides) -> Order:
 @pytest.mark.asyncio
 async def test_place_order_is_gated() -> None:
     transport = FakeTransport()
-    adapter = _adapter(transport)
+    adapter = _adapter(transport, security_resolver=None)
     session = await _session(adapter)
     with pytest.raises(SafetyBypassError):
         await adapter.place_order(session, _order())  # no router token
@@ -156,6 +156,22 @@ async def test_place_order_with_router_token() -> None:
     assert call["json"]["limit_price"] == 2450.0
     assert call["json"]["algo_id"] == "99999"  # mandatory algo id auto-filled
     assert call["json"]["is_amo"] is False
+
+
+@pytest.mark.asyncio
+async def test_place_order_with_router_token_auto_resolves_from_instruments() -> None:
+    csv_text = "EXCH,SEGMENT,SECURITY_ID,TRADING_SYMBOL,SYMBOL_NAME\nNSE,E,2885,RELIANCE-EQ,RELIANCE\n"
+    transport = FakeTransport({
+        ("GET", "/market/instruments"): (200, csv_text),
+        ("POST", "/order"): {"status": "success", "data": {"order_id": "EQ-11"}},
+    })
+    adapter = _adapter(transport, security_resolver=None)
+    session = await _session(adapter)
+    oid = await adapter.place_order(session, _order(), _router_token=_ROUTER_TOKEN)
+    assert oid == "EQ-11"
+    assert transport.paths() == ["/market/instruments", "/order"]
+    assert transport.calls[0]["params"] == {"source": "equity"}
+    assert transport.calls[1]["json"]["security_id"] == "2885"
 
 
 @pytest.mark.asyncio
@@ -568,6 +584,55 @@ async def test_instruments_parses_csv() -> None:
     rows = await adapter.instruments(session, "equity")
     assert rows == [{"EXCH": "NSE", "SEGMENT": "E", "SECURITY_ID": "2885", "TRADING_SYMBOL": "RELIANCE-EQ"}]
     assert transport.calls[0]["params"] == {"source": "equity"}
+
+
+@pytest.mark.asyncio
+async def test_quotes_auto_resolve_from_instruments_master_and_cache() -> None:
+    csv_text = "EXCH,SEGMENT,SECURITY_ID,TRADING_SYMBOL,SYMBOL_NAME\nNSE,E,2885,RELIANCE-EQ,RELIANCE\n"
+    transport = FakeTransport({
+        ("GET", "/market/instruments"): (200, csv_text),
+        ("GET", "/market/quotes/full"): FULL_QUOTE,
+        ("GET", "/market/quotes/mkt"): {"status": "success", "data": {"NSE_2885": {
+            "market_depth": {
+                "aggregate": {"total_buy": "100", "total_sell": "50"},
+                "depth": [{"buy": {"quantity": "10", "price": "788.60"},
+                           "sell": {"quantity": "7", "price": "789.15"}}],
+            },
+        }}},
+    })
+    adapter = _adapter(transport, security_resolver=None)
+    session = await _session(adapter)
+    quotes = await adapter.quotes(session, ["NSE:RELIANCE"])
+    depth = await adapter.market_depth(session, ["NSE:RELIANCE"])
+    assert quotes[0].symbol == "RELIANCE" and quotes[0].ltp == 788.8
+    assert depth["NSE:RELIANCE"]["bids"][0] == {"price": 788.60, "quantity": 10}
+    assert transport.paths() == ["/market/instruments", "/market/quotes/full", "/market/quotes/mkt"]
+    assert transport.calls[1]["params"]["scrip-codes"] == "NSE_2885"
+    assert transport.calls[2]["params"]["scrip-codes"] == "NSE_2885"
+
+
+@pytest.mark.asyncio
+async def test_margin_and_historical_auto_resolve_from_cached_instruments() -> None:
+    csv_text = "EXCH,SEGMENT,SECURITY_ID,TRADING_SYMBOL,SYMBOL_NAME\nNSE,E,2885,RELIANCE-EQ,RELIANCE\n"
+    transport = FakeTransport({
+        ("GET", "/market/instruments"): (200, csv_text),
+        ("GET", "/margin"): {"status": "success", "data": {
+            "total_margin": 500, "charges": {"brokerage": 5, "total_charges": 5.5},
+        }},
+        ("GET", "/market/historical/1day"): {"status": "success", "data": {"candles": []}},
+    })
+    adapter = _adapter(transport, security_resolver=None)
+    session = await _session(adapter)
+    margin = await adapter.margin_calculator(session, _order(product="MIS", pricetype="MARKET", price="0"))
+    candles = await adapter.historical(session, {
+        "symbol": "RELIANCE", "exchange": "NSE", "interval": "1d",
+        "from_date": "2025-06-01", "to_date": "2025-06-02",
+    })
+    assert margin["required_margin"] == "500"
+    assert candles.symbol == "RELIANCE" and candles.bars == []
+    assert transport.paths() == ["/market/instruments", "/margin", "/market/historical/1day"]
+    assert transport.calls[1]["json"]["securityID"] == "2885"
+    assert transport.calls[2]["params"]["scrip-codes"] == "NSE_2885"
 
 
 # ---------------------------------------------------------------------------
