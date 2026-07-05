@@ -44,6 +44,7 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
+GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "margin", "history")
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
 PROBE_QUOTE_SYMBOL = f"{PROBE_EXCHANGE}:{PROBE_SYMBOL}"
@@ -69,7 +70,7 @@ KOTAK_READ_CHOICES = (
 )
 READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
     "dhan": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("expiry", "optionchain"),
-    "groww": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
+    "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES + ("optionchain",),
     "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
     "kotakneo": KOTAK_READ_CHOICES,
     "upstox": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + (
@@ -84,7 +85,7 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
 READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
     "dhan": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
-    "groww": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
+    "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
     "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
     "upstox": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("search", "timings", "holidays"),
@@ -367,6 +368,12 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
         return adapter.trade_book
     if name == "quotes":
         return lambda session: adapter.quotes(session, [PROBE_QUOTE_SYMBOL])
+    if name == "ltp":
+        return (
+            (lambda session: adapter.ltp(session, [PROBE_QUOTE_SYMBOL]))
+            if callable(getattr(adapter, "ltp", None))
+            else None
+        )
     if name in {"depth", "market_depth"}:
         return (
             (lambda session: adapter.market_depth(session, [PROBE_QUOTE_SYMBOL]))
@@ -516,7 +523,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=["default"],
         help=(
             "Read-only calls: default, all, or broker-supported names. Common names include "
-            "profile funds positions holdings orders trades quotes depth margin history. "
+            "profile funds positions holdings orders trades quotes ltp depth margin history. "
             "Broker extras include expiry optionchain optiongreeks search timings holidays "
             "limits scrip_master search_scrip quote_details market_depth."
         ),
