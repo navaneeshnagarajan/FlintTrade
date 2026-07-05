@@ -116,6 +116,25 @@ from flinttrade_gateway.contracts import ContractManager  # noqa: E402
 
 logger = logging.getLogger("flinttrade")
 
+DEFAULT_BACKEND_PORT = 5100
+
+
+def _resolve_backend_port() -> int:
+    """Resolve the standalone backend loopback port from env, then default.
+
+    ``make start`` and ``make dev`` expose ``FLINTTRADE_BACKEND_PORT`` to let a
+    contributor run FlintTrade beside another local backend. The serve path must
+    honour the same contract the Makefile prints.
+    """
+    raw = os.environ.get("FLINTTRADE_BACKEND_PORT", "").strip()
+    if not raw:
+        return DEFAULT_BACKEND_PORT
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Ignoring non-integer FLINTTRADE_BACKEND_PORT=%r", raw)
+        return DEFAULT_BACKEND_PORT
+
 
 def _rag_auto_index_enabled() -> bool:
     """Return whether startup should auto-index docs into the RAG store."""
@@ -2640,7 +2659,7 @@ class FlintTradeApp:
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
-        # Start FlintTrade API server (Flask, port 5100)
+        # Start FlintTrade API server (Flask, configurable loopback port).
         flask_app = create_flask_app(
             safety=self.safety,
             scheduler=self.scheduler,
@@ -2652,7 +2671,7 @@ class FlintTradeApp:
             contract_manager=self.contract_manager,
             rag=self.rag,
         )
-        _run_flask_server(flask_app, port=5100)
+        _run_flask_server(flask_app, port=_resolve_backend_port())
 
         # Load market holidays (graceful — warns if OpenAlgo unreachable)
         try:
