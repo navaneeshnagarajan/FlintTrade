@@ -29,13 +29,13 @@ Supported payload formats:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 from dataclasses import dataclass
 
 from flinttrade_core.models import Order
+
+from .webhook_hmac import verify_hmac_sha256_signature
 
 logger = logging.getLogger("flinttrade.integration.tradingview")
 
@@ -213,25 +213,21 @@ def verify_webhook_signature(
     body: bytes,
     signature: str,
     secret: str,
+    *,
+    skip_verification: bool = False,
 ) -> bool:
     """Verify TradingView webhook signature (HMAC-SHA256).
 
-    When *secret* is configured, a missing or empty *signature* is rejected
-    (fail-closed). Only when no secret was provisioned (explicit opt-out)
-    does this function return ``True`` for unsigned requests.
+    Empty secrets fail closed unless ``skip_verification=True`` is passed
+    explicitly. This mirrors :class:`WebhookReceiver` so all webhook entry
+    points share one HMAC policy.
     """
-    if not secret:
-        return True  # Signature verification explicitly disabled
-    if not signature:
-        return False  # Secret configured but no signature header — reject
-
-    expected = hmac.new(
-        secret.encode("utf-8"),
+    return verify_hmac_sha256_signature(
         body,
-        hashlib.sha256,
-    ).hexdigest()
-
-    return hmac.compare_digest(expected, signature)
+        signature,
+        secret,
+        skip_verification=skip_verification,
+    )
 
 
 class TradingViewWebhook:
@@ -249,9 +245,11 @@ class TradingViewWebhook:
         self,
         default_strategy: str = "Flint",
         secret: str = "",
+        skip_verification: bool = False,
     ) -> None:
         self.default_strategy = default_strategy
         self.secret = secret
+        self.skip_verification = skip_verification
 
     def handle(
         self,
@@ -261,14 +259,16 @@ class TradingViewWebhook:
         """Parse and validate a TradingView webhook request."""
         raw_bytes = body.encode("utf-8") if isinstance(body, str) else body
 
-        # Fail-closed: when a secret is configured, every request must carry
-        # a valid signature. No secret = signing disabled.
-        if self.secret:
-            if not signature or not verify_webhook_signature(raw_bytes, signature, self.secret):
-                return TradingViewAlert(
-                    raw_payload=raw_bytes.decode("utf-8", errors="replace"),
-                    error="Invalid webhook signature",
-                )
+        if not verify_webhook_signature(
+            raw_bytes,
+            signature,
+            self.secret,
+            skip_verification=self.skip_verification,
+        ):
+            return TradingViewAlert(
+                raw_payload=raw_bytes.decode("utf-8", errors="replace"),
+                error="Invalid webhook signature",
+            )
 
         alert = parse_tradingview_payload(raw_bytes, self.default_strategy)
         if alert.is_valid:

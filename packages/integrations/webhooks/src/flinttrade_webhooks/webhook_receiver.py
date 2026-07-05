@@ -34,8 +34,6 @@ Example::
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 import time
 from collections import deque
@@ -43,6 +41,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+from .webhook_hmac import verify_hmac_sha256_signature
 
 logger = logging.getLogger("flinttrade.integration.webhook_receiver")
 
@@ -257,16 +257,12 @@ class WebhookReceiver:
         if not signature:
             return False
 
-        # Strip "sha256=" prefix if present
-        sig_hex = signature.removeprefix("sha256=")
-
-        expected = hmac.new(
-            signing_secret.encode("utf-8"),
+        return verify_hmac_sha256_signature(
             payload,
-            hashlib.sha256,
-        ).hexdigest()
-
-        return hmac.compare_digest(expected, sig_hex)
+            signature,
+            signing_secret,
+            skip_verification=skip_verification,
+        )
 
     # ------------------------------------------------------------------
     # Parsers

@@ -168,9 +168,13 @@ class TestTradingViewAuth:
         body = b'{"action":"BUY","symbol":"NIFTY"}'
         assert not verify_webhook_signature(body, "bad_signature", "my_secret_key")
 
-    def test_verify_no_secret_skips(self):
+    def test_verify_no_secret_rejects_by_default(self):
         from flinttrade_webhooks.tradingview import verify_webhook_signature
-        assert verify_webhook_signature(b"data", "any", "")
+        assert not verify_webhook_signature(b"data", "any", "")
+
+    def test_verify_no_secret_skips_when_explicit(self):
+        from flinttrade_webhooks.tradingview import verify_webhook_signature
+        assert verify_webhook_signature(b"data", "any", "", skip_verification=True)
 
     def test_handler_rejects_bad_sig(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
@@ -191,6 +195,13 @@ class TestTradingViewAuth:
     def test_handler_no_secret_configured(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
         tv = TradingViewWebhook()
+        alert = tv.handle('{"action":"BUY","symbol":"NIFTY"}')
+        assert not alert.is_valid
+        assert "signature" in alert.error.lower()
+
+    def test_handler_no_secret_explicit_skip(self):
+        from flinttrade_webhooks.tradingview import TradingViewWebhook
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle('{"action":"BUY","symbol":"NIFTY"}')
         assert alert.is_valid
 

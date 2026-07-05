@@ -269,9 +269,13 @@ class TestVerifyWebhookSignature:
         sig = hmac.new(b"correct", body, hashlib.sha256).hexdigest()
         assert not verify_webhook_signature(body, sig, "wrong")
 
-    def test_empty_secret_skips_validation(self):
+    def test_empty_secret_rejects_by_default(self):
         from flinttrade_webhooks.tradingview import verify_webhook_signature
-        assert verify_webhook_signature(b"anything", "any_sig", "")
+        assert not verify_webhook_signature(b"anything", "any_sig", "")
+
+    def test_empty_secret_skips_only_when_explicit(self):
+        from flinttrade_webhooks.tradingview import verify_webhook_signature
+        assert verify_webhook_signature(b"anything", "any_sig", "", skip_verification=True)
 
     def test_empty_signature_with_secret_rejected(self):
         """Fail-closed: when a secret is configured, a missing signature rejects."""
@@ -287,33 +291,33 @@ class TestVerifyWebhookSignature:
 class TestTradingViewWebhookClass:
     def test_default_strategy_applied(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook(default_strategy="PinescriptBot")
+        tv = TradingViewWebhook(default_strategy="PinescriptBot", skip_verification=True)
         alert = tv.handle("BUY NIFTY")
         assert alert.strategy == "PinescriptBot"
 
     def test_to_order_returns_order(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle(json.dumps({"action": "BUY", "symbol": "RELIANCE"}))
         order = tv.to_order(alert)
         assert order is not None
 
     def test_to_order_invalid_alert_returns_none(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle("")
         order = tv.to_order(alert)
         assert order is None
 
     def test_handle_string_body(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle('{"action":"SELL","symbol":"TCS"}')
         assert alert.is_valid
 
     def test_handle_bytes_body(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle(b"BUY INFY NSE 10")
         assert alert.is_valid
 
@@ -333,22 +337,29 @@ class TestTradingViewWebhookClass:
         assert not alert.is_valid
         assert "signature" in alert.error.lower()
 
-    def test_no_signature_and_no_secret_passes(self):
+    def test_no_signature_and_no_secret_rejects_by_default(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
         tv = TradingViewWebhook(secret="")
         alert = tv.handle('{"action":"BUY","symbol":"X"}', signature="anything")
+        assert not alert.is_valid
+        assert "signature" in alert.error.lower()
+
+    def test_no_signature_and_no_secret_passes_when_explicitly_skipped(self):
+        from flinttrade_webhooks.tradingview import TradingViewWebhook
+        tv = TradingViewWebhook(secret="", skip_verification=True)
+        alert = tv.handle('{"action":"BUY","symbol":"X"}')
         assert alert.is_valid
 
     def test_handle_empty_payload(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle("")
         assert not alert.is_valid
         assert "Empty" in alert.error
 
     def test_nfo_exchange_preserved(self):
         from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
+        tv = TradingViewWebhook(skip_verification=True)
         alert = tv.handle(json.dumps({
             "action": "BUY", "symbol": "NIFTY", "exchange": "NFO", "quantity": "75",
         }))
