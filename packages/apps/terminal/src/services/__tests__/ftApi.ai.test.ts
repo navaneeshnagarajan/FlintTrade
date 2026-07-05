@@ -144,4 +144,21 @@ describe("startAgent", () => {
     expect(requestBody(fetchMock)).not.toHaveProperty("broker");
     expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
   });
+
+  it("fails closed rather than starting an autonomous agent on a defaulted target", async () => {
+    // Round-5 (HIGH): AgentPanel passes no explicit target and has no selector,
+    // so an active native account that isn't confirmed connected must fail closed
+    // — never bind an autonomous session to brokers.execution.default. The throw
+    // is synchronous (argument position); TanStack's mutationFn routes it to
+    // onError, exactly like startSmartRoute.
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "disconnected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    expect(() => startAgent(BASE_PARAMS)).toThrow(/isn't connected yet/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

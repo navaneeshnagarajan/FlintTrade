@@ -1,5 +1,5 @@
 import { get, post } from "./ftApi.helpers";
-import { pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
+import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -376,11 +376,17 @@ export interface AgentStartParams {
 
 function withAgentBrokerTarget(params: AgentStartParams): AgentStartParams {
   if (params.broker || params.account_id) return params;
-  const nativeTarget = pickNativeBrokerOrderTarget(
-    useModeStore.getState().mode,
-    useConnectionStore.getState().apiKey,
-  );
-  return nativeTarget ? { ...params, ...nativeTarget } : params;
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  const nativeTarget = pickNativeBrokerOrderTarget(mode, apiKey);
+  if (nativeTarget) return { ...params, ...nativeTarget };
+  // Fail closed like postOrder / startSmartRoute: an autonomous agent must never
+  // START against a silently-defaulted target. AgentPanel passes no explicit
+  // broker/account_id and has no target selector, so in the post-reload
+  // unconfirmed window a bare start would bind the whole session to the backend's
+  // brokers.execution.default rather than the operator's selected native account.
+  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  return params;
 }
 
 /** Live agent/session snapshot — honest `{running: false}` shape when idle. */
