@@ -47,6 +47,9 @@ export interface BrokerAccount {
   error_message: string | null;
   is_primary: boolean;
   source?: "gateway" | "native";
+  expires_at?: number | null;
+  needs_relogin?: boolean;
+  login_retryable?: boolean;
 }
 
 export interface OAuthStartResponse {

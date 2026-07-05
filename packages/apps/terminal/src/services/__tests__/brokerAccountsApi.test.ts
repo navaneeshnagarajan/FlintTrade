@@ -83,6 +83,9 @@ describe("brokerAccountsApi", () => {
         error_message: null,
         is_primary: false,
         source: "native",
+        expires_at: null,
+        needs_relogin: false,
+        login_retryable: false,
       },
       {
         account_id: "DH1",
@@ -93,6 +96,9 @@ describe("brokerAccountsApi", () => {
         error_message: "Needs a fresh token.",
         is_primary: false,
         source: "native",
+        expires_at: null,
+        needs_relogin: true,
+        login_retryable: false,
       },
     ]);
   });

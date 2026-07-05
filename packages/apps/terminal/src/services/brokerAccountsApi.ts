@@ -27,6 +27,9 @@ export function nativeToBrokerAccount(account: NativeAccount): BrokerAccount {
     error_message: account.login_error ?? null,
     is_primary: !!account.is_primary,
     source: "native",
+    expires_at: account.expires_at ?? null,
+    needs_relogin: !!account.needs_relogin,
+    login_retryable: !!account.login_retryable,
   };
 }
 

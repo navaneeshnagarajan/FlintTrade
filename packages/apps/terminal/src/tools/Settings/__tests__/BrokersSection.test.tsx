@@ -6,17 +6,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { BrokerAccount } from "@/types/broker";
 
 vi.mock("@/services/ftApi.native", () => ({
   listNativeBrokers: vi.fn(),
   listBrokerMcpCatalogue: vi.fn(),
-  listNativeAccounts: vi.fn(),
   connectNativeAccount: vi.fn(),
   oauthStartNativeAccount: vi.fn(),
 }));
 
 vi.mock("@/services/brokerAccountsApi", () => ({
-  listGatewayBrokerAccounts: vi.fn(),
+  listBrokerAccounts: vi.fn(),
   removeBrokerAccount: vi.fn(),
   reconnectBrokerAccount: vi.fn(),
   setPrimaryBrokerAccount: vi.fn(),
@@ -25,12 +25,11 @@ vi.mock("@/services/brokerAccountsApi", () => ({
 import {
   listNativeBrokers,
   listBrokerMcpCatalogue,
-  listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
 } from "@/services/ftApi.native";
 import {
-  listGatewayBrokerAccounts,
+  listBrokerAccounts,
   removeBrokerAccount,
   reconnectBrokerAccount,
   setPrimaryBrokerAccount,
@@ -404,13 +403,40 @@ function renderSection() {
   );
 }
 
+function makeNativeAccount(overrides: Partial<BrokerAccount> = {}): BrokerAccount {
+  return {
+    account_id: "D1",
+    broker: "dhan",
+    label: "Dhan",
+    status: "connected",
+    connected_at: null,
+    error_message: null,
+    is_primary: false,
+    source: "native",
+    ...overrides,
+  };
+}
+
+function makeGatewayAccount(overrides: Partial<BrokerAccount> = {}): BrokerAccount {
+  return {
+    account_id: "GW1",
+    broker: "zerodha",
+    label: "Zerodha Main",
+    status: "connected",
+    connected_at: null,
+    error_message: null,
+    is_primary: false,
+    source: "gateway",
+    ...overrides,
+  };
+}
+
 describe("BrokersSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
-    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (listGatewayBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     // The broker store is a module singleton; reset it so a seeded gateway
     // account from one test never leaks into the next.
     useBrokerStore.setState({ accounts: [], activeAccountId: null });
@@ -430,18 +456,7 @@ describe("BrokersSection", () => {
   });
 
   it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {
-    (listGatewayBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        account_id: "GW1",
-        broker: "zerodha",
-        label: "Zerodha Main",
-        status: "connected",
-        connected_at: null,
-        error_message: null,
-        is_primary: false,
-        source: "gateway",
-      },
-    ]);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([makeGatewayAccount()]);
     (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
     renderSection();
@@ -462,42 +477,16 @@ describe("BrokersSection", () => {
     // BOTH the native adapter and the OpenAlgo bridge. Removing the gateway row
     // must use a source-qualified key so it cannot cross-evict the native row
     // (and silently null the active native write target).
-    (listGatewayBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        account_id: "SHARED",
-        broker: "upstox",
-        label: "Upstox Bridge",
-        status: "connected",
-        connected_at: null,
-        error_message: null,
-        is_primary: false,
-        source: "gateway",
-      },
-    ]);
+    const sharedAccounts = [
+      makeNativeAccount({ account_id: "SHARED", broker: "upstox", label: "Upstox Native" }),
+      makeGatewayAccount({ account_id: "SHARED", broker: "upstox", label: "Upstox Bridge" }),
+    ];
+    (listBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(sharedAccounts)
+      .mockResolvedValue([sharedAccounts[0]]);
     (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     useBrokerStore.setState({
-      accounts: [
-        {
-          account_id: "SHARED",
-          broker: "upstox",
-          label: "Upstox Native",
-          status: "connected",
-          connected_at: null,
-          error_message: null,
-          is_primary: false,
-          source: "native",
-        },
-        {
-          account_id: "SHARED",
-          broker: "upstox",
-          label: "Upstox Bridge",
-          status: "connected",
-          connected_at: null,
-          error_message: null,
-          is_primary: false,
-          source: "gateway",
-        },
-      ],
+      accounts: sharedAccounts,
       activeAccountId: "native:upstox:SHARED",
     });
 
@@ -524,23 +513,13 @@ describe("BrokersSection", () => {
     // A removed native account must leave the write-target store immediately so
     // the next account poll's last-good preservation cannot resurrect it as a
     // live write target while its source route refreshes.
-    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { adapter_id: "dhan", account_id: "D1", label: "Dhan", has_session: true, is_primary: false },
-    ]);
+    const nativeAccount = makeNativeAccount({ account_id: "D1", broker: "dhan", label: "Dhan" });
+    (listBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([nativeAccount])
+      .mockResolvedValue([]);
     (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     useBrokerStore.setState({
-      accounts: [
-        {
-          account_id: "D1",
-          broker: "dhan",
-          label: "Dhan",
-          status: "connected",
-          connected_at: null,
-          error_message: null,
-          is_primary: false,
-          source: "native",
-        },
-      ],
+      accounts: [nativeAccount],
       activeAccountId: "native:dhan:D1",
     });
 
@@ -610,15 +589,15 @@ describe("BrokersSection", () => {
   });
 
   it("shows retry-later broker login failures without asking for fresh login", async () => {
-    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        adapter_id: "upstox",
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeNativeAccount({
         account_id: "UPX1",
+        broker: "upstox",
         label: "Upstox",
-        has_session: false,
+        status: "disconnected",
         login_retryable: true,
-        login_error: "Broker login is temporarily unavailable; retry later.",
-      },
+        error_message: "Broker login is temporarily unavailable; retry later.",
+      }),
     ]);
 
     renderSection();
@@ -751,20 +730,21 @@ describe("BrokersSection", () => {
 });
 
 describe("BrokersSection — re-authentication (G5/G7)", () => {
-  const STALE_ACCOUNT = {
-    adapter_id: "dhan",
+  const STALE_ACCOUNT = makeNativeAccount({
     account_id: "1234567890",
+    broker: "dhan",
     label: "Dhan",
-    has_session: false,
+    status: "token_expired",
     needs_relogin: true,
-    login_error: "login-failed: Dhan login requires an access_token",
-  };
+    error_message: "login-failed: Dhan login requires an access_token",
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
-    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([STALE_ACCOUNT]);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([STALE_ACCOUNT]);
+    useBrokerStore.setState({ accounts: [], activeAccountId: null });
   });
 
   it("shows the needs-fresh-login state with the actionable reason", async () => {
@@ -806,19 +786,20 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
 });
 
 describe("BrokersSection — primary account selection", () => {
-  const CONNECTED_NON_PRIMARY = {
-    adapter_id: "upstox",
+  const CONNECTED_NON_PRIMARY = makeNativeAccount({
     account_id: "UPX1",
+    broker: "upstox",
     label: "Upstox",
-    has_session: true,
+    status: "connected",
     is_primary: false,
-  };
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
-    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([CONNECTED_NON_PRIMARY]);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([CONNECTED_NON_PRIMARY]);
+    useBrokerStore.setState({ accounts: [], activeAccountId: null });
   });
 
   it("can set a connected native account as primary", async () => {
@@ -838,19 +819,20 @@ describe("BrokersSection — primary account selection", () => {
 });
 
 describe("BrokersSection — disconnect feedback", () => {
-  const CONNECTED_ACCOUNT = {
-    adapter_id: "upstox",
+  const CONNECTED_ACCOUNT = makeNativeAccount({
     account_id: "UPX1",
+    broker: "upstox",
     label: "Upstox",
-    has_session: true,
+    status: "connected",
     needs_relogin: false,
-  };
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
     (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
-    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([CONNECTED_ACCOUNT]);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([CONNECTED_ACCOUNT]);
+    useBrokerStore.setState({ accounts: [], activeAccountId: null });
   });
 
   it("shows a confirmation after disconnecting an account", async () => {

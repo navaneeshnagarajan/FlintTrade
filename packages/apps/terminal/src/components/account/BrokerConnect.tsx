@@ -34,11 +34,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { BROKER_ACCOUNTS_QUERY_KEY } from "@/hooks/useBrokerAccounts";
+import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 import {
-  listGatewayBrokerAccounts,
   reconnectBrokerAccount,
   removeBrokerAccount,
   setPrimaryBrokerAccount,
@@ -46,7 +45,6 @@ import {
 import {
   listNativeBrokers,
   listBrokerMcpCatalogue,
-  listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
   type McpClientConfig,
@@ -54,8 +52,6 @@ import {
 } from "@/services/ftApi.native";
 
 const BROKERS_KEY = ["native", "brokers"] as const;
-const ACCOUNTS_KEY = ["native", "accounts"] as const;
-const GATEWAY_ACCOUNTS_KEY = ["gateway", "accounts"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
 
 function expiryLabel(expiresAt?: number | null): string {
@@ -133,10 +129,13 @@ export function BrokerConnect() {
   const qc = useQueryClient();
   const brokersQuery = useQuery({ queryKey: BROKERS_KEY, queryFn: listNativeBrokers });
   const mcpQuery = useQuery({ queryKey: MCP_KEY, queryFn: listBrokerMcpCatalogue });
-  const accountsQuery = useQuery({ queryKey: ACCOUNTS_KEY, queryFn: listNativeAccounts });
+  useBrokerAccounts();
+  const brokerAccounts = useBrokerStore((s) => s.accounts);
 
   const brokers = brokersQuery.data ?? [];
   const mcpBrokers = mcpQuery.data ?? [];
+  const accounts = brokerAccounts.filter((a) => a.source === "native");
+  const gatewayAccounts = brokerAccounts.filter((a) => a.source !== "native");
   const connectableNativeNames = brokers
     .filter((b) => b.connectable)
     .map((b) => b.display_name);
@@ -170,8 +169,6 @@ export function BrokerConnect() {
 
   function invalidateAccountQueries(delay = 0) {
     const refresh = () => {
-      void qc.invalidateQueries({ queryKey: ACCOUNTS_KEY });
-      void qc.invalidateQueries({ queryKey: GATEWAY_ACCOUNTS_KEY });
       void qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
     };
     if (delay > 0) {
@@ -307,20 +304,6 @@ export function BrokerConnect() {
       );
     },
   });
-
-  // Legacy gateway accounts (BROKER_CATALOG / OpenAlgo-bridge path) still need
-  // remove / reconnect / set-primary management — folding that here keeps a
-  // single brokers surface rather than a separate orphaned screen. The section
-  // renders only when such accounts exist, so the common native-only setup is
-  // visually unchanged. This is a dedicated gateway-only query (not the shared
-  // useBrokerAccounts poll) so it neither duplicates the native-accounts fetch
-  // that accountsQuery already runs nor depends on a parent populating the store
-  // — it works standalone in the pre-app setup wizard too.
-  const gatewayAccountsQuery = useQuery({
-    queryKey: GATEWAY_ACCOUNTS_KEY,
-    queryFn: listGatewayBrokerAccounts,
-  });
-  const gatewayAccounts = gatewayAccountsQuery.data ?? [];
 
   const gatewayRemoveMutation = useMutation({
     mutationFn: (sel: { accountId: string; broker: string }) =>
@@ -557,61 +540,65 @@ export function BrokerConnect() {
       {/* Connected accounts */}
       <div className="space-y-2">
         <h3 className="text-sm font-medium text-text-secondary">Connected accounts</h3>
-        {(accountsQuery.data ?? []).length === 0 ? (
+        {accounts.length === 0 ? (
           <p className="text-sm text-text-muted">No broker accounts connected yet.</p>
         ) : (
           <ul className="space-y-2">
-            {(accountsQuery.data ?? []).map((a) => (
+            {accounts.map((a) => {
+              const connected = a.status === "connected";
+              const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
+              const retryLater = !!a.login_retryable;
+              return (
               <li
-                key={`${a.adapter_id}:${a.account_id}`}
+                key={brokerAccountKey(a)}
                 className="flex items-center justify-between rounded-lg border border-border-default bg-surface-card p-3"
               >
                 <div className="flex items-center gap-3">
-                  {a.has_session ? (
+                  {connected ? (
                     <CheckCircle2 className="size-4 text-profit" aria-hidden="true" />
-                  ) : a.needs_relogin || a.login_retryable ? (
+                  ) : needsFreshLogin || retryLater ? (
                     <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
                   ) : (
                     <XCircle className="size-4 text-loss" aria-hidden="true" />
                   )}
                   <div>
                     <div className="text-sm text-text-primary font-medium">
-                      {a.label || a.adapter_id} · {a.account_id}
+                      {a.label || a.broker} · {a.account_id}
                     </div>
                     <div className="text-xs text-text-muted">
-                      {a.adapter_id}
+                      {a.broker}
                       {a.is_primary ? " · primary" : ""}
-                      {a.has_session
+                      {connected
                         ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
-                        : a.needs_relogin
+                        : needsFreshLogin
                           ? " · needs fresh login"
-                          : a.login_retryable
+                          : retryLater
                             ? " · retry later"
                           : " · no live session"}
                     </div>
-                    {!a.has_session && (a.needs_relogin || a.login_retryable) && a.login_error && (
-                      <div className="text-xxs text-warning mt-0.5">{a.login_error}</div>
+                    {!connected && (needsFreshLogin || retryLater) && a.error_message && (
+                      <div className="text-xxs text-warning mt-0.5">{a.error_message}</div>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  {a.has_session && !a.is_primary && (
+                  {connected && !a.is_primary && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      aria-label={`Set ${a.adapter_id} ${a.account_id} as primary`}
-                      onClick={() => setPrimaryMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                      aria-label={`Set ${a.broker} ${a.account_id} as primary`}
+                      onClick={() => setPrimaryMutation.mutate({ adapter: a.broker, account: a.account_id })}
                       disabled={setPrimaryMutation.isPending}
                     >
                       <Star className="size-4" aria-hidden="true" />
                     </Button>
                   )}
-                  {!a.has_session && (
+                  {!connected && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      aria-label={`Re-authenticate ${a.adapter_id} ${a.account_id}`}
-                      onClick={() => reloginMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                      aria-label={`Re-authenticate ${a.broker} ${a.account_id}`}
+                      onClick={() => reloginMutation.mutate({ adapter: a.broker, account: a.account_id })}
                       disabled={reloginMutation.isPending}
                     >
                       <RefreshCw
@@ -623,15 +610,16 @@ export function BrokerConnect() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    aria-label={`Disconnect ${a.adapter_id} ${a.account_id}`}
-                    onClick={() => removeMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                    aria-label={`Disconnect ${a.broker} ${a.account_id}`}
+                    onClick={() => removeMutation.mutate({ adapter: a.broker, account: a.account_id })}
                     disabled={removeMutation.isPending}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />
                   </Button>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

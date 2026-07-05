@@ -245,6 +245,9 @@ describe("useBrokerAccounts — successful response", () => {
         error_message: null,
         is_primary: true,
         source: "native",
+        expires_at: 9_999,
+        needs_relogin: false,
+        login_retryable: false,
       },
       {
         account_id: "DHAN-1",
@@ -255,6 +258,9 @@ describe("useBrokerAccounts — successful response", () => {
         error_message: "login-failed",
         is_primary: false,
         source: "native",
+        expires_at: null,
+        needs_relogin: true,
+        login_retryable: false,
       },
       {
         account_id: "IND-1",
@@ -265,6 +271,9 @@ describe("useBrokerAccounts — successful response", () => {
         error_message: "Broker login is temporarily unavailable; retry later.",
         is_primary: false,
         source: "native",
+        expires_at: null,
+        needs_relogin: false,
+        login_retryable: true,
       },
     ]);
   });
@@ -291,6 +300,9 @@ describe("useBrokerAccounts — successful response", () => {
         error_message: null,
         is_primary: false,
         source: "native",
+        expires_at: null,
+        needs_relogin: false,
+        login_retryable: false,
       },
     ]);
   });
