@@ -57,13 +57,19 @@ async function throwHttpError(resp: Response, endpoint: string): Promise<never> 
   let message: string | null = null;
   try {
     const body: unknown = await resp.json();
+    const record = body !== null && typeof body === "object"
+      ? body as Record<string, unknown>
+      : null;
     if (
-      body !== null &&
-      typeof body === "object" &&
-      "message" in body &&
-      typeof (body as { message: unknown }).message === "string"
+      record &&
+      typeof record.message === "string"
     ) {
-      message = (body as { message: string }).message;
+      message = record.message;
+    } else if (
+      record &&
+      typeof record.error === "string"
+    ) {
+      message = record.error;
     }
   } catch {
     // Not a JSON body — fall through to the generic message.
@@ -139,6 +145,25 @@ export async function postV1<T>(endpoint: string, body: object = {}): Promise<T>
  */
 export async function getV1<T>(endpoint: string): Promise<T> {
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
+    headers: buildHeaders(false),
+  });
+  if (!resp.ok) await throwHttpError(resp, endpoint);
+  return parseResponse<T>(resp, endpoint);
+}
+
+export async function putV1<T>(endpoint: string, body: object = {}): Promise<T> {
+  const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
+    method: "PUT",
+    headers: buildHeaders(true),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) await throwHttpError(resp, endpoint);
+  return parseResponse<T>(resp, endpoint);
+}
+
+export async function delV1<T>(endpoint: string): Promise<T> {
+  const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
+    method: "DELETE",
     headers: buildHeaders(false),
   });
   if (!resp.ok) await throwHttpError(resp, endpoint);

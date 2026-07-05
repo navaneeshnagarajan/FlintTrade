@@ -28,7 +28,7 @@ vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: "" }) },
 }));
 
-import { parseResponse, post, get } from "../ftApi.helpers";
+import { parseResponse, post, get, getV1, putV1, delV1 } from "../ftApi.helpers";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -148,6 +148,51 @@ describe("get — HTTP error handling", () => {
     );
     const result = await get<{ accounts: unknown[] }>("ditto/accounts");
     expect(result).toStrictEqual({ accounts: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bare /v1 helpers
+// ---------------------------------------------------------------------------
+
+describe("bare /v1 helpers — shared gateway route client", () => {
+  it("getV1 surfaces non-ok JSON error fields", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ status: "error", error: "Gateway unavailable" }, 503),
+    );
+
+    await expect(getV1("brokers")).rejects.toThrow("Gateway unavailable");
+  });
+
+  it("putV1 sends JSON to the bare /v1 route family", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ status: "success", limits: { dhan: { order: 10, data: 2 } } }),
+    );
+
+    const result = await putV1<{ limits: Record<string, { order: number; data: number }> }>(
+      "rate-limits",
+      { broker_id: "dhan", order: 10 },
+    );
+
+    expect(result.limits.dhan.order).toBe(10);
+    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/ft-api/v1/rate-limits");
+    expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual({ broker_id: "dhan", order: 10 });
+  });
+
+  it("delV1 sends DELETE without a JSON content header", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ status: "success" }),
+    );
+
+    await delV1("accounts/acc%2Fspecial");
+
+    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/ft-api/v1/accounts/acc%2Fspecial");
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
   });
 });
 
