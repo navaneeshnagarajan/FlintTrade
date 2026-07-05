@@ -142,6 +142,12 @@ class TestCapabilitiesRoute:
             "https://mcp.dhan.co/mcp",
         ]
         assert dhan_configs["cursor"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
+        assert dhan_configs["opencode"]["config"] == {
+            "name": "dhan",
+            "type": "remote",
+            "url": "https://mcp.dhan.co/mcp",
+            "oauth": True,
+        }
 
         for broker_id in ("upstox", "groww"):
             mcp = brokers[broker_id]["mcp"]

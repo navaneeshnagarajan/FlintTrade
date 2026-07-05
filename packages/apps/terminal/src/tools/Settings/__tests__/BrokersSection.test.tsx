@@ -184,7 +184,7 @@ const MCP_BROKERS = [
       use_cases: ["Portfolio and account review", "Super Orders"],
       cautions: ["Broker MCP trade tools are outside FlintTrade's in-process safety gate."],
       client_configs: [
-        { id: "remote_url", label: "Claude / ChatGPT custom connector", url: "https://mcp.dhan.co/mcp" },
+        { id: "remote_url", label: "Claude / ChatGPT / custom connector", url: "https://mcp.dhan.co/mcp" },
         {
           id: "claude_code",
           label: "Claude Code CLI",
@@ -205,6 +205,17 @@ const MCP_BROKERS = [
             mcpServers: {
               dhan: { url: "https://mcp.dhan.co/mcp" },
             },
+          },
+        },
+        {
+          id: "opencode",
+          label: "OpenCode remote OAuth",
+          url: "https://mcp.dhan.co/mcp",
+          config: {
+            name: "dhan",
+            type: "remote",
+            url: "https://mcp.dhan.co/mcp",
+            oauth: true,
           },
         },
       ],
@@ -449,6 +460,8 @@ describe("BrokersSection", () => {
       "codex mcp add dhan --url https://mcp.dhan.co/mcp",
     );
     expect(screen.getByTestId("broker-mcp-dhan-cursor")).toHaveTextContent("mcpServers");
+    expect(screen.getByTestId("broker-mcp-dhan-opencode")).toHaveTextContent("OpenCode remote OAuth");
+    expect(screen.getByTestId("broker-mcp-dhan-opencode")).toHaveTextContent("oauth");
     expect(screen.getByText("https://mcp.groww.in/mcp")).toBeInTheDocument();
     expect(screen.getByText("npx mcp-remote@0.1.18 https://mcp.groww.in/mcp 52155")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("mcpServers");

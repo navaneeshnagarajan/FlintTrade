@@ -581,7 +581,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "client_configs": [
             {
                 "id": "remote_url",
-                "label": "Claude / ChatGPT custom connector",
+                "label": "Claude / ChatGPT / custom connector",
                 "url": "https://mcp.dhan.co/mcp",
                 "config": {"url": "https://mcp.dhan.co/mcp"},
             },
@@ -605,6 +605,17 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                     "mcpServers": {
                         "dhan": {"url": "https://mcp.dhan.co/mcp"},
                     },
+                },
+            },
+            {
+                "id": "opencode",
+                "label": "OpenCode remote OAuth",
+                "url": "https://mcp.dhan.co/mcp",
+                "config": {
+                    "name": "dhan",
+                    "type": "remote",
+                    "url": "https://mcp.dhan.co/mcp",
+                    "oauth": True,
                 },
             },
         ],
