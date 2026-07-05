@@ -244,6 +244,28 @@ const MCP_BROKERS = [
           },
         },
         {
+          id: "vscode_copilot",
+          label: "VS Code direct URL",
+          url: "https://mcp.dhan.co/mcp",
+          config: {
+            mcp: {
+              servers: {
+                dhan: { url: "https://mcp.dhan.co/mcp" },
+              },
+            },
+          },
+        },
+        {
+          id: "kiro",
+          label: "Kiro direct URL",
+          url: "https://mcp.dhan.co/mcp",
+          config: {
+            mcpServers: {
+              dhan: { url: "https://mcp.dhan.co/mcp" },
+            },
+          },
+        },
+        {
           id: "opencode",
           label: "OpenCode remote OAuth",
           url: "https://mcp.dhan.co/mcp",
@@ -330,7 +352,7 @@ const MCP_BROKERS = [
       trading_supported: true,
       login_steps: [
         "For Claude Pro, add a custom connector named GrowwMCP with the Groww MCP URL.",
-        "For Cursor or VS Code, add the mcp-remote configuration and install Node.js if needed.",
+        "For Cursor, VS Code, or Windsurf, add the mcp-remote configuration and install Node.js if needed.",
         "Confirm DDPI status before sell-order workflows.",
       ],
       use_cases: [
@@ -353,7 +375,7 @@ const MCP_BROKERS = [
         },
         {
           id: "mcp_remote_cursor_vscode",
-          label: "Cursor / VS Code mcp-remote",
+          label: "Cursor / VS Code / Windsurf mcp-remote",
           command: "npx",
           args: ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
           config: {
@@ -540,6 +562,9 @@ describe("BrokersSection", () => {
       "codex mcp add dhan --url https://mcp.dhan.co/mcp",
     );
     expect(screen.getByTestId("broker-mcp-dhan-cursor")).toHaveTextContent("mcpServers");
+    expect(screen.getByTestId("broker-mcp-dhan-vscode_copilot")).toHaveTextContent("VS Code direct URL");
+    expect(screen.getByTestId("broker-mcp-dhan-vscode_copilot")).toHaveTextContent("mcp");
+    expect(screen.getByTestId("broker-mcp-dhan-kiro")).toHaveTextContent("Kiro direct URL");
     expect(screen.getByTestId("broker-mcp-dhan-opencode")).toHaveTextContent("OpenCode remote OAuth");
     expect(screen.getByTestId("broker-mcp-dhan-opencode")).toHaveTextContent("oauth");
     expect(screen.getByTestId("broker-mcp-dhan-dhanhq_skill_pack")).toHaveTextContent(
@@ -551,6 +576,7 @@ describe("BrokersSection", () => {
     expect(screen.getByText("npx mcp-remote@0.1.18 https://mcp.groww.in/mcp 52155")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("mcpServers");
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("growwmcp");
+    expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("Windsurf");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");

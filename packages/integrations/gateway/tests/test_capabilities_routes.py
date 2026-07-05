@@ -109,6 +109,18 @@ class TestCapabilitiesRoute:
         assert caps["option_chain_greeks_supported"] is True
         assert caps["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
 
+    def test_kotak_native_streaming_limits_are_doc_grounded(self, client) -> None:  # type: ignore[no-untyped-def]
+        """Kotak exposes public WebSocket limits without promoting live-stream readiness."""
+        response = client.get("/api/v1/broker/capabilities?broker=kotakneo")
+        assert response.status_code == 200
+        caps = response.get_json()["capabilities"]
+        assert caps["connectable"] is False
+        assert caps["supports_websocket"] is True
+        assert caps["streaming_runtime_ready"] is False
+        assert caps["streaming_max_connections_per_user"] == 16
+        assert caps["streaming_max_symbols_per_connection"] == 200
+        assert caps["streaming_max_total_symbols"] == 200
+
     def test_mcp_catalogue_lists_hosted_broker_mcp_servers(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp")
         assert response.status_code == 200
@@ -143,6 +155,10 @@ class TestCapabilitiesRoute:
             "https://mcp.dhan.co/mcp",
         ]
         assert dhan_configs["cursor"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
+        assert dhan_configs["vscode_copilot"]["config"]["mcp"]["servers"]["dhan"]["url"] == (
+            "https://mcp.dhan.co/mcp"
+        )
+        assert dhan_configs["kiro"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
         assert dhan_configs["opencode"]["config"] == {
             "name": "dhan",
             "type": "remote",

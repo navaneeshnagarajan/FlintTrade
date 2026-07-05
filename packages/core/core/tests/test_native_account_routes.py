@@ -277,6 +277,10 @@ def test_list_native_brokers_catalogue(client):
         "https://mcp.dhan.co/mcp",
     ]
     assert dhan_mcp_configs["cursor"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
+    assert dhan_mcp_configs["vscode_copilot"]["config"]["mcp"]["servers"]["dhan"]["url"] == (
+        "https://mcp.dhan.co/mcp"
+    )
+    assert dhan_mcp_configs["kiro"]["config"]["mcpServers"]["dhan"]["url"] == "https://mcp.dhan.co/mcp"
     assert dhan_mcp_configs["dhanhq_skill_pack"]["command"] == "skills"
     assert "option chain with Greeks" in " ".join(brokers["dhan"]["mcp"]["use_cases"])
     assert brokers["upstox"]["mcp"]["remote_url"] == "https://mcp.upstox.com/mcp"

@@ -609,6 +609,28 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
                 },
             },
             {
+                "id": "vscode_copilot",
+                "label": "VS Code direct URL",
+                "url": "https://mcp.dhan.co/mcp",
+                "config": {
+                    "mcp": {
+                        "servers": {
+                            "dhan": {"url": "https://mcp.dhan.co/mcp"},
+                        },
+                    },
+                },
+            },
+            {
+                "id": "kiro",
+                "label": "Kiro direct URL",
+                "url": "https://mcp.dhan.co/mcp",
+                "config": {
+                    "mcpServers": {
+                        "dhan": {"url": "https://mcp.dhan.co/mcp"},
+                    },
+                },
+            },
+            {
                 "id": "opencode",
                 "label": "OpenCode remote OAuth",
                 "url": "https://mcp.dhan.co/mcp",
@@ -699,7 +721,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "trading_supported": True,
         "login_steps": [
             "For Claude Pro, add a custom connector named GrowwMCP with the Groww MCP URL.",
-            "For Cursor or VS Code, add the mcp-remote configuration and install Node.js if needed.",
+            "For Cursor, VS Code, or Windsurf, add the mcp-remote configuration and install Node.js if needed.",
             "Confirm DDPI status before sell-order workflows.",
         ],
         "use_cases": [
@@ -723,7 +745,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
             },
             {
                 "id": "mcp_remote_cursor_vscode",
-                "label": "Cursor / VS Code mcp-remote",
+                "label": "Cursor / VS Code / Windsurf mcp-remote",
                 "command": "npx",
                 "args": ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
                 "config": {

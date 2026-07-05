@@ -68,6 +68,10 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         "historical_max_lookback_days_daily": native.historical_max_lookback_days_daily,
         "historical_max_candles_per_request": native.historical_max_candles_per_request,
         "market_depth_runtime_ready": native.market_depth_runtime_ready,
+        "streaming_runtime_ready": native.streaming_runtime_ready,
+        "streaming_max_connections_per_user": native.streaming_max_connections_per_user,
+        "streaming_max_symbols_per_connection": native.streaming_max_symbols_per_connection,
+        "streaming_max_total_symbols": native.streaming_max_total_symbols,
         "option_chain_supported": native.option_chain_supported,
         "option_chain_greeks_supported": native.option_chain_greeks_supported,
     }

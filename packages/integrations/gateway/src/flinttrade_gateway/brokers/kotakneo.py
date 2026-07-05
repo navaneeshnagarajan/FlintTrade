@@ -144,6 +144,11 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     # No option-chain endpoint (search_scrip only).
     option_chain_supported=False,
     streaming_supported=True,
+    # Captured Kotak Neo v2 WebSocket docs: 16 channels and 200 scrips at a
+    # time. Runtime remains disabled until the SDK callback bridge is live-proven.
+    streaming_max_connections_per_user=16,
+    streaming_max_symbols_per_connection=200,
+    streaming_max_total_symbols=200,
     bracket_order_native=True,
     cover_order_native=True,
     multi_quote_supported=True,
@@ -760,9 +765,10 @@ class KotakNeoAdapter(BrokerAdapter):
 
         ``mode`` maps to NEO's subscription types (``kotakneo_mapping.
         subscription_flags``): LTP/QUOTE → scrip feed (``mws``), FULL/DEPTH →
-        5-level depth feed (``dps``), INDEX → index feed (``ifs``). The feed
-        fans out at most 3000 tokens per socket (SDK limit). Each subscription
-        is recorded (token + flags) so ``unsubscribe`` can replay it exactly.
+        5-level depth feed (``dps``), INDEX → index feed (``ifs``). The public
+        docs cap the WebSocket surface at 16 channels and 200 subscribed scrips.
+        Each subscription is recorded (token + flags) so ``unsubscribe`` can
+        replay it exactly.
         """
         is_index, is_depth = M.subscription_flags(mode)
         tokens = await self._resolve_feed_tokens(session, symbols, is_index=is_index)

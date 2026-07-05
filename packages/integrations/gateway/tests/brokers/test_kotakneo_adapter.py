@@ -19,6 +19,7 @@ from flinttrade_core.exceptions import BrokerError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import (
+    KOTAKNEO_CAPABILITIES,
     KotakNeoAdapter,
     KotakNeoClient,
     _normalise_credentials,
@@ -276,6 +277,15 @@ def test_sdk_rest_wrapper_adds_fin_key_to_login_and_session_calls_only():
     assert "neo-fin-key" not in rest.headers[3]
     assert "neo-fin-key" not in rest.headers[4]
     assert rest.headers[5]["neo-fin-key"] == "custom"
+
+
+def test_capabilities_record_current_public_websocket_limits_without_runtime_promotion() -> None:
+    """Captured Kotak docs advertise 16 channels and 200 subscribed scrips."""
+    assert KOTAKNEO_CAPABILITIES.streaming_supported is True
+    assert KOTAKNEO_CAPABILITIES.streaming_runtime_ready is False
+    assert KOTAKNEO_CAPABILITIES.streaming_max_connections_per_user == 16
+    assert KOTAKNEO_CAPABILITIES.streaming_max_symbols_per_connection == 200
+    assert KOTAKNEO_CAPABILITIES.streaming_max_total_symbols == 200
 
 
 # ---------------------------------------------------------------------------
