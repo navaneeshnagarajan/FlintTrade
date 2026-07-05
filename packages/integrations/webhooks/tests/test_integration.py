@@ -293,131 +293,27 @@ class TestChartInkSymbolMapping:
 
 
 # ======================================================================
-# Webhook Server
+# Webhook receiver surface
 # ======================================================================
 
 
-class TestWebhookServer:
-    """Test webhook server rate limiting and endpoint management."""
+class TestWebhookReceiverSurface:
+    """The mounted receiver is the single webhook intake core."""
 
-    def test_rate_limiter_allows_within_limit(self):
-        from flinttrade_webhooks.webhook_server import WebhookRateLimiter
-        rl = WebhookRateLimiter(max_requests=5, window_seconds=60)
-        for _ in range(5):
-            assert rl.allow()
-        assert not rl.allow()  # 6th should be blocked
+    def test_standalone_webhook_server_is_retired(self):
+        import importlib
 
-    def test_rate_limiter_remaining(self):
-        from flinttrade_webhooks.webhook_server import WebhookRateLimiter
-        rl = WebhookRateLimiter(max_requests=10, window_seconds=60)
-        assert rl.remaining == 10
-        rl.allow()
-        assert rl.remaining == 9
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("flinttrade_webhooks.webhook_server")
 
-    def test_server_creates_flask_app(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer(port=9090)
-        assert server.app is not None
-        assert server.port == 9090
+    def test_receiver_rate_limit_replaces_server_limiter(self):
+        from flinttrade_webhooks.webhook_receiver import WebhookConfig, WebhookReceiver
 
-    def test_register_endpoint(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"status": "ok"}
-        server.register("/webhook/test", "test", handler)
-        # Endpoint should exist in Flask app rules
-        rules = [r.rule for r in server.app.url_map.iter_rules()]
-        assert "/webhook/test" in rules
-
-    def test_register_tradingview(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"status": "ok"}
-        server.register_tradingview(handler, strategy_id="my_strat")
-        rules = [r.rule for r in server.app.url_map.iter_rules()]
-        assert "/webhook/tradingview/my_strat" in rules
-
-    def test_register_chartink(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"status": "ok"}
-        server.register_chartink(handler, strategy_id="scanner1")
-        rules = [r.rule for r in server.app.url_map.iter_rules()]
-        assert "/webhook/chartink/scanner1" in rules
-
-    def test_health_endpoint(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        with server.app.test_client() as client:
-            resp = client.get("/health")
-            assert resp.status_code == 200
-            data = resp.get_json()
-            assert data["status"] == "ok"
-
-    def test_webhook_auth_rejects_bad_secret(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"result": "processed"}
-        server.register("/webhook/secure", "secure", handler, secret="my_secret")
-        with server.app.test_client() as client:
-            resp = client.post(
-                "/webhook/secure",
-                data=b"test",
-                headers={"X-Webhook-Secret": "wrong"},
-            )
-            assert resp.status_code == 401
-
-    def test_webhook_auth_accepts_good_secret(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"result": "processed"}
-        server.register("/webhook/secure", "secure", handler, secret="my_secret")
-        with server.app.test_client() as client:
-            resp = client.post(
-                "/webhook/secure",
-                data=b"test",
-                headers={"X-Webhook-Secret": "my_secret"},
-            )
-            assert resp.status_code == 200
-
-    def test_webhook_no_secret_allows_all(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"result": "ok"}
-        server.register("/webhook/open", "open", handler)
-        with server.app.test_client() as client:
-            resp = client.post("/webhook/open", data=b"test")
-            assert resp.status_code == 200
-
-    def test_disable_endpoint(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer()
-        def handler(body, headers):
-            return {"result": "ok"}
-        server.register("/webhook/toggle", "toggle", handler)
-        server.disable_endpoint("/webhook/toggle")
-        with server.app.test_client() as client:
-            resp = client.post("/webhook/toggle", data=b"test")
-            assert resp.status_code == 503
-
-    def test_rate_limit_on_webhook(self):
-        from flinttrade_webhooks.webhook_server import WebhookServer
-        server = WebhookServer(rate_limit=3, rate_window=60)
-        def handler(body, headers):
-            return {"result": "ok"}
-        server.register("/webhook/limited", "limited", handler)
-        with server.app.test_client() as client:
-            for _ in range(3):
-                resp = client.post("/webhook/limited", data=b"test")
-                assert resp.status_code == 200
-            resp = client.post("/webhook/limited", data=b"test")
-            assert resp.status_code == 429
+        receiver = WebhookReceiver(WebhookConfig(skip_verification=True, rate_limit=2))
+        assert receiver.check_rate_limit() is True
+        assert receiver.check_rate_limit() is True
+        assert receiver.check_rate_limit() is False
+        assert receiver.rate_limit_remaining == 0
 
 
 # ======================================================================
@@ -652,12 +548,13 @@ class TestPackageExports:
     def test_all_exports(self):
         from flinttrade_webhooks import __all__
         expected = [
-            "TradingViewWebhook", "ChartInkWebhook", "WebhookServer",
+            "TradingViewWebhook", "ChartInkWebhook", "WebhookReceiver",
             "FlowBuilder", "Alerter", "FlowDefinition",
             "AlertType", "AlertChannel",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"
+        assert "WebhookServer" not in __all__
 
     def test_version(self):
         from flinttrade_webhooks import __version__

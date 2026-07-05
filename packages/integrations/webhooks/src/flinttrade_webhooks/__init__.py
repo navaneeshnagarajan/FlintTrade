@@ -26,7 +26,6 @@ from .flow_builder import (
 )
 from .tradingview import TradingViewAlert, TradingViewWebhook
 from .voice_orders import VoiceCommand, VoiceOrderParser, voice_bp
-from .webhook_server import WebhookServer
 from .webhook_receiver import WebhookConfig, WebhookLogEntry, WebhookPayload, WebhookReceiver
 from .webhook_routes import init_webhook_routes, webhook_bp
 from .webhook_secret_store import WebhookSecretStore
@@ -40,8 +39,6 @@ __all__ = [
     "ChartInkScanResult",
     "ChartInkConfig",
     "ChartInkPlacementResult",
-    # Webhook server
-    "WebhookServer",
     # Flow builder
     "FlowBuilder",
     "FlowDefinition",
