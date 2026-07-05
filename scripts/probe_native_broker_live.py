@@ -40,13 +40,37 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
     "upstox": UpstoxAdapter,
 }
 
-READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
+COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
+KOTAK_PROBE_EXCHANGE = "NSE"
+KOTAK_PROBE_SYMBOL = "RELIANCE"
+KOTAK_PROBE_QUOTE_SYMBOL = f"{KOTAK_PROBE_EXCHANGE}:{KOTAK_PROBE_SYMBOL}"
+KOTAK_READ_CHOICES = (
+    "funds",
+    "limits",
+    "positions",
+    "holdings",
+    "orders",
+    "trades",
+    "scrip_master",
+    "search_scrip",
+    "quotes",
+    "quote_details",
+    "market_depth",
+)
+READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
+    "dhan": COMMON_READ_CHOICES,
+    "groww": COMMON_READ_CHOICES,
+    "indmoney": COMMON_READ_CHOICES,
+    "kotakneo": KOTAK_READ_CHOICES,
+    "upstox": COMMON_READ_CHOICES,
+}
+READ_CHOICES = tuple(dict.fromkeys(COMMON_READ_CHOICES + KOTAK_READ_CHOICES))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
-    "dhan": READ_CHOICES,
-    "groww": READ_CHOICES,
-    "indmoney": READ_CHOICES,
-    "kotakneo": ("funds", "positions", "holdings", "orders", "trades"),
-    "upstox": READ_CHOICES,
+    "dhan": COMMON_READ_CHOICES,
+    "groww": COMMON_READ_CHOICES,
+    "indmoney": COMMON_READ_CHOICES,
+    "kotakneo": KOTAK_READ_CHOICES,
+    "upstox": COMMON_READ_CHOICES,
 }
 DEFAULT_METHOD: dict[str, str] = {
     "dhan": "access_token",
@@ -246,22 +270,23 @@ def collect_credentials(broker: str, method: str, environment: str) -> dict[str,
 
 
 def _resolve_reads(broker: str, requested: list[str] | None) -> list[str]:
+    allowed_reads = READ_CHOICES_BY_BROKER[broker]
     if not requested or requested == ["default"]:
         return list(DEFAULT_READS[broker])
     if requested == ["all"]:
-        return list(READ_CHOICES)
+        return list(allowed_reads)
     reads: list[str] = []
     for read in requested:
         if read == "default":
             reads.extend(DEFAULT_READS[broker])
         elif read == "all":
-            reads.extend(READ_CHOICES)
+            reads.extend(allowed_reads)
         else:
             reads.append(read)
     deduped: list[str] = []
     for read in reads:
-        if read not in READ_CHOICES:
-            raise ValueError(f"unknown read {read!r}; choose from: {', '.join(READ_CHOICES)}")
+        if read not in allowed_reads:
+            raise ValueError(f"unknown {broker} read {read!r}; choose from: {', '.join(allowed_reads)}")
         if read not in deduped:
             deduped.append(read)
     return deduped
@@ -276,6 +301,17 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
         return adapter.order_book
     if name == "trades":
         return adapter.trade_book
+    if broker == "kotakneo":
+        if name == "scrip_master":
+            return lambda session: adapter.scrip_master(session, KOTAK_PROBE_EXCHANGE)
+        if name == "search_scrip":
+            return lambda session: adapter.search_scrip(session, KOTAK_PROBE_SYMBOL, KOTAK_PROBE_EXCHANGE)
+        if name == "quotes":
+            return lambda session: adapter.quotes(session, [KOTAK_PROBE_QUOTE_SYMBOL])
+        if name == "quote_details":
+            return lambda session: adapter.quote_details(session, [KOTAK_PROBE_QUOTE_SYMBOL], "ltp")
+        if name == "market_depth":
+            return lambda session: adapter.market_depth(session, [KOTAK_PROBE_QUOTE_SYMBOL])
     return getattr(adapter, name, None)
 
 
@@ -359,7 +395,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--reads",
         nargs="+",
         default=["default"],
-        help="Read-only calls: default, all, or any of profile funds positions holdings orders trades.",
+        help=(
+            "Read-only calls: default, all, or broker-supported names. Common names: "
+            "profile funds positions holdings orders trades. Kotak adds limits "
+            "scrip_master search_scrip quotes quote_details market_depth."
+        ),
     )
     parser.add_argument(
         "--logout",

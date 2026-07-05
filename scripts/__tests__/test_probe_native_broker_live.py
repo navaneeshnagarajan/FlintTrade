@@ -10,6 +10,7 @@ class _FakeAdapter:
     def __init__(self) -> None:
         self.credentials: dict[str, str] | None = None
         self.logged_out = False
+        self.calls: list[tuple] = []
 
     async def login(self, credentials: dict[str, str]) -> object:
         self.credentials = credentials
@@ -27,6 +28,10 @@ class _FakeAdapter:
     async def funds(self, _session: object) -> dict:
         return {"available_cash": 1000}
 
+    async def limits(self, _session: object) -> dict:
+        self.calls.append(("limits",))
+        return {"available_cash": 1000}
+
     async def positions(self, _session: object) -> list:
         return []
 
@@ -38,6 +43,26 @@ class _FakeAdapter:
 
     async def trade_book(self, _session: object) -> list:
         return []
+
+    async def scrip_master(self, _session: object, exchange: str | None = None) -> dict:
+        self.calls.append(("scrip_master", exchange))
+        return {"segments": [exchange]}
+
+    async def search_scrip(self, _session: object, symbol: str, exchange: str = "NSE", **_kwargs: object) -> list:
+        self.calls.append(("search_scrip", symbol, exchange))
+        return [{"symbol": symbol, "exchange": exchange, "token": "12345"}]
+
+    async def quotes(self, _session: object, symbols: list[str]) -> list:
+        self.calls.append(("quotes", tuple(symbols)))
+        return [{"symbol": symbols[0]}]
+
+    async def quote_details(self, _session: object, symbols: list[str], quote_type: str = "all") -> list:
+        self.calls.append(("quote_details", tuple(symbols), quote_type))
+        return [{"symbol": symbols[0], "type": quote_type}]
+
+    async def market_depth(self, _session: object, symbols: list[str]) -> list:
+        self.calls.append(("market_depth", tuple(symbols)))
+        return [{"symbol": symbols[0], "bids": [], "asks": []}]
 
 
 def test_redact_removes_secret_and_account_like_values() -> None:
@@ -176,9 +201,45 @@ def test_kotak_probe_prompts_for_docs_token_once() -> None:
     assert "consumer_key" not in {field.name for field in fields}
 
 
+def test_resolve_reads_is_broker_specific() -> None:
+    assert "market_depth" not in probe._resolve_reads("dhan", ["all"])
+    assert "market_depth" in probe._resolve_reads("kotakneo", ["all"])
+    assert "quote_details" in probe._resolve_reads("kotakneo", ["default"])
+
+
+def test_kotak_default_probe_exercises_extended_reads(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["kotak-test-token", "+910000000000", "demo-ucc", "000000", "111111", ""])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "kotakneo", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("kotakneo", "totp_mpin", ["default"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.credentials == {
+        "environment": "prod",
+        "access_token": "kotak-test-token",
+        "mobile_number": "+910000000000",
+        "ucc": "demo-ucc",
+        "totp": "000000",
+        "mpin": "111111",
+    }
+    assert ("limits",) in fake.calls
+    assert ("scrip_master", "NSE") in fake.calls
+    assert ("search_scrip", "RELIANCE", "NSE") in fake.calls
+    assert ("quotes", ("NSE:RELIANCE",)) in fake.calls
+    assert ("quote_details", ("NSE:RELIANCE",), "ltp") in fake.calls
+    assert ("market_depth", ("NSE:RELIANCE",)) in fake.calls
+    assert "limits: ok object_keys=1" in out
+    assert "market_depth: ok rows=1" in out
+    assert "kotak-test-token" not in out
+    assert "+910000000000" not in out
+
+
 def test_run_probe_dispatches_groww_access_token_reads(monkeypatch, capsys) -> None:
     fake = _FakeAdapter()
-    values = iter(["GROWW-TOKEN-SECRET", "GROWWUSER1"])
+    values = iter(["groww-test-token", "groww-user"])
     monkeypatch.setitem(probe.ADAPTER_FACTORIES, "groww", lambda: fake)
     monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
 
@@ -186,14 +247,14 @@ def test_run_probe_dispatches_groww_access_token_reads(monkeypatch, capsys) -> N
 
     out = capsys.readouterr().out
     assert code == 0
-    assert fake.credentials == {"access_token": "GROWW-TOKEN-SECRET", "user_id": "GROWWUSER1"}
+    assert fake.credentials == {"access_token": "groww-test-token", "user_id": "groww-user"}
     assert fake.logged_out is False
     assert "profile: ok object_keys=1" in out
     assert "funds: ok object_keys=1" in out
     assert "orders: ok rows=0" in out
     assert "logout: skipped" in out
-    assert "GROWW-TOKEN-SECRET" not in out
-    assert "GROWWUSER1" not in out
+    assert "groww-test-token" not in out
+    assert "groww-user" not in out
 
 
 def test_kotak_wrapper_help_is_kotak_specific(capsys) -> None:
@@ -206,6 +267,7 @@ def test_kotak_wrapper_help_is_kotak_specific(capsys) -> None:
 
     out = capsys.readouterr().out
     assert "Read-only Kotak Neo native adapter probe" in out
+    assert "market_depth" in out
     assert "{dhan,indmoney,kotakneo,upstox}" not in out
 
 

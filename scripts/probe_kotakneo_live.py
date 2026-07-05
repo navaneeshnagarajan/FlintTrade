@@ -30,7 +30,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--reads",
         nargs="+",
         default=["default"],
-        help="Read-only calls: default, all, or any of funds positions holdings orders trades.",
+        help=(
+            "Read-only calls: default, all, or any of funds limits positions holdings orders trades "
+            "scrip_master search_scrip quotes quote_details market_depth."
+        ),
     )
     parser.add_argument(
         "--logout",
