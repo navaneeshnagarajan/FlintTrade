@@ -1282,6 +1282,40 @@ def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
     assert entry["needs_relogin"] is True
 
 
+def test_relogin_login_failure_drops_prior_session(client, monkeypatch):
+    """If fresh login throws before registering a replacement session, the old
+    in-memory session must not keep the account looking connected."""
+    c, app, _tmp = client
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXLOGINFAIL", "credentials": {"access_token": "tok"}},
+    )
+    assert app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL").adapter_id == "upstox"
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _login_failure(_self, _credentials):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(UpstoxAdapter, "login", _login_failure)
+
+    resp = c.post(
+        "/api/v1/native/accounts/upstox/UPXLOGINFAIL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "dead"}},
+    )
+
+    assert resp.status_code == 502
+    assert resp.get_json()["data"]["session"]["has_session"] is False
+    with pytest.raises(Exception):
+        app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL")
+    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
+    entry = next(a for a in listing if a["account_id"] == "UPXLOGINFAIL")
+    assert entry["has_session"] is False
+    assert entry["needs_relogin"] is True
+
+
 def test_native_read_dead_token_drops_session_and_surfaces_relogin(client, monkeypatch):
     """A token can expire after a successful connect; the next authenticated
     native read must not leave the account looking connected with only 502s."""

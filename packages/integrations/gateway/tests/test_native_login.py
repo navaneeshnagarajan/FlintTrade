@@ -84,6 +84,20 @@ def test_establish_native_session_fails_closed() -> None:
     assert registry.sessions == {}
 
 
+def test_establish_native_session_failure_removes_prior_session() -> None:
+    """A replay/relogin failure must not leave a stale in-memory session active."""
+    adapter = _FakeAdapter("dhan", fail=True)
+    registry = _FakeRegistry()
+    registry.sessions[("dhan", "111")] = _FakeSession("dhan", "111")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            establish_native_session(adapter, registry, {"access_token": "dead"}, "dhan", "111")
+        )
+
+    assert ("dhan", "111") not in registry.sessions
+
+
 def test_establish_all_isolates_per_selector_failures(caplog) -> None:
     adapters = {"dhan": _FakeAdapter("dhan"), "upstox": _FakeAdapter("upstox", fail=True)}
     registry = _FakeRegistry()
@@ -106,6 +120,18 @@ def test_establish_all_isolates_per_selector_failures(caplog) -> None:
     logs = "\n".join(record.getMessage() for record in caplog.records)
     assert "upstox:222" not in logs
     assert "broker rejected credentials" not in logs
+
+
+def test_establish_all_failed_replay_removes_prior_session() -> None:
+    adapters = {"upstox": _FakeAdapter("upstox", fail=True)}
+    registry = _FakeRegistry()
+    registry.sessions[("upstox", "222")] = _FakeSession("upstox", "222")
+    store = _FakeStore({("upstox", "222"): {"access_token": "dead"}})
+
+    results = asyncio.run(establish_native_sessions(adapters, registry, store, ["upstox:222"]))
+
+    assert results["upstox:222"] == SESSION_INVALID_RELOGIN_MESSAGE
+    assert ("upstox", "222") not in registry.sessions
 
 
 def test_establish_all_skips_selectors_without_credentials(caplog) -> None:

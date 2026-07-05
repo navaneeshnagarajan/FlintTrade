@@ -239,7 +239,14 @@ async def establish_native_session(
         sessionless and the router keeps returning "no session" rather than
         dispatching against a half-authenticated broker.
     """
-    session = await adapter.login(credentials)
+    try:
+        session = await adapter.login(credentials)
+    except Exception:
+        try:
+            registry.remove_session_for(adapter_id, account_id)
+        except Exception:  # noqa: BLE001 - login already failed; best-effort cleanup
+            pass
+        raise
     registry.put_session(adapter_id, account_id, session)
     logger.info(
         "Native session established for %s (expires_at=%s)",
