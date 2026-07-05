@@ -11,6 +11,7 @@ import pytest
 from flinttrade_core.exceptions import BrokerError, DataError, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
+from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.groww import GrowwAdapter, _ROUTER_TOKEN
 
 pytestmark = pytest.mark.unit
@@ -146,14 +147,22 @@ async def test_login_returns_daily_expiring_session() -> None:
 
 @pytest.mark.asyncio
 async def test_login_requires_access_token() -> None:
-    with pytest.raises(BrokerError, match="access_token or api_key"):
+    with pytest.raises(BrokerError, match="access_token, api_key"):
         await GrowwAdapter().login({"user_id": "G1"})
 
 
 @pytest.mark.asyncio
 async def test_login_requires_complete_api_key_credentials() -> None:
-    with pytest.raises(BrokerError, match="both api_key and api_secret"):
+    with pytest.raises(BrokerError, match="exactly one of api_secret or totp"):
         await GrowwAdapter().login({"user_id": "G1", "api_key": "KEY"})
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_ambiguous_groww_token_material() -> None:
+    with pytest.raises(BrokerError, match="exactly one of api_secret or totp"):
+        await GrowwAdapter().login(
+            {"user_id": "G1", "api_key": "KEY", "api_secret": "SECRET", "totp": "123456"}
+        )
 
 
 @pytest.mark.asyncio
@@ -174,6 +183,48 @@ async def test_api_key_secret_login_mints_access_token() -> None:
     assert call["json_body"]["checksum"] == hashlib.sha256(
         f"SECRET{call['json_body']['timestamp']}".encode("utf-8")
     ).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_api_key_totp_login_mints_access_token() -> None:
+    transport = MockGrowwTransport()
+    adapter = _adapter(transport)
+    session = await adapter.login({"user_id": "G1", "api_key": "APIKEY", "totp": "123456"})
+
+    assert session.access_token == "MINTED_TOKEN"
+    assert session.extra["auth_method"] == "api_key_totp"
+    assert len(transport.calls) == 1
+    call = transport.calls[0]
+    assert call["method"] == "POST"
+    assert call["path"] == "/v1/token/api/access"
+    assert call["headers"]["Authorization"] == "Bearer APIKEY"
+    assert call["json_body"] == {"key_type": "totp", "totp": "123456"}
+
+
+def test_replay_credentials_drops_groww_totp_and_keeps_minted_token() -> None:
+    adapter = GrowwAdapter(http_factory=lambda: MockGrowwTransport())
+    session = Session(
+        access_token="MINTED_TOKEN",
+        expires_at=9e9,
+        account_id="G1",
+        adapter_id="groww",
+        extra={"auth_method": "api_key_totp"},
+    )
+    replay = adapter.replay_credentials({"user_id": "G1", "api_key": "APIKEY", "totp": "123456"}, session)
+    assert replay == {"user_id": "G1", "api_key": "APIKEY", "access_token": "MINTED_TOKEN"}
+
+
+def test_replay_credentials_keeps_replayable_groww_secret_material_unchanged() -> None:
+    adapter = GrowwAdapter(http_factory=lambda: MockGrowwTransport())
+    session = Session(
+        access_token="MINTED_TOKEN",
+        expires_at=9e9,
+        account_id="G1",
+        adapter_id="groww",
+        extra={"auth_method": "api_key_secret"},
+    )
+    original = {"user_id": "G1", "api_key": "APIKEY", "api_secret": "SECRET"}
+    assert adapter.replay_credentials(original, session) == original
 
 
 @pytest.mark.asyncio

@@ -319,6 +319,23 @@ def test_run_probe_dispatches_groww_access_token_reads(monkeypatch, capsys) -> N
     assert "groww-user" not in out
 
 
+def test_run_probe_dispatches_groww_totp_login(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["groww-api-key", "123456", "groww-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "groww", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("groww", "api_key_totp", ["profile"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.credentials == {"api_key": "groww-api-key", "totp": "123456", "user_id": "groww-user"}
+    assert "profile: ok object_keys=1" in out
+    assert "groww-api-key" not in out
+    assert "123456" not in out
+    assert "groww-user" not in out
+
+
 def test_kotak_wrapper_help_is_kotak_specific(capsys) -> None:
     try:
         kotak_wrapper.parse_args(["--help"])

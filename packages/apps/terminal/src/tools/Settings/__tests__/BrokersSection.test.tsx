@@ -140,6 +140,17 @@ const BROKERS = [
     connectable: false,
     auth_methods: [
       {
+        id: "api_key_totp",
+        label: "API key + TOTP",
+        kind: "direct" as const,
+        description: "Enter the Groww Trade API key and current TOTP code.",
+        fields: [
+          { name: "user_id", label: "User ID", secret: false, required: false, help: "" },
+          { name: "api_key", label: "API key", secret: true, required: true, help: "" },
+          { name: "totp", label: "6-digit TOTP", secret: false, required: true, help: "" },
+        ],
+      },
+      {
         id: "api_key_secret",
         label: "API key + secret",
         kind: "direct" as const,

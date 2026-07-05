@@ -512,6 +512,18 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
     ],
     "groww": [
         {
+            "id": "api_key_totp", "label": "API key + TOTP", "kind": "direct",
+            "description": (
+                "Enter the Groww Trade API key and the current TOTP code from your authenticator. FlintTrade "
+                "mints the daily access token locally before creating the broker session."
+            ),
+            "fields": [
+                _f("user_id", "User ID", required=False),
+                _f("api_key", "API key", secret=True),
+                _f("totp", "6-digit TOTP"),
+            ],
+        },
+        {
             "id": "api_key_secret", "label": "API key + secret", "kind": "direct",
             "description": (
                 "Enter the Groww Trade API key and secret from Groww Cloud/API Keys. FlintTrade mints the "

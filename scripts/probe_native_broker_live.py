@@ -124,6 +124,11 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
         ),
     },
     "groww": {
+        "api_key_totp": (
+            CredentialField("api_key", "Groww Trade API key"),
+            CredentialField("totp", "Current Groww TOTP"),
+            CredentialField("user_id", "Optional Groww user/account label", required=False),
+        ),
         "api_key_secret": (
             CredentialField("api_key", "Groww Trade API key"),
             CredentialField("api_secret", "Groww Trade API secret"),

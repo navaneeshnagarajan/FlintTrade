@@ -222,7 +222,7 @@ async def establish_native_session(
         adapter_id: The bare adapter name (e.g. ``"dhan"``).
         account_id: The account within that adapter (e.g. the client id).
         credential_store: Optional ``CredentialStore``. When supplied AND the
-            adapter exposes ``replay_credentials`` (Dhan/Upstox/Kotak Neo), the
+            adapter exposes ``replay_credentials`` (Dhan/Upstox/Kotak Neo/Groww), the
             vault payload is rewritten with the REPLAYABLE material after a
             successful login (G7): single-use artefacts (OAuth ``code``,
             30-second TOTP) are swapped for the minted ``access_token`` where
