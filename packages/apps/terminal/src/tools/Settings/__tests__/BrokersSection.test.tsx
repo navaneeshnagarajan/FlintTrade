@@ -46,7 +46,22 @@ const BROKERS = [
     adapter_id: "dhan",
     display_name: "Dhan",
     connectable: true,
+    oauth_redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+    postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
     auth_methods: [
+      {
+        id: "oauth",
+        label: "Log in with Dhan (OAuth)",
+        kind: "oauth" as const,
+        description: (
+          "Approve a DhanHQ app-consent login. Register the shown redirect URL in your DhanHQ app; " +
+          "Dhan redirects back with a tokenId that FlintTrade consumes for a 24h access token."
+        ),
+        fields: [
+          { name: "api_key", label: "App ID", secret: false, required: true, help: "" },
+          { name: "api_secret", label: "App secret", secret: true, required: true, help: "" },
+        ],
+      },
       {
         id: "access_token",
         label: "Access token",
@@ -55,6 +70,17 @@ const BROKERS = [
         fields: [
           { name: "client_id", label: "Dhan client ID", secret: false, required: true, help: "" },
           { name: "access_token", label: "Access token", secret: true, required: true, help: "" },
+        ],
+      },
+      {
+        id: "pin_totp",
+        label: "PIN + TOTP",
+        kind: "direct" as const,
+        description: "Mint a fresh 24h token from your PIN and authenticator code.",
+        fields: [
+          { name: "client_id", label: "Dhan client ID", secret: false, required: true, help: "" },
+          { name: "pin", label: "PIN", secret: true, required: true, help: "" },
+          { name: "totp", label: "6-digit TOTP", secret: false, required: true, help: "" },
         ],
       },
     ],
@@ -561,6 +587,8 @@ describe("BrokersSection", () => {
     // Pick Dhan (native select renders options once opened).
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
     fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Access token" }));
 
     fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "1234567890" } });
     fireEvent.change(screen.getByLabelText("Dhan client ID"), { target: { value: "1234567890" } });
@@ -577,6 +605,42 @@ describe("BrokersSection", () => {
       ),
     );
     expect(await screen.findByText(/Dhan account 1234567890 connected/i)).toBeInTheDocument();
+  });
+
+  it("launches OAuth for Dhan app-consent logins", async () => {
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection();
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    expect(screen.getByDisplayValue("http://127.0.0.1:5100/api/v1/native/oauth/callback")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("http://127.0.0.1:5100/api/v1/native/postbacks/dhan")).toBeInTheDocument();
+    expect(screen.getByText(/Dhan redirects back with a tokenId/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHANCLIENT1" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+    fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+
+    await waitFor(() =>
+      expect(oauthStartNativeAccount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          adapter_id: "dhan",
+          account_id: "DHANCLIENT1",
+          api_key: "APPID",
+          api_secret: "SECRET",
+        }),
+      ),
+    );
+    expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("auth.dhan.co"), "_blank", "noopener");
+    expect(screen.getByText(/Postback .* is optional/i)).toBeInTheDocument();
   });
 
   it("launches OAuth for an oauth-method broker (Upstox)", async () => {
