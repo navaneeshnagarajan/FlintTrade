@@ -41,7 +41,7 @@ flowchart LR
 
     subgraph NativeGateway["Native gateway · beta"]
         NGA[adapter contract + routing]
-        DHAN[Dhan · Upstox · Kotak Neo · IndMoney<br/>adapters built to parity]
+        DHAN[Dhan · Upstox · Kotak Neo · INDmoney · Groww<br/>adapters built to parity]
     end
 
     subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (optional external service)"]

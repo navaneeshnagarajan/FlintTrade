@@ -1,7 +1,7 @@
 """Native credential-replay login step (Phase 1 G3).
 
 The missing link between the encrypted credential vault and a live native
-broker session. A native adapter (Dhan/Upstox/Kotak Neo/IndMoney) is
+broker session. A native adapter (Dhan/Upstox/Kotak Neo/INDmoney/Groww) is
 *constructed* by ``build_native_adapters`` once its SDK attests and the vault
 holds credentials, but until something decrypts those credentials, calls the
 adapter's ``login()``, and registers the resulting ``Session`` under the
@@ -35,7 +35,7 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
     rather than false-alarming ``needs_relogin``. A 4xx (auth) or a broker
     error payload, by contrast, is a real "this token does not work".
 
-    The four natives use three different HTTP stacks — IndMoney raw ``httpx``,
+    The current natives use three HTTP stacks — INDmoney/Groww raw ``httpx``,
     Upstox ``urllib3`` (via ``upstox_client``), Dhan/Kotak Neo ``requests`` —
     so transport errors surface as different exception classes. All three
     families' timeout/connection errors (plus the stdlib fallbacks) are
@@ -159,7 +159,7 @@ def should_drop_session_after_probe_error(exc: BaseException) -> bool:
 async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, account_id: str) -> str | None:
     """Confirm a just-established token actually authenticates (error string or None).
 
-    The token-replay logins (Upstox/IndMoney) build a Session WITHOUT contacting
+    The token-replay logins (Upstox/INDmoney) build a Session WITHOUT contacting
     the broker, so a dead/expired token would otherwise report success. A cheap
     authenticated ``funds`` read forces a real API call. On a hard auth/broker
     failure the live session is DROPPED and an error returned so the caller can

@@ -255,9 +255,9 @@ def test_unchanged_payload_skips_the_write() -> None:
 
 
 def test_transient_classifier_covers_httpx_requests_urllib3_and_stdlib() -> None:
-    """The four natives use httpx (IndMoney), urllib3 (Upstox) and requests
-    (Dhan/Kotak) — a transport blip on ANY of them must be classified transient
-    so the liveness probe keeps a healthy session (audit fix, was httpx-only)."""
+    """The natives use httpx (INDmoney/Groww), urllib3 (Upstox), and requests
+    (Dhan/Kotak); a transport blip on any of them must be classified transient
+    so the liveness probe keeps a healthy session."""
     import socket
 
     import httpx

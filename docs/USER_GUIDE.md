@@ -94,9 +94,9 @@ run OpenAlgo.
 
 For native connect, use Setup → Brokers or Settings → Brokers. Dhan and Upstox
 offer OAuth-style flows, INDmoney uses a dashboard-generated 24-hour token, and
-Kotak Neo stays disabled until its live checks pass. Localhost postback URLs are
-for diagnostics unless you expose FlintTrade through a broker-reachable tunnel
-or public URL.
+Kotak Neo plus Groww stay disabled until their live checks pass. Localhost
+postback URLs are for diagnostics unless you expose FlintTrade through a
+broker-reachable tunnel or public URL.
 
 ### Why two layers?
 
