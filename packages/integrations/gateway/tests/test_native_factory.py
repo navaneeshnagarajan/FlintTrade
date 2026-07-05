@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from flinttrade_gateway.adapter import BROKER_CATALOG
 from flinttrade_gateway.brokers._base import BrokerAdapter
 from flinttrade_gateway.brokers.dhan import DhanAdapter
 from flinttrade_gateway.brokers.groww import GrowwAdapter
@@ -23,13 +24,25 @@ _ALL_OK = {"dhan", "upstox", "kotakneo", "indmoney", "groww"}
 
 
 def test_catalog_covers_native_adapters():
+    native_catalogue_ids = {broker_id for broker_id, info in BROKER_CATALOG.items() if info.native}
+    assert native_catalogue_ids == _ALL_OK
     assert set(NATIVE_ADAPTER_CLASSES) == _ALL_OK
-    assert set(SDK_PIN_BY_BROKER) == _ALL_OK
+    assert set(SDK_PIN_BY_BROKER) == native_catalogue_ids
     assert NATIVE_ADAPTER_CLASSES["dhan"] is DhanAdapter
     assert NATIVE_ADAPTER_CLASSES["upstox"] is UpstoxAdapter
     assert NATIVE_ADAPTER_CLASSES["kotakneo"] is KotakNeoAdapter
     assert NATIVE_ADAPTER_CLASSES["indmoney"] is IndMoneyAdapter
     assert NATIVE_ADAPTER_CLASSES["groww"] is GrowwAdapter
+
+
+def test_sdk_pins_are_derived_from_broker_catalogue():
+    """Native SDK attestation pins must have one catalogue source of truth."""
+    expected = {
+        broker_id: info.sdk_pin
+        for broker_id, info in BROKER_CATALOG.items()
+        if info.native
+    }
+    assert SDK_PIN_BY_BROKER == expected
 
 
 def test_rest_only_native_declares_no_sdk_pin():
@@ -40,8 +53,11 @@ def test_rest_only_native_declares_no_sdk_pin():
     official SDK installed for attestation/parity, even though the adapter still
     uses FlintTrade's REST transport.
     """
+    assert BROKER_CATALOG["indmoney"].sdk_pin is None
     assert SDK_PIN_BY_BROKER["indmoney"] is None
+    assert BROKER_CATALOG["dhan"].sdk_pin == "dhanhq"
     assert SDK_PIN_BY_BROKER["dhan"] == "dhanhq"
+    assert BROKER_CATALOG["groww"].sdk_pin == "growwapi"
     assert SDK_PIN_BY_BROKER["groww"] == "growwapi"
 
 

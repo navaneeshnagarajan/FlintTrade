@@ -210,6 +210,21 @@ class TestBrokerCatalog:
         assert entry.connectable is False
         assert set(EXCHANGE_TO_KOTAK) <= set(entry.exchanges)
 
+    def test_native_sdk_pins_live_on_broker_catalogue(self):
+        """SDK attestation metadata belongs to the single broker catalogue."""
+        pins = {
+            name: info.sdk_pin
+            for name, info in BROKER_CATALOG.items()
+            if info.native
+        }
+        assert pins == {
+            "dhan": "dhanhq",
+            "upstox": "upstox-python-sdk",
+            "kotakneo": "neo-api-client",
+            "indmoney": None,
+            "groww": "growwapi",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Bootstrap tests

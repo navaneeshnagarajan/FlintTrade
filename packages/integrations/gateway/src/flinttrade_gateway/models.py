@@ -167,6 +167,9 @@ class BrokerInfo(BaseModel):
             login/read verified — and the backend refuses native connects for
             it. Promote a broker by flipping this single flag after evidence.
         auth_methods: The native login methods (empty for bridge-only brokers).
+        sdk_pin: The repo-local SDK lock/package name that gates native
+            activation. ``None`` means either bridge-only or native REST-only
+            with no third-party SDK to attest.
         mcp: Metadata for the broker-hosted MCP server, when the broker offers
             one. This is setup/capability information, not a native-session
             credential or a FlintTrade order execution path.
@@ -184,6 +187,7 @@ class BrokerInfo(BaseModel):
     native: bool = False
     connectable: bool = False
     auth_methods: list[AuthMethod] = []
+    sdk_pin: str | None = None
     mcp: BrokerMCPInfo | None = None
 
 

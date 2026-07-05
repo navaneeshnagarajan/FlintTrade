@@ -746,6 +746,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=True,  # tried-and-tested against a live account
         auth_methods=_NATIVE_AUTH["dhan"],
+        sdk_pin="dhanhq",
         mcp=_BROKER_MCP["dhan"],
     ),
     "aliceblue": BrokerInfo(
@@ -765,6 +766,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=True,  # tried-and-tested against a live account
         auth_methods=_NATIVE_AUTH["upstox"],
+        sdk_pin="upstox-python-sdk",
         mcp=_BROKER_MCP["upstox"],
     ),
     "compositedge": BrokerInfo(
@@ -842,6 +844,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=False,
         auth_methods=_NATIVE_AUTH["kotakneo"],
+        sdk_pin="neo-api-client",
     ),
     "motilal": BrokerInfo(
         name="motilal",
@@ -888,6 +891,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=False,
         auth_methods=_NATIVE_AUTH["groww"],
+        sdk_pin="growwapi",
         mcp=_BROKER_MCP["groww"],
     ),
     "wisdom": BrokerInfo(
@@ -935,6 +939,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=True,  # login/read verified against INDstocks dashboard token read paths
         auth_methods=_NATIVE_AUTH["indmoney"],
+        sdk_pin=None,
     ),
     "fivepaisaxts": BrokerInfo(
         name="fivepaisaxts",

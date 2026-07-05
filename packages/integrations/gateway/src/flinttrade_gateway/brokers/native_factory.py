@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..adapter import BROKER_CATALOG
 from ._base import BrokerAdapter
 from .dhan import DhanAdapter
 from .groww import GrowwAdapter
@@ -39,17 +40,13 @@ NATIVE_ADAPTER_CLASSES: dict[str, type[BrokerAdapter]] = {
     "groww": GrowwAdapter,
 }
 
-# broker_id -> the ``brokers.lock`` SDK pin name that gates its activation. Lets
-# the router map an attestation result (keyed by SDK package) back to a broker.
-# Placeholder pins intentionally attest as ``skipped`` and keep future waves dormant.
-# ``None`` marks REST-only natives with NO third-party SDK (INDmoney):
-# there is nothing to attest, so activation is gated by stored credentials alone.
+# broker_id -> the ``brokers.lock`` SDK pin name that gates native activation.
+# The pin itself lives on BROKER_CATALOG so the operator-facing native flag and
+# the repo-local SDK attestation gate cannot drift.
 SDK_PIN_BY_BROKER: dict[str, str | None] = {
-    "dhan": "dhanhq",
-    "upstox": "upstox-python-sdk",
-    "kotakneo": "neo-api-client",
-    "indmoney": None,
-    "groww": "growwapi",
+    broker_id: info.sdk_pin
+    for broker_id, info in BROKER_CATALOG.items()
+    if info.native
 }
 
 

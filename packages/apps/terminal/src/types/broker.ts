@@ -35,6 +35,7 @@ export interface BrokerInfo {
   native?: boolean;
   connectable?: boolean;
   auth_methods?: AuthMethod[];
+  sdk_pin?: string | null;
 }
 
 export interface BrokerAccount {
