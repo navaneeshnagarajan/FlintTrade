@@ -225,7 +225,7 @@ async def test_logout_tolerates_facade_without_logout():
     await adapter.logout(session)  # must not raise
 
 
-def test_sdk_rest_wrapper_adds_fin_key_only_to_session_calls():
+def test_sdk_rest_wrapper_adds_fin_key_to_login_and_session_calls_only():
     class FakeRest:
         def __init__(self) -> None:
             self.headers: list[dict[str, str]] = []
@@ -244,16 +244,38 @@ def test_sdk_rest_wrapper_adds_fin_key_only_to_session_calls():
             self.api_client = type("ApiClient", (), {"rest_client": FakeRest()})()
 
     neo = FakeNeo()
-    KotakNeoClient._install_post_login_fin_key_header(neo)
+    KotakNeoClient._install_fin_key_header_patch(neo)
     rest = neo.api_client.rest_client
 
     rest.request(method="POST", url="https://example/orders", headers={"Auth": "A", "Sid": "S"})
-    rest.request(method="GET", url="https://example/quotes", headers={"Authorization": "plain-token"})
+    rest.request(
+        method="POST",
+        url="https://mis.kotaksecurities.com/login/1.0/tradeApiLogin",
+        headers={"Authorization": "plain-token"},
+    )
+    rest.request(
+        method="POST",
+        url="https://mis.kotaksecurities.com/login/1.0/tradeApiValidate",
+        headers={"Authorization": "plain-token", "Auth": "view-token", "sid": "view-sid"},
+    )
+    rest.request(
+        method="GET",
+        url="https://example/script-details/1.0/quotes/neosymbol/nse_cm|26000/all",
+        headers={"Authorization": "plain-token"},
+    )
+    rest.request(
+        method="GET",
+        url="https://example/script-details/1.0/masterscrip/file-paths",
+        headers={"Authorization": "plain-token"},
+    )
     rest.request(method="POST", url="https://example/orders", headers={"Auth": "A", "neo-fin-key": "custom"})
 
     assert rest.headers[0]["neo-fin-key"] == "neotradeapi"
-    assert "neo-fin-key" not in rest.headers[1]
-    assert rest.headers[2]["neo-fin-key"] == "custom"
+    assert rest.headers[1]["neo-fin-key"] == "neotradeapi"
+    assert rest.headers[2]["neo-fin-key"] == "neotradeapi"
+    assert "neo-fin-key" not in rest.headers[3]
+    assert "neo-fin-key" not in rest.headers[4]
+    assert rest.headers[5]["neo-fin-key"] == "custom"
 
 
 # ---------------------------------------------------------------------------

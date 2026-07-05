@@ -176,7 +176,7 @@ class KotakNeoClient:
             neo_fin_key=credentials.get("neo_fin_key"),
             consumer_key=credentials.get("consumer_key"),
         )
-        self._install_post_login_fin_key_header(self._neo)
+        self._install_fin_key_header_patch(self._neo)
         M.ensure_ok(
             self._neo.totp_login(
                 mobile_number=credentials.get("mobile_number"),
@@ -187,15 +187,15 @@ class KotakNeoClient:
         M.ensure_ok(self._neo.totp_validate(mpin=credentials.get("mpin")))
 
     @staticmethod
-    def _install_post_login_fin_key_header(neo: Any) -> None:
-        """Patch the SDK REST client to send ``neo-fin-key`` on session calls.
+    def _install_fin_key_header_patch(neo: Any) -> None:
+        """Patch the SDK REST client to send ``neo-fin-key`` where required.
 
-        The current Kotak docs require ``neo-fin-key`` on post-login
-        Auth/Sid-backed order/report/portfolio/limits/margin calls, while
+        The current Kotak docs require ``neo-fin-key`` on the fixed login calls
+        and on Auth/Sid-backed order/report/portfolio/limits/margin calls, while
         quotes and scrip-master remain Authorization-only. Some SDK modules omit
-        the fin-key header, so the facade adds it only when the outgoing request
-        already carries ``Auth`` or ``Sid``. This keeps the SDK surface intact
-        and avoids adding the header to quotes/scrip-master.
+        the fin-key header, so the facade adds it only for login URLs or when
+        the outgoing request already carries ``Auth``/``Sid``. This keeps the
+        SDK surface intact and avoids adding the header to quotes/scrip-master.
         """
         api_client = getattr(neo, "api_client", None)
         rest_client = getattr(api_client, "rest_client", None)
@@ -214,7 +214,13 @@ class KotakNeoClient:
             if isinstance(headers, dict):
                 patched = dict(headers)
                 lower = {str(key).lower() for key in patched}
-                if ("auth" in lower or "sid" in lower) and "neo-fin-key" not in lower:
+                url = kwargs.get("url")
+                if url is None and len(mutable_args) >= 2:
+                    url = mutable_args[1]
+                path = str(url or "").lower()
+                login_call = "tradeapilogin" in path or "tradeapivalidate" in path
+                needs_fin_key = "auth" in lower or "sid" in lower or login_call
+                if needs_fin_key and "neo-fin-key" not in lower:
                     patched["neo-fin-key"] = fin_key()
                 if positional_headers:
                     mutable_args[3] = patched
@@ -224,6 +230,8 @@ class KotakNeoClient:
 
         rest_client.request = request
         rest_client._flinttrade_fin_key_wrapped = True
+
+    _install_post_login_fin_key_header = _install_fin_key_header_patch
 
     # -- gated writes -------------------------------------------------------
 
