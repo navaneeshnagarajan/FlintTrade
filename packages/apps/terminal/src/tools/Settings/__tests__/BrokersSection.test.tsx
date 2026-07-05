@@ -210,7 +210,7 @@ const MCP_BROKERS = [
       use_cases: ["Portfolio intelligence", "F&O analysis", "Smart order management", "Market context"],
       cautions: [
         "Sell orders through Groww MCP require DDPI authorisation.",
-        "Groww native adapter code exists but remains disabled until live login/read verification passes.",
+        "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP, and order-safety verification pass.",
         "The Groww Trade API page still requires static IP setup for API-key order placement.",
       ],
       client_configs: [
@@ -398,7 +398,7 @@ describe("BrokersSection", () => {
     expect(screen.getByText("npx mcp-remote@0.1.18 https://mcp.groww.in/mcp 52155")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("mcpServers");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
-    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("disabled until live login/read verification");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
     expect(screen.queryByRole("option", { name: "Groww" })).not.toBeInTheDocument();

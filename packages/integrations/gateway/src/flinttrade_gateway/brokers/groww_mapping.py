@@ -14,6 +14,7 @@ from typing import Any
 
 from flinttrade_core.exceptions import (
     BrokerError,
+    DataError,
     InsufficientFunds,
     InvalidPrice,
     InvalidQuantity,
@@ -54,14 +55,51 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
-def map_error(status: int, payload: Any) -> BrokerError:
+def _error_fields(payload: Any) -> tuple[str, str]:
+    if not isinstance(payload, dict):
+        return "", _text(payload)
+    nested = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    code = _text(
+        payload.get("error_code")
+        or payload.get("code")
+        or (nested.get("code") if isinstance(nested, dict) else "")
+    )
+    message = _text(
+        payload.get("message")
+        or (nested.get("message") if isinstance(nested, dict) else "")
+        or payload
+    )
+    return code, message
+
+
+def _is_market_data_endpoint(endpoint: str | None) -> bool:
+    value = _text(endpoint).lower()
+    return any(
+        marker in value
+        for marker in (
+            "/live-data/",
+            "/historical/",
+            "/option-chain/",
+            "/instruments/",
+            "instrument.csv",
+        )
+    )
+
+
+def map_error(status: int, payload: Any, *, endpoint: str | None = None) -> BrokerError:
     """Map a Groww HTTP/envelope failure into FlintTrade's taxonomy."""
-    code = _text(payload.get("error_code") if isinstance(payload, dict) else "")
-    message = _text(payload.get("message") if isinstance(payload, dict) else "") or _text(payload) or "Groww API error"
+    code, message = _error_fields(payload)
+    message = message or "Groww API error"
     lower = message.lower()
     kwargs = {"broker_code": code or str(status), "broker_id": "groww"}
-    if status in (401, 403) or "unauthor" in lower or "expired" in lower or "invalid token" in lower:
+    if status in (401, 403) and _is_market_data_endpoint(endpoint) and (
+        "forbidden" in lower or "authentication required" in lower or "access denied" in lower
+    ):
+        return DataError("Groww market-data access is not enabled for this API key", **kwargs)
+    if status == 401 or "unauthor" in lower or "expired" in lower or "invalid token" in lower:
         return SessionExpired("Groww access token is invalid or expired", **kwargs)
+    if status == 403:
+        return BrokerError(message, **kwargs)
     if status == 429 or "rate limit" in lower:
         return RateLimitError(message, endpoint="groww", broker_code=code or str(status), broker_id="groww")
     if "margin" in lower or "fund" in lower or "balance" in lower:

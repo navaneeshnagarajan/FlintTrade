@@ -35,6 +35,7 @@ STATUS_SKIPPED = "skipped"  # pin not yet populated (placeholder) — broker not
 # brokers.lock pin name → installed distribution name for version lookup.
 _DIST_NAMES: dict[str, str] = {
     "dhanhq": "dhanhq",
+    "growwapi": "growwapi",
     "upstox-python-sdk": "upstox-python-sdk",
     "neo-api-client": "neo-api-client",
 }

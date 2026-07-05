@@ -35,12 +35,14 @@ def test_catalog_covers_native_adapters():
 def test_rest_only_native_declares_no_sdk_pin():
     """REST-only natives have no third-party SDK pin.
 
-    IndMoney and Groww set their pin to ``None``, which
-    ``attest_ok`` treats as trivially attested — credentials remain the only
-    activation gate."""
+    IndMoney sets its pin to ``None``, which ``attest_ok`` treats as trivially
+    attested — credentials remain the only activation gate. Groww now has the
+    official SDK installed for attestation/parity, even though the adapter still
+    uses FlintTrade's REST transport.
+    """
     assert SDK_PIN_BY_BROKER["indmoney"] is None
-    assert SDK_PIN_BY_BROKER["groww"] is None
     assert SDK_PIN_BY_BROKER["dhan"] == "dhanhq"
+    assert SDK_PIN_BY_BROKER["groww"] == "growwapi"
 
 
 def test_is_native_broker():

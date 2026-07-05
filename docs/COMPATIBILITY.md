@@ -42,14 +42,16 @@ optional OpenAlgo-compatible bridge. The native path is beta: the gateway
 contract, routing, credentials, capabilities, and founder-broker adapter code are
 present in the repo. Native connectability is gated per broker by live evidence:
 Dhan, Upstox, and INDmoney are currently enabled in the app after login/read
-verification against real accounts; Kotak Neo remains catalogued but disabled
-as "coming soon" until its live adapter login/read checks pass. Dhan and Upstox
-use native SDK/API clients, INDmoney is REST-only with a dashboard-generated
-24-hour token, and Kotak Neo has adapter/mapping coverage plus portal evidence
-but no promoted native connect yet. The credential-replay login step, in-app
-credential capture (Settings → Brokers), OAuth connect flow, and daily session
-refresh are built. Closed-market/no-funds verification does not prove funded
-order execution; keep order-placement claims scoped to the evidence collected.
+verification against real accounts; Kotak Neo and Groww remain catalogued but
+disabled as "coming soon" until their broker-specific blockers clear. Dhan and
+Upstox use native SDK/API clients, Groww has the official `growwapi` SDK pinned
+for attestation/reference parity while production calls use FlintTrade's tested
+REST transport, and INDmoney is REST-only with a dashboard-generated 24-hour
+token. Kotak Neo has adapter/mapping coverage plus portal evidence but no
+promoted native connect yet. The credential-replay login step, in-app credential
+capture (Settings → Brokers), OAuth connect flow, and daily session refresh are
+built. Closed-market/no-funds verification does not prove funded order
+execution; keep order-placement claims scoped to the evidence collected.
 
 For the OpenAlgo path, whatever broker version OpenAlgo supports is the
 compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)

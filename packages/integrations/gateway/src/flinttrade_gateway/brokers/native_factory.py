@@ -1,7 +1,8 @@
 """Native-adapter activation factory (the dormant -> live bridge).
 
-The native SDK adapters (Dhan / Upstox / Kotak Neo) are written, gated and
-mock-tested, but stay dormant until two prerequisites hold for a broker:
+The native adapters (Dhan / Upstox / Kotak Neo / INDmoney / Groww) are written,
+gated and mock-tested, but stay dormant until two prerequisites hold for a
+broker:
 
 1. its non-placeholder SDK pin is installed and attested (``broker_sdk_attest``), and
 2. the operator has stored credentials for it (the encrypted vault).
@@ -41,14 +42,14 @@ NATIVE_ADAPTER_CLASSES: dict[str, type[BrokerAdapter]] = {
 # broker_id -> the ``brokers.lock`` SDK pin name that gates its activation. Lets
 # the router map an attestation result (keyed by SDK package) back to a broker.
 # Placeholder pins intentionally attest as ``skipped`` and keep future waves dormant.
-# ``None`` marks REST-only natives with NO third-party SDK (IndMoney/Groww):
+# ``None`` marks REST-only natives with NO third-party SDK (INDmoney):
 # there is nothing to attest, so activation is gated by stored credentials alone.
 SDK_PIN_BY_BROKER: dict[str, str | None] = {
     "dhan": "dhanhq",
     "upstox": "upstox-python-sdk",
     "kotakneo": "neo-api-client",
     "indmoney": None,
-    "groww": None,
+    "groww": "growwapi",
 }
 
 

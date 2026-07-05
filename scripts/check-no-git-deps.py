@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Assert no git/file/path/tarball deps in any lockfile or manifest (provenance gate).
+"""Assert no unapproved git/file/path/tarball deps in lockfiles/manifests.
 
 Every dependency — direct or transitive — must come from an attested public registry
 (PyPI / npm / crates.io). A git URL has no verifiable hash chain; the upstream commit
-can be force-pushed, the URL hijacked, the tarball replaced.
+can be force-pushed, the URL hijacked, the tarball replaced. The only current
+exception is an operator-cleared broker SDK that is unavailable on PyPI and is
+cross-checked against ``brokers.lock`` by exact commit.
 
 Failures:
   - requirements.in / requirements.lock: any `git+`, `file:`, or remote archive URL
+  - uv.lock: any git source except an exact broker SDK commit listed in brokers.lock
   - pnpm-lock.yaml: any git-resolution or tarball-URL dependency
   - Cargo.toml: any external `git = "..."` or `path = "..."` dep outside the workspace
 
@@ -26,6 +29,22 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 _FORBIDDEN_REQ = re.compile(r"(git\+|file:|https?://[^/]+/.+\.(tar\.gz|whl|zip))")
 
 
+def _allowed_uv_git_sources() -> dict[str, str]:
+    brokers_lock = REPO / "brokers.lock"
+    if not brokers_lock.exists():
+        return {}
+    data = tomllib.loads(brokers_lock.read_text(encoding="utf-8"))
+    allowed: dict[str, str] = {}
+    for entry in data.get("broker", []):
+        if not isinstance(entry, Mapping):
+            continue
+        name = str(entry.get("name", ""))
+        source_commit = str(entry.get("source_commit", ""))
+        if name and source_commit:
+            allowed[name] = source_commit
+    return allowed
+
+
 def check_requirements() -> list[str]:
     fails: list[str] = []
     for fname in ("requirements.in", "requirements.lock"):
@@ -36,8 +55,31 @@ def check_requirements() -> list[str]:
             s = line.strip()
             if not s or s.startswith("#") or s.startswith("--hash"):
                 continue
-            if _FORBIDDEN_REQ.match(s):
+            if _FORBIDDEN_REQ.search(s):
                 fails.append(f"{fname}:{n}: forbidden non-registry source: {s!r}")
+    return fails
+
+
+def check_uv_lock() -> list[str]:
+    p = REPO / "uv.lock"
+    if not p.exists():
+        return []
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
+    allowed = _allowed_uv_git_sources()
+    fails: list[str] = []
+    for package in data.get("package", []):
+        if not isinstance(package, Mapping):
+            continue
+        source = package.get("source")
+        if not isinstance(source, Mapping):
+            continue
+        git_value = source.get("git")
+        if not isinstance(git_value, str):
+            continue
+        name = str(package.get("name", ""))
+        expected_commit = allowed.get(name)
+        if not expected_commit or expected_commit not in git_value:
+            fails.append(f"uv.lock: forbidden git source for {name}: {git_value!r}")
     return fails
 
 
@@ -122,12 +164,12 @@ def check_cargo_toml() -> list[str]:
 
 
 def main() -> int:
-    fails = check_requirements() + check_pnpm_lock() + check_cargo_toml()
+    fails = check_requirements() + check_uv_lock() + check_pnpm_lock() + check_cargo_toml()
     if fails:
         for f in fails:
             print(f"FAIL: {f}", file=sys.stderr)
         return 1
-    print("dependency provenance OK (no git/file/tarball/external-path deps)")
+    print("dependency provenance OK (no unapproved git/file/tarball/external-path deps)")
     return 0
 
 

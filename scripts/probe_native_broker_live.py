@@ -50,7 +50,7 @@ DEFAULT_READS: dict[str, tuple[str, ...]] = {
 }
 DEFAULT_METHOD: dict[str, str] = {
     "dhan": "access_token",
-    "groww": "access_token",
+    "groww": "api_key_secret",
     "indmoney": "access_token",
     "kotakneo": "totp_mpin",
     "upstox": "access_token",
@@ -83,6 +83,11 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
         ),
     },
     "groww": {
+        "api_key_secret": (
+            CredentialField("api_key", "Groww Trade API key"),
+            CredentialField("api_secret", "Groww Trade API secret"),
+            CredentialField("user_id", "Optional Groww user/account label", required=False),
+        ),
         "access_token": (
             CredentialField("access_token", "Groww Trade API access token"),
             CredentialField("user_id", "Optional Groww user/account label", required=False),

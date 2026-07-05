@@ -199,7 +199,7 @@ class TestBrokerCatalog:
         assert entry.connectable is False
         assert entry.mcp is not None
         assert entry.mcp.remote_url == "https://mcp.groww.in/mcp"
-        assert {m.id for m in entry.auth_methods} == {"access_token"}
+        assert {m.id for m in entry.auth_methods} == {"api_key_secret", "access_token"}
 
 
 # ---------------------------------------------------------------------------

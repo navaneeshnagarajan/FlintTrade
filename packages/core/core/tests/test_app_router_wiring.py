@@ -207,7 +207,7 @@ def test_native_activation_checks_credential_presence() -> None:
 
     ``has_credentials`` must mirror the vault's ``list_accounts`` adapter ids.
     ``attest_ok`` now depends on the pinned SDK being INSTALLED (dhan/upstox/
-    kotakneo all carry real pins) — so its per-broker value is environment-
+    kotakneo/groww all carry real pins) — so its per-broker value is environment-
     dependent and not hard-asserted here. IndMoney is the exception: its SDK pin
     is ``None`` (REST-only), so it always attests. PLACEHOLDER-pin dormancy is
     covered against a fixture lock in ``test_broker_sdk_attest``.

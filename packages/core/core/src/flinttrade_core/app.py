@@ -599,7 +599,7 @@ def _native_activation_checks(
             return False
         pin = SDK_PIN_BY_BROKER[broker_id]
         if pin is None:
-            # REST-only native (no third-party SDK, e.g. IndMoney): nothing to
+            # REST-only native (no third-party SDK, currently INDmoney): nothing to
             # attest — activation is gated by stored credentials alone.
             return True
         return attest_status.get(pin) == STATUS_OK

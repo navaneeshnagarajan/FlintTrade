@@ -520,10 +520,23 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
     ],
     "groww": [
         {
+            "id": "api_key_secret", "label": "API key + secret", "kind": "direct",
+            "description": (
+                "Enter the Groww Trade API key and secret from Groww Cloud/API Keys. FlintTrade mints the "
+                "daily access token locally before creating the broker session. Live order placement still "
+                "requires static outbound IP setup."
+            ),
+            "fields": [
+                _f("user_id", "User ID", required=False),
+                _f("api_key", "API key", secret=True),
+                _f("api_secret", "API secret", secret=True),
+            ],
+        },
+        {
             "id": "access_token", "label": "Access token", "kind": "direct",
             "description": (
-                "Generate a Groww Trade API access token from Groww Cloud/API Keys and paste it here. "
-                "Groww tokens expire at 06:00 IST and live order placement still requires static outbound IP setup."
+                "Paste an already minted Groww Trade API access token from Groww Cloud/API Keys. Groww tokens "
+                "expire at 06:00 IST and live order placement still requires static outbound IP setup."
             ),
             "fields": [
                 _f("user_id", "User ID", required=False),
@@ -649,7 +662,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         ],
         "cautions": [
             "Sell orders through Groww MCP require DDPI authorisation.",
-            "Groww native adapter code exists but remains disabled until live login/read verification passes.",
+            "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP, and order-safety verification pass.",
             "The Groww Trade API page still requires static IP setup for API-key order placement.",
         ],
         "client_configs": [

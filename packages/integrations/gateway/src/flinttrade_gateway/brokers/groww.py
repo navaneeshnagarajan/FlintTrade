@@ -13,6 +13,7 @@ Safety: every write requires the router's shared ``_ROUTER_TOKEN``. A direct
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from zoneinfo import ZoneInfo
@@ -104,6 +105,39 @@ def _next_6am_ist() -> float:
     return expiry.astimezone(timezone.utc).timestamp()
 
 
+def _expiry_from_token_payload(payload: Any) -> float:
+    """Best-effort expiry parser for Groww token responses."""
+    if not isinstance(payload, dict):
+        return _next_6am_ist()
+    now = datetime.now(tz=timezone.utc).timestamp()
+    for key in ("expires_at", "expiry", "expiresAt", "expiryTime", "expiry_time"):
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        if isinstance(value, (int, float)):
+            return float(value) / 1000 if value > 10_000_000_000 else float(value)
+        text = str(value).strip()
+        if not text:
+            continue
+        if text.isdigit():
+            numeric = float(text)
+            return numeric / 1000 if numeric > 10_000_000_000 else numeric
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    expires_in = payload.get("expires_in") or payload.get("expiresIn")
+    try:
+        if expires_in:
+            return now + float(expires_in)
+    except (TypeError, ValueError):
+        pass
+    return _next_6am_ist()
+
+
 class GrowwAdapter(BrokerAdapter):
     """Native Groww Trade API adapter."""
 
@@ -161,20 +195,69 @@ class GrowwAdapter(BrokerAdapter):
             json_body=json_body,
         )
         if status >= 400:
-            raise M.map_error(status, payload)
+            raise M.map_error(status, payload, endpoint=path)
         return payload if raw else M.unwrap(payload)
 
+    async def _mint_access_token(self, transport: Transport, *, api_key: str, api_secret: str) -> tuple[str, float]:
+        timestamp = str(int(datetime.now(tz=timezone.utc).timestamp()))
+        checksum = hashlib.sha256(f"{api_secret}{timestamp}".encode("utf-8")).hexdigest()
+        status, payload = await asyncio.to_thread(
+            transport,
+            "POST",
+            f"{M.BASE_URL}/v1/token/api/access",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "X-API-VERSION": "1.0",
+            },
+            params=None,
+            json_body={
+                "key_type": "approval",
+                "checksum": checksum,
+                "timestamp": timestamp,
+            },
+        )
+        if status >= 400:
+            raise M.map_error(status, payload, endpoint="/v1/token/api/access")
+        data = M.unwrap(payload)
+        token = ""
+        if isinstance(data, dict):
+            token = str(data.get("token") or data.get("access_token") or data.get("accessToken") or "").strip()
+        elif isinstance(data, str):
+            token = data.strip()
+        if not token:
+            raise BrokerError("Groww access-token mint did not return a token", broker_id="groww")
+        return token, _expiry_from_token_payload(data)
+
     async def login(self, credentials: dict) -> Session:
-        access_token = str(credentials.get("access_token") or credentials.get("api_key") or "").strip()
+        access_token = str(credentials.get("access_token") or "").strip()
+        expires_at = _next_6am_ist()
+        auth_method = "access_token"
         if not access_token:
-            raise BrokerError("Groww login requires an access_token from Groww Cloud API Keys", broker_id="groww")
+            api_key = str(credentials.get("api_key") or "").strip()
+            api_secret = str(credentials.get("api_secret") or credentials.get("secret") or "").strip()
+            if not (api_key or api_secret):
+                raise BrokerError(
+                    "Groww login requires either access_token or api_key + api_secret",
+                    broker_id="groww",
+                )
+            if not api_key or not api_secret:
+                raise BrokerError("Groww API-key login requires both api_key and api_secret", broker_id="groww")
+            mint_transport = self._http_factory() if self._http_factory is not None else _build_httpx_transport()
+            access_token, expires_at = await self._mint_access_token(
+                mint_transport,
+                api_key=api_key,
+                api_secret=api_secret,
+            )
+            auth_method = "api_key_secret"
         transport = None if self._http_factory is not None else _build_httpx_transport()
         return Session(
             access_token=access_token,
-            expires_at=_next_6am_ist(),
+            expires_at=expires_at,
             account_id=str(credentials.get("user_id") or credentials.get("account_id") or ""),
             adapter_id="groww",
-            extra={"transport": transport},
+            extra={"transport": transport, "auth_method": auth_method},
         )
 
     async def refresh(self, session: Session) -> Session:
@@ -411,12 +494,12 @@ class GrowwAdapter(BrokerAdapter):
             transport,
             "GET",
             "https://growwapi-assets.groww.in/instruments/instrument.csv",
-            headers=self._headers(session),
+            headers={"Accept": "text/csv"},
             params=None,
             json_body=None,
         )
         if status >= 400:
-            raise M.map_error(status, payload)
+            raise M.map_error(status, payload, endpoint="instrument.csv")
         return payload if isinstance(payload, str) else str(payload)
 
     async def instruments(self, session: Session) -> list[dict[str, str]]:

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError, SessionExpired
+from flinttrade_core.exceptions import BrokerError, DataError, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.groww import GrowwAdapter, _ROUTER_TOKEN
@@ -21,6 +22,7 @@ class MockGrowwTransport:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
         self.expired = False
+        self.forbid_market_data = False
 
     def __call__(
         self,
@@ -43,6 +45,15 @@ class MockGrowwTransport:
             return 401, {"status": "FAILURE", "message": "Access token expired"}
 
         path = self.calls[-1]["path"]
+        if self.forbid_market_data and (
+            path.startswith("/v1/live-data/")
+            or path.startswith("/v1/historical/")
+            or path.startswith("/v1/option-chain/")
+            or url == "https://growwapi-assets.groww.in/instruments/instrument.csv"
+        ):
+            return 403, {"status": "FAILURE", "error": {"code": "403", "message": "Access forbidden for this request."}}
+        if path == "/v1/token/api/access":
+            return 200, {"status": "SUCCESS", "payload": {"token": "MINTED_TOKEN"}}
         if path == "/v1/order/create":
             return 200, {"status": "SUCCESS", "payload": {"groww_order_id": "GROWWOID1"}}
         if path == "/v1/order/modify":
@@ -129,13 +140,40 @@ async def test_login_returns_daily_expiring_session() -> None:
     assert session.adapter_id == "groww"
     assert session.account_id == "G1"
     assert session.access_token == "TOK"
+    assert session.extra["auth_method"] == "access_token"
     assert before < session.expires_at <= before + 24 * 3600 + 60
 
 
 @pytest.mark.asyncio
 async def test_login_requires_access_token() -> None:
-    with pytest.raises(BrokerError, match="access_token"):
+    with pytest.raises(BrokerError, match="access_token or api_key"):
         await GrowwAdapter().login({"user_id": "G1"})
+
+
+@pytest.mark.asyncio
+async def test_login_requires_complete_api_key_credentials() -> None:
+    with pytest.raises(BrokerError, match="both api_key and api_secret"):
+        await GrowwAdapter().login({"user_id": "G1", "api_key": "KEY"})
+
+
+@pytest.mark.asyncio
+async def test_api_key_secret_login_mints_access_token() -> None:
+    transport = MockGrowwTransport()
+    adapter = _adapter(transport)
+    session = await adapter.login({"user_id": "G1", "api_key": "APIKEY", "api_secret": "SECRET"})
+
+    assert session.access_token == "MINTED_TOKEN"
+    assert session.extra["auth_method"] == "api_key_secret"
+    assert len(transport.calls) == 1
+    call = transport.calls[0]
+    assert call["method"] == "POST"
+    assert call["path"] == "/v1/token/api/access"
+    assert call["headers"]["Authorization"] == "Bearer APIKEY"
+    assert call["json_body"]["key_type"] == "approval"
+    assert str(call["json_body"]["timestamp"]).isdigit()
+    assert call["json_body"]["checksum"] == hashlib.sha256(
+        f"SECRET{call['json_body']['timestamp']}".encode("utf-8")
+    ).hexdigest()
 
 
 @pytest.mark.asyncio
@@ -221,6 +259,8 @@ async def test_reads_map_groww_envelopes() -> None:
     assert ltps == {"NSE:RELIANCE": 2905.5}
     assert candles.bars[0].close == 104.0
     assert instruments == [{"trading_symbol": "RELIANCE", "exchange": "NSE", "segment": "CASH"}]
+    instrument_call = next(call for call in transport.calls if call["url"] == "https://growwapi-assets.groww.in/instruments/instrument.csv")
+    assert instrument_call["headers"] == {"Accept": "text/csv"}
 
 
 @pytest.mark.asyncio
@@ -231,3 +271,15 @@ async def test_expired_token_maps_to_session_expired() -> None:
     session = await _session(adapter)
     with pytest.raises(SessionExpired):
         await adapter.funds(session)
+
+
+@pytest.mark.asyncio
+async def test_market_data_forbidden_does_not_expire_session() -> None:
+    transport = MockGrowwTransport()
+    transport.forbid_market_data = True
+    adapter = _adapter(transport)
+    session = await _session(adapter)
+
+    assert await adapter.funds(session)
+    with pytest.raises(DataError, match="market-data access is not enabled"):
+        await adapter.quotes(session, ["NSE:RELIANCE"])

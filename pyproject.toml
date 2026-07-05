@@ -1,3 +1,12 @@
+[tool.uv]
+dependency-metadata = [
+    # The Kotak Neo SDK declares an exact old dependency stack that conflicts
+    # with FlintTrade's supported runtime. The adapter imports the SDK lazily and
+    # only uses its own client surface, so keep the SDK itself pinned while
+    # preventing those stale transitive pins from downgrading the workspace.
+    { name = "neo-api-client", version = "2.0.0", requires-dist = [], requires-python = ">=3.12" },
+]
+
 [tool.uv.workspace]
 members = [
     "packages/core/core",
@@ -48,6 +57,7 @@ flinttrade-journal = { workspace = true }
 flinttrade-screener = { workspace = true }
 flinttrade-ticks = { workspace = true }
 flinttrade-webhooks = { workspace = true }
+neo-api-client = { git = "https://github.com/Kotak-Neo/Kotak-neo-api-v2.git", rev = "8cee5bda63bd9334f8501bb23b7f1d2945f93397" }
 
 # ----------------------------------------------------------------------------
 # Pytest configuration

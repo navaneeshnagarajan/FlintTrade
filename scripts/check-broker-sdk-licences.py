@@ -67,6 +67,14 @@ def _extract_metadata_licence(name: str) -> str | None:
     return _normalise_spdx(raw) or None
 
 
+def _is_distribution_installed(name: str) -> bool:
+    try:
+        md.version(name)
+    except md.PackageNotFoundError:
+        return False
+    return True
+
+
 def _is_placeholder_entry(entry: dict[str, object]) -> bool:
     """True when an inactive broker wave has not populated its full SDK pin."""
     fields = (
@@ -115,7 +123,10 @@ def main() -> int:
             continue
         installed = _extract_metadata_licence(name)
         if installed is None:
-            print(f"NOTE: {name} not installed here; skipping wheel-metadata cross-check")
+            if _is_distribution_installed(name):
+                print(f"NOTE: {name} installed but has no wheel licence metadata; relying on brokers.lock")
+            else:
+                print(f"NOTE: {name} not installed here; skipping wheel-metadata cross-check")
             continue
         if installed != declared and installed not in allowed:
             fails.append(

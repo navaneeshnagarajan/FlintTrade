@@ -110,7 +110,7 @@ class TestCapabilitiesRoute:
         assert brokers["groww"]["connectable"] is False
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
         assert "DDPI" in " ".join(brokers["groww"]["mcp"]["cautions"])
-        assert "disabled until live login/read verification" in " ".join(brokers["groww"]["mcp"]["cautions"])
+        assert "market-data/API permissions" in " ".join(brokers["groww"]["mcp"]["cautions"])
         for broker_id in ("dhan", "upstox", "groww"):
             mcp = brokers[broker_id]["mcp"]
             command_config = next(c for c in mcp["client_configs"] if c.get("command") == "npx")

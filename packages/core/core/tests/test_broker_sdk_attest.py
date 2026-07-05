@@ -69,6 +69,7 @@ def test_loads_the_repo_brokers_lock():
     pins = load_pins()
     names = {p.get("name") for p in pins}
     assert "dhanhq" in names  # the repo's wave-1 pin
+    assert "growwapi" in names
 
 
 def test_missing_lock_returns_empty(tmp_path):

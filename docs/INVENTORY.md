@@ -10,9 +10,11 @@ between buckets.
 founder brokers (Dhan / Upstox / Kotak Neo / INDmoney / Groww) is present and
 mock-tested. Dhan, Upstox, and INDmoney are the current connectable native set
 after live login/read verification; Kotak Neo and Groww are built and catalogued
-but stay `connectable=false` until their live adapter login/read checks pass.
-INDmoney and Groww are REST-only and have no SDK pin. Closed-market/no-funds
-verification does not prove funded live order execution.
+but stay `connectable=false` until their remaining live blockers clear. Groww's
+official `growwapi` SDK is pinned for attestation/reference parity while the
+adapter keeps using FlintTrade's tested REST transport; INDmoney is the only
+REST-only native with no SDK pin. Closed-market/no-funds verification does not
+prove funded live order execution.
 
 ## Legend
 
@@ -41,7 +43,7 @@ verification does not prove funded live order execution.
 | — Dhan: rolling-options history + multi-level depth (L20) | ✅ | Encoded as routing capabilities (`options_history_*`, `depth_levels`) |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
-| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan, Upstox, and INDmoney are connectable after live login/read verification; Kotak Neo remains coming soon until a live adapter login/read probe passes. |
+| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan, Upstox, and INDmoney are connectable after live login/read verification; Kotak Neo remains coming soon until a live adapter login/read probe passes, and Groww remains coming soon until market-data/API permission, static-IP, and order-safety proof land. |
 | Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Generic terminal place/modify/cancel now route to the active native account when no OpenAlgo key is configured, but funded live native order placement remains unproven because verification used no-funds/closed-market accounts. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 

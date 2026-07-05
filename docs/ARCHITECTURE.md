@@ -83,8 +83,10 @@ gateway contract and routing are present, and the five founder-broker adapters
 (Dhan, Upstox, Kotak Neo, INDmoney, Groww) remain dormant unless their activation
 gates pass. The current connectable native set is Dhan, Upstox, and INDmoney
 after live login/read verification. Kotak Neo and Groww are built and catalogued
-but kept `connectable=false` until their live adapter login/read checks pass;
-portal/static-IP evidence is not enough by itself to promote them.
+but kept `connectable=false` until their broker-specific blockers clear:
+Kotak Neo still needs a successful live adapter login/read probe, while Groww
+needs market-data/API permission, static-IP resolution, and order-safety proof.
+Portal/static-IP evidence is not enough by itself to promote them.
 
 ---
 
