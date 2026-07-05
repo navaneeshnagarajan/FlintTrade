@@ -18,7 +18,12 @@ import pytest
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
-from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, KotakNeoClient, _ROUTER_TOKEN
+from flinttrade_gateway.brokers.kotakneo import (
+    KotakNeoAdapter,
+    KotakNeoClient,
+    _normalise_credentials,
+    _ROUTER_TOKEN,
+)
 from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 
 pytestmark = pytest.mark.unit
@@ -155,11 +160,48 @@ async def _session(adapter: KotakNeoAdapter):
 # Auth lifecycle
 # ---------------------------------------------------------------------------
 
+def test_normalise_credentials_accepts_kotak_docs_access_token_alias() -> None:
+    original = {"access_token": "TRADE-API-TOKEN", "mobile_number": "9"}
+
+    normalised = _normalise_credentials(original)
+
+    assert normalised["consumer_key"] == "TRADE-API-TOKEN"
+    assert normalised["access_token"] == "TRADE-API-TOKEN"
+    assert "consumer_key" not in original
+    with_both = _normalise_credentials({"consumer_key": "SDK-NAME", "access_token": "DOC-NAME"})
+    assert with_both["consumer_key"] == "SDK-NAME"
+
+
 @pytest.mark.asyncio
 async def test_login_requires_totp():
     with pytest.raises(BrokerError, match="totp"):
         await KotakNeoAdapter().login(
             {"consumer_key": "CK", "mobile_number": "+91...", "ucc": "U1", "mpin": "1234"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_login_accepts_access_token_alias_for_kotak_authorization_header():
+    mock = MockNeoFull()
+    session = await _adapter(mock).login(
+        {
+            "access_token": "TRADE-API-TOKEN",
+            "mobile_number": "+91...",
+            "ucc": "U1",
+            "mpin": "1234",
+            "totp": "000000",
+        }
+    )
+
+    assert session.account_id == "U1"
+    assert session.adapter_id == "kotakneo"
+
+
+@pytest.mark.asyncio
+async def test_login_requires_consumer_key_or_access_token():
+    with pytest.raises(BrokerError, match="consumer_key.*access_token"):
+        await KotakNeoAdapter().login(
+            {"mobile_number": "+91...", "ucc": "U1", "mpin": "1234", "totp": "000000"}
         )
 
 

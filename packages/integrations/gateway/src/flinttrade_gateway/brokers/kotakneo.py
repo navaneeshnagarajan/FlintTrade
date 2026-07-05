@@ -23,6 +23,11 @@ only login. ``refresh`` is a full daily re-login. The SDK pin is present and the
 adapter is mock-tested; native connect stays disabled until a maintainer-entered
 live account login/read probe passes.
 
+The broker's public docs call the TOTP route's ``Authorization`` header a Trade
+API access token, while the Python SDK stores that same header value as
+``consumer_key``. FlintTrade accepts either credential name and normalises the
+docs-facing token into the SDK-facing field.
+
 Cost: Kotak Neo advertises **zero brokerage** on API order execution and a free
 API. The one documented exception is that a bracket order's square-off leg
 attracts standard brokerage even though the initial leg is free.
@@ -78,6 +83,16 @@ def _split_symbol(raw: str) -> tuple[str, str]:
         exchange, name = raw.split(":", 1)
         return exchange.strip().upper(), name.strip()
     return "NSE", raw.strip()
+
+
+def _normalise_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
+    """Map Kotak's docs-facing token name onto the SDK's ``consumer_key`` slot."""
+    normalised = dict(credentials)
+    auth_token = normalised.get("consumer_key") or normalised.get("access_token")
+    if auth_token:
+        normalised["consumer_key"] = auth_token
+    return normalised
+
 
 KOTAKNEO_CAPABILITIES = Capabilities(
     segments=(
@@ -142,14 +157,18 @@ class KotakNeoClient:
     construction so the adapter stays SDK-free. Built by ``KotakNeoAdapter.login``
     for live use; tests inject a mock with the same method surface instead.
 
-    An ``access_token`` credential (the OAuth bearer minted on the Kotak portal)
-    is forwarded to ``NeoAPI`` for the napi gateway routes; the TOTP+MPIN 2FA is
-    still required to mint the trade-scope session.
+    The public docs' Trade API access token is sent by the SDK as
+    ``consumer_key`` on the TOTP ``Authorization`` header. If a caller supplies
+    only ``access_token``, FlintTrade maps it to that SDK field while still
+    forwarding the original value to ``NeoAPI`` for compatibility with captured
+    portal-token flows. TOTP+MPIN 2FA is still required to mint the trade-scope
+    session.
     """
 
     def __init__(self, credentials: dict[str, Any]) -> None:
         from neo_api_client import NeoAPI  # noqa: PLC0415
 
+        credentials = _normalise_credentials(credentials)
         self._neo = NeoAPI(
             environment=str(credentials.get("environment", "prod")),
             access_token=credentials.get("access_token") or None,
@@ -395,14 +414,17 @@ class KotakNeoAdapter(BrokerAdapter):
     async def login(self, credentials: dict) -> Session:
         """Run the v2 TOTP+MPIN login and return a day-scoped session.
 
-        Credentials: ``consumer_key`` (the Authorization header for the TOTP
-        routes), ``mobile_number`` + ``ucc`` + ``totp`` (view token via
+        Credentials: ``access_token`` (Kotak docs' Trade API token) or
+        ``consumer_key`` (the SDK name for the same TOTP ``Authorization``
+        header), ``mobile_number`` + ``ucc`` + ``totp`` (view token via
         ``totp_login``) and ``mpin`` (trade token via ``totp_validate``).
-        Optional: ``access_token`` (portal OAuth bearer, forwarded to ``NeoAPI``),
-        ``environment`` (``prod``/``uat``) and ``neo_fin_key``. The v1
+        Optional: ``environment`` (``prod``/``uat``) and ``neo_fin_key``. The v1
         mobile+password / OTP flow no longer exists in the v2 SDK.
         """
-        for required in ("consumer_key", "mobile_number", "ucc", "mpin", "totp"):
+        credentials = _normalise_credentials(credentials)
+        if not credentials.get("consumer_key"):
+            raise BrokerError("Kotak Neo login requires 'consumer_key' or 'access_token'")
+        for required in ("mobile_number", "ucc", "mpin", "totp"):
             if not credentials.get(required):
                 raise BrokerError(f"Kotak Neo login requires {required!r}")
         client = (
@@ -423,10 +445,9 @@ class KotakNeoAdapter(BrokerAdapter):
 
         The NEO 2FA consumes a live 30-second TOTP and yields SDK-internal
         session state that cannot be rehydrated from a stored token, so there
-        is nothing minted to write back — just drop the one-time ``totp`` so a
-        boot-time replay fails with the clear "requires 'totp'" message
-        (surfaced as needs-fresh-login) instead of silently replaying a stale
-        code at the broker.
+        is nothing minted to write back — just drop the one-time ``totp``. Token
+        naming is preserved as entered (``access_token`` or ``consumer_key``)
+        because login accepts either form on the next fresh authentication.
         """
         return {k: v for k, v in credentials.items() if k != "totp"}
 

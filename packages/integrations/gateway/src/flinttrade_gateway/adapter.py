@@ -472,19 +472,28 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
     "kotakneo": [
         {
             "id": "totp_mpin", "label": "TOTP + MPIN", "kind": "direct",
-            "description": "Kotak NEO two-step 2FA. Consumer key from NEO → Invest → Trade API; TOTP from your authenticator; MPIN is your NEO PIN.",
+            "description": (
+                "Kotak Neo two-step 2FA. Paste the Trade API access token from NEO → Invest → Trade API "
+                "(the Python SDK calls this consumer key), then enter TOTP and MPIN."
+            ),
             "fields": [
-                _f("consumer_key", "Consumer key", secret=True),
+                _f(
+                    "consumer_key",
+                    "Trade API access token (consumer key)",
+                    secret=True,
+                    required=False,
+                    help_="Kotak's docs call this the Trade API access token; the SDK sends it as consumer_key.",
+                ),
                 _f("mobile_number", "Mobile number (with country code)"),
                 _f("ucc", "UCC (client code)"),
                 _f("totp", "6-digit TOTP"),
                 _f("mpin", "MPIN", secret=True),
                 _f(
                     "access_token",
-                    "Portal access token",
+                    "Trade API access token alias",
                     secret=True,
                     required=False,
-                    help_="Optional Trade API token from the Kotak Neo portal; the TOTP + MPIN session is still required.",
+                    help_="Accepted as the same Authorization token if consumer key is left blank; retained for older captures.",
                 ),
                 _f("neo_fin_key", "Neo fin key", required=False),
             ],

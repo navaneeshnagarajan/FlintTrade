@@ -284,6 +284,8 @@ def test_list_native_brokers_catalogue(client):
     kotak = next(m for m in brokers["kotakneo"]["auth_methods"] if m["id"] == "totp_mpin")
     assert any(f["secret"] for f in kotak["fields"])
     kotak_fields = {f["name"]: f for f in kotak["fields"]}
+    assert kotak_fields["consumer_key"]["required"] is False
+    assert "Trade API access token" in kotak_fields["consumer_key"]["label"]
     assert kotak_fields["access_token"]["secret"] is True
     assert kotak_fields["access_token"]["required"] is False
 
