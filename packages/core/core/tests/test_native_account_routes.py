@@ -1013,6 +1013,111 @@ def test_native_account_reads_include_broker_specific_surfaces(client, monkeypat
     assert trades.get_json()["data"][0]["trade_id"] == "T1"
 
 
+def test_native_account_reads_cover_kotak_neo_documented_surfaces(client, monkeypatch):
+    """Kotak Neo's documented read helpers stay routed once an adapter session is active."""
+    from flinttrade_gateway.brokers._base import Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+
+    async def _limits(_self, _session, segment, exchange, product):
+        assert (segment, exchange, product) == ("CASH", "NSE", "MIS")
+        return {"available_cash": 1000, "segment": segment, "exchange": exchange, "product": product}
+
+    async def _quote_details(_self, _session, symbols, quote_type="all"):
+        assert symbols == ["NSE:INFY"]
+        assert quote_type == "ltp"
+        return [{"symbol": "INFY", "ltp": 1450.25}]
+
+    async def _scrip_master(_self, _session, exchange=None):
+        assert exchange == "NSE"
+        return {"segments": [{"exchange": exchange, "url": "https://example.invalid/nse.csv"}]}
+
+    async def _search_scrip(
+        _self,
+        _session,
+        symbol,
+        exchange="NSE",
+        *,
+        expiry=None,
+        option_type=None,
+        strike_price=None,
+        ignore_50multiple=True,
+    ):
+        assert symbol == "NIFTY"
+        assert exchange == "NFO"
+        assert expiry == "30JUL2026"
+        assert option_type == "CE"
+        assert strike_price == "25000"
+        assert ignore_50multiple is False
+        return [{"symbol": symbol, "exchange": exchange, "token": "12345"}]
+
+    async def _order_history(_self, _session, order_id):
+        assert order_id == "OID-1"
+        return [{"order_id": order_id, "status": "OPEN"}]
+
+    async def _order_trades(_self, _session, order_id):
+        assert order_id == "OID-1"
+        return [{"order_id": order_id, "trade_id": "T1"}]
+
+    async def _market_depth(_self, _session, symbols):
+        assert symbols == ["NSE:INFY", "NSE:RELIANCE"]
+        return [{"symbol": "INFY", "bids": [{"price": 1450.0}], "asks": [{"price": 1450.25}]}]
+
+    async def _margin_calculator(_self, _session, order):
+        assert order.symbol == "INFY"
+        assert order.exchange == "NSE"
+        assert order.quantity == "10"
+        assert order.product == "MIS"
+        return {"required_margin": 1234.5}
+
+    monkeypatch.setattr(KotakNeoAdapter, "limits", _limits)
+    monkeypatch.setattr(KotakNeoAdapter, "quote_details", _quote_details)
+    monkeypatch.setattr(KotakNeoAdapter, "scrip_master", _scrip_master)
+    monkeypatch.setattr(KotakNeoAdapter, "search_scrip", _search_scrip)
+    monkeypatch.setattr(KotakNeoAdapter, "order_history", _order_history)
+    monkeypatch.setattr(KotakNeoAdapter, "order_trades", _order_trades)
+    monkeypatch.setattr(KotakNeoAdapter, "market_depth", _market_depth)
+    monkeypatch.setattr(KotakNeoAdapter, "margin_calculator", _margin_calculator)
+
+    c, app, _tmp = client
+    app.config["NATIVE_ADAPTERS"]["kotakneo"] = KotakNeoAdapter()
+    app.config["REGISTRY"].put_session(
+        "kotakneo",
+        "KOTAKREADS",
+        Session(access_token="tok", expires_at=9e9, account_id="KOTAKREADS", adapter_id="kotakneo"),
+    )
+
+    limits = c.get("/api/v1/native/accounts/kotakneo/KOTAKREADS/limits?segment=CASH&exchange=NSE&product=MIS")
+    details = c.get("/api/v1/native/accounts/kotakneo/KOTAKREADS/quote_details?symbol=INFY&exchange=NSE&type=ltp")
+    master = c.get("/api/v1/native/accounts/kotakneo/KOTAKREADS/scrip_master?exchange=NSE")
+    search = c.get(
+        "/api/v1/native/accounts/kotakneo/KOTAKREADS/search_scrip"
+        "?symbol=NIFTY&exchange=NFO&expiry=30JUL2026&option_type=ce&strike_price=25000&ignore_50multiple=false"
+    )
+    history = c.get("/api/v1/native/accounts/kotakneo/KOTAKREADS/orderhistory?orderId=OID-1")
+    trades = c.get("/api/v1/native/accounts/kotakneo/KOTAKREADS/ordertrades?order_id=OID-1")
+    depth = c.get("/api/v1/native/accounts/kotakneo/KOTAKREADS/depth?symbols=NSE:INFY,NSE:RELIANCE")
+    margin = c.get(
+        "/api/v1/native/accounts/kotakneo/KOTAKREADS/margin?symbol=INFY&exchange=NSE&qty=10&product=MIS"
+    )
+
+    assert limits.status_code == 200, limits.get_json()
+    assert details.status_code == 200, details.get_json()
+    assert master.status_code == 200, master.get_json()
+    assert search.status_code == 200, search.get_json()
+    assert history.status_code == 200, history.get_json()
+    assert trades.status_code == 200, trades.get_json()
+    assert depth.status_code == 200, depth.get_json()
+    assert margin.status_code == 200, margin.get_json()
+    assert limits.get_json()["data"]["product"] == "MIS"
+    assert details.get_json()["data"][0]["ltp"] == 1450.25
+    assert master.get_json()["data"]["segments"][0]["exchange"] == "NSE"
+    assert search.get_json()["data"][0]["token"] == "12345"
+    assert history.get_json()["data"][0]["status"] == "OPEN"
+    assert trades.get_json()["data"][0]["trade_id"] == "T1"
+    assert depth.get_json()["data"][0]["bids"][0]["price"] == 1450.0
+    assert margin.get_json()["data"]["required_margin"] == 1234.5
+
+
 def test_native_account_read_service_window_is_retryable_without_dropping_session(client, monkeypatch):
     """A broker service-hours outage is a read outage, not a re-auth signal."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
