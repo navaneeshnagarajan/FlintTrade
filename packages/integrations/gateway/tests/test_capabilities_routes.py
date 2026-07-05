@@ -131,6 +131,7 @@ class TestCapabilitiesRoute:
         assert caps["rate_limit_quote_per_sec"] == 5
         assert caps["supports_market_orders"] is True
         assert caps["supports_options"] is True
+        assert caps["supports_commodities"] is True
         assert caps["historical_intraday_intervals_minutes"] == [1, 5, 10, 60, 240]
         assert caps["market_depth_runtime_ready"] is False
         assert caps["gtt_native"] is True

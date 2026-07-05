@@ -14,7 +14,18 @@ Covers:
 from __future__ import annotations
 
 
-from flinttrade_gateway.capabilities import BrokerCapabilities, CapabilityRegistry, REGISTRY
+from flinttrade_gateway.capabilities import (
+    AuthModel,
+    BrokerCapabilities,
+    Capabilities,
+    CapabilityRegistry,
+    DepthLevels,
+    OrderTypes,
+    REGISTRY,
+    Segments,
+    TickProtocol,
+    _native_to_broker_capabilities,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +71,25 @@ def test_capabilities_broker_name_stored() -> None:
     """broker_name is stored correctly."""
     caps = BrokerCapabilities(broker_name="my_broker")
     assert caps.broker_name == "my_broker"
+
+
+def test_native_projection_treats_mcx_as_futures_and_commodities() -> None:
+    """MCX is a futures market even when a broker has no equity/index F&O."""
+    projected = _native_to_broker_capabilities(
+        "commodity_only",
+        Capabilities(
+            segments=Segments.MCX,
+            order_types=OrderTypes.MARKET | OrderTypes.LIMIT,
+            depth_levels=DepthLevels.L5,
+            tick_protocol=TickProtocol.GENERIC_JSON,
+            auth_model=AuthModel.OAUTH_RENEWABLE_24H,
+            session_lifetime_hours=24.0,
+        ),
+    )
+
+    assert projected.supports_futures is True
+    assert projected.supports_commodities is True
+    assert projected.supports_options is False
 
 
 # ---------------------------------------------------------------------------

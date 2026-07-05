@@ -40,7 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 Transport = Callable[..., tuple[int, Any]]
 
 GROWW_CAPABILITIES = Capabilities(
-    segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO,
+    segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.MCX,
     order_types=(
         OrderTypes.MARKET
         | OrderTypes.LIMIT
@@ -363,7 +363,7 @@ class GrowwAdapter(BrokerAdapter):
 
     async def order_book(self, session: Session) -> list[Order]:
         out: list[dict[str, Any]] = []
-        for segment in ("CASH", "FNO"):
+        for segment in ("CASH", "FNO", "COMMODITY"):
             payload = await self._request(
                 session,
                 "GET",
@@ -397,7 +397,11 @@ class GrowwAdapter(BrokerAdapter):
         out: list[dict[str, Any]] = []
         for order in orders:  # type: ignore[assignment]
             oid = str(order.get("orderid") or "")
-            segment = "FNO" if order.get("exchange") in {"NFO", "BFO"} else "CASH"
+            exchange = order.get("exchange")
+            if exchange == "MCX":
+                segment = "COMMODITY"
+            else:
+                segment = "FNO" if exchange in {"NFO", "BFO"} else "CASH"
             if oid:
                 out.extend(await self.order_trades(session, oid, segment=segment))
         return out  # type: ignore[return-value]

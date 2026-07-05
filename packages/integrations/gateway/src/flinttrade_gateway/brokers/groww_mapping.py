@@ -127,6 +127,8 @@ def unwrap(payload: Any) -> Any:
 def exchange_segment(exchange: Any) -> tuple[str, str]:
     """Map FlintTrade exchange names to Groww ``(exchange, segment)``."""
     ex = _upper(exchange) or "NSE"
+    if ex in {"MCX", "MCX_FO", "MCX_COM", "COMMODITY"}:
+        return "MCX", "COMMODITY"
     if ex in {"NFO", "NSE_FO", "NSE_FNO"}:
         return "NSE", "FNO"
     if ex in {"BFO", "BSE_FO", "BSE_FNO"}:
@@ -139,6 +141,8 @@ def exchange_segment(exchange: Any) -> tuple[str, str]:
 def openalgo_exchange(exchange: Any, segment: Any = "") -> str:
     ex = _upper(exchange)
     seg = _upper(segment)
+    if seg == "COMMODITY" or ex == "MCX":
+        return "MCX"
     if seg == "FNO" and ex == "BSE":
         return "BFO"
     if seg == "FNO":

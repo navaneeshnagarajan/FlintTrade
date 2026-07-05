@@ -64,7 +64,7 @@ class MockGrowwTransport:
         if path.startswith("/v1/order-advance/cancel/"):
             return 200, {"status": "SUCCESS", "payload": {"smart_order_id": "GTT1"}}
         if path == "/v1/order/list":
-            rows = [{
+            cash_rows = [{
                 "groww_order_id": "GROWWOID1",
                 "trading_symbol": "RELIANCE",
                 "exchange": "NSE",
@@ -76,7 +76,21 @@ class MockGrowwTransport:
                 "price": 2900,
                 "order_status": "OPEN",
             }]
-            return 200, {"status": "SUCCESS", "payload": {"order_list": rows if (params or {}).get("segment") == "CASH" else []}}
+            commodity_rows = [{
+                "groww_order_id": "GROWWMCX1",
+                "trading_symbol": "CRUDEOIL25JANFUT",
+                "exchange": "MCX",
+                "segment": "COMMODITY",
+                "transaction_type": "BUY",
+                "order_type": "LIMIT",
+                "product": "NRML",
+                "quantity": 1,
+                "price": 6200,
+                "order_status": "OPEN",
+            }]
+            segment = (params or {}).get("segment")
+            rows = cash_rows if segment == "CASH" else commodity_rows if segment == "COMMODITY" else []
+            return 200, {"status": "SUCCESS", "payload": {"order_list": rows}}
         if path == "/v1/positions/user":
             return 200, {"status": "SUCCESS", "payload": {"positions": [{
                 "trading_symbol": "NIFTY26JUN24000CE",
@@ -115,7 +129,8 @@ class MockGrowwTransport:
                 "volume": 12345,
             }}
         if path == "/v1/live-data/ltp":
-            return 200, {"status": "SUCCESS", "payload": {"NSE_RELIANCE": 2905.5}}
+            keys = [k for k in str((params or {}).get("exchange_symbols", "")).split(",") if k]
+            return 200, {"status": "SUCCESS", "payload": {key: 2905.5 for key in keys}}
         if path == "/v1/historical/candle/range":
             return 200, {"status": "SUCCESS", "payload": {"candles": [
                 ["2026-07-01 09:15:00", 100, 105, 99, 104, 1000],
@@ -312,6 +327,57 @@ async def test_reads_map_groww_envelopes() -> None:
     assert instruments == [{"trading_symbol": "RELIANCE", "exchange": "NSE", "segment": "CASH"}]
     instrument_call = next(call for call in transport.calls if call["url"] == "https://growwapi-assets.groww.in/instruments/instrument.csv")
     assert instrument_call["headers"] == {"Accept": "text/csv"}
+
+
+@pytest.mark.asyncio
+async def test_mcx_commodity_surface_uses_groww_commodity_segment() -> None:
+    transport = MockGrowwTransport()
+    adapter = _adapter(transport)
+    session = await _session(adapter)
+    order = Order(
+        symbol="CRUDEOIL25JANFUT",
+        action="BUY",
+        exchange="MCX",
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="6200",
+    )
+
+    await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    await adapter.quotes(session, ["MCX:CRUDEOIL25JANFUT"])
+    ltp = await adapter.ltp(session, ["MCX:CRUDEOIL25JANFUT"])
+    await adapter.historical(session, {
+        "symbol": "CRUDEOIL25JANFUT",
+        "exchange": "MCX",
+        "interval": "5m",
+        "from_date": "2026-07-01 09:15:00",
+        "to_date": "2026-07-01 09:20:00",
+    })
+    orders = await adapter.order_book(session)
+
+    place_call = next(call for call in transport.calls if call["path"] == "/v1/order/create")
+    assert place_call["json_body"]["exchange"] == "MCX"
+    assert place_call["json_body"]["segment"] == "COMMODITY"
+    quote_call = next(call for call in transport.calls if call["path"] == "/v1/live-data/quote")
+    assert quote_call["params"] == {
+        "exchange": "MCX",
+        "segment": "COMMODITY",
+        "trading_symbol": "CRUDEOIL25JANFUT",
+    }
+    ltp_call = next(call for call in transport.calls if call["path"] == "/v1/live-data/ltp")
+    assert ltp_call["params"] == {"segment": "COMMODITY", "exchange_symbols": "MCX_CRUDEOIL25JANFUT"}
+    assert ltp == {"MCX:CRUDEOIL25JANFUT": 2905.5}
+    history_call = next(call for call in transport.calls if call["path"] == "/v1/historical/candle/range")
+    assert history_call["params"]["exchange"] == "MCX"
+    assert history_call["params"]["segment"] == "COMMODITY"
+    assert any(order["exchange"] == "MCX" for order in orders)
+    list_segments = [
+        call["params"]["segment"]
+        for call in transport.calls
+        if call["path"] == "/v1/order/list"
+    ]
+    assert list_segments == ["CASH", "FNO", "COMMODITY"]
 
 
 @pytest.mark.asyncio
