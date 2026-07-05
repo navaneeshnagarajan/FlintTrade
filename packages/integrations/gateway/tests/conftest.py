@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 # existing tests. New submodules should be added here when tests pick
 # them up as bare imports.
 _GATEWAY_MODULES = (
-    "broker_interface",
     "models",
     "exceptions",
     "adapter",
