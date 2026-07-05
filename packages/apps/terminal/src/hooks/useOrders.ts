@@ -4,11 +4,17 @@ import type { Order } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
 
-export function useOrders() {
+interface BrokerDataQueryOptions {
+  enabled?: boolean;
+}
+
+export function useOrders(options: BrokerDataQueryOptions = {}) {
+  const enabled = options.enabled ?? true;
   return useQuery<Order[]>({
     queryKey: queryKeys.orders.all,
     queryFn: getOrderbook,
+    enabled,
     staleTime: 5_000,
-    refetchInterval: () => (isMarketHours() ? 10_000 : false),
+    refetchInterval: () => (enabled && isMarketHours() ? 10_000 : false),
   });
 }

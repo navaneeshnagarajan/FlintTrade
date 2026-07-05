@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { usePositions } from "@/hooks/usePositions";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useRRGData } from "@/hooks/useRRGData";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -109,8 +110,10 @@ function SectorMapWidget(_props: WidgetProps) {
   const [containerSize, setContainerSize] = useState<ContainerSize>({ width: 0, height: 0 });
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [, setSectorData] = useAtom(sectorDataAtom);
+  const isBrokerConnected = useBrokerConnected();
 
-  const { data: positionsData } = usePositions();
+  const { data: positionsData } = usePositions({ enabled: isBrokerConnected });
+  const isSampleSectorData = !positionsData || positionsData.length === 0;
 
   // Memoized callback ref for treemap container (adapted from source)
   const setTreemapRef = useCallback((node: HTMLDivElement | null): void => {
@@ -266,6 +269,14 @@ function SectorMapWidget(_props: WidgetProps) {
           <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
             {selectedSector ? selectedSector : "Sector Map"}
           </span>
+          {isSampleSectorData && (
+            <Badge
+              variant="outline"
+              className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
+            >
+              Sample data
+            </Badge>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">

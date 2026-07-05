@@ -30,6 +30,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import type { WidgetProps } from "@/types/widgets";
@@ -160,8 +161,9 @@ function formatINR(n: number): string {
 // Widget
 // ---------------------------------------------------------------------------
 function RiskPanelWidget(_props: WidgetProps) {
-  const { data: fundsData } = useFunds();
-  const { data: positions } = usePositions();
+  const isBrokerConnected = useBrokerConnected();
+  const { data: fundsData } = useFunds({ enabled: isBrokerConnected });
+  const { data: positions } = usePositions({ enabled: isBrokerConnected });
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
   const { totalPnl, openOrderCount } = useTradingStore();
 
@@ -209,9 +211,19 @@ function RiskPanelWidget(_props: WidgetProps) {
           <ShieldAlert size={11} className="text-text-muted" />
           <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">Risk Panel</span>
         </div>
-        <Badge className={`text-xxs px-1.5 py-0 border ${overallColors.badge}`}>
-          {overallLabel}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          {!isBrokerConnected && (
+            <Badge
+              variant="outline"
+              className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
+            >
+              Broker required
+            </Badge>
+          )}
+          <Badge className={`text-xxs px-1.5 py-0 border ${overallColors.badge}`}>
+            {overallLabel}
+          </Badge>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-3">

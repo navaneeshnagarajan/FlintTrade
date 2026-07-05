@@ -16,6 +16,7 @@ import { FlintMiniSparkline, FlintSegmentTracker } from "@flinttrade/design-syst
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useOrders } from "@/hooks/useOrders";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import {
   Table,
@@ -138,9 +139,13 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 function DashboardWidget(_props: WidgetProps) {
-  const { data: fundsData, dataUpdatedAt, isPending: fundsPending } = useFunds();
-  const { data: positionsData, isPending: positionsPending } = usePositions();
-  const { data: ordersData, isPending: ordersPending } = useOrders();
+  const isBrokerConnected = useBrokerConnected();
+  const { data: fundsData, dataUpdatedAt, isPending: fundsPending } = useFunds({ enabled: isBrokerConnected });
+  const { data: positionsData, isPending: positionsPending } = usePositions({ enabled: isBrokerConnected });
+  const { data: ordersData, isPending: ordersPending } = useOrders({ enabled: isBrokerConnected });
+  const showFundsPending = isBrokerConnected && fundsPending;
+  const showPositionsPending = isBrokerConnected && positionsPending;
+  const showOrdersPending = isBrokerConnected && ordersPending;
 
   const funds = fundsData as RawFunds | undefined;
   const positions = (positionsData ?? []) as RawPosition[];
@@ -160,8 +165,17 @@ function DashboardWidget(_props: WidgetProps) {
     <div className="h-full w-full flex flex-col overflow-hidden bg-surface-base" data-tour-target="dashboard">
       <h2 className="sr-only">Dashboard Overview</h2>
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-      {/* Index strip — responsive: 5 cols on wide panels, fewer on narrow */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {!isBrokerConnected && (
+          <div
+            className="px-3 py-2 text-xs bg-warning/10 text-warning border border-warning/30 rounded"
+            role="status"
+            aria-label="Broker connection required for live dashboard account data"
+          >
+            Broker required
+          </div>
+        )}
+        {/* Index strip — responsive: 5 cols on wide panels, fewer on narrow */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {INDICES.map((idx) => (
           <IndexCard
             key={idx.symbol}
@@ -183,7 +197,7 @@ function DashboardWidget(_props: WidgetProps) {
               availableCash >= 0 ? "text-profit" : "text-loss"
             }`}
           >
-            {fundsPending ? (
+            {showFundsPending ? (
               <Skeleton className="h-7 w-28" />
             ) : funds ? (
               `\u20B9${INR0.format(availableCash)}`
@@ -199,7 +213,7 @@ function DashboardWidget(_props: WidgetProps) {
             Margin Used
           </div>
           <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-            {fundsPending ? (
+            {showFundsPending ? (
               <Skeleton className="h-7 w-24" />
             ) : funds ? (
               `\u20B9${INR0.format(usedMargin)}`
@@ -219,7 +233,7 @@ function DashboardWidget(_props: WidgetProps) {
               totalPnl >= 0 ? "text-profit" : "text-loss"
             }`}
           >
-            {positionsPending ? (
+            {showPositionsPending ? (
               <Skeleton className="h-7 w-28" />
             ) : positions.length > 0 || funds ? (
               `${totalPnl >= 0 ? "+" : ""}\u20B9${INR0.format(Math.abs(totalPnl))}`
@@ -274,7 +288,7 @@ function DashboardWidget(_props: WidgetProps) {
             </div>
           )}
         </div>
-        {positionsPending ? (
+        {showPositionsPending ? (
           <div className="p-4 space-y-2">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-8 w-full" />
@@ -283,7 +297,9 @@ function DashboardWidget(_props: WidgetProps) {
         ) : positions.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <Minus size={16} className="mx-auto mb-1 text-text-disabled" aria-hidden="true" />
-            <p className="text-xs text-text-muted font-sans">No open positions</p>
+            <p className="text-xs text-text-muted font-sans">
+              {isBrokerConnected ? "No open positions" : "Connect a broker to load positions"}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -373,7 +389,7 @@ function DashboardWidget(_props: WidgetProps) {
             Orders
           </h3>
         </div>
-        {ordersPending ? (
+        {showOrdersPending ? (
           <div className="p-4 space-y-2">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-8 w-full" />
@@ -382,7 +398,9 @@ function DashboardWidget(_props: WidgetProps) {
         ) : orders.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <Minus size={16} className="mx-auto mb-1 text-text-disabled" aria-hidden="true" />
-            <p className="text-xs text-text-muted font-sans">No orders today</p>
+            <p className="text-xs text-text-muted font-sans">
+              {isBrokerConnected ? "No orders today" : "Connect a broker to load orders"}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">

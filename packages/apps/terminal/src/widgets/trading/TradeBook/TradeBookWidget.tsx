@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useTradebook } from "@/hooks/useTradebook";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { WidgetProps } from "@/types/widgets";
 import type { RawTrade } from "@/types/rawApi";
 
@@ -89,7 +90,8 @@ function FilterPill({ value, label, count, activeFilter, onClick }: FilterPillPr
 }
 
 function TradeBookWidget(_props: WidgetProps) {
-  const { data: tradesData, dataUpdatedAt, refetch, isFetching } = useTradebook();
+  const isBrokerConnected = useBrokerConnected();
+  const { data: tradesData, dataUpdatedAt, refetch, isFetching } = useTradebook({ enabled: isBrokerConnected });
   const [sorting, setSorting] = useState<SortingState>([]);
   const [filter, setFilter] = useState<FilterValue>(FILTER_ALL);
 
@@ -208,23 +210,34 @@ function TradeBookWidget(_props: WidgetProps) {
           <span className="text-xxs text-text-secondary font-mono tabular-nums">({counts.all})</span>
         </div>
         <div className="flex items-center gap-2">
+          {!isBrokerConnected && (
+            <span
+              className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+              role="status"
+              aria-label="Broker connection required for live trade book"
+            >
+              Broker required
+            </span>
+          )}
           {lastFetch && (
             <span className="text-xxs text-text-muted flex items-center gap-0.5">
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
-            aria-label="Refresh tradebook"
-          >
-            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          </Button>
+          {isBrokerConnected && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
+              aria-label="Refresh tradebook"
+            >
+              <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -239,7 +252,9 @@ function TradeBookWidget(_props: WidgetProps) {
       {filteredRows.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <ArrowRightLeft size={24} className="text-text-disabled" />
-          <span className="text-sm">No trades today</span>
+          <span className="text-sm">
+            {isBrokerConnected ? "No trades today" : "Connect a broker to load trades"}
+          </span>
         </div>
       ) : (
         <div className="flex-1 overflow-auto">

@@ -13,9 +13,14 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // Mock useHoldings hook
 const mockRefetch = vi.fn();
 const mockUseHoldings = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 
 vi.mock("@/hooks/useHoldings", () => ({
   useHoldings: (...args: unknown[]) => mockUseHoldings(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 // Positions are fetched for the portfolio-report export.
@@ -72,6 +77,7 @@ describe("HoldingsWidget", () => {
     // clearAllMocks (not restoreAllMocks) so vi.fn() CALL HISTORY is reset
     // between tests — the "nothing to export" assertion checks not-called.
     vi.clearAllMocks();
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUsePositions.mockReturnValue({ data: [] });
   });
 
@@ -165,5 +171,19 @@ describe("HoldingsWidget", () => {
       expect.objectContaining({ category: "alert", title: "Nothing to export" }),
     );
     expect(mockDownloadReport).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch, refresh, or export holdings without a broker connection", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
+    mockUsePositions.mockReturnValue({ data: [] });
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+
+    expect(mockUseHoldings).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load holdings")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /export portfolio report/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Refresh holdings")).not.toBeInTheDocument();
   });
 });

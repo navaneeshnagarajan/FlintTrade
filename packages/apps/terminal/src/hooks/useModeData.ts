@@ -21,6 +21,7 @@ import { useOrders } from "@/hooks/useOrders";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { AppMode } from "@/stores/modeStore";
 import type { Position, Order, Holding, Funds } from "@/types/api";
 
@@ -161,17 +162,16 @@ function useExploreModeData<T>(key: ModeDataKey): ModeDataResult<T> {
 /**
  * Calls the appropriate TanStack Query hook for the given key.
  *
- * React rules of hooks require that hooks are called unconditionally,
- * so we call ALL hooks every render and pick the right result.
- * The unused hooks still run but are lightweight (staleTime prevents
- * unnecessary refetches).
+ * React rules of hooks require that hooks are called unconditionally, so we
+ * call all hook wrappers every render. Only the selected key is enabled, and
+ * explore mode disables the API branch entirely.
  */
-function useApiModeData<T>(key: ModeDataKey): ModeDataResult<T> {
-  const positions = usePositions();
-  const orders = useOrders();
-  const holdings = useHoldings();
-  const funds = useFunds();
-  const tradebook = useTradebook();
+function useApiModeData<T>(key: ModeDataKey, enabled: boolean): ModeDataResult<T> {
+  const positions = usePositions({ enabled: enabled && key === "positions" });
+  const orders = useOrders({ enabled: enabled && key === "orders" });
+  const holdings = useHoldings({ enabled: enabled && key === "holdings" });
+  const funds = useFunds({ enabled: enabled && key === "funds" });
+  const tradebook = useTradebook({ enabled: enabled && key === "tradebook" });
 
   // Pick the result for the requested key
   const selected = useMemo(() => {
@@ -222,12 +222,12 @@ function useApiModeData<T>(key: ModeDataKey): ModeDataResult<T> {
  */
 export function useModeData<T = unknown>(key: ModeDataKey): ModeDataResult<T> {
   const mode: AppMode = useModeStore((s) => s.mode);
+  const isBrokerConnected = useBrokerConnected();
 
   // We must call both branches unconditionally (rules of hooks).
-  // The unused branch is a no-op in terms of network calls because
-  // explore mode returns static data and API hooks respect staleTime.
+  // The unused API branch is disabled, so explore mode remains broker-free.
   const exploreResult = useExploreModeData<T>(key);
-  const apiResult = useApiModeData<T>(key);
+  const apiResult = useApiModeData<T>(key, mode !== "explore" && isBrokerConnected);
 
   return mode === "explore" ? exploreResult : apiResult;
 }

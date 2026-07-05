@@ -29,6 +29,7 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 const mockUsePositions = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 const mockConnectionState = vi.hoisted(() => ({
   apiKey: "",
 }));
@@ -48,6 +49,10 @@ const mockBrokerState = vi.hoisted(() => ({
 
 vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 // Mock tradingStore to avoid side-effects in usePositions
@@ -138,6 +143,7 @@ describe("PositionsWidget", () => {
     vi.restoreAllMocks();
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
+    mockUseBrokerConnected.mockReturnValue(true);
     mockBrokerState.accounts = [];
     mockBrokerState.activeAccountId = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
@@ -153,6 +159,18 @@ describe("PositionsWidget", () => {
     render(<PositionsWidget {...defaultProps} />);
 
     expect(screen.getByText("No open positions")).toBeInTheDocument();
+  });
+
+  it("does not fetch or expose position actions without a broker connection", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /exit all positions/i })).not.toBeInTheDocument();
   });
 
   it("displays position rows with symbol, qty, and P&L", () => {
@@ -174,6 +192,24 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("+₹1,200")).toBeInTheDocument();
     // formatPnl(-800) produces "₹800" (Math.abs, no sign prefix for negative)
     expect(screen.getByText("₹800")).toBeInTheDocument();
+  });
+
+  it("shows connected practice positions read-only without broker write controls", () => {
+    mockModeState.mode = "practice";
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
   });
 
   it("shows the header with position count", () => {

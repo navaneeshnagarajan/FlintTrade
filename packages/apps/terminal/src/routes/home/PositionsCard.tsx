@@ -4,6 +4,7 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { usePositions } from "@/hooks/usePositions";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoPositions } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -11,13 +12,14 @@ import { Loader2 } from "lucide-react";
 
 export function PositionsCard() {
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const query = usePositions();
+  const isBrokerConnected = useBrokerConnected();
+  const query = usePositions({ enabled: isBrokerConnected && !isExplore });
   const storePnl = useTradingStore((s) => s.totalPnl);
 
   // Demo mode shows simulated positions; the trading-store P&L mirror isn't fed
   // in explore, so derive the header total from the demo positions themselves.
   const positions = isExplore ? getDemoPositions() : query.data;
-  const isLoading = isExplore ? false : query.isLoading;
+  const isLoading = isExplore || !isBrokerConnected ? false : query.isLoading;
   const openPositions = positions?.filter((p) => p.quantity !== 0) ?? [];
   const totalPnl = isExplore
     ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
@@ -50,7 +52,9 @@ export function PositionsCard() {
           </div>
         ) : openPositions.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-text-muted">No open positions</p>
+            <p className="text-xs text-text-muted">
+              {isExplore || isBrokerConnected ? "No open positions" : "Connect a broker to load positions"}
+            </p>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-1" style={{ scrollbarWidth: "none" }}>

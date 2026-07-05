@@ -23,6 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { WidgetProps } from "@/types/widgets";
 import type { RawOrder } from "@/types/rawApi";
 
@@ -43,7 +44,8 @@ function statusVariant(
 }
 
 function OrdersWidget(_props: WidgetProps) {
-  const { data: ordersData, refetch, isFetching, isError, error } = useOrders();
+  const isBrokerConnected = useBrokerConnected();
+  const { data: ordersData, refetch, isFetching, isError, error } = useOrders({ enabled: isBrokerConnected });
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
 
@@ -130,17 +132,30 @@ function OrdersWidget(_props: WidgetProps) {
         <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
           Orders{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
-          aria-label="Refresh orders"
-        >
-          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
-        </Button>
+        <div className="flex items-center gap-2">
+          {!isBrokerConnected && (
+            <span
+              className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+              role="status"
+              aria-label="Broker connection required for live orders"
+            >
+              Broker required
+            </span>
+          )}
+          {isBrokerConnected && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
+              aria-label="Refresh orders"
+            >
+              <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Error banner */}
@@ -165,7 +180,9 @@ function OrdersWidget(_props: WidgetProps) {
       {rows.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <FileText size={24} className="text-text-disabled" />
-          <span className="text-sm">No orders today</span>
+          <span className="text-sm">
+            {isBrokerConnected ? "No orders today" : "Connect a broker to load orders"}
+          </span>
         </div>
       ) : (
         <div className="flex-1 overflow-auto min-h-0">

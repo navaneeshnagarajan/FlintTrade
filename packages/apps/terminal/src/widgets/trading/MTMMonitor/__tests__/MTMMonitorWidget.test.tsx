@@ -91,6 +91,10 @@ vi.mock("@/hooks/useFunds", () => ({
   useFunds: vi.fn(() => ({ data: undefined, isLoading: false, error: null, refetch: vi.fn() })),
 }));
 
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: vi.fn().mockReturnValue(true),
+}));
+
 // Mock PnLSummary sub-component (it makes its own API call)
 vi.mock("../PnLSummary", () => ({
   PnLSummary: () => <div data-testid="pnl-summary">PnL Summary</div>,
@@ -106,9 +110,13 @@ vi.mock("@/stores/settingsStore", () => ({
 }));
 
 import { usePositions } from "@/hooks/usePositions";
+import { useFunds } from "@/hooks/useFunds";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import MTMMonitorWidget from "../MTMMonitorWidget";
 
 const mockUsePositions = usePositions as ReturnType<typeof vi.fn>;
+const mockUseFunds = useFunds as ReturnType<typeof vi.fn>;
+const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -128,6 +136,7 @@ describe("MTMMonitorWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     chartMocks.reset();
+    mockUseBrokerConnected.mockReturnValue(true);
   });
 
   it("renders without crashing", () => {
@@ -205,5 +214,15 @@ describe("MTMMonitorWidget", () => {
         priceScaleId: "right",
       }),
     ]);
+  });
+
+  it("does not poll live positions and funds while broker is disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
   });
 });

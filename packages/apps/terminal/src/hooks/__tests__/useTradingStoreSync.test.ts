@@ -20,15 +20,20 @@ import type { Funds, Position } from "@/types/api";
 
 const mockUseFunds = vi.fn();
 const mockUsePositions = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 const mockUpdateFromFunds = vi.fn();
 const mockUpdateFromPositions = vi.fn();
 
 vi.mock("@/hooks/useFunds", () => ({
-  useFunds: () => mockUseFunds(),
+  useFunds: (...args: unknown[]) => mockUseFunds(...args),
 }));
 
 vi.mock("@/hooks/usePositions", () => ({
-  usePositions: () => mockUsePositions(),
+  usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 vi.mock("@/stores/tradingStore", () => ({
@@ -65,12 +70,28 @@ const POSITIONS: Position[] = [
 describe("useTradingStoreSync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseBrokerConnected.mockReturnValue(true);
   });
 
   it("does not fire setters while both queries are loading", () => {
     mockUseFunds.mockReturnValue({ data: undefined });
     mockUsePositions.mockReturnValue({ data: undefined });
     renderHook(() => useTradingStoreSync());
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUpdateFromFunds).not.toHaveBeenCalled();
+    expect(mockUpdateFromPositions).not.toHaveBeenCalled();
+  });
+
+  it("disables broker-backed sync queries when no broker is connected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseFunds.mockReturnValue({ data: undefined });
+    mockUsePositions.mockReturnValue({ data: undefined });
+
+    renderHook(() => useTradingStoreSync());
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
     expect(mockUpdateFromFunds).not.toHaveBeenCalled();
     expect(mockUpdateFromPositions).not.toHaveBeenCalled();
   });

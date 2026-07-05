@@ -17,6 +17,7 @@ import React from "react";
 // ---------------------------------------------------------------------------
 
 let currentMode: "explore" | "practice" | "live" = "explore";
+let brokerConnected = true;
 const modeListeners = new Set<() => void>();
 
 vi.mock("@/stores/modeStore", () => ({
@@ -30,6 +31,10 @@ vi.mock("@/stores/modeStore", () => ({
     }, []);
     return selector({ mode: currentMode });
   },
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => brokerConnected,
 }));
 
 function setTestMode(mode: "explore" | "practice" | "live") {
@@ -111,6 +116,7 @@ function createWrapper() {
 
 beforeEach(() => {
   currentMode = "explore";
+  brokerConnected = true;
   modeListeners.clear();
   vi.clearAllMocks();
 });
@@ -223,6 +229,17 @@ describe("useModeData — live mode", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.data).toEqual(mockFunds);
+  });
+
+  it("does not fetch account data when live mode has no broker connection", () => {
+    brokerConnected = false;
+
+    const { result } = renderHook(() => useModeData("orders"), {
+      wrapper: createWrapper(),
+    });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.data).toBeUndefined();
   });
 });
 

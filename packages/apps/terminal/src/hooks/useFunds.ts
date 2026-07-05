@@ -3,6 +3,10 @@ import { getFunds } from "@/services/api";
 import type { Funds } from "@/types/api";
 import { queryKeys } from "@/services/queryKeys";
 
+interface BrokerDataQueryOptions {
+  enabled?: boolean;
+}
+
 /**
  * Pure TanStack Query hook for the Funds REST endpoint.
  *
@@ -10,11 +14,13 @@ import { queryKeys } from "@/services/queryKeys";
  * `useTradingStoreSync` at the app root so there is exactly one write
  * point.
  */
-export function useFunds() {
+export function useFunds(options: BrokerDataQueryOptions = {}) {
+  const enabled = options.enabled ?? true;
   return useQuery<Funds>({
     queryKey: queryKeys.funds.all,
     queryFn: getFunds,
+    enabled,
     staleTime: 15_000,
-    refetchInterval: 30_000,
+    refetchInterval: enabled ? 30_000 : false,
   });
 }

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTradingStore } from "@/stores/tradingStore";
 
 /**
@@ -19,8 +20,9 @@ import { useTradingStore } from "@/stores/tradingStore";
  * forbids.
  */
 export function useTradingStoreSync(): void {
-  const funds = useFunds();
-  const positions = usePositions();
+  const isBrokerConnected = useBrokerConnected();
+  const funds = useFunds({ enabled: isBrokerConnected });
+  const positions = usePositions({ enabled: isBrokerConnected });
 
   useEffect(() => {
     if (funds.data) {

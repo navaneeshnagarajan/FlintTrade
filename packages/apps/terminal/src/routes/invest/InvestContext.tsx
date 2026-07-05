@@ -16,6 +16,7 @@ import {
 } from "react";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { classifySector } from "@/lib/sectors";
 import type { Holding } from "@/types/api";
 
@@ -51,14 +52,15 @@ const InvestContext = createContext<InvestContextValue | null>(null);
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function InvestProvider({ children }: { children: ReactNode }) {
+  const isBrokerConnected = useBrokerConnected();
   const {
     data: holdings = [],
     isLoading: holdingsLoading,
     isError: holdingsError,
     refetch: refetchHoldings,
-  } = useHoldings();
+  } = useHoldings({ enabled: isBrokerConnected });
 
-  const { data: funds, isLoading: fundsLoading } = useFunds();
+  const { data: funds, isLoading: fundsLoading } = useFunds({ enabled: isBrokerConnected });
 
   const isLoading = holdingsLoading || fundsLoading;
   const availableCash = funds?.availableCash ?? 0;

@@ -17,6 +17,8 @@ vi.mock("@/hooks/usePositions", () => ({ usePositions: () => ({ data: undefined,
 vi.mock("@/hooks/useOrders", () => ({ useOrders: () => ({ data: undefined, isLoading: false }) }));
 vi.mock("@/hooks/useFunds", () => ({ useFunds: () => ({ data: undefined }) }));
 vi.mock("@/hooks/useHoldings", () => ({ useHoldings: () => ({ data: undefined }) }));
+let brokerConnected = true;
+vi.mock("@/hooks/useBrokerConnected", () => ({ useBrokerConnected: () => brokerConnected }));
 vi.mock("@/stores/tradingStore", () => ({
   useTradingStore: (sel: (s: { totalPnl: number }) => unknown) => sel({ totalPnl: 0 }),
 }));
@@ -34,7 +36,10 @@ function setMode(mode: "explore" | "live") {
   useModeStore.setState({ mode });
 }
 
-afterEach(() => setMode("live"));
+afterEach(() => {
+  brokerConnected = true;
+  setMode("live");
+});
 
 describe("demo-mode dashboard cards", () => {
   it("PositionsCard shows simulated positions in explore mode", () => {
@@ -67,8 +72,18 @@ describe("demo-mode dashboard cards", () => {
 
   it("falls back to the empty state in live mode when the broker returns nothing", () => {
     setMode("live");
+    brokerConnected = true;
     render(<PositionsCard />);
     expect(screen.getByText("No open positions")).toBeInTheDocument();
     expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
+  });
+
+  it("does not look like an empty broker response when live mode has no broker", () => {
+    setMode("live");
+    brokerConnected = false;
+
+    render(<PositionsCard />);
+
+    expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
   });
 });

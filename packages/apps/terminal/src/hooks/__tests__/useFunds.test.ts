@@ -78,6 +78,15 @@ describe("useFunds — URL is called", () => {
 
     await waitFor(() => expect(mockGetFunds).toHaveBeenCalledTimes(1));
   });
+
+  it("does not call getFunds when disabled", () => {
+    mockGetFunds.mockResolvedValue(makeFunds());
+
+    const { result } = renderHook(() => useFunds({ enabled: false }), { wrapper: createWrapper() });
+
+    expect(mockGetFunds).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe("idle");
+  });
 });
 
 describe("useFunds — response shape", () => {

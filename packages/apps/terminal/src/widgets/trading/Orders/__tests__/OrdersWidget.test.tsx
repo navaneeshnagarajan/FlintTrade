@@ -15,9 +15,14 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // ---------------------------------------------------------------------------
 
 const mockUseOrders = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 
 vi.mock("@/hooks/useOrders", () => ({
   useOrders: (...args: unknown[]) => mockUseOrders(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
@@ -57,6 +62,7 @@ function queryResult(overrides = {}) {
 describe("OrdersWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseOrders.mockReturnValue(queryResult({ data: [] }));
   });
 
@@ -125,5 +131,15 @@ describe("OrdersWidget", () => {
     render(<OrdersWidget {...defaultProps} />);
 
     expect(screen.getByLabelText("Refresh orders")).toBeInTheDocument();
+  });
+
+  it("does not fetch or refresh orders without a broker connection", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    render(<OrdersWidget {...defaultProps} />);
+
+    expect(mockUseOrders).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load orders")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Refresh orders")).not.toBeInTheDocument();
   });
 });

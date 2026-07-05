@@ -26,9 +26,14 @@ vi.stubGlobal(
 
 // Mock usePositions — controlled per test
 const mockUsePositions = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 
 vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 // useTrackBehavior — no side-effects needed in tests
@@ -129,6 +134,7 @@ describe("PositionHeatMapWidget", () => {
     vi.restoreAllMocks();
     // Default: live mode, empty positions
     mockModeStore.mockImplementation(liveModeSelector);
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUsePositions.mockReturnValue(makeQueryResult({ data: [] }));
   });
 
@@ -151,6 +157,16 @@ describe("PositionHeatMapWidget", () => {
     render(<PositionHeatMapWidget {...defaultProps} />);
 
     expect(screen.getByText("No positions")).toBeInTheDocument();
+  });
+
+  it("does not fetch live positions when broker is disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+
+    render(<PositionHeatMapWidget {...defaultProps} />);
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
   });
 
   it("renders the widget header with title", () => {

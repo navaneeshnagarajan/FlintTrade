@@ -17,6 +17,7 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 const mockUseFunds = vi.fn();
 const mockUsePositions = vi.fn();
 const mockUseOrders = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 const jotaiMocks = vi.hoisted(() => ({
   useAtomValue: vi.fn<() => unknown>(() => null),
 }));
@@ -31,6 +32,10 @@ vi.mock("@/hooks/usePositions", () => ({
 
 vi.mock("@/hooks/useOrders", () => ({
   useOrders: (...args: unknown[]) => mockUseOrders(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 // Mock Jotai tickAtomFamily — returns null tick (no WS data in test)
@@ -117,6 +122,7 @@ describe("DashboardWidget", () => {
     vi.restoreAllMocks();
     jotaiMocks.useAtomValue.mockReset();
     jotaiMocks.useAtomValue.mockReturnValue(null);
+    mockUseBrokerConnected.mockReturnValue(true);
     setupMocks({});
   });
 
@@ -174,6 +180,20 @@ describe("DashboardWidget", () => {
     render(<DashboardWidget {...defaultProps} />);
 
     expect(screen.getByText("No orders today")).toBeInTheDocument();
+  });
+
+  it("does not fetch account snapshots when no broker is connected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    setupMocks({ fundsPending: true, positionsPending: true, ordersPending: true });
+
+    render(<DashboardWidget {...defaultProps} />);
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUseOrders).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load orders")).toBeInTheDocument();
   });
 
   it("renders sparkline and position status through Flint UI primitives", () => {

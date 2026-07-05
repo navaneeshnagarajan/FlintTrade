@@ -50,6 +50,14 @@ describe("useHoldings — URL is called", () => {
     renderHook(() => useHoldings(), { wrapper: createWrapper() });
     await waitFor(() => expect(mockGetHoldings).toHaveBeenCalledTimes(1));
   });
+
+  it("does not call getHoldings when disabled", () => {
+    mockGetHoldings.mockResolvedValue([makeHolding()]);
+    const { result } = renderHook(() => useHoldings({ enabled: false }), { wrapper: createWrapper() });
+
+    expect(mockGetHoldings).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe("idle");
+  });
 });
 
 describe("useHoldings — response shape", () => {

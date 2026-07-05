@@ -43,6 +43,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -124,8 +125,9 @@ function StatCard({
 // Widget
 // ---------------------------------------------------------------------------
 function MTMMonitorWidget(_props: WidgetProps) {
-  const { data: positions } = usePositions();
-  const { data: _funds } = useFunds(); // keeps store updated
+  const isBrokerConnected = useBrokerConnected();
+  const { data: positions } = usePositions({ enabled: isBrokerConnected });
+  const { data: _funds } = useFunds({ enabled: isBrokerConnected }); // keeps store updated
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -368,6 +370,14 @@ function MTMMonitorWidget(_props: WidgetProps) {
           <span className="text-xxs text-text-muted font-mono tabular-nums">
             Target {formatINR(riskLimits.mtmTarget)} / SL {formatINR(riskLimits.mtmStoploss)}
           </span>
+          {!isBrokerConnected && (
+            <Badge
+              variant="outline"
+              className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
+            >
+              Broker required
+            </Badge>
+          )}
           <Badge className={`text-xxs px-1.5 py-0 border ${status.color}`}>
             {status.label}
           </Badge>

@@ -1,6 +1,5 @@
 /**
- * useTradebook tests — simplest of the data hooks. No conditional enable,
- * no market-hours gating, no retry override. Mirrors `useFunds.test.ts`.
+ * useTradebook tests — simple broker data hook with an explicit enabled gate.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -49,6 +48,14 @@ describe("useTradebook — URL is called", () => {
     mockGetTradebook.mockResolvedValue([makeTrade()]);
     renderHook(() => useTradebook(), { wrapper: createWrapper() });
     await waitFor(() => expect(mockGetTradebook).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not call getTradebook when disabled", () => {
+    mockGetTradebook.mockResolvedValue([makeTrade()]);
+    const { result } = renderHook(() => useTradebook({ enabled: false }), { wrapper: createWrapper() });
+
+    expect(mockGetTradebook).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe("idle");
   });
 });
 

@@ -4,6 +4,10 @@ import type { Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
 
+interface BrokerDataQueryOptions {
+  enabled?: boolean;
+}
+
 /**
  * Pure TanStack Query hook for the PositionBook REST endpoint.
  *
@@ -11,11 +15,13 @@ import { queryKeys } from "@/services/queryKeys";
  * `useTradingStoreSync` at the app root so there is exactly one write
  * point.
  */
-export function usePositions() {
+export function usePositions(options: BrokerDataQueryOptions = {}) {
+  const enabled = options.enabled ?? true;
   return useQuery<Position[]>({
     queryKey: queryKeys.positions.all,
     queryFn: getPositionbook,
+    enabled,
     staleTime: 3_000,
-    refetchInterval: () => (isMarketHours() ? 5_000 : 60_000),
+    refetchInterval: () => (enabled ? (isMarketHours() ? 5_000 : 60_000) : false),
   });
 }

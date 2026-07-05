@@ -83,6 +83,15 @@ describe("useOrders", () => {
     await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(1));
   });
 
+  it("does not call getOrderbook when disabled", () => {
+    mockGetOrderbook.mockResolvedValue([]);
+
+    const { result } = renderHook(() => useOrders({ enabled: false }), { wrapper: createWrapper() });
+
+    expect(mockGetOrderbook).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe("idle");
+  });
+
   it("exposes the array unwrapped", async () => {
     const orders = [
       { order_id: "OID1", symbol: "NIFTY", status: "OPEN" } as unknown as Order,
@@ -116,6 +125,15 @@ describe("usePositions", () => {
     renderHook(() => usePositions(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockGetPositionbook).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not call getPositionbook when disabled", () => {
+    mockGetPositionbook.mockResolvedValue([]);
+
+    const { result } = renderHook(() => usePositions({ enabled: false }), { wrapper: createWrapper() });
+
+    expect(mockGetPositionbook).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe("idle");
   });
 
   it("exposes the array unwrapped", async () => {

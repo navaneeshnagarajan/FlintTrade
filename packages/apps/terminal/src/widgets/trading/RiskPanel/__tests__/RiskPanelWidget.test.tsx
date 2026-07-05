@@ -15,13 +15,18 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 const mockUseFunds = vi.fn();
 const mockUsePositions = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 
 vi.mock("@/hooks/useFunds", () => ({
-  useFunds: () => mockUseFunds(),
+  useFunds: (...args: unknown[]) => mockUseFunds(...args),
 }));
 
 vi.mock("@/hooks/usePositions", () => ({
-  usePositions: () => mockUsePositions(),
+  usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 vi.mock("@/stores/settingsStore", () => ({
@@ -77,6 +82,7 @@ function setupDefaultMocks() {
 describe("RiskPanelWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockUseBrokerConnected.mockReturnValue(true);
     setupDefaultMocks();
   });
 
@@ -104,5 +110,15 @@ describe("RiskPanelWidget", () => {
   it("displays overall risk badge as Safe when usage is low", () => {
     render(<RiskPanelWidget {...defaultProps} />);
     expect(screen.getByText("Safe")).toBeInTheDocument();
+  });
+
+  it("gates live risk account data when broker is disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+
+    render(<RiskPanelWidget {...defaultProps} />);
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
   });
 });

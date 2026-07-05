@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { useModeStore } from "@/stores/modeStore";
 import { usePositions } from "@/hooks/usePositions";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { divergingColourScaleRange } from "@/lib/colourScale";
 import type { Position } from "@/types/api";
@@ -280,8 +281,11 @@ const MIN_CELL_PX = 4; // Cells smaller than this are invisible noise — skip l
 function PositionHeatMapWidget(_props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
+  const isBrokerConnected = useBrokerConnected();
 
-  const { data: positionsData, isError, error, refetch, isFetching } = usePositions();
+  const { data: positionsData, isError, error, refetch, isFetching } = usePositions({
+    enabled: isBrokerConnected && !isExplore,
+  });
   const trackBehavior = useTrackBehavior();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -479,6 +483,15 @@ function PositionHeatMapWidget(_props: WidgetProps) {
               {fmtPnl(totalPnl)}
             </span>
           )}
+          {!isExplore && !isBrokerConnected && (
+            <span
+              className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+              role="status"
+              aria-label="Broker connection required for live position heat map"
+            >
+              Broker required
+            </span>
+          )}
           {/* Group mode selector */}
           <Select value={groupMode} onValueChange={(v) => setGroupMode(v as GroupMode)}>
             <SelectTrigger className="h-6 text-xxs bg-surface-hover border-border-subtle text-text-secondary focus:ring-accent/50 w-24">
@@ -518,8 +531,12 @@ function PositionHeatMapWidget(_props: WidgetProps) {
         {cells.length === 0 ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
             <SquareStack size={28} className="text-text-disabled" />
-            <span className="text-sm">No positions</span>
-            <span className="text-xxs text-text-disabled">Open positions will appear here</span>
+            <span className="text-sm">
+              {isExplore || isBrokerConnected ? "No positions" : "Connect a broker to load positions"}
+            </span>
+            <span className="text-xxs text-text-disabled">
+              {isExplore || isBrokerConnected ? "Open positions will appear here" : "Live positions require a broker session"}
+            </span>
           </div>
         ) : (
           <div className="absolute inset-0 overflow-hidden">

@@ -25,9 +25,14 @@ vi.stubGlobal(
 );
 
 const mockUsePositions = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 
 vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 // Mock Jotai
@@ -89,6 +94,7 @@ const defaultProps = makeDockviewPanelProps();
 describe("SectorMapWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseBrokerConnected.mockReturnValue(true);
     // No positions — widget falls back to demo data
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
   });
@@ -101,6 +107,15 @@ describe("SectorMapWidget", () => {
   it("shows the Sector Map heading", () => {
     render(<SectorMapWidget {...defaultProps} />);
     expect(screen.getByText("Sector Map")).toBeInTheDocument();
+  });
+
+  it("labels fallback sector data as sample and does not fetch positions when disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+
+    render(<SectorMapWidget {...defaultProps} />);
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
   it("shows view mode toggle buttons (Treemap, Grid, Sectors)", () => {

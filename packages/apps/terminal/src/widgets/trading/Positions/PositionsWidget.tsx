@@ -26,6 +26,7 @@ import { post } from "@/services/ftApi.helpers";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { BrokerTargetSelect, useBrokerOrderTarget } from "@/widgets/orders/OrdersManagerShared";
 import { useModeStore } from "@/stores/modeStore";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { BrokerTarget } from "@/lib/brokerOrdersApi";
 import {
   type ColumnDef,
@@ -281,7 +282,11 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
 
 function PositionsWidget(_props: WidgetProps) {
   const appMode = useModeStore((s) => s.mode);
-  const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions();
+  const isBrokerConnected = useBrokerConnected();
+  const canWritePositions = isBrokerConnected && appMode === "live";
+  const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions({
+    enabled: isBrokerConnected,
+  });
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
   const [exitAllOpen, setExitAllOpen] = useState(false);
@@ -383,7 +388,7 @@ function PositionsWidget(_props: WidgetProps) {
         id: "actions",
         header: "",
         enableSorting: false,
-        cell: ({ row }) => (
+        cell: ({ row }) => canWritePositions ? (
           <Button
             size="sm"
             variant="ghost"
@@ -394,10 +399,12 @@ function PositionsWidget(_props: WidgetProps) {
           >
             <Repeat size={10} aria-hidden="true" /> Convert
           </Button>
+        ) : (
+          <span className="text-xxs text-text-muted">Live only</span>
         ),
       },
     ],
-    [],
+    [canWritePositions],
   );
 
   const table = useReactTable({
@@ -417,9 +424,29 @@ function PositionsWidget(_props: WidgetProps) {
           Positions{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
         <div className="flex items-center gap-2">
+          {!isBrokerConnected && (
+            <span
+              className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+              role="status"
+              aria-label="Broker connection required for live positions"
+            >
+              Broker required
+            </span>
+          )}
+          {isBrokerConnected && appMode !== "live" && (
+            <span
+              className="px-1.5 py-0.5 text-xxs bg-surface-hover text-text-muted border border-border-subtle rounded"
+              role="status"
+              aria-label="Position management actions require Live mode"
+            >
+              Read-only
+            </span>
+          )}
           {/* Convert + Exit-all are gated native-broker verbs; pick the target
               account here (the OpenAlgo bridge implements neither). */}
-          <BrokerTargetSelect value={brokerTarget} onChange={setBrokerTarget} />
+          {canWritePositions && rows.length > 0 && (
+            <BrokerTargetSelect value={brokerTarget} onChange={setBrokerTarget} />
+          )}
           <span className={`font-mono tabular-nums font-medium ${totalPnl >= 0 ? "text-profit" : "text-loss"}`}>
             P&L: {formatPnl(totalPnl)}
           </span>
@@ -429,7 +456,7 @@ function PositionsWidget(_props: WidgetProps) {
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
-          {rows.length > 0 && (
+          {isBrokerConnected && rows.length > 0 && (
             <button
               type="button"
               onClick={() => void handleExport()}
@@ -441,7 +468,7 @@ function PositionsWidget(_props: WidgetProps) {
               <FileDown size={12} className={isExporting ? "animate-pulse" : ""} />
             </button>
           )}
-          {rows.length > 0 && (
+          {canWritePositions && rows.length > 0 && (
             <Button
               size="sm"
               variant="ghost"
@@ -478,7 +505,9 @@ function PositionsWidget(_props: WidgetProps) {
       {rows.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <Layers size={24} className="text-text-disabled" />
-          <span className="text-sm">No open positions</span>
+          <span className="text-sm">
+            {isBrokerConnected ? "No open positions" : "Connect a broker to load positions"}
+          </span>
         </div>
       ) : (
         <div className="flex-1 overflow-auto min-h-0">

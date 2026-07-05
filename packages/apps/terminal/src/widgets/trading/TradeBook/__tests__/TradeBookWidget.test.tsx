@@ -13,9 +13,14 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // Mock useTradebook hook
 const mockRefetch = vi.fn();
 const mockUseTradebook = vi.fn();
+const mockUseBrokerConnected = vi.fn();
 
 vi.mock("@/hooks/useTradebook", () => ({
   useTradebook: (...args: unknown[]) => mockUseTradebook(...args),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
 import TradeBookWidget from "../TradeBookWidget";
@@ -61,6 +66,7 @@ const SAMPLE_TRADES = [
 describe("TradeBookWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockUseBrokerConnected.mockReturnValue(true);
   });
 
   it("renders without crashing", () => {
@@ -108,5 +114,16 @@ describe("TradeBookWidget", () => {
     expect(screen.getByText("NIFTY24APR23000PE")).toBeInTheDocument();
     expect(screen.queryByText("NIFTY24APR23000CE")).not.toBeInTheDocument();
     expect(screen.queryByText("BANKNIFTY24APR50000CE")).not.toBeInTheDocument();
+  });
+
+  it("does not fetch or refresh tradebook without a broker connection", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseTradebook.mockReturnValue(queryResult({ data: [] }));
+    render(<TradeBookWidget {...makeDockviewPanelProps()} />);
+
+    expect(mockUseTradebook).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load trades")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Refresh tradebook")).not.toBeInTheDocument();
   });
 });
