@@ -50,7 +50,10 @@ REST transport, and INDmoney is REST-only with a dashboard-generated 24-hour
 token. INDstocks' FAQ advertises an `indstocks-sdk`, but no matching PyPI or npm
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus portal evidence but no promoted native connect
-yet. The credential-replay login step, in-app credential capture (Settings →
+yet. `python scripts/sync_broker_sdk_refs.py` refreshes local SDK source mirrors
+and PyPI artifacts under the gitignored `.local/sdk-audit/` cache; `uv.lock` and
+`brokers.lock` remain the only tracked install/attestation sources. The
+credential-replay login step, in-app credential capture (Settings →
 Brokers), OAuth connect flow, and daily session refresh are built.
 Closed-market/no-funds verification does not prove funded order execution; keep
 order-placement claims scoped to the evidence collected.
