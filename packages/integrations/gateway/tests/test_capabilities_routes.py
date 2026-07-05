@@ -87,12 +87,36 @@ class TestCapabilitiesRoute:
         response = client.get("/api/v1/broker/capabilities?broker=upstox")
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
+        assert caps["auth_model"] == "oauth_daily"
+        assert caps["rate_limit_orders_per_sec"] == 10
+        assert caps["rate_limit_data_per_sec"] == 50
+        assert caps["rate_limit_quote_per_sec"] == 50
         assert caps["historical_intraday_intervals_minutes"] == [1, 3, 5, 15, 30]
         assert caps["historical_intervals"] == ["1m", "3m", "5m", "15m", "30m", "1D", "1W", "1M"]
         assert caps["connectable"] is True
+        assert caps["gtt_native"] is True
+        assert caps["iceberg_native"] is True
+        assert caps["cover_order_native"] is False
         assert caps["mcp"]["remote_url"] == "https://mcp.upstox.com/mcp"
         assert caps["mcp"]["read_only"] is True
         assert caps["mcp"]["trading_supported"] is False
+
+    def test_indmoney_native_safety_metadata_present(self, client) -> None:  # type: ignore[no-untyped-def]
+        """INDmoney's mandatory algo tag and rate limits survive the unified endpoint."""
+        response = client.get("/api/v1/broker/capabilities?broker=indmoney")
+        assert response.status_code == 200
+        caps = response.get_json()["capabilities"]
+        assert caps["connectable"] is True
+        assert caps["auth_model"] == "oauth_renewable_24h"
+        assert caps["algo_tag_required"] is True
+        assert caps["rate_limit_orders_per_sec"] == 10
+        assert caps["rate_limit_data_per_sec"] == 5
+        assert caps["rate_limit_data_per_day"] == 100_000
+        assert caps["rate_limit_quote_per_sec"] == 5
+        assert caps["order_modifications_per_order"] == 25
+        assert caps["brokerage_free"] is False
+        assert caps["gtt_native"] is True
+        assert caps["option_chain_supported"] is False
 
     def test_groww_native_capabilities_are_catalogued(self, client) -> None:  # type: ignore[no-untyped-def]
         """Groww must not disappear from the legacy capability endpoint."""
@@ -101,10 +125,15 @@ class TestCapabilitiesRoute:
         caps = response.get_json()["capabilities"]
         assert caps["broker_name"] == "groww"
         assert caps["connectable"] is False
+        assert caps["auth_model"] == "oauth_renewable_24h"
+        assert caps["rate_limit_orders_per_sec"] == 10
+        assert caps["rate_limit_data_per_sec"] == 5
+        assert caps["rate_limit_quote_per_sec"] == 5
         assert caps["supports_market_orders"] is True
         assert caps["supports_options"] is True
         assert caps["historical_intraday_intervals_minutes"] == [1, 5, 10, 60, 240]
         assert caps["market_depth_runtime_ready"] is False
+        assert caps["gtt_native"] is True
         assert caps["option_chain_supported"] is True
         assert caps["option_chain_greeks_supported"] is True
         assert caps["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
@@ -115,11 +144,20 @@ class TestCapabilitiesRoute:
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
         assert caps["connectable"] is False
+        assert caps["auth_model"] == "mpin_totp_daily"
+        assert caps["rate_limit_orders_per_sec"] == 10
+        assert caps["algo_tag_required"] is False
+        assert caps["brokerage_free"] is True
+        assert caps["cost_paid"] is False
+        assert caps["cost_inr_per_month"] == 0
         assert caps["supports_websocket"] is True
         assert caps["streaming_runtime_ready"] is False
         assert caps["streaming_max_connections_per_user"] == 16
         assert caps["streaming_max_symbols_per_connection"] == 200
         assert caps["streaming_max_total_symbols"] == 200
+        assert caps["bracket_order_native"] is True
+        assert caps["cover_order_native"] is True
+        assert caps["gtt_native"] is False
 
     def test_mcp_catalogue_lists_hosted_broker_mcp_servers(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp")
