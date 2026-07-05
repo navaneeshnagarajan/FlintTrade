@@ -22,4 +22,3 @@ def account_ref(account_id: object) -> str:
 def selector_ref(adapter_id: object, account_id: object) -> str:
     """Stable log-safe reference for a broker selector."""
     return f"{adapter_id}:{account_ref(account_id)}"
-

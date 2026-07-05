@@ -66,4 +66,3 @@ def test_ticker_logs_without_raw_account_id(caplog: pytest.LogCaptureFixture) ->
     logs = "\n".join(caplog.messages)
     assert raw_account not in logs
     assert "account#" in logs
-
