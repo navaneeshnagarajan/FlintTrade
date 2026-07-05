@@ -39,7 +39,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -63,12 +63,14 @@ webhook_bp = Blueprint(
 # Module-level receiver singleton (injected via init_webhook_routes or lazily created)
 _receiver: WebhookReceiver | None = None
 _secret_store: WebhookSecretStore | None = None
+_endpoint_status_provider: Callable[[str], bool | None] | None = None
 
 
 def init_webhook_routes(
     receiver: WebhookReceiver,
     *,
     secret_store: WebhookSecretStore | None = None,
+    endpoint_status_provider: Callable[[str], bool | None] | None = None,
 ) -> None:
     """Inject a receiver and optional per-webhook secret store.
 
@@ -78,10 +80,15 @@ def init_webhook_routes(
         secret_store: Encrypted store for named webhook signing secrets and
             replay nonces. When omitted, routes keep the receiver's legacy
             global-secret behaviour.
+        endpoint_status_provider: Optional ``path -> enabled`` callable backed
+            by the mounted endpoint registry. Return ``False`` to block a known
+            disabled endpoint, ``True`` for a known enabled endpoint, and
+            ``None`` when the path is not registry-managed.
     """
-    global _receiver, _secret_store  # noqa: PLW0603
+    global _receiver, _secret_store, _endpoint_status_provider  # noqa: PLW0603
     _receiver = receiver
     _secret_store = secret_store
+    _endpoint_status_provider = endpoint_status_provider
     logger.info("WebhookReceiver injected into webhook_routes")
 
 
@@ -120,6 +127,13 @@ def _mounted_webhook_path(source: str, webhook_id: str | None) -> str | None:
     if not webhook_id:
         return None
     return f"/v1/webhook/{source}/{'/'.join(part for part in webhook_id.split('/') if part)}"
+
+
+def _registered_endpoint_enabled(path: str) -> bool | None:
+    """Return the registry-backed enabled state for a mounted named endpoint."""
+    if _endpoint_status_provider is None:
+        return None
+    return _endpoint_status_provider(path)
 
 
 def _parse_replay_timestamp(value: Any) -> float | None:
@@ -233,6 +247,15 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             "status": "error",
             "message": f"Unknown source '{source}'. Allowed: {sorted(_VALID_SOURCES)}",
         }), 404
+    mounted_path = _mounted_webhook_path(source, webhook_id)
+    if mounted_path:
+        try:
+            enabled = _registered_endpoint_enabled(mounted_path)
+        except Exception:
+            logger.exception("Webhook endpoint registry lookup failed for source=%s", source)
+            return jsonify({"status": "error", "message": "Webhook endpoint registry unavailable"}), 503
+        if enabled is False:
+            return jsonify({"status": "error", "message": "Webhook endpoint disabled"}), 503
 
     # Rate limiting
     if not receiver.check_rate_limit():
@@ -253,7 +276,6 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
 
     # Signature verification
     sig_header = request.headers.get("X-Signature", "")
-    mounted_path = _mounted_webhook_path(source, webhook_id)
     signing_secret: str | None = None
     if mounted_path and _secret_store is not None:
         try:

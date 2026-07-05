@@ -577,6 +577,27 @@ def _save_webhook_registry(workspace: Any, rows: list[dict[str, Any]]) -> None:
     workspace.set(_WEBHOOK_REGISTRY_KEY, payload)
 
 
+def webhook_endpoint_enabled(path: str) -> bool | None:
+    """Return whether a mounted webhook path is enabled in the workspace registry.
+
+    Returns ``None`` when the path is not registry-managed. The mounted receiver
+    treats that as legacy/global-receiver behaviour; only a known disabled row is
+    blocked at intake time.
+    """
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        return None
+    try:
+        mounted_path = _normalise_webhook_path(raw_path, _webhook_type(raw_path))
+    except ValueError:
+        return None
+    _workspace, rows = _load_webhook_registry()
+    for row in rows:
+        if row["path"] == mounted_path:
+            return bool(row["enabled"])
+    return None
+
+
 def _get_webhook_secret_store() -> Any | None:
     """Return the app-injected encrypted webhook store, if available."""
     return current_app.config.get("WEBHOOK_SECRET_STORE")

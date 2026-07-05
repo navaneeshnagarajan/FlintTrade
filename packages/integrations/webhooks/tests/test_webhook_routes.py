@@ -131,6 +131,44 @@ def test_receive_rate_limited():
     assert resp.status_code == 429
 
 
+def test_receive_named_endpoint_disabled_by_registry():
+    """503 when the mounted endpoint registry marks a named endpoint disabled."""
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    provider = MagicMock(return_value=False)
+    mod.init_webhook_routes(_mock_receiver(), endpoint_status_provider=provider)
+    flask_app.register_blueprint(mod.webhook_bp)
+    with flask_app.test_client() as c:
+        resp = c.post(
+            "/v1/webhook/custom/disabled-signal",
+            data=json.dumps({"symbol": "NIFTY"}),
+            content_type="application/json",
+        )
+    assert resp.status_code == 503
+    assert resp.get_json()["message"] == "Webhook endpoint disabled"
+    provider.assert_called_once_with("/v1/webhook/custom/disabled-signal")
+
+
+def test_receive_named_endpoint_registry_failure_fails_closed():
+    """503 when endpoint status cannot be checked."""
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+
+    def _boom(_path: str) -> bool:
+        raise RuntimeError("workspace locked")
+
+    mod.init_webhook_routes(_mock_receiver(), endpoint_status_provider=_boom)
+    flask_app.register_blueprint(mod.webhook_bp)
+    with flask_app.test_client() as c:
+        resp = c.post(
+            "/v1/webhook/custom/registry-error",
+            data=json.dumps({"symbol": "NIFTY"}),
+            content_type="application/json",
+        )
+    assert resp.status_code == 503
+    assert resp.get_json()["message"] == "Webhook endpoint registry unavailable"
+
+
 def test_receive_invalid_json(client):
     """400 for non-JSON body."""
     resp = client.post(

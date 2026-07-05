@@ -1841,9 +1841,14 @@ def create_flask_app(
     from flinttrade_webhooks.webhook_receiver import WebhookConfig, WebhookReceiver  # noqa: PLC0415
     from flinttrade_webhooks.webhook_routes import init_webhook_routes, webhook_bp  # noqa: PLC0415
     from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore  # noqa: PLC0415
+    from .operations_routes import webhook_endpoint_enabled  # noqa: PLC0415
     webhook_secret_store = WebhookSecretStore(_workspace_dir() / "webhook_secrets.db", _get_master_password())
     app.config["WEBHOOK_SECRET_STORE"] = webhook_secret_store
-    init_webhook_routes(WebhookReceiver(WebhookConfig()), secret_store=webhook_secret_store)
+    init_webhook_routes(
+        WebhookReceiver(WebhookConfig()),
+        secret_store=webhook_secret_store,
+        endpoint_status_provider=webhook_endpoint_enabled,
+    )
     app.register_blueprint(webhook_bp)
 
     from flinttrade_screener.payoff_routes import payoff_bp  # noqa: PLC0415
@@ -1912,6 +1917,8 @@ def create_flask_app(
     # - Admin introspect (already gated by FLINTTRADE_DEV in admin_routes)
     # - OAuth callbacks (browser redirect — no API key in URL)
     # - Frontend error reporting (/api/v1/errors — must be reachable before auth)
+    # - Signed external webhook POSTs (/v1/webhook/*) — HMAC/replay/endpoint
+    #   state is enforced inside webhook_routes before dispatch.
     _PUBLIC_V1_PREFIXES = (
         "/v1/admin/health",
         "/v1/admin/introspect",
@@ -2012,6 +2019,11 @@ def create_flask_app(
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
+            return None
+        # External signal providers cannot send the FlintTrade API key. Keep
+        # only POST intake public; the route itself enforces HMAC signatures,
+        # replay defence, endpoint enabled-state, and fail-closed dispatch.
+        if request.method == "POST" and request.path.startswith("/v1/webhook/"):
             return None
         # Allow specific public /v1/ paths only
         if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):

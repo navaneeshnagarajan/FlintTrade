@@ -5,6 +5,10 @@ Run with:
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -790,12 +794,29 @@ class TestWebhooksManagement:
         yield
         workspace.set("automation.webhooks", previous)
 
-    def _create(self, client, *, path: str, name: str, webhook_type: str = "custom", secret: str = ""):
+    def _create(
+        self,
+        client,
+        *,
+        path: str,
+        name: str,
+        webhook_type: str = "custom",
+        secret: str = "",
+        enabled: bool = True,
+    ):
         return client.post(
             "/api/v1/webhooks",
             headers=_auth_headers(),
-            json={"path": path, "name": name, "type": webhook_type, "secret": secret},
+            json={"path": path, "name": name, "type": webhook_type, "secret": secret, "enabled": enabled},
         )
+
+    def _signed_headers(self, body: bytes, secret: str, *, nonce: str = "ops-nonce-1") -> dict[str, str]:
+        return {
+            "Content-Type": "application/json",
+            "X-Signature": "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest(),
+            "X-Webhook-Nonce": nonce,
+            "X-Webhook-Timestamp": str(time.time()),
+        }
 
     def test_list_starts_empty_without_standalone_server(self, client):
         resp = client.get("/api/v1/webhooks", headers=_auth_headers())
@@ -903,3 +924,54 @@ class TestWebhooksManagement:
         )
         assert resp.status_code == 200
         assert store.has_secret(target["path"]) is False
+
+    def test_signed_webhook_post_is_public_but_still_hmac_checked(self, client):
+        secret = "public-post-secret"
+        created = self._create(
+            client,
+            path="/webhook/custom/public-signal",
+            name="Public Signal",
+            webhook_type="custom",
+            secret=secret,
+        )
+        assert created.status_code == 201
+
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode("utf-8")
+        resp = client.post(
+            "/ft-api/v1/webhook/custom/public-signal",
+            data=body,
+            headers=self._signed_headers(body, secret, nonce=f"public-post-{time.time_ns()}"),
+        )
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["status"] == "success"
+        assert payload["data"]["status"] == "received"
+
+        bad_headers = self._signed_headers(body, "wrong-secret", nonce=f"public-post-bad-{time.time_ns()}")
+        rejected = client.post(
+            "/ft-api/v1/webhook/custom/public-signal",
+            data=body,
+            headers=bad_headers,
+        )
+        assert rejected.status_code == 401
+
+    def test_disabled_registered_webhook_is_rejected_before_dispatch(self, client):
+        secret = "disabled-post-secret"
+        created = self._create(
+            client,
+            path="/webhook/custom/disabled-signal",
+            name="Disabled Signal",
+            webhook_type="custom",
+            secret=secret,
+            enabled=False,
+        )
+        assert created.status_code == 201
+
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode("utf-8")
+        resp = client.post(
+            "/ft-api/v1/webhook/custom/disabled-signal",
+            data=body,
+            headers=self._signed_headers(body, secret, nonce=f"disabled-post-{time.time_ns()}"),
+        )
+        assert resp.status_code == 503
+        assert resp.get_json()["message"] == "Webhook endpoint disabled"
