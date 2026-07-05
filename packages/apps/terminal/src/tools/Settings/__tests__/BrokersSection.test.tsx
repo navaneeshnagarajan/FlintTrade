@@ -286,6 +286,40 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(gatewayApi.removeAccount).toHaveBeenCalledWith("GW1"));
   });
 
+  it("optimistically drops a removed native account from the store (finding #2 — no resurrection)", async () => {
+    // A removed native account must leave the write-target store immediately so
+    // the next account poll's last-good preservation cannot resurrect it as a
+    // live write target while its source route refreshes.
+    (listNativeAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { adapter_id: "dhan", account_id: "D1", label: "Dhan", has_session: true, is_primary: false },
+    ]);
+    (removeNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    useBrokerStore.setState({
+      accounts: [
+        {
+          account_id: "D1",
+          broker: "dhan",
+          label: "Dhan",
+          status: "connected",
+          connected_at: null,
+          error_message: null,
+          is_primary: false,
+          source: "native",
+        },
+      ],
+      activeAccountId: "native:dhan:D1",
+    });
+
+    renderSection();
+
+    const disconnect = await screen.findByRole("button", { name: /disconnect dhan d1/i });
+    fireEvent.click(disconnect);
+
+    await waitFor(() => expect(removeNativeAccount).toHaveBeenCalledWith("dhan", "D1"));
+    await waitFor(() => expect(useBrokerStore.getState().accounts).toHaveLength(0));
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
+  });
+
   it("shows hosted MCP setup without promoting Groww to native connect", async () => {
     renderSection();
     await waitFor(() => expect(listBrokerMcpCatalogue).toHaveBeenCalled());

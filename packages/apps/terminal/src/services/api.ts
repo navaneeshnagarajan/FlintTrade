@@ -42,6 +42,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import {
+  nativeActiveWriteTargetIsUnconfirmed,
   pickNativeBrokerOrderTarget,
   pickNativeWriteTarget,
 } from "@/services/brokerTargets";
@@ -1158,6 +1159,19 @@ async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
 
   const normalisedBody = normaliseOrderBody(body);
   const nativeTarget = pickNativeWriteTarget(mode, apiKey);
+  // Fail closed: the operator selected a native account as the live write target
+  // but its session isn't confirmed connected yet (e.g. the post-reload window
+  // before the first account poll re-derives status). Sending on the bare path
+  // would let the backend resolve brokers.execution.default and silently route
+  // this live order to a different target than the operator chose — so reject
+  // instead and tell them to wait / reconnect.
+  if (nativeTarget === undefined && nativeActiveWriteTargetIsUnconfirmed(mode, apiKey)) {
+    throw new Error(
+      "Your selected native broker isn't connected yet — its session is still being "
+      + "established (this can happen right after a reload). Wait a moment and retry, or "
+      + "reconnect it in Settings → Brokers.",
+    );
+  }
   const isNativeRoutedEndpoint = nativeTarget !== undefined && NATIVE_ROUTED_ORDER_ENDPOINTS.has(ftEndpoint);
   const orderPath = isNativeRoutedEndpoint
     ? `${encodeURIComponent(nativeTarget.broker)}/${ftEndpoint}`

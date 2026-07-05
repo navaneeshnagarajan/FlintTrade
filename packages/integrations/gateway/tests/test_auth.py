@@ -204,17 +204,28 @@ def test_add_account_unknown_broker(client) -> None:
     assert "not found" in data["message"].lower()
 
 
-def test_add_account_rejects_coming_soon_native(client) -> None:
-    """The legacy gateway account route must honour the native "coming soon"
-    gate too — a native adapter that is built but not yet live-verified
-    (connectable=False, e.g. kotakneo / groww) cannot be connected through this
-    back door (Codex-wave review finding 8; principle 3)."""
-    for broker in ("kotakneo", "groww"):
-        response = client.post(
-            "/v1/accounts", json={"broker": broker, "label": "x", "credentials": {"access_token": "x"}}
-        )
-        assert response.status_code == 400, broker
-        assert "coming soon" in response.get_json()["message"].lower()
+@pytest.mark.parametrize(
+    ("route", "extra_body"),
+    [
+        ("/v1/accounts", {"label": "x", "credentials": {"access_token": "x"}}),
+        ("/v1/auth/oauth/start", {}),
+        ("/v1/auth/credentials", {"credentials": {"api_key": "x"}}),
+        ("/v1/auth/otp/request", {"mobile": "9999999999"}),
+        ("/v1/auth/otp/verify", {"otp": "123456"}),
+    ],
+)
+@pytest.mark.parametrize("broker", ["kotakneo", "groww"])
+def test_native_connect_routes_reject_coming_soon_native(client, route, extra_body, broker) -> None:
+    """Every legacy gateway native-connect entrypoint must honour the "coming
+    soon" gate — a native adapter that is built but not yet live-verified
+    (connectable=False, e.g. kotakneo / groww) cannot be connected through any
+    back door (Codex-wave review findings 8 + otp_verify; principle 3).
+
+    All five connect-completing routes are covered so a future edit that drops
+    the guard from any one of them fails a test, not just add_account."""
+    response = client.post(route, json={"broker": broker, **extra_body})
+    assert response.status_code == 400, (route, broker)
+    assert "coming soon" in response.get_json()["message"].lower(), (route, broker)
 
 
 # ---------------------------------------------------------------------------

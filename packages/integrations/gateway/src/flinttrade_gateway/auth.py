@@ -504,6 +504,16 @@ def otp_verify() -> Any:
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
 
+    # otp_verify is a fully connect-completing native entrypoint that does not
+    # depend on a prior otp_request (it takes broker/account_id from its own
+    # body), so it must enforce the coming-soon gate itself — otherwise a native
+    # adapter whose own surface refuses connection could be attached via this
+    # back door. Mirrors the guard on add_account/oauth_start/submit_credentials/
+    # otp_request.
+    coming_soon = _reject_coming_soon_native(broker)
+    if coming_soon is not None:
+        return coming_soon
+
     try:
         full_credentials = {"otp": otp, **credentials}
         info = _registry().add_account(account_id, broker, body.get("label", ""), full_credentials)

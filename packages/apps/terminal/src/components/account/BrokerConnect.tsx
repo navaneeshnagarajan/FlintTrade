@@ -9,7 +9,7 @@
  * the backend's loopback callback establishes the session.
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
@@ -34,8 +34,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import { useBrokerStore } from "@/stores/brokerStore";
+import { BROKER_ACCOUNTS_QUERY_KEY } from "@/hooks/useBrokerAccounts";
+import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import { gatewayApi } from "@/services/gatewayApi";
 import type { BrokerAccount } from "@/types/broker";
 import {
@@ -53,6 +53,7 @@ import {
 
 const BROKERS_KEY = ["native", "brokers"] as const;
 const ACCOUNTS_KEY = ["native", "accounts"] as const;
+const GATEWAY_ACCOUNTS_KEY = ["gateway", "accounts"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
 
 function expiryLabel(expiresAt?: number | null): string {
@@ -153,6 +154,7 @@ export function BrokerConnect() {
   function invalidateAccountQueries(delay = 0) {
     const refresh = () => {
       void qc.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+      void qc.invalidateQueries({ queryKey: GATEWAY_ACCOUNTS_KEY });
       void qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
     };
     if (delay > 0) {
@@ -225,6 +227,12 @@ export function BrokerConnect() {
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} disconnected.`);
+      // Drop the row from the store immediately so the next account poll's
+      // last-good preservation (useBrokerAccounts) cannot resurrect a
+      // just-removed account as a live write target while its source refreshes.
+      useBrokerStore.getState().removeAccount(
+        brokerAccountKey({ source: "native", broker: sel.adapter, account_id: sel.account }),
+      );
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {
@@ -280,28 +288,26 @@ export function BrokerConnect() {
     },
   });
 
-  // Legacy gateway accounts (BROKER_CATALOG / OpenAlgo-bridge path) live in the
-  // unified broker store. They are not part of the native connect flow above,
-  // but they still need remove / reconnect / set-primary management — folding
-  // that here keeps a single brokers surface rather than a separate orphaned
-  // screen. The section renders only when such accounts exist, so the common
-  // native-only setup is visually unchanged. Triggering the shared poll here
-  // populates the store in both the app shell and the pre-app setup wizard.
-  useBrokerAccounts();
-  // Select the stable store array and filter via useMemo — filtering inside the
-  // Zustand selector would return a fresh array each call and loop under
-  // useSyncExternalStore.
-  const allAccounts = useBrokerStore((s) => s.accounts);
-  const gatewayAccounts = useMemo(
-    () => allAccounts.filter((a) => a.source !== "native"),
-    [allAccounts],
-  );
+  // Legacy gateway accounts (BROKER_CATALOG / OpenAlgo-bridge path) still need
+  // remove / reconnect / set-primary management — folding that here keeps a
+  // single brokers surface rather than a separate orphaned screen. The section
+  // renders only when such accounts exist, so the common native-only setup is
+  // visually unchanged. This is a dedicated gateway-only query (not the shared
+  // useBrokerAccounts poll) so it neither duplicates the native-accounts fetch
+  // that accountsQuery already runs nor depends on a parent populating the store
+  // — it works standalone in the pre-app setup wizard too.
+  const gatewayAccountsQuery = useQuery({
+    queryKey: GATEWAY_ACCOUNTS_KEY,
+    queryFn: () => gatewayApi.listAccounts(),
+  });
+  const gatewayAccounts = gatewayAccountsQuery.data ?? [];
 
   const gatewayRemoveMutation = useMutation({
     mutationFn: (accountId: string) => gatewayApi.removeAccount(accountId),
     onSuccess: (_r, accountId) => {
       setError("");
       setNotice(`Gateway account ${accountId} disconnected.`);
+      useBrokerStore.getState().removeAccount(accountId);
       invalidateAccountQueries();
     },
     onError: (e: unknown, accountId) => {

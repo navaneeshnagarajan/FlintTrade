@@ -31,7 +31,7 @@ describe("ConnectionStep", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("button", { name: /flinttrade gateway/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /flinttrade native/i })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
@@ -40,9 +40,9 @@ describe("ConnectionStep", () => {
     expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
   });
 
-  it("shows the native connect (with the risk note) after selecting the FlintTrade Gateway tab", () => {
+  it("shows the native connect (with the risk note) after selecting the FlintTrade Native tab", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /flinttrade gateway/i }));
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByText("Native brokers section")).toBeInTheDocument();
     expect(screen.getByText(/use at your own risk/i)).toBeInTheDocument();
@@ -53,7 +53,7 @@ describe("ConnectionStep", () => {
     _nativeAccounts = [{ has_session: true }];
 
     render(<ConnectionStep onComplete={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /flinttrade gateway/i }));
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
   });

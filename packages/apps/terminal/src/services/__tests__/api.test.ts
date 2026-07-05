@@ -1364,6 +1364,33 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(body).not.toHaveProperty("apikey");
   });
 
+  it("fails closed instead of retargeting when the active native account is not yet connected", async () => {
+    // Re-audit finding #1: after a reload the persisted active native account
+    // rehydrates as not-yet-connected (status !== "connected") until the first
+    // poll. Sending on the bare path would let the backend resolve
+    // brokers.execution.default and silently route this LIVE order to a
+    // different target — so postOrder must reject, not fetch.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [
+      { account_id: "U1", broker: "upstox", source: "native", status: "disconnected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+
+    await expect(
+      placeOrder({
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        price_type: "MARKET",
+        product: "MIS",
+        orderType: "MARKET",
+      } as unknown as Parameters<typeof placeOrder>[0]),
+    ).rejects.toThrow(/isn't connected yet/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("routes live modifyOrder through the active connected native account", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";

@@ -48,9 +48,37 @@ export function pickNativeBrokerOrderTargetFromState(
   return { broker: target.broker, account_id: target.accountId };
 }
 
+/**
+ * True when native writes are in force (live mode, no bridge key) and the
+ * operator's *selected* active account is native but not confirmed connected —
+ * e.g. right after a reload, before the first account poll re-derives its live
+ * status from the session. Callers on the live-order path must fail closed
+ * rather than fall through to the bare path, which the backend would resolve to
+ * `brokers.execution.default` — silently routing the order to a different target
+ * than the operator chose.
+ */
+export function hasUnconfirmedNativeActiveWriteTarget(
+  mode: string,
+  apiKey: string,
+  accounts: NativeBrokerTargetAccount[],
+  activeAccountId: string | null,
+): boolean {
+  if (mode !== "live" || apiKey.trim().length > 0) return false;
+  const active = accounts.find((account) => isBrokerAccountMatch(account, activeAccountId));
+  return active?.source === "native" && active.status !== "connected";
+}
+
 export function pickNativeWriteTarget(mode: string, apiKey: string): NativeWriteTarget | undefined {
   const { accounts, activeAccountId } = useBrokerStore.getState();
   return pickNativeWriteTargetFromState(mode, apiKey, accounts, activeAccountId);
+}
+
+/**
+ * Store-reading wrapper for {@link hasUnconfirmedNativeActiveWriteTarget}.
+ */
+export function nativeActiveWriteTargetIsUnconfirmed(mode: string, apiKey: string): boolean {
+  const { accounts, activeAccountId } = useBrokerStore.getState();
+  return hasUnconfirmedNativeActiveWriteTarget(mode, apiKey, accounts, activeAccountId);
 }
 
 export function pickNativeBrokerOrderTarget(

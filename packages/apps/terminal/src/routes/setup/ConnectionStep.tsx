@@ -2,8 +2,8 @@
  * ConnectionStep — connection configuration step in the setup wizard.
  *
  * Two modes toggled via tabs:
- *   - "FlintTrade Gateway" — pick a broker, enter credentials, manage accounts
- *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server
+ *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server (primary)
+ *   - "FlintTrade Native"  — pick a native broker adapter, enter credentials, manage accounts
  *
  * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
  */
@@ -299,7 +299,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
           OpenAlgo Bridge
         </TabButton>
         <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
-          FlintTrade Gateway
+          FlintTrade Native
         </TabButton>
       </div>
 
