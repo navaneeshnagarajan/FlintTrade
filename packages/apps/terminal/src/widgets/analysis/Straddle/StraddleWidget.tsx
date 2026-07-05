@@ -51,7 +51,14 @@ interface RawOptionRow {
   last_price?: number;
 }
 
+interface RawOptionChainEntry {
+  strike?: number;
+  ce?: RawOptionRow | null;
+  pe?: RawOptionRow | null;
+}
+
 interface RawOptionChain {
+  chain?: RawOptionChainEntry[];
   calls?: RawOptionRow[];
   puts?: RawOptionRow[];
   atm_strike?: number;
@@ -132,14 +139,41 @@ function appendPoint(arr: ChartPoint[], point: ChartPoint): void {
   }
 }
 
+function optionLegWithStrike(row: RawOptionRow | null | undefined, strike: unknown): RawOptionRow | null {
+  if (!row) return null;
+  const strikeValue = Number(row.strike_price ?? row.strike ?? strike);
+  if (!Number.isFinite(strikeValue) || strikeValue <= 0) return null;
+  return { ...row, strike: strikeValue, strike_price: strikeValue };
+}
+
+function chainCalls(chain: RawOptionChain): RawOptionRow[] {
+  if (chain.chain?.length) {
+    return chain.chain.flatMap((entry) => {
+      const row = optionLegWithStrike(entry.ce, entry.strike);
+      return row ? [row] : [];
+    });
+  }
+  return chain.calls ?? [];
+}
+
+function chainPuts(chain: RawOptionChain): RawOptionRow[] {
+  if (chain.chain?.length) {
+    return chain.chain.flatMap((entry) => {
+      const row = optionLegWithStrike(entry.pe, entry.strike);
+      return row ? [row] : [];
+    });
+  }
+  return chain.puts ?? [];
+}
+
 function findAtm(chain: RawOptionChain, spotLtp: number): number | null {
   if (!chain) return null;
   if (chain.atm_strike) return Number(chain.atm_strike);
   if (!spotLtp) return null;
 
   const strikes = Array.from(new Set([
-    ...(chain.calls ?? []).map((c) => Number(c.strike_price ?? c.strike)),
-    ...(chain.puts  ?? []).map((p) => Number(p.strike_price ?? p.strike)),
+    ...chainCalls(chain).map((c) => Number(c.strike_price ?? c.strike)),
+    ...chainPuts(chain).map((p) => Number(p.strike_price ?? p.strike)),
   ])).filter(Boolean).sort((a, b) => a - b);
 
   if (strikes.length === 0) return null;
@@ -467,8 +501,8 @@ function StraddleWidget() {
         const spotLtp = Number(newSpot.ltp ?? 0);
         const atm = findAtm(newChain, spotLtp);
         if (atm != null) {
-          const ce = findOption(newChain.calls ?? [], atm);
-          const pe = findOption(newChain.puts  ?? [], atm);
+          const ce = findOption(chainCalls(newChain), atm);
+          const pe = findOption(chainPuts(newChain), atm);
           const ceLtp = Number(ce?.ltp ?? ce?.last_price ?? 0);
           const peLtp = Number(pe?.ltp ?? pe?.last_price ?? 0);
           const straddleVal = ceLtp + peLtp;
@@ -515,8 +549,8 @@ function StraddleWidget() {
     const atm     = findAtm(chain, spotLtp);
     if (atm == null) return { atmStrike: null, ceLtp: null, peLtp: null, straddlePrice: null, pnl: null };
 
-    const ce = findOption(chain.calls ?? [], atm);
-    const pe = findOption(chain.puts  ?? [], atm);
+    const ce = findOption(chainCalls(chain), atm);
+    const pe = findOption(chainPuts(chain), atm);
 
     const ceLtpVal = Number(ce?.ltp ?? ce?.last_price ?? 0) || null;
     const peLtpVal = Number(pe?.ltp ?? pe?.last_price ?? 0) || null;

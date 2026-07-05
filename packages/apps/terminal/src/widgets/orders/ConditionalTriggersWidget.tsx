@@ -40,11 +40,11 @@ import {
   BrokerOrdersErrorNotice,
   BrokerTargetSelect,
   BrokerRowsTable,
-  DEFAULT_BROKER_TARGET,
   LiveModeNotice,
   extractRowId,
   parsePriceValue,
   parseWholeNumber,
+  useBrokerOrderTarget,
 } from "./OrdersManagerShared";
 
 // --- Dhan v2 condition vocabulary (see broker docs: conditional-trigger) ----
@@ -111,7 +111,7 @@ export default function ConditionalTriggersWidget() {
   const appMode = useModeStore((s) => s.mode);
   const isLive = appMode === "live";
 
-  const [target, setTarget] = useState(DEFAULT_BROKER_TARGET);
+  const [target, setTarget] = useBrokerOrderTarget(appMode);
 
   // null → placing a new trigger; an id → FULL-replacement modify of that alert.
   const [editingAlertId, setEditingAlertId] = useState<string | null>(null);

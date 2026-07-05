@@ -45,3 +45,17 @@ def test_flinttrade_api_key_authenticates_without_openalgo_key(monkeypatch, tmp_
     assert wrong.status_code == 401
     assert ok.status_code == 200
     assert ok.get_json()["status"] == "success"
+
+
+def test_auth_state_default_is_workspace_scoped(monkeypatch, tmp_path: Path) -> None:
+    """Auth revocation/rate-limit state must not leak to the operator home."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    from flinttrade_core import auth_state as auth_state_mod
+
+    auth_state_mod.reset_singleton_for_tests()
+    try:
+        state = auth_state_mod.get_auth_state()
+        assert state._db_path == tmp_path / "auth_state.duckdb"
+        assert state._db_path.exists()
+    finally:
+        auth_state_mod.reset_singleton_for_tests()

@@ -337,7 +337,7 @@ export function SectorTab() {
 
       <p className="text-xs text-text-muted">
         Sector classification based on NSE symbol mapping. Unrecognised symbols are grouped
-        under "Other". Data sourced from live holdings via OpenAlgo.
+        under "Other". Data sourced from live holdings via your active broker data source.
       </p>
     </div>
   );

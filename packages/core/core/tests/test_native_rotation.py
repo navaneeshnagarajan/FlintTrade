@@ -14,6 +14,8 @@ from typing import Any
 import pytest
 from flask import Flask
 
+from flinttrade_gateway.native_login import SESSION_INVALID_RELOGIN_MESSAGE
+
 from flinttrade_core.native_rotation import NativeSessionRefresher
 
 pytestmark = pytest.mark.unit
@@ -117,11 +119,13 @@ def test_failure_raises_and_lands_in_the_status_surface() -> None:
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "dead"}})
     app = _app(adapter, registry, store)
 
-    with pytest.raises(RuntimeError, match="fresh 2FA required"):
+    with pytest.raises(RuntimeError, match="Broker session expired or invalid") as raised:
         NativeSessionRefresher(app).refresh_token("dhan")
 
     # The UI surface (G7) records the per-selector reason.
-    assert "login-failed" in app.config["NATIVE_SESSION_STATUS"]["dhan:111"]
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == SESSION_INVALID_RELOGIN_MESSAGE
+    assert "dhan:111" not in str(raised.value)
+    assert "fresh 2FA required" not in str(raised.value)
     assert registry.sessions == {}  # fail-closed: no session registered
 
 
@@ -157,6 +161,101 @@ def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch) -> None:
     assert c.post("/admin/credentials/rotation/dhan/rotate-now").status_code == 401
 
 
+def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
+    """Coming-soon native selectors must not create noisy daily refresh jobs."""
+    from flinttrade_core.native_rotation import configure_session_rotation
+
+    app = Flask(__name__)
+    app.config["NATIVE_ADAPTERS"] = {
+        "dhan": object(),
+        "upstox": object(),
+        "indmoney": object(),
+    }
+    monkeypatch.setattr(
+        "flinttrade_core.app._read_workspace_brokers",
+        lambda: {
+            "registered": [
+                "openalgo:default",
+                "dhan:D1",
+                "upstox:U1",
+                "indmoney:I1",
+                "kotakneo:K1",
+            ]
+        },
+    )
+
+    assert configure_session_rotation(app) is not None
+
+    job_ids = {job.id for job in app.config["ROTATION_SCHEDULER"].get_jobs()}
+    assert {"cred_refresh_dhan", "cred_refresh_upstox", "cred_refresh_indmoney"} <= job_ids
+    assert "cred_refresh_kotakneo" not in job_ids
+    assert "cred_refresh_openalgo" not in job_ids
+
+
+def test_rotation_route_auth_runs_before_active_broker_check(monkeypatch) -> None:
+    """Unauthenticated callers get 401, not an active-broker oracle."""
+    from flinttrade_core.native_rotation import configure_session_rotation
+
+    app = Flask(__name__)
+    app.config["NATIVE_ADAPTERS"] = {}
+
+    def guard():
+        return {"status": "error", "message": "unauthorised"}, 401
+
+    app.config["BROKER_MGMT_WRITE_GUARD"] = guard
+    monkeypatch.setattr("flinttrade_core.app._read_workspace_brokers", lambda: {"registered": ["kotakneo:K1"]})
+    app.register_blueprint(configure_session_rotation(app))
+
+    resp = app.test_client().post("/admin/credentials/rotation/kotakneo/schedule")
+
+    assert resp.status_code == 401
+
+
+def test_rotation_route_rejects_inactive_native_after_auth(monkeypatch) -> None:
+    """Manual admin scheduling follows the same active-native truth as boot."""
+    from flinttrade_core.native_rotation import configure_session_rotation
+
+    app = Flask(__name__)
+    app.config["NATIVE_ADAPTERS"] = {"dhan": object()}
+    app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
+    monkeypatch.setattr(
+        "flinttrade_core.app._read_workspace_brokers",
+        lambda: {"registered": ["dhan:D1", "kotakneo:K1", "openalgo:default"]},
+    )
+    app.register_blueprint(configure_session_rotation(app))
+    client = app.test_client()
+
+    assert client.post("/admin/credentials/rotation/dhan/schedule").status_code == 200
+    kotak = client.post("/admin/credentials/rotation/kotakneo/schedule")
+    openalgo = client.post("/admin/credentials/rotation/openalgo/schedule")
+
+    assert kotak.status_code == 400
+    assert "not active" in kotak.get_json()["message"]
+    assert openalgo.status_code == 400
+
+
+def test_rotation_route_rejects_weekly_native_api_key_rotation(monkeypatch) -> None:
+    """Core-mounted native rotation supports real daily refresh, not fake weekly key rotation."""
+    from flinttrade_core.native_rotation import configure_session_rotation
+
+    app = Flask(__name__)
+    app.config["NATIVE_ADAPTERS"] = {"dhan": object()}
+    app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
+    monkeypatch.setattr("flinttrade_core.app._read_workspace_brokers", lambda: {"registered": ["dhan:D1"]})
+    app.register_blueprint(configure_session_rotation(app))
+    client = app.test_client()
+
+    daily = client.post("/admin/credentials/rotation/dhan/schedule", json={"interval": "daily", "time_ist": "08:05"})
+    weekly = client.post(
+        "/admin/credentials/rotation/dhan/schedule",
+        json={"interval": "weekly", "time_ist": "08:05", "day": 0},
+    )
+
+    assert daily.status_code == 200
+    assert weekly.status_code == 400
+    assert "daily refresh only" in weekly.get_json()["message"]
+
+
 def test_renewed_token_is_persisted_to_the_vault() -> None:
     """After Dhan RenewToken, the vault must hold the NEW token (write-back's
     replay-equality guard would otherwise skip the write, leaving the old
@@ -184,9 +283,11 @@ def test_dead_token_probe_downgrades_to_needs_relogin() -> None:
     app = _app(adapter, registry, store)
 
     import pytest
-    with pytest.raises(RuntimeError, match="token verification failed"):
+    with pytest.raises(RuntimeError, match="Broker session expired or invalid") as raised:
         NativeSessionRefresher(app).refresh_token("dhan")
-    assert "login-failed" in app.config["NATIVE_SESSION_STATUS"]["dhan:111"]
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == SESSION_INVALID_RELOGIN_MESSAGE
+    assert "dhan:111" not in str(raised.value)
+    assert "401 token expired" not in str(raised.value)
     assert ("dhan", "111") not in registry.sessions  # dropped
 
 

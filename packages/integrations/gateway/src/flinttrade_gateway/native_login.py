@@ -22,6 +22,10 @@ from typing import Any
 
 logger = logging.getLogger("flinttrade.gateway.native_login")
 
+SESSION_INVALID_RELOGIN_MESSAGE = "Broker session expired or invalid; re-login required."
+CREDENTIALS_UNAVAILABLE_MESSAGE = "Broker credentials unavailable; re-login required."
+BROKER_LOGIN_RETRY_MESSAGE = "Broker login is temporarily unavailable; retry later."
+
 
 def _is_transient_probe_error(exc: BaseException) -> bool:
     """True for transport hiccups that are NOT proof a token is dead.
@@ -136,6 +140,22 @@ def _is_auth_failure(exc: BaseException) -> bool:
     return any(marker in str(exc).lower() for marker in _AUTH_FAILURE_MARKERS)
 
 
+def should_keep_session_after_probe_error(exc: BaseException) -> bool:
+    """Return True when a liveness-probe error does not prove auth is dead."""
+    from flinttrade_core.exceptions import NetworkError, RateLimitError  # noqa: PLC0415
+
+    return not _is_auth_failure(exc) and (
+        _is_transient_probe_error(exc)
+        or _is_service_window_error(exc)
+        or isinstance(exc, (RateLimitError, NetworkError))
+    )
+
+
+def should_drop_session_after_probe_error(exc: BaseException) -> bool:
+    """Return True when an error proves the native broker session is dead."""
+    return _is_auth_failure(exc)
+
+
 async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, account_id: str) -> str | None:
     """Confirm a just-established token actually authenticates (error string or None).
 
@@ -162,28 +182,22 @@ async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, ac
         await reader(session)  # native adapters' funds() is always a coroutine
         return None
     except Exception as exc:  # noqa: BLE001 - classify below
-        from flinttrade_core.exceptions import NetworkError, RateLimitError  # noqa: PLC0415
-
         # A dead credential is evicted no matter what else the message says. Only
         # errors that do NOT prove the token is dead keep the freshly-minted
         # session: a transport blip, a closed service window, or a typed
         # rate-limit / network error (NetworkError covers BrokerTimeout/Internal).
-        keep = not _is_auth_failure(exc) and (
-            _is_transient_probe_error(exc)
-            or _is_service_window_error(exc)
-            or isinstance(exc, (RateLimitError, NetworkError))
-        )
-        if keep:
+        if should_keep_session_after_probe_error(exc):
             logger.info(
-                "Token liveness probe inconclusive for %s:%s (%s) — keeping session",
-                adapter_id, account_id, exc,
+                "Token liveness probe inconclusive for %s (%s) — keeping session",
+                adapter_id, type(exc).__name__,
             )
             return None
         try:
             registry.remove_session_for(adapter_id, account_id)
         except Exception:  # noqa: BLE001
             pass
-        return f"token verification failed: {exc}"
+        logger.warning("Token liveness probe proved %s session invalid; session dropped", adapter_id)
+        return SESSION_INVALID_RELOGIN_MESSAGE
 
 
 async def establish_native_session(
@@ -228,9 +242,8 @@ async def establish_native_session(
     session = await adapter.login(credentials)
     registry.put_session(adapter_id, account_id, session)
     logger.info(
-        "Native session established for %s:%s (expires_at=%s)",
+        "Native session established for %s (expires_at=%s)",
         adapter_id,
-        account_id,
         getattr(session, "expires_at", None),
     )
     replay = getattr(adapter, "replay_credentials", None)
@@ -240,16 +253,13 @@ async def establish_native_session(
             if isinstance(replayable, dict) and replayable != credentials:
                 credential_store.update_credentials_for(adapter_id, account_id, replayable)
                 logger.info(
-                    "Vault payload for %s:%s rewritten with replayable material (G7)",
+                    "Vault payload for %s rewritten with replayable material (G7)",
                     adapter_id,
-                    account_id,
                 )
         except Exception as exc:  # noqa: BLE001 - write-back must never fail the live session
             logger.warning(
-                "Replayable-credential write-back failed for %s:%s: %s",
-                adapter_id,
-                account_id,
-                exc,
+                "Replayable-credential write-back failed for %s (%s)",
+                adapter_id, type(exc).__name__,
             )
     if verify:
         # The token-replay logins build a Session without a broker call, so a
@@ -287,9 +297,8 @@ async def establish_native_sessions(
         selectors: The registered ``<adapter_id>:<account_id>`` selectors.
         verify: When True, probe each freshly-established session with a cheap
             authenticated read so a dead token surfaces as a failure rather than
-            a false "ok". Used by the interactive connect/re-authenticate paths
-            (operator present); left False at boot to keep startup fast and
-            avoid dropping a good session on a transient startup network blip.
+            a false "ok". Transient probe failures keep the session; transient
+            login failures leave the selector sessionless with a retry message.
 
     Returns:
         ``{selector: "ok" | "<error>"}`` for observability (never raises).
@@ -309,8 +318,11 @@ async def establish_native_sessions(
         try:
             credentials = credential_store.retrieve_for(adapter_id, account_id)
         except Exception as exc:  # noqa: BLE001 - a missing/undecryptable row must not brick boot
-            logger.info("No usable vault credentials for %s (%s) — leaving sessionless", selector, exc)
-            results[selector] = f"no-credentials: {exc}"
+            logger.info(
+                "No usable vault credentials for %s (%s) — leaving sessionless",
+                adapter_id, type(exc).__name__,
+            )
+            results[selector] = CREDENTIALS_UNAVAILABLE_MESSAGE
             continue
         try:
             await establish_native_session(
@@ -319,6 +331,9 @@ async def establish_native_sessions(
             )
             results[selector] = "ok"
         except Exception as exc:  # noqa: BLE001 - per-selector isolation
-            logger.warning("Native login failed for %s: %s", selector, exc)
-            results[selector] = f"login-failed: {exc}"
+            logger.warning("Native login failed for %s (%s)", adapter_id, type(exc).__name__)
+            if should_keep_session_after_probe_error(exc):
+                results[selector] = BROKER_LOGIN_RETRY_MESSAGE
+            else:
+                results[selector] = SESSION_INVALID_RELOGIN_MESSAGE
     return results

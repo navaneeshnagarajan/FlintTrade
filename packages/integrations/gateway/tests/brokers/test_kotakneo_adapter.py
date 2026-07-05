@@ -563,6 +563,19 @@ def test_replay_credentials_drops_the_one_time_totp_only() -> None:
 
     adapter = KotakNeoAdapter(client_factory=lambda _s: object())
     session = Session(access_token="UCC1", expires_at=9e9, account_id="UCC1", adapter_id="kotakneo")
-    creds = {"consumer_key": "CK", "mobile_number": "9", "ucc": "UCC1", "mpin": "111111", "totp": "000111"}
+    creds = {
+        "consumer_key": "CK",
+        "mobile_number": "9",
+        "ucc": "UCC1",
+        "mpin": "111111",
+        "totp": "000111",
+        "access_token": "PORTAL-TOKEN",
+    }
     replay = adapter.replay_credentials(creds, session)
-    assert replay == {"consumer_key": "CK", "mobile_number": "9", "ucc": "UCC1", "mpin": "111111"}
+    assert replay == {
+        "consumer_key": "CK",
+        "mobile_number": "9",
+        "ucc": "UCC1",
+        "mpin": "111111",
+        "access_token": "PORTAL-TOKEN",
+    }

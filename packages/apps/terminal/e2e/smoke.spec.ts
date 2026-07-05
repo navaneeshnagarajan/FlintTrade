@@ -5,12 +5,13 @@
  *   - The app loads without crashing
  *   - Root "/" redirects to a known FlintTrade route
  *   - The document title contains "FlintTrade"
- *   - The TopBar (chrome header) is visible with route navigation links
+ *   - App chrome is visible with route navigation controls
  *
  * No broker connection is needed. These tests work in explore / unauthenticated state.
  */
 
 import { test, expect } from '@playwright/test';
+import { seedExploreDemoSession } from './helpers';
 
 test.describe('Smoke — app loads', () => {
   test('root "/" redirects to a known route', async ({ page }) => {
@@ -36,6 +37,7 @@ test.describe('Smoke — app loads', () => {
   });
 
   test('TopBar is present on app routes', async ({ page }) => {
+    await seedExploreDemoSession(page);
     // Navigate directly to /trade — AppLayout renders TopBar
     await page.goto('/trade');
     // TopBar is inside a <header> element
@@ -43,12 +45,14 @@ test.describe('Smoke — app loads', () => {
     await expect(header).toBeVisible({ timeout: 10_000 });
   });
 
-  test('TopBar contains route navigation links', async ({ page }) => {
+  test('app chrome contains route navigation controls', async ({ page }) => {
+    await seedExploreDemoSession(page);
     await page.goto('/trade');
-    // BASE_ROUTE_TABS: Learn, Invest, Trade — always visible regardless of skill level
-    await expect(page.getByRole('link', { name: 'Learn' })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('link', { name: 'Invest' })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('link', { name: 'Trade' })).toBeVisible({ timeout: 10_000 });
+    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+    await expect(nav.getByRole('button', { name: 'Home' })).toBeVisible({ timeout: 10_000 });
+    await expect(nav.getByRole('button', { name: 'Learn' })).toBeVisible({ timeout: 10_000 });
+    await expect(nav.getByRole('button', { name: 'Invest' })).toBeVisible({ timeout: 10_000 });
+    await expect(nav.getByRole('button', { name: 'Trade' })).toBeVisible({ timeout: 10_000 });
   });
 
   test('/welcome renders without errors', async ({ page }) => {

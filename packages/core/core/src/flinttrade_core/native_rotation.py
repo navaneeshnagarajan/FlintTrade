@@ -14,10 +14,12 @@ IndMoney need a fresh login at expiry. The morning refresh therefore:
    silently trading on a dead session.
 
 ``configure_session_rotation`` builds the rotator over this hook, schedules
-the 08:05 IST refresh for every registered native broker (after Upstox's
+the 08:05 IST refresh for active registered native brokers (after Upstox's
 ~03:30 IST expiry, before the 09:15 open), and returns the admin blueprint
-for the factory to mount. The APScheduler instance is created UNSTARTED —
-the serve path starts it — so ``create_flask_app`` stays side-effect-light.
+for the factory to mount. Coming-soon native selectors can stay registered
+without creating false daily refresh failures. The APScheduler instance is
+created UNSTARTED — the serve path starts it — so ``create_flask_app`` stays
+side-effect-light.
 """
 
 from __future__ import annotations
@@ -55,7 +57,12 @@ class NativeSessionRefresher:
         """
         import asyncio  # noqa: PLC0415
 
-        from flinttrade_gateway.native_login import establish_native_session  # noqa: PLC0415
+        from flinttrade_gateway.native_login import (  # noqa: PLC0415
+            BROKER_LOGIN_RETRY_MESSAGE,
+            SESSION_INVALID_RELOGIN_MESSAGE,
+            establish_native_session,
+            should_keep_session_after_probe_error,
+        )
 
         app = self._app
         adapter = (app.config.get("NATIVE_ADAPTERS") or {}).get(broker)
@@ -102,7 +109,7 @@ class NativeSessionRefresher:
                         except Exception as exc:  # noqa: BLE001 - fall back to replay
                             logger.info(
                                 "renew_token failed for %s (%s) — replaying vault credentials",
-                                selector, exc,
+                                broker, type(exc).__name__,
                             )
                 # verify=True: the token-replay logins (Upstox/IndMoney) build a
                 # Session without contacting the broker, so a DEAD token would
@@ -123,11 +130,16 @@ class NativeSessionRefresher:
                     try:
                         store.update_credentials_for(broker, account_id, credentials)
                     except Exception as exc:  # noqa: BLE001 - session is live regardless
-                        logger.warning("Renewed-token persist failed for %s: %s", selector, exc)
+                        logger.warning("Renewed-token persist failed for %s (%s)", broker, type(exc).__name__)
                 status[selector] = "ok"
             except Exception as exc:  # noqa: BLE001 - per-selector isolation
-                status[selector] = f"login-failed: {exc}"
-                failures.append(f"{selector}: {exc}")
+                message = (
+                    BROKER_LOGIN_RETRY_MESSAGE
+                    if should_keep_session_after_probe_error(exc)
+                    else SESSION_INVALID_RELOGIN_MESSAGE
+                )
+                status[selector] = message
+                failures.append(f"{broker}: {message}")
         if failures:
             raise RuntimeError("; ".join(failures))
 
@@ -137,9 +149,10 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
 
     Stores the rotator on ``app.config["CREDENTIALS_ROTATOR"]`` and its
     UNSTARTED scheduler on ``app.config["ROTATION_SCHEDULER"]`` (the serve
-    path calls ``.start()`` — tests never spawn the thread). Every registered
-    native broker gets a daily 08:05 IST refresh job. Returns ``None`` (and
-    logs) when APScheduler is unavailable — rotation then simply stays off.
+    path calls ``.start()`` — tests never spawn the thread). Every active
+    registered native broker gets a daily 08:05 IST refresh job. Returns
+    ``None`` (and logs) when APScheduler is unavailable — rotation then simply
+    stays off.
     """
     try:
         from apscheduler.schedulers.background import BackgroundScheduler  # noqa: PLC0415
@@ -156,14 +169,17 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
     app.config["CREDENTIALS_ROTATOR"] = rotator
     app.config["ROTATION_SCHEDULER"] = scheduler
 
-    # Morning re-auth for every registered native (jobs queue on the unstarted
-    # scheduler and arm when the serve path starts it).
+    # Morning re-auth for active registered natives (jobs queue on the
+    # unstarted scheduler and arm when the serve path starts it).
     try:
         from .app import _read_workspace_brokers  # noqa: PLC0415
 
         registered = [str(s) for s in ((_read_workspace_brokers() or {}).get("registered") or [])]
+        active_adapters = set((app.config.get("NATIVE_ADAPTERS") or {}).keys())
         native_brokers = sorted({
-            s.split(":", 1)[0] for s in registered if is_native_broker(s.split(":", 1)[0])
+            s.split(":", 1)[0]
+            for s in registered
+            if is_native_broker(s.split(":", 1)[0]) and s.split(":", 1)[0] in active_adapters
         })
         for broker in native_brokers:
             rotator.schedule_daily_refresh(broker, "08:05")
@@ -174,12 +190,31 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
 
     @bp.before_request
     def _guard_rotation_writes() -> Any | None:
-        """G9 — rotation schedule/rotate-now writes need the operator session."""
+        """G9 + broker truth — writes need auth and an active native adapter."""
         if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
             return None
         guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
-        if guard is None:
+        if guard is not None:
+            guard_result = guard()
+            if guard_result is not None:
+                return guard_result
+
+        broker = (request.view_args or {}).get("broker")
+        if not broker:
             return None
-        return guard()
+        active_adapters = set((current_app.config.get("NATIVE_ADAPTERS") or {}).keys())
+        if str(broker) not in active_adapters:
+            return {
+                "status": "error",
+                "message": f"'{broker}' is not active for native session refresh.",
+            }, 400
+        if request.endpoint == "rotation_admin.rotation_schedule":
+            body = request.get_json(silent=True) or {}
+            if str(body.get("interval", "daily")).lower() == "weekly":
+                return {
+                    "status": "error",
+                    "message": "Native broker sessions support daily refresh only.",
+                }, 400
+        return None
 
     return bp

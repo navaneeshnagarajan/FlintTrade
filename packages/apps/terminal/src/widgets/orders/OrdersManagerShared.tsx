@@ -5,9 +5,8 @@
  * Shares the honest-state primitives so every widget behaves identically:
  *   - LiveModeNotice: these are live-broker constructs; outside Live mode the
  *     widgets neither fetch nor pretend.
- *   - BrokerTargetSelect: broker/account selector fed by brokerStore gateway
- *     accounts plus the OpenAlgo bridge default — mirrors AccountSwitcher's
- *     data source.
+ *   - BrokerTargetSelect: broker/account selector fed by connected brokerStore
+ *     accounts plus the OpenAlgo bridge default.
  *   - BrokerOrdersErrorNotice: surfaces backend refusals verbatim; a 501 maps
  *     to "Not available for this broker".
  *   - BrokerRowsTable: defensive table over adapter-specific rows (the
@@ -16,7 +15,7 @@
  *     fabricated).
  */
 
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Select,
@@ -34,6 +33,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useBrokerStore } from "@/stores/brokerStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { pickNativeBrokerOrderTargetFromState } from "@/services/brokerTargets";
 import {
   isUnsupportedForBroker,
   type BrokerOrderRow,
@@ -139,6 +140,67 @@ export const DEFAULT_BROKER_TARGET: Required<BrokerTarget> = {
   account_id: "default",
 };
 
+type BrokerOrderAccount = ReturnType<typeof useBrokerStore.getState>["accounts"][number];
+
+export function isBrokerOrderTargetableAccount(account: BrokerOrderAccount): boolean {
+  return account.status === "connected";
+}
+
+export function brokerOrderTargetExists(
+  target: Required<BrokerTarget>,
+  accounts: ReturnType<typeof useBrokerStore.getState>["accounts"],
+): boolean {
+  if (encodeTarget(target) === encodeTarget(DEFAULT_BROKER_TARGET)) return true;
+  return accounts.some(
+    (account) =>
+      isBrokerOrderTargetableAccount(account) &&
+      account.broker === target.broker &&
+      account.account_id === target.account_id,
+  );
+}
+
+/**
+ * Select the broker/account target for gated broker-management widgets.
+ *
+ * OpenAlgo remains primary when a bridge API key is present. In native-only
+ * Live mode, the active connected native account becomes the initial target so
+ * GTT/super/trigger/position writes do not silently hit OpenAlgo/default.
+ */
+export function useBrokerOrderTarget(
+  mode: string,
+): [Required<BrokerTarget>, (target: Required<BrokerTarget>) => void] {
+  const apiKey = useConnectionStore((s) => s.apiKey);
+  const { accounts, activeAccountId } = useBrokerStore(
+    useShallow((s) => ({ accounts: s.accounts, activeAccountId: s.activeAccountId })),
+  );
+
+  const automaticTarget = useMemo<Required<BrokerTarget>>(
+    () =>
+      pickNativeBrokerOrderTargetFromState(mode, apiKey, accounts, activeAccountId) ??
+      DEFAULT_BROKER_TARGET,
+    [mode, apiKey, accounts, activeAccountId],
+  );
+  const [target, setTarget] = useState<Required<BrokerTarget>>(automaticTarget);
+  const [manualTarget, setManualTarget] = useState(false);
+
+  const chooseTarget = useCallback((next: Required<BrokerTarget>) => {
+    setManualTarget(true);
+    setTarget(next);
+  }, []);
+
+  useEffect(() => {
+    const currentTargetGone = !brokerOrderTargetExists(target, accounts);
+    if (!manualTarget || currentTargetGone) {
+      setTarget((current) =>
+        encodeTarget(current) === encodeTarget(automaticTarget) ? current : automaticTarget,
+      );
+      if (currentTargetGone) setManualTarget(false);
+    }
+  }, [accounts, automaticTarget, manualTarget, target]);
+
+  return [target, chooseTarget];
+}
+
 export function BrokerTargetSelect({
   value,
   onChange,
@@ -152,6 +214,7 @@ export function BrokerTargetSelect({
     { target: DEFAULT_BROKER_TARGET, label: "OpenAlgo · default" },
   ];
   for (const account of accounts) {
+    if (!isBrokerOrderTargetableAccount(account)) continue;
     const target = { broker: account.broker, account_id: account.account_id };
     if (options.some((o) => encodeTarget(o.target) === encodeTarget(target))) continue;
     options.push({

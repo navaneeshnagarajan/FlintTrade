@@ -31,6 +31,11 @@ import httpx
 logger = logging.getLogger("flinttrade.ai.openclaw_bridge")
 
 _DEFAULT_TIMEOUT = 10.0
+_AGENT_CONTROL_UNSUPPORTED_CODE = "openclaw_agent_control_unsupported"
+_AGENT_CONTROL_UNSUPPORTED_MESSAGE = (
+    "This bridge does not use OpenClaw's removed /api/agents HTTP lifecycle "
+    "contract. Use the OpenClaw CLI or gateway session controls for agent runs."
+)
 
 
 @dataclass
@@ -65,6 +70,8 @@ class OpenClawBridge:
         self.host = host.rstrip("/")
         self._timeout = timeout
         self._connected = False
+        self.agent_control_supported = False
+        self.agent_control_message = _AGENT_CONTROL_UNSUPPORTED_MESSAGE
 
     # ------------------------------------------------------------------
     # Health
@@ -78,9 +85,16 @@ class OpenClawBridge:
         """
         try:
             with httpx.Client(timeout=self._timeout) as client:
-                resp = client.get(f"{self.host}/health")
-                self._connected = resp.status_code == 200
-                return self._connected
+                for endpoint in ("/healthz", "/health"):
+                    resp = client.get(f"{self.host}{endpoint}")
+                    if resp.status_code == 200:
+                        self._connected = True
+                        return True
+                    if endpoint == "/healthz" and resp.status_code == 404:
+                        continue
+                    break
+                self._connected = False
+                return False
         except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
             logger.debug("OpenClaw health check failed: %s", exc)
             self._connected = False
@@ -101,21 +115,11 @@ class OpenClawBridge:
         Returns:
             Response dict with ``status`` and ``agent_id`` on success.
         """
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(
-                    f"{self.host}/api/agents/deploy",
-                    json=agent_config,
-                )
-                if resp.status_code == 200:
-                    return resp.json()
-                return {
-                    "status": "error",
-                    "message": f"HTTP {resp.status_code}",
-                }
-        except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
-            logger.warning("OpenClaw deploy_agent failed: %s", exc)
-            return {"status": "error", "message": "OpenClaw request failed"}
+        return {
+            "status": "error",
+            "code": _AGENT_CONTROL_UNSUPPORTED_CODE,
+            "message": _AGENT_CONTROL_UNSUPPORTED_MESSAGE,
+        }
 
     def list_agents(self) -> list[dict]:
         """List all running agents on OpenClaw.
@@ -125,19 +129,7 @@ class OpenClawBridge:
             ``status``, ``strategy``, ``symbols``, ``created_at``.
             Returns an empty list on connection failure.
         """
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.get(f"{self.host}/api/agents")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # Handle both { "agents": [...] } and bare [...] formats
-                    if isinstance(data, list):
-                        return data
-                    return data.get("agents", [])
-                return []
-        except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
-            logger.debug("OpenClaw list_agents failed: %s", exc)
-            return []
+        return []
 
     def stop_agent(self, agent_id: str) -> dict:
         """Stop a running agent.
@@ -148,20 +140,11 @@ class OpenClawBridge:
         Returns:
             Response dict with ``status`` and stop details.
         """
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(
-                    f"{self.host}/api/agents/{agent_id}/stop",
-                )
-                if resp.status_code == 200:
-                    return resp.json()
-                return {
-                    "status": "error",
-                    "message": f"HTTP {resp.status_code}",
-                }
-        except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
-            logger.warning("OpenClaw stop_agent failed: %s", exc)
-            return {"status": "error", "message": "OpenClaw request failed"}
+        return {
+            "status": "error",
+            "code": _AGENT_CONTROL_UNSUPPORTED_CODE,
+            "message": _AGENT_CONTROL_UNSUPPORTED_MESSAGE,
+        }
 
     def get_agent_logs(self, agent_id: str) -> list[str]:
         """Get logs for a specific agent.
@@ -172,20 +155,7 @@ class OpenClawBridge:
         Returns:
             List of log line strings.  Returns empty list on failure.
         """
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.get(
-                    f"{self.host}/api/agents/{agent_id}/logs",
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return data
-                    return data.get("logs", [])
-                return []
-        except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
-            logger.debug("OpenClaw get_agent_logs failed: %s", exc)
-            return []
+        return []
 
     # ------------------------------------------------------------------
     # Properties

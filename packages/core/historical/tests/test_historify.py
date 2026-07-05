@@ -131,6 +131,32 @@ class TestDownloadSymbols:
         assert result.succeeded == 1
         assert result.failed == 0
 
+    def test_download_initialises_fresh_pipeline(self, mock_client, tmp_path):
+        from flinttrade_historical.historify import HistorifyDownloader
+        from flinttrade_historical.pipeline import DataPipeline
+
+        pipeline = DataPipeline(db_path=str(tmp_path / "fresh.duckdb"))
+        try:
+            dl = HistorifyDownloader(
+                client=mock_client,
+                storage=pipeline,
+                queue_db_path=tmp_path / "fresh_queue.db",
+            )
+
+            result = asyncio.run(
+                dl.download_symbols(
+                    symbols=[("NIFTY", "NSE_INDEX")],
+                    intervals=["1d"],
+                    from_date=date(2025, 6, 1),
+                    to_date=date(2025, 6, 30),
+                )
+            )
+
+            assert result.succeeded == 1
+            assert pipeline.count_bars("ohlcv_1d", "NIFTY", "NSE_INDEX") == 5
+        finally:
+            pipeline.close()
+
     def test_download_multiple_symbols(self, downloader):
         result = asyncio.run(
             downloader.download_symbols(

@@ -6,10 +6,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const { mockSetConnectionStatus, mockDirectBrokerConnected } = vi.hoisted(() => ({
+  mockSetConnectionStatus: vi.fn(),
+  mockDirectBrokerConnected: { value: false },
+}));
 
 // ---------------------------------------------------------------------------
 // Framer-motion stub
@@ -81,9 +86,13 @@ vi.mock("@/stores/connectionStore", () => ({
     (selector: (state: Record<string, unknown>) => unknown) =>
       selector({
         status: "disconnected",
-        setStatus: vi.fn(),
+        setStatus: mockSetConnectionStatus,
       }),
   ),
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useDirectBrokerConnected: () => mockDirectBrokerConnected.value,
 }));
 
 vi.mock("@/hooks/useMarketStatus", () => ({
@@ -126,6 +135,7 @@ function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
 describe("TopBarV2", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDirectBrokerConnected.value = false;
   });
 
   it("renders without crashing", () => {
@@ -221,6 +231,16 @@ describe("TopBarV2", () => {
   it("renders the account switcher slot", () => {
     renderTopBarV2();
     expect(screen.getByTestId("account-switcher")).toBeInTheDocument();
+  });
+
+  it("keeps the terminal connected when a direct broker session exists and OpenAlgo ping fails", async () => {
+    mockDirectBrokerConnected.value = true;
+
+    renderTopBarV2();
+
+    await waitFor(() => {
+      expect(mockSetConnectionStatus).toHaveBeenCalledWith("connected");
+    });
   });
 
   it("renders the fullscreen button", () => {

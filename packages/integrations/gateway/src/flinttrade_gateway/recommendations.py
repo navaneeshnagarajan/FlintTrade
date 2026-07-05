@@ -152,6 +152,8 @@ def _score_throughput(c: Capabilities) -> tuple[float, str]:
 def _score_streaming(c: Capabilities) -> tuple[float, str]:
     if not c.streaming_supported:
         return 0.0, "No real-time streaming."
+    if not c.streaming_runtime_ready:
+        return 0.0, "Broker feed documented, but FlintTrade live-stream wiring is not enabled yet."
     score = 1.0
     bits = ["live streaming"]
     if c.streaming_max_total_symbols:
@@ -212,7 +214,7 @@ def recommend(
         ``broker_id`` for determinism. ``score`` is normalised to ``0.0..1.0``
         within this call (best broker = 1.0; all-zero stays 0.0).
     """
-    caps = capabilities_by_broker or NATIVE_BROKER_CAPABILITIES
+    caps = NATIVE_BROKER_CAPABILITIES if capabilities_by_broker is None else capabilities_by_broker
     scorer = _SCORERS[use_case]
     scored = [(bid, *scorer(c)) for bid, c in caps.items()]
     best = max((raw for _, raw, _ in scored), default=0.0)

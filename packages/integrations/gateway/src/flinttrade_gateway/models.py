@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -97,6 +98,42 @@ class AuthMethod(BaseModel):
     fields: list[AuthMethodField] = []
 
 
+class MCPClientConfig(BaseModel):
+    """One client configuration shape for a broker-hosted MCP server.
+
+    The values are setup metadata only. They are never credentials, and they do
+    not make FlintTrade an MCP execution proxy.
+    """
+
+    id: str
+    label: str
+    command: str | None = None
+    args: list[str] = []
+    url: str | None = None
+    config: dict[str, Any] = {}
+
+
+class BrokerMCPInfo(BaseModel):
+    """Broker-hosted MCP server metadata.
+
+    ``trading_supported`` describes the broker's external MCP server, not an
+    in-process FlintTrade order path. Any FlintTrade-side order automation must
+    still mint a safety context and dispatch through the broker router.
+    """
+
+    remote_url: str
+    docs_url: str
+    auth_mode: str
+    reauth: str
+    read_only: bool
+    trading_supported: bool
+    daily_reauthorization: bool = False
+    login_steps: list[str] = []
+    use_cases: list[str] = []
+    cautions: list[str] = []
+    client_configs: list[MCPClientConfig] = []
+
+
 class BrokerInfo(BaseModel):
     """Static metadata describing a broker's capabilities and auth requirements.
 
@@ -124,12 +161,15 @@ class BrokerInfo(BaseModel):
         native: A native FlintTrade adapter exists for this broker (it can be
             captured through the native connect path, not only the OpenAlgo
             bridge).
-        connectable: The native adapter is tried-and-tested against a live
-            account, so the UI may offer a native connect. ``native=True,
+        connectable: The native adapter has passed live login/read checks, so
+            the UI may offer a native connect. ``native=True,
             connectable=False`` renders as "coming soon" — built but not yet
-            live-verified — and the backend refuses native connects for it.
-            Promote a broker by flipping this single flag.
+            login/read verified — and the backend refuses native connects for
+            it. Promote a broker by flipping this single flag after evidence.
         auth_methods: The native login methods (empty for bridge-only brokers).
+        mcp: Metadata for the broker-hosted MCP server, when the broker offers
+            one. This is setup/capability information, not a native-session
+            credential or a FlintTrade order execution path.
     """
 
     name: str
@@ -144,6 +184,7 @@ class BrokerInfo(BaseModel):
     native: bool = False
     connectable: bool = False
     auth_methods: list[AuthMethod] = []
+    mcp: BrokerMCPInfo | None = None
 
 
 class BrokerAccountInfo(BaseModel):

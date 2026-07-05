@@ -1,5 +1,26 @@
-export type AuthFlowType = "oauth_redirect" | "totp_form" | "api_key_direct" | "otp_sms";
+export type AuthFlowType =
+  | "oauth_redirect"
+  | "totp_form"
+  | "api_key_direct"
+  | "otp_sms"
+  | "otp_multistep";
 export type AccountStatus = "disconnected" | "authenticating" | "connected" | "error" | "token_expired";
+
+export interface AuthMethodField {
+  name: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+  help: string;
+}
+
+export interface AuthMethod {
+  id: string;
+  label: string;
+  kind: "direct" | "oauth" | string;
+  description: string;
+  fields: AuthMethodField[];
+}
 
 export interface BrokerInfo {
   name: string;
@@ -10,6 +31,10 @@ export interface BrokerInfo {
   supports_streaming: boolean;
   oauth_url_template: string | null;
   is_sandbox: boolean;
+  aux_params?: string[];
+  native?: boolean;
+  connectable?: boolean;
+  auth_methods?: AuthMethod[];
 }
 
 export interface BrokerAccount {
@@ -20,6 +45,7 @@ export interface BrokerAccount {
   connected_at: string | null;
   error_message: string | null;
   is_primary: boolean;
+  source?: "gateway" | "native";
 }
 
 export interface OAuthStartResponse {
@@ -28,10 +54,12 @@ export interface OAuthStartResponse {
 }
 
 export interface TOTPAuthFields {
-  client_id: boolean;
-  password: boolean;
-  totp: boolean;
-  pin: boolean;
+  client_id?: boolean;
+  password?: boolean;
+  totp?: boolean;
+  pin?: boolean;
+  api_key?: boolean;
+  api_secret?: boolean;
 }
 
 export type AuthFlowState =

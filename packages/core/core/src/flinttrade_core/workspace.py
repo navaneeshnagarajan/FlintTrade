@@ -105,7 +105,11 @@ class Workspace:
             or os.environ.get("FLINTTRADE_HOME")
             or os.environ.get("FLINTTRADE_WORKSPACE_DIR")
         )
-        if home_dir is not None or os.environ.get("FLINTTRADE_HOME"):
+        if home_dir is not None:
+            self._home = home_dir.expanduser().resolve()
+        elif os.environ.get("FLINTTRADE_WORKSPACE_DIR"):
+            self._home = workspace_dir().expanduser().resolve()
+        elif os.environ.get("FLINTTRADE_HOME"):
             self._home = (home_dir or _default_home()).expanduser().resolve()
         else:
             self._home = workspace_dir().expanduser().resolve()

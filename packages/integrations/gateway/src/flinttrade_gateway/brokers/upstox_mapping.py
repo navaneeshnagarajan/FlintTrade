@@ -457,6 +457,32 @@ def from_upstox_quote(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _upstox_depth_levels(rows: Any) -> list[dict[str, Any]]:
+    levels: list[dict[str, Any]] = []
+    if not isinstance(rows, list):
+        return levels
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        levels.append({
+            "price": _num(row.get("price")),
+            "quantity": int(_num(row.get("quantity"))),
+            "orders": int(_num(row.get("orders"))),
+        })
+    return levels
+
+
+def from_upstox_depth(rec: dict[str, Any]) -> dict[str, Any]:
+    """Parse one Upstox full-quote record into a FlintTrade depth ladder."""
+    depth = rec.get("depth", {}) if isinstance(rec.get("depth"), dict) else {}
+    return {
+        "symbol": rec.get("symbol", ""),
+        "exchange": _exchange_of_token(rec.get("instrument_token", "")),
+        "bids": _upstox_depth_levels(depth.get("buy")),
+        "asks": _upstox_depth_levels(depth.get("sell")),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Auth (OAuth 2.0 — login dialog URL + token-exchange form)
 # ---------------------------------------------------------------------------

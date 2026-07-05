@@ -3,10 +3,10 @@
  *
  * SettingsRoute renders:
  *   - A slim header with a "Settings" label and back button
- *   - A left sidebar <nav aria-label="Settings sections"> listing all sections
+ *   - A left section tablist labelled "Settings sections"
  *   - A scrollable content area for the active section
  *
- * Section IDs are defined in settingsConfig.ts. The sidebar buttons are
+ * Section IDs are defined in settingsConfig.ts. The section controls are
  * vertical tabs using aria-selected for the active entry.
  *
  * Verifies:
@@ -17,46 +17,44 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { seedExploreDemoSession } from './helpers';
 
 test.describe('Settings page', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      sessionStorage.setItem('flinttrade:dailyWelcomeDismissed', 'true');
-      localStorage.setItem('flinttrade:tourComplete', 'true');
-    });
+    await seedExploreDemoSession(page);
     await page.goto('/settings');
-    // Wait for the sidebar nav to appear — signals SettingsRoute has mounted
+    // Wait for the section tabs to appear — signals SettingsRoute has mounted
     await page
-      .getByRole('navigation', { name: 'Settings sections' })
+      .getByRole('tablist', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
   });
 
-  test('settings sidebar is visible', async ({ page }) => {
-    const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
-    await expect(sidebar).toBeVisible();
+  test('settings section tabs are visible', async ({ page }) => {
+    const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
+    await expect(sectionTabs).toBeVisible();
   });
 
-  test('sidebar contains expected sections', async ({ page }) => {
-    const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
+  test('section tabs contain expected sections', async ({ page }) => {
+    const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
     for (const label of ['General', 'Appearance', 'Broker Gateway', 'Skill & Experience', 'About']) {
-      await expect(sidebar.getByText(label, { exact: true })).toBeVisible();
+      await expect(sectionTabs.getByText(label, { exact: true })).toBeVisible();
     }
   });
 
   test('clicking "Appearance" section activates it', async ({ page }) => {
-    const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
-    await sidebar.getByText('Appearance', { exact: true }).click();
+    const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
+    await sectionTabs.getByText('Appearance', { exact: true }).click();
 
-    const activeTab = sidebar.getByRole('tab', { name: 'Appearance' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Appearance' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
   test('clicking "Skill & Experience" section activates it', async ({ page }) => {
-    const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
-    await sidebar.getByText('Skill & Experience', { exact: true }).click();
+    const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
+    await sectionTabs.getByText('Skill & Experience', { exact: true }).click();
 
-    const activeTab = sidebar.getByRole('tab', { name: 'Skill & Experience' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Skill & Experience' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -69,11 +67,11 @@ test.describe('Settings page', () => {
   test('deep-link /settings#api activates Broker Gateway section', async ({ page }) => {
     await page.goto('/settings#api');
     await page
-      .getByRole('navigation', { name: 'Settings sections' })
+      .getByRole('tablist', { name: 'Settings sections' })
       .waitFor({ timeout: 15_000 });
 
-    const sidebar = page.getByRole('navigation', { name: 'Settings sections' });
-    const activeTab = sidebar.getByRole('tab', { name: 'Broker Gateway' });
+    const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
+    const activeTab = sectionTabs.getByRole('tab', { name: 'Broker Gateway' });
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 });

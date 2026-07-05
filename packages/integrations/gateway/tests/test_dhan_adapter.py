@@ -192,6 +192,78 @@ async def test_login_with_pin_totp_mints_a_token():
 
 
 @pytest.mark.asyncio
+async def test_login_with_oauth_token_id_consumes_a_token():
+    """Dhan app-consent OAuth returns a tokenId, which login() consumes into a
+    normal 24h access token before building the Dhan session."""
+    from unittest.mock import MagicMock
+
+    login_helper = MagicMock()
+    login_helper.consume_token_id.return_value = {"accessToken": "OAUTH-TOK", "expiryTime": "..."}
+    adapter = DhanAdapter(
+        client_factory=lambda _s: MockDhan(),
+        login_factory=lambda _client_id: login_helper,
+    )
+    session = await adapter.login({
+        "client_id": "C1",
+        "token_id": "TOKENID1",
+        "app_id": "APPID",
+        "app_secret": "SECRET",
+    })
+    assert session.access_token == "OAUTH-TOK"
+    assert session.account_id == "C1"
+    login_helper.consume_token_id.assert_called_once_with("TOKENID1", "APPID", "SECRET")
+
+
+@pytest.mark.asyncio
+async def test_login_with_oauth_token_id_hides_failed_token_payload():
+    from flinttrade_core.exceptions import BrokerError
+    from unittest.mock import MagicMock
+
+    login_helper = MagicMock()
+    login_helper.consume_token_id.return_value = {
+        "status": "failure",
+        "dhanClientId": "C1",
+        "message": "secret.person@example.com",
+    }
+    adapter = DhanAdapter(
+        client_factory=lambda _s: MockDhan(),
+        login_factory=lambda _client_id: login_helper,
+    )
+    with pytest.raises(BrokerError) as excinfo:
+        await adapter.login({
+            "client_id": "C1",
+            "token_id": "TOKENID1",
+            "app_id": "APPID",
+            "app_secret": "SECRET",
+        })
+    assert str(excinfo.value) == "Dhan OAuth token consumption failed"
+    assert "secret.person@example.com" not in str(excinfo.value)
+    assert "TOKENID1" not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_login_with_pin_totp_hides_failed_token_payload():
+    from flinttrade_core.exceptions import BrokerError
+    from unittest.mock import MagicMock
+
+    login_helper = MagicMock()
+    login_helper.generate_token.return_value = {
+        "status": "failure",
+        "dhanClientId": "C1",
+        "message": "9999999999",
+    }
+    adapter = DhanAdapter(
+        client_factory=lambda _s: MockDhan(),
+        login_factory=lambda _client_id: login_helper,
+    )
+    with pytest.raises(BrokerError) as excinfo:
+        await adapter.login({"client_id": "C1", "pin": "1234", "totp": "654321"})
+    assert str(excinfo.value) == "Dhan PIN+TOTP token generation failed"
+    assert "9999999999" not in str(excinfo.value)
+    assert "654321" not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
 async def test_login_pin_totp_requires_client_id():
     from flinttrade_core.exceptions import BrokerError
 
@@ -518,6 +590,18 @@ async def test_reads_map_correctly():
     assert holdings[0]["symbol"] == "SBIN"
     funds = await adapter.funds(session)
     assert funds["available_balance"] == "50000"
+
+
+@pytest.mark.asyncio
+async def test_holdings_empty_broker_response_returns_empty_list():
+    class EmptyHoldingsDhan(MockDhan):
+        def get_holdings(self):
+            return {"status": "failure", "remarks": {"error_message": "No holdings available"}}
+
+    adapter = _adapter(EmptyHoldingsDhan())
+    session = await _session(adapter)
+
+    assert await adapter.holdings(session) == []
 
 
 @pytest.mark.asyncio

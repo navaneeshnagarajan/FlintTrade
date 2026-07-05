@@ -1,4 +1,7 @@
 import { buildHeaders, get, getBase, isDemoAuthSession, post, del } from "./ftApi.helpers";
+import { pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
 
 export interface SafetyConfigRaw {
   l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
@@ -146,6 +149,16 @@ export interface SmartRouteParams {
   broker?: string;
 }
 
+function withSmartRouteBrokerTarget(params: SmartRouteParams): SmartRouteParams {
+  if (params.broker || params.account_id) return params;
+
+  const nativeTarget = pickNativeBrokerOrderTarget(
+    useModeStore.getState().mode,
+    useConnectionStore.getState().apiKey,
+  );
+  return nativeTarget ? { ...params, ...nativeTarget } : params;
+}
+
 /**
  * Start a smart-routed order job (202 → initial job snapshot).
  *
@@ -157,7 +170,7 @@ export async function startSmartRoute(params: SmartRouteParams): Promise<SmartRo
   const resp = await fetch(`${getBase()}/api/v1/orders/smart-route`, {
     method: "POST",
     headers: buildHeaders(true),
-    body: JSON.stringify(params),
+    body: JSON.stringify(withSmartRouteBrokerTarget(params)),
   });
   const json = (await resp.json().catch(() => null)) as
     | { data?: SmartRouteJob; message?: string }

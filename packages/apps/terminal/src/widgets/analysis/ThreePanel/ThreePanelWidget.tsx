@@ -9,7 +9,7 @@
  *
  * Header controls: underlying symbol, expiry, strike (defaults to ATM).
  * CE and PE option symbols are derived from underlying + expiry + strike via
- * the OpenAlgo `optionsymbol` endpoint.
+ * the broker resolver when available, with a compact-symbol fallback.
  */
 
 import {
@@ -45,6 +45,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { getHistory, getExpiry, getOptionSymbol, getOptionChain } from "@/services/api";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { lightweightCandlestickRuntime } from "@/lib/lightweightChartRuntime";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,20 @@ function getStartDate(interval: string): string {
   return formatDate(d);
 }
 
+function fallbackOptionSymbol(
+  underlying: string,
+  expiry: string,
+  strike: string,
+  optionType: "CE" | "PE",
+): { symbol: string; exchange: string } | null {
+  const symbol = buildCompactOptionSymbol(underlying, expiry, strike, optionType);
+  if (!symbol) return null;
+  return {
+    symbol,
+    exchange: OPTION_EXCHANGE,
+  };
+}
+
 /**
  * Derive CE / PE option symbol strings from the option chain ATM strike.
  * Returns null if data is unavailable.
@@ -119,10 +134,10 @@ async function resolveOptionSymbols(
 
   const ce = ceResult.status === "fulfilled" && ceResult.value
     ? (ceResult.value as { symbol: string; exchange: string })
-    : null;
+    : fallbackOptionSymbol(underlying, expiry, strikeOffset, "CE");
   const pe = peResult.status === "fulfilled" && peResult.value
     ? (peResult.value as { symbol: string; exchange: string })
-    : null;
+    : fallbackOptionSymbol(underlying, expiry, strikeOffset, "PE");
 
   return { ce, pe };
 }

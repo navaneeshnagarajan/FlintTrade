@@ -327,56 +327,68 @@ def _live_kill_switch_block() -> Any | None:
     return None if result.passed else result
 
 
-def _gather_l2_state(adapter_id: str) -> tuple[list[Any], float, float]:
+def _gather_l2_state(adapter_id: str, *, account_id: str = "default") -> tuple[list[Any], float, float]:
     """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
 
-    Reads the connected account's positionbook + funds through the OpenAlgo
-    bridge client so SafetySystem L2 can enforce max-positions and margin%
-    against REAL exposure. Best-effort by design: any failure (no client,
-    network, auth) returns empty/zero state, so L2 simply enforces nothing for
-    that order — a state-read hiccup must never block a live order (L1/L4/L5
-    still apply). Runs two reads on the human order path; acceptable latency
-    for the cumulative-exposure brake.
-
-    Scoped to ``adapter_id == "openalgo"`` — the only functional adapter. The
-    routed ``/<broker>/place`` path accepts any broker, but OPENALGO_CLIENT
-    holds OpenAlgo's portfolio, not a native broker's; feeding it for a native
-    selector would enforce L2 against the WRONG account. Native adapters are
-    dormant today, so for them L2 simply no-ops (empty state) rather than
-    mis-enforcing; a per-adapter gather lands when native adapters ship.
+    Reads the connected account's positions + funds through the same broker
+    surface the order will use: OpenAlgo for the bridge path, or the active
+    native adapter + registry session for routed native brokers. Best-effort by
+    design: any failure (no client/session, network, auth) returns empty/zero
+    state, so L2 simply enforces nothing for that order — a state-read hiccup
+    must never block a live order (L1/L4/L5 still apply). Runs two reads on the
+    human order path; acceptable latency for the cumulative-exposure brake.
     """
     import asyncio  # noqa: PLC0415
+    from .l2_state import normalise_l2_state  # noqa: PLC0415
 
-    if adapter_id != "openalgo":
+    if adapter_id == "openalgo":
+        client = current_app.config.get("OPENALGO_CLIENT")
+        if client is None:
+            return [], 0.0, 0.0
+
+        async def _fetch_openalgo() -> tuple[Any, Any]:
+            return await client.positionbook(), await client.funds()
+
+        try:
+            positions, funds = asyncio.run(_fetch_openalgo())
+        except Exception:
+            logger.debug(
+                "L2 portfolio-state fetch failed — L2 limits not enforced this order",
+                exc_info=True,
+            )
+            return [], 0.0, 0.0
+
+        return normalise_l2_state(positions, funds)
+
+    native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
+    registry = current_app.config.get("REGISTRY")
+    adapter = native_adapters.get(adapter_id)
+    if adapter is None or registry is None:
         return [], 0.0, 0.0
-
-    client = current_app.config.get("OPENALGO_CLIENT")
-    if client is None:
-        return [], 0.0, 0.0
-
-    async def _fetch() -> tuple[Any, Any]:
-        return await client.positionbook(), await client.funds()
 
     try:
-        positions, funds = asyncio.run(_fetch())
+        session = registry.get_session_for(adapter_id, account_id)
+    except Exception:
+        return [], 0.0, 0.0
+
+    positions_reader = getattr(adapter, "positions", None)
+    funds_reader = getattr(adapter, "funds", None)
+    if not callable(positions_reader) or not callable(funds_reader):
+        return [], 0.0, 0.0
+
+    async def _fetch_native() -> tuple[Any, Any]:
+        return await positions_reader(session), await funds_reader(session)
+
+    try:
+        positions, funds = asyncio.run(_fetch_native())
     except Exception:
         logger.debug(
-            "L2 portfolio-state fetch failed — L2 limits not enforced this order",
+            "Native L2 portfolio-state fetch failed — L2 limits not enforced this order",
             exc_info=True,
         )
         return [], 0.0, 0.0
 
-    def _to_float(value: Any) -> float:
-        try:
-            return float(str(value))
-        except (TypeError, ValueError):
-            return 0.0
-
-    return (
-        list(positions or []),
-        _to_float(getattr(funds, "used_margin", 0)),
-        _to_float(getattr(funds, "total_balance", 0)),
-    )
+    return normalise_l2_state(positions, funds)
 
 
 def _dispatch_live_order(
@@ -385,6 +397,7 @@ def _dispatch_live_order(
     payload: dict[str, Any],
     *,
     adapter_id: str = "openalgo",
+    account_id: str | None = None,
     variety: str | None = None,
 ) -> tuple[Any, int]:
     """The single enforced execution channel for a live order placement (C1).
@@ -413,7 +426,7 @@ def _dispatch_live_order(
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
-    account_id = str(body.get("account_id") or "default")
+    account_id = account_id or str(body.get("account_id") or "default")
 
     router = current_app.config.get("BROKER_ROUTER")
     if router is None:
@@ -446,7 +459,7 @@ def _dispatch_live_order(
     # fed from the hot path: greeks need option-chain data the bridge lacks,
     # and L4 latches its kill switch, so a noisy broker PNL must not drive it —
     # tracked in PLAN §3b.)
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id)
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id, account_id=account_id)
     safety = current_app.config.get("SAFETY")
     if safety is None:
         safety = SafetySystem(SafetyConfig())
@@ -784,6 +797,7 @@ def _dispatch_live_modify(
     payload: dict[str, Any],
     *,
     adapter_id: str = "openalgo",
+    account_id: str | None = None,
 ) -> tuple[Any, int]:
     """Gate a live order MODIFY through the BrokerRouter (one-shot gate + ACL).
 
@@ -796,7 +810,7 @@ def _dispatch_live_modify(
     from flinttrade_core.models import ModifyOrder  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
-    account_id = str(body.get("account_id") or "default")
+    account_id = account_id or str(body.get("account_id") or "default")
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
@@ -838,6 +852,7 @@ def _dispatch_live_cancel(
     payload: dict[str, Any],
     *,
     adapter_id: str = "openalgo",
+    account_id: str | None = None,
 ) -> tuple[Any, int]:
     """Gate a live order CANCEL through the BrokerRouter (one-shot gate + ACL).
 
@@ -853,7 +868,7 @@ def _dispatch_live_cancel(
     """
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
-    account_id = str(body.get("account_id") or "default")
+    account_id = account_id or str(body.get("account_id") or "default")
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Cancel requires an 'orderid'"}), 400
@@ -1014,17 +1029,17 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             "message": "Authentication required — JWT could not be decoded",
         }), 401
 
+    adapter_id, account_id = _gated_target(body)
     if ft_action == "place":
-        return _dispatch_live_order(ft_action, body, live_payload, adapter_id="openalgo")
+        return _dispatch_live_order(ft_action, body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "modify":
-        return _dispatch_live_modify(body, live_payload, adapter_id="openalgo")
+        return _dispatch_live_modify(body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "cancel":
-        return _dispatch_live_cancel(body, live_payload, adapter_id="openalgo")
-    if ft_action == "cancel-all" and str(body.get("broker") or "").strip().lower() not in ("", "openalgo"):
+        return _dispatch_live_cancel(body, live_payload, adapter_id=adapter_id, account_id=account_id)
+    if ft_action == "cancel-all" and adapter_id != "openalgo":
         # Native adapters sweep through the gated cancel_all_orders verb
         # (one-shot SafetyContext + ACL). OpenAlgo bridge cancel-all has no
         # gated verb yet and is rejected by the fail-closed block below.
-        adapter_id, account_id = _gated_target(body)
         fields = {k: str(body[k]) for k in ("tag", "segment") if body.get(k) is not None}
         return _gated_verb_write(
             "cancel_all_orders", fields, live_payload,
@@ -1192,6 +1207,33 @@ def _decode_request_payload() -> dict[str, Any] | None:
         return None
 
 
+def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Validate common auth/live-unlock gates for selector-bound routed writes."""
+    payload = _decode_request_payload()
+    if not payload:
+        return None, (jsonify({
+            "status": "error",
+            "message": "Authentication required — provide a valid JWT",
+        }), 401)
+
+    if payload.get("mode") != _MODE_LIVE:
+        return None, (jsonify({
+            "status": "error",
+            "message": (
+                "The routed order path serves live mode only. Use "
+                "/api/v1/orders/place for explore/practice."
+            ),
+        }), 400)
+
+    if not _is_live_mode_unlocked():
+        return None, (jsonify({
+            "status": "error",
+            "message": "Live mode not unlocked — verify PIN first",
+        }), 403)
+
+    return payload, None
+
+
 @orders_bp.route("/<broker>/place", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100)
 def place_order_routed(broker: str) -> tuple[Any, int]:
@@ -1210,27 +1252,9 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
         actor not authorised / verification failed), 503 (routing unavailable or
         the broker is not connected yet).
     """
-    payload = _decode_request_payload()
-    if not payload:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
-
-    if payload.get("mode") != _MODE_LIVE:
-        return jsonify({
-            "status": "error",
-            "message": (
-                "The routed order path serves live mode only. Use "
-                "/api/v1/orders/place for explore/practice."
-            ),
-        }), 400
-
-    if not _is_live_mode_unlocked():
-        return jsonify({
-            "status": "error",
-            "message": "Live mode not unlocked — verify PIN first",
-        }), 403
+    payload, error = _decode_routed_live_payload()
+    if error is not None:
+        return error
 
     body = request.get_json(silent=True) or {}
     return _dispatch_live_order("place", body, payload, adapter_id=broker)
@@ -1273,6 +1297,18 @@ def modify_order() -> tuple[Any, int]:
     return _dispatch_order("modify")
 
 
+@orders_bp.route("/<broker>/modify", methods=["POST"])
+@rate_limit("orders", user_rate=10, global_rate=100)
+def modify_order_routed(broker: str) -> tuple[Any, int]:
+    """Modify a LIVE order through the selector-bound broker router."""
+    payload, error = _decode_routed_live_payload()
+    if error is not None:
+        return error
+
+    body = request.get_json(silent=True) or {}
+    return _dispatch_live_modify(body, payload, adapter_id=broker)
+
+
 @orders_bp.route("/cancel", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100)
 def cancel_order() -> tuple[Any, int]:
@@ -1288,6 +1324,18 @@ def cancel_order() -> tuple[Any, int]:
         JSON with ``status`` and confirmation.
     """
     return _dispatch_order("cancel")
+
+
+@orders_bp.route("/<broker>/cancel", methods=["POST"])
+@rate_limit("orders", user_rate=10, global_rate=100)
+def cancel_order_routed(broker: str) -> tuple[Any, int]:
+    """Cancel a LIVE order through the selector-bound broker router."""
+    payload, error = _decode_routed_live_payload()
+    if error is not None:
+        return error
+
+    body = request.get_json(silent=True) or {}
+    return _dispatch_live_cancel(body, payload, adapter_id=broker)
 
 
 @orders_bp.route("/cancel-all", methods=["POST"])
@@ -1444,6 +1492,22 @@ def gtt_cancel_order() -> tuple[Any, int]:
 _SUPER_ORDER_LEGS = frozenset({"ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"})
 
 
+def _configured_execution_target() -> tuple[str, str]:
+    """Return the router's configured execution default, or OpenAlgo/default."""
+    router = current_app.config.get("BROKER_ROUTER")
+    config = getattr(router, "_config", None)
+    execution = getattr(config, "execution", None)
+    selector = str(getattr(execution, "default", "") or "").strip()
+    if selector:
+        try:
+            from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
+
+            return parse_selector(selector)
+        except ValueError:
+            logger.warning("Ignoring malformed brokers.execution.default selector: %s", selector)
+    return "openalgo", "default"
+
+
 def _gated_target(params: Any) -> tuple[str, str]:
     """Resolve the ``(adapter_id, account_id)`` target from a body or query mapping.
 
@@ -1452,8 +1516,12 @@ def _gated_target(params: Any) -> tuple[str, str]:
             carrying optional ``broker`` and ``account_id`` fields.
 
     Returns:
-        ``(adapter_id, account_id)`` — defaults ``("openalgo", "default")``.
+        ``(adapter_id, account_id)``. With no explicit target, the running
+        ``brokers.execution.default`` selector wins; if no configured router is
+        available this falls back to ``("openalgo", "default")``.
     """
+    if not str(params.get("broker") or "").strip() and not str(params.get("account_id") or "").strip():
+        return _configured_execution_target()
     adapter_id = str(params.get("broker") or "openalgo").strip().lower()
     account_id = str(params.get("account_id") or "default").strip() or "default"
     return adapter_id, account_id
@@ -1766,7 +1834,7 @@ def _trigger_legs_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], list[
     return condition, legs
 
 
-def _check_legs_through_safety(legs: list[Any], adapter_id: str) -> tuple[Any, int] | None:
+def _check_legs_through_safety(legs: list[Any], adapter_id: str, *, account_id: str = "default") -> tuple[Any, int] | None:
     """Run the full SafetySystem (L1–L5) over each typed placement leg.
 
     Conditional-trigger PLACEMENT and MODIFY arm real orders the instant the
@@ -1780,6 +1848,7 @@ def _check_legs_through_safety(legs: list[Any], adapter_id: str) -> tuple[Any, i
         legs: Typed :class:`~flinttrade_core.models.Order` legs (already coerced
             by :func:`_body_to_order`).
         adapter_id: Target broker adapter id (scopes the L2 exposure read).
+        account_id: Target broker account id within the adapter.
 
     Returns:
         ``None`` when every leg passes; otherwise a ``(flask.Response,
@@ -1791,7 +1860,7 @@ def _check_legs_through_safety(legs: list[Any], adapter_id: str) -> tuple[Any, i
     safety = current_app.config.get("SAFETY")
     if safety is None:
         safety = SafetySystem(SafetyConfig())
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id)
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id, account_id=account_id)
     for leg in legs:
         results = safety.check_order(
             leg,
@@ -1828,15 +1897,18 @@ def forever_place() -> tuple[Any, int]:
     covers them.
 
     Request JSON: standard order fields plus ``trigger_price`` (required by the
-    broker), optional OCO trio, optional ``broker`` (default ``"openalgo"``)
-    and ``account_id`` (default ``"default"``).
+    broker), optional OCO trio, optional ``broker`` and ``account_id``. With no
+    target fields, ``brokers.execution.default`` is used.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
     body = request.get_json(silent=True) or {}
-    adapter_id, _account_id = _gated_target(body)  # account_id rides in the body
-    return _dispatch_live_order("forever-place", body, payload, adapter_id=adapter_id, variety="gtt")
+    adapter_id, account_id = _gated_target(body)
+    return _dispatch_live_order(
+        "forever-place", body, payload,
+        adapter_id=adapter_id, account_id=account_id, variety="gtt",
+    )
 
 
 @orders_bp.route("/forever/<order_id>", methods=["PUT"])
@@ -1993,7 +2065,7 @@ def trigger_place() -> tuple[Any, int]:
     adapter_id, account_id = _gated_target(body)
     # Run the FULL SafetySystem (L1–L5) over every leg — a placement path must
     # never skip the risk layers (the kill-switch flag below only runs L5).
-    blocked = _check_legs_through_safety(legs, adapter_id)
+    blocked = _check_legs_through_safety(legs, adapter_id, account_id=account_id)
     if blocked is not None:
         return blocked
     return _gated_verb_write(
@@ -2033,7 +2105,7 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
     adapter_id, account_id = _gated_target(body)
     # A modify replaces the armed legs, so re-run the FULL SafetySystem (L1–L5)
     # over the new legs before re-gating — same brake as placement.
-    blocked = _check_legs_through_safety(legs, adapter_id)
+    blocked = _check_legs_through_safety(legs, adapter_id, account_id=account_id)
     if blocked is not None:
         return blocked
     return _gated_verb_write(
@@ -2093,7 +2165,7 @@ def multi_order_place() -> tuple[Any, int]:
     safety = current_app.config.get("SAFETY")
     if safety is None:
         safety = SafetySystem(SafetyConfig())
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id)
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id, account_id=account_id)
     legs: list[Any] = []
     try:
         for index, leg in enumerate(raw_orders):

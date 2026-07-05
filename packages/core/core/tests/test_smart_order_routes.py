@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from flask import Flask
@@ -40,20 +41,22 @@ class _NoIoAdapter:
 
     def __init__(self) -> None:
         self.orders: list[object] = []
+        self.sessions: list[object] = []
 
     async def place_order(self, session: object, order: object, *, _router_token: object = None) -> str:
         if _router_token is not _ROUTER_TOKEN:
             raise SafetyBypassError("adapter write method called outside BrokerRouter")
+        self.sessions.append(session)
         self.orders.append(order)
         return f"OID-{len(self.orders)}"
 
 
-def _session(_ctx: object, _adapter_id: str, _account_id: str) -> Session:
+def _session(_ctx: object, adapter_id: str, account_id: str) -> Session:
     return Session(
         access_token="tok",
         expires_at=datetime.now(tz=timezone.utc).timestamp() + 3600,
-        account_id="default",
-        adapter_id="openalgo",
+        account_id=account_id,
+        adapter_id=adapter_id,
     )
 
 
@@ -82,13 +85,39 @@ def _safety() -> SafetySystem:
     return SafetySystem(SafetyConfig(check_market_hours=False))
 
 
-def _make_app(*, enabled: bool = True, adapter: _NoIoAdapter | None = None) -> tuple[Flask, _NoIoAdapter]:
+_DEFAULT_OPENALGO_CLIENT = object()
+
+
+def _make_app(
+    *,
+    enabled: bool = True,
+    adapter: _NoIoAdapter | None = None,
+    adapter_id: str = "openalgo",
+    openalgo_client: object = _DEFAULT_OPENALGO_CLIENT,
+    execution_default: str | None = None,
+) -> tuple[Flask, _NoIoAdapter]:
+    from flinttrade_gateway.routing_config import RoutingConfig
+
     adapter = adapter or _NoIoAdapter()
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["SMART_ROUTING"] = {"enabled": enabled, "twap_window_seconds": 1, "twap_slices": 2}
-    app.config["BROKER_ROUTER"] = BrokerRouter({"openalgo": adapter}, _session)
-    app.config["OPENALGO_CLIENT"] = _FakeClient(asks=[(100.0, 500)], bids=[(99.5, 500)])
+    router_config = None
+    if execution_default is not None:
+        router_config = RoutingConfig.from_workspace({
+            "registered": [execution_default],
+            "execution": {"default": execution_default},
+            "data": {
+                "ticks": execution_default,
+                "historical": execution_default,
+                "option_chains": execution_default,
+                "quote": execution_default,
+            },
+        })
+    app.config["BROKER_ROUTER"] = BrokerRouter({adapter_id: adapter}, _session, config=router_config)
+    if openalgo_client is _DEFAULT_OPENALGO_CLIENT:
+        openalgo_client = _FakeClient(asks=[(100.0, 500)], bids=[(99.5, 500)])
+    app.config["OPENALGO_CLIENT"] = openalgo_client
     app.config["SAFETY"] = _safety()
     app.register_blueprint(mod.smart_order_bp)
     return app, adapter
@@ -223,6 +252,86 @@ def test_high_urgency_places_one_gated_child(live_auth):
     # traversed gate_order → BrokerRouter → adapter.
     assert len(adapter.orders) == 1
     assert adapter.orders[0].quantity == "10"
+
+
+def test_native_high_urgency_does_not_require_openalgo_client(live_auth):
+    """Native high urgency can execute through BrokerRouter without bridge data."""
+    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None)
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 3,
+            "urgency": "high",
+            "broker": "upstox",
+            "account_id": "U1",
+        },
+    )
+
+    assert resp.status_code == 202
+    final = _wait_done(client, resp.get_json()["data"]["job_id"])
+    assert final["status"] == "done"
+    assert final["filled_quantity"] == 3
+    assert len(adapter.orders) == 1
+    assert adapter.orders[0].quantity == "3"
+
+
+def test_omitted_target_uses_configured_execution_default(live_auth):
+    """Direct API callers inherit brokers.execution.default when target fields are absent."""
+    app, adapter = _make_app(
+        adapter_id="upstox",
+        openalgo_client=None,
+        execution_default="upstox:U1",
+    )
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 3,
+            "urgency": "high",
+        },
+    )
+
+    assert resp.status_code == 202
+    final = _wait_done(client, resp.get_json()["data"]["job_id"])
+    assert final["status"] == "done"
+    assert len(adapter.orders) == 1
+    assert adapter.orders[0].quantity == "3"
+    assert adapter.sessions[0].adapter_id == "upstox"
+    assert adapter.sessions[0].account_id == "U1"
+
+
+def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth):
+    """Native medium urgency is depth-aware; no bridge depth means no dispatch."""
+    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None)
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 3,
+            "urgency": "medium",
+            "broker": "upstox",
+            "account_id": "U1",
+        },
+    )
+
+    assert resp.status_code == 202
+    final = _wait_done(client, resp.get_json()["data"]["job_id"])
+    assert final["status"] == "error"
+    assert "no market depth available" in final["error"]
+    assert adapter.orders == []
 
 
 def test_twap_splits_into_gated_slices(live_auth):
@@ -447,9 +556,8 @@ async def test_executor_l2_provider_failure_does_not_block():
     assert len(adapter.orders) == 1
 
 
-async def test_gather_portfolio_state_scoped_to_openalgo():
-    """The async gatherer reads OpenAlgo state only — a native selector yields
-    empty (L2 no-op), never OpenAlgo's portfolio mis-applied."""
+async def test_gather_portfolio_state_scoped_to_selector():
+    """The async gatherer reads OpenAlgo only for OpenAlgo selectors."""
     from types import SimpleNamespace
 
     from flinttrade_core.models import Position
@@ -465,6 +573,39 @@ async def test_gather_portfolio_state_scoped_to_openalgo():
     assert len(pos) == 1 and used == 5.0 and total == 10.0
     assert await mod.gather_portfolio_state(_Client(), "dhan") == ([], 0.0, 0.0)
     assert await mod.gather_portfolio_state(None, "openalgo") == ([], 0.0, 0.0)
+
+
+async def test_gather_portfolio_state_uses_native_adapter_and_account():
+    """Native smart-route/agent L2 reads use the active native selector."""
+    from flinttrade_core.models import Position
+
+    client = MagicMock()
+    client.positionbook = AsyncMock(side_effect=AssertionError("must not read OpenAlgo for native L2"))
+    client.funds = AsyncMock(side_effect=AssertionError("must not read OpenAlgo for native L2"))
+
+    session = object()
+    registry = MagicMock()
+    registry.get_session_for.return_value = session
+    adapter = MagicMock()
+    adapter.positions = AsyncMock(return_value=[Position(symbol="TCS", exchange="NSE", quantity="25")])
+    adapter.funds = AsyncMock(return_value={"used_margin": "9", "total_balance": "10"})
+
+    pos, used, total = await mod.gather_portfolio_state(
+        client,
+        "dhan",
+        account_id="D1",
+        native_adapters={"dhan": adapter},
+        registry=registry,
+    )
+
+    assert pos[0].quantity == "25"
+    assert used == 9.0
+    assert total == 10.0
+    registry.get_session_for.assert_called_once_with("dhan", "D1")
+    adapter.positions.assert_awaited_once_with(session)
+    adapter.funds.assert_awaited_once_with(session)
+    client.positionbook.assert_not_awaited()
+    client.funds.assert_not_awaited()
 
 
 async def test_executor_pre_dispatch_check_aborts_before_the_gate():

@@ -77,6 +77,22 @@ export interface PnLSummary {
   data_points: number;
 }
 
+export interface PnLSymbolsPeriod {
+  realized_pnl: number;
+  unrealized_pnl: number;
+  total_pnl: number;
+  trade_count: number;
+}
+
+export interface PnLSymbolsResponse {
+  status?: string;
+  date_from: string | null;
+  date_to: string | null;
+  series_count: number;
+  period: PnLSymbolsPeriod;
+  overall_summary: PnLSummary;
+}
+
 export interface NewsArticle {
   title: string;
   link: string;
@@ -125,6 +141,13 @@ export const getTradeJournal = (
 
 export const getPnLTracker = () => get<PnLTrackerEntry[]>("pnl-tracker");
 export const getPnLSummary = () => get<PnLSummary>("pnl-tracker/summary");
+export const getPnlSymbols = (dateFrom?: string, dateTo?: string) => {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const qs = params.toString();
+  return get<PnLSymbolsResponse>("pnl/symbols" + (qs ? "?" + qs : ""));
+};
 
 export const getNews = () => get<{ articles: NewsArticle[] }>("news");
 

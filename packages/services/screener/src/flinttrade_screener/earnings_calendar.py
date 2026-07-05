@@ -256,6 +256,25 @@ class EarningsCalendar:
         ]
         return sorted(matching, key=lambda e: e.date)
 
+    def get_by_month(self, year: int, month: int) -> list[EarningsEvent]:
+        """Return all earnings events in a specific calendar month.
+
+        Args:
+            year: Four-digit calendar year.
+            month: One-based calendar month.
+
+        Returns:
+            Events in that month, sorted by date then symbol.
+        """
+        month_start = date(year, month, 1)
+        month_end = _month_end(month_start)
+        events: list[EarningsEvent] = []
+        for iso_date, day_events in self._cache.items():
+            event_date = date.fromisoformat(iso_date)
+            if month_start <= event_date <= month_end:
+                events.extend(day_events)
+        return sorted(events, key=lambda e: (e.date, e.symbol))
+
     # ------------------------------------------------------------------
     # Sample data generation
     # ------------------------------------------------------------------

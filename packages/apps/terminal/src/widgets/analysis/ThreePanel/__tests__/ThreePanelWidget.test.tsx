@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -33,6 +33,13 @@ const threePanelMocks = vi.hoisted(() => ({
   fitContent: vi.fn(),
   crosshairCallbacks: [] as Array<(param: unknown) => void>,
   series: [] as Array<{ setData: ReturnType<typeof vi.fn>; applyOptions: ReturnType<typeof vi.fn> }>,
+}));
+
+const apiMocks = vi.hoisted(() => ({
+  getHistory: vi.fn(),
+  getExpiry: vi.fn(),
+  getOptionSymbol: vi.fn(),
+  getOptionChain: vi.fn(),
 }));
 
 vi.mock("lightweight-charts", () => ({
@@ -69,12 +76,10 @@ vi.mock("lightweight-charts", () => ({
 }));
 
 vi.mock("@/services/api", () => ({
-  getHistory: vi.fn(() => Promise.resolve([])),
-  getExpiry: vi.fn(() => Promise.resolve({ expiry: ["27MAR25", "03APR25"] })),
-  getOptionSymbol: vi.fn(() =>
-    Promise.resolve({ symbol: "NIFTY25MAR2522000CE", exchange: "NFO" }),
-  ),
-  getOptionChain: vi.fn(() => Promise.resolve({ atm_strike: 22000 })),
+  getHistory: apiMocks.getHistory,
+  getExpiry: apiMocks.getExpiry,
+  getOptionSymbol: apiMocks.getOptionSymbol,
+  getOptionChain: apiMocks.getOptionChain,
 }));
 
 vi.mock("@/hooks/useChartTheme", () => ({
@@ -100,12 +105,16 @@ import ThreePanelWidget from "../ThreePanelWidget";
 
 describe("ThreePanelWidget", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
     threePanelMocks.timeScaleSubscribe.mockReset();
     threePanelMocks.setVisibleRange.mockReset();
     threePanelMocks.fitContent.mockReset();
     threePanelMocks.crosshairCallbacks = [];
     threePanelMocks.series = [];
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getExpiry.mockResolvedValue({ expiry: ["27MAR25", "03APR25"] });
+    apiMocks.getOptionSymbol.mockResolvedValue({ symbol: "NIFTY25MAR2522000CE", exchange: "NFO" });
+    apiMocks.getOptionChain.mockResolvedValue({ atm_strike: 22000 });
   });
 
   it("renders without crashing", () => {
@@ -199,5 +208,28 @@ describe("ThreePanelWidget", () => {
     expect(screen.getByText("24,080.00")).toBeInTheDocument();
     expect(screen.getByText("24,155.00")).toBeInTheDocument();
     expect(screen.getByText("1.25L")).toBeInTheDocument();
+  });
+
+  it("falls back to compact option symbols when the resolver is unavailable", async () => {
+    apiMocks.getOptionSymbol.mockRejectedValue(new Error("OpenAlgo API key missing"));
+
+    render(<ThreePanelWidget />);
+
+    await waitFor(() => {
+      expect(apiMocks.getHistory).toHaveBeenCalledWith(
+        "NIFTY27MAR2522000CE",
+        "NFO",
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      );
+      expect(apiMocks.getHistory).toHaveBeenCalledWith(
+        "NIFTY27MAR2522000PE",
+        "NFO",
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      );
+    });
   });
 });

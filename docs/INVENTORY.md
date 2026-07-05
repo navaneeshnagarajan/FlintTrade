@@ -7,12 +7,12 @@ It is a living document — update it in the same change that moves a feature
 between buckets.
 
 `v0.6.0-beta.1` is not production ready. The native adapter code for the four
-founder brokers (Dhan / Upstox / Kotak Neo / IndMoney) is present and
-mock-tested, but only Dhan currently carries an active SDK pin in
-`brokers.lock`. Upstox and Kotak Neo stay placeholder-pinned until their wave is
-approved with exact SDK hashes, licence evidence, and sandbox evidence; Kotak Neo
-is additionally blocked until the upstream SDK licensing is compatible or
-explicitly authorised. IndMoney is REST-only and has no SDK pin.
+founder brokers (Dhan / Upstox / Kotak Neo / INDmoney) is present and
+mock-tested. Dhan, Upstox, and INDmoney are the current connectable native set
+after live login/read verification; Kotak Neo is built and catalogued but stays
+`connectable=false` until its live adapter login/read checks pass. INDmoney is
+REST-only and has no SDK pin. Closed-market/no-funds verification does not prove
+funded live order execution.
 
 ## Legend
 
@@ -36,13 +36,13 @@ explicitly authorised. IndMoney is REST-only and has no SDK pin.
 
 | Item | Status | Notes |
 |---|---|---|
-| OpenAlgo bridge adapter (orders + market data) | ✅ | The only functional **order** adapter; ~45 endpoints |
+| OpenAlgo bridge adapter (orders + market data) | ✅ | First-class optional bridge path; ~45 endpoints |
 | Smart routing suggestions | ✅ | Capability metadata + recommendation engine + Account-Manager UI |
 | — Dhan: rolling-options history + multi-level depth (L20) | ✅ | Encoded as routing capabilities (`options_history_*`, `depth_levels`) |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
-| Native adapters (Dhan/Upstox/Kotak Neo/IndMoney): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan has the active `dhanhq` pin; Upstox/Kotak Neo are placeholder-pinned until exact SDK, licence, approval, and sandbox evidence are recorded; IndMoney is REST-only. |
-| Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Live native execution remains disabled unless the broker has an active attested pin plus vault credentials; Kotak Neo also needs upstream licence clearance before any pin or install guidance is carried. |
+| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan, Upstox, and INDmoney are connectable after live login/read verification; Kotak Neo remains coming soon until a live adapter login/read probe passes. |
+| Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Generic terminal place/modify/cancel now route to the active native account when no OpenAlgo key is configured, but funded live native order placement remains unproven because verification used no-funds/closed-market accounts. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 
 ## AI Agent
@@ -118,8 +118,8 @@ explicitly authorised. IndMoney is REST-only and has no SDK pin.
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | ✅ | "Historical Chain" widget — archived expiries → grouped CE/PE chain; honest empty state |
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
-| Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Every registered native gets a daily 08:05 IST refresh job (armed on the serve path). Not yet live-verified against funded accounts |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan is the only active native SDK pin today; Upstox/Kotak Neo are deliberately placeholder-pinned until approval evidence is complete, and Kotak Neo is blocked on upstream licence clearance. |
+| Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); stale coming-soon selectors such as Kotak Neo do not schedule false refresh work. |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney REST writes are mapped and gated; Kotak Neo is mapped but not connectable. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
 | n8n bridge (health / workflows / webhook trigger) | ✅ | Automate → "n8n Bridge" section (advanced skill tier) wires all five clients (health badge, activate/deactivate with surfaced failures, manual webhook trigger); honest offline + missing-API-key states; `N8N_HOST` is read by the bridge and documented with `N8N_API_KEY` in `.env.example` |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 

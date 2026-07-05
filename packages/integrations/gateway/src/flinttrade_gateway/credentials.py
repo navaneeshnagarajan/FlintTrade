@@ -438,6 +438,26 @@ class CredentialStore:
             )
             conn.commit()
 
+    def remove_for(self, adapter_id: str, account_id: str) -> None:
+        """Delete an account by composite ``(adapter_id, account_id)`` selector.
+
+        Native account-management routes carry both selector parts in the URL.
+        Deleting by ``account_id`` alone would let a mistyped adapter path remove
+        a different broker's vault row when account ids collide or when the
+        caller simply supplied the wrong adapter. Missing selectors are a no-op,
+        matching :meth:`remove`.
+
+        Args:
+            adapter_id: The routing adapter (e.g. ``"dhan"``).
+            account_id: The account within that adapter.
+        """
+        with self._get_connection() as conn:
+            conn.execute(
+                "DELETE FROM accounts WHERE adapter_id = ? AND account_id = ?",
+                (adapter_id, account_id),
+            )
+            conn.commit()
+
     def list_accounts(self) -> list[dict[str, Any]]:
         """Return metadata for all stored accounts without decrypted credentials.
 

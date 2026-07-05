@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+import inspect
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -54,6 +55,33 @@ def _resolve_openalgo_root() -> Path:
 
 _OPENALGO_ROOT = _resolve_openalgo_root()
 _OPENALGO_ROOT_STR = str(_OPENALGO_ROOT)
+
+
+def _split_exchange_symbol(raw: Any, default_exchange: str = "NSE") -> tuple[str, str]:
+    """Return ``(exchange, symbol)`` from either ``EXCHANGE:SYMBOL`` or a bare symbol."""
+    text = str(raw or "").strip()
+    if ":" in text:
+        exchange, symbol = text.split(":", 1)
+        return exchange.strip().upper() or default_exchange, symbol.strip()
+    return default_exchange, text
+
+
+def _supports_positional_call(method: Any, argc: int) -> bool | None:
+    """Whether ``method`` can receive ``argc`` positional args, or ``None`` if unknown."""
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return None
+
+    positional = [
+        p
+        for p in signature.parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    if any(p.kind is p.VAR_POSITIONAL for p in signature.parameters.values()):
+        return True
+    required = [p for p in positional if p.default is p.empty]
+    return len(required) <= argc <= len(positional)
 
 # ---------------------------------------------------------------------------
 # Bootstrap — install shims before any broker module is imported
@@ -156,27 +184,23 @@ class BrokerAdapter(Protocol):
         """Calculate margin required for an order."""
         ...
 
-    def get_quotes(self, symbol: str, exchange: str, auth_token: str = "") -> Any:
-        """Fetch live quote for a symbol."""
+    def get_quotes(self, symbols: list[str], auth_token: str = "") -> Any:
+        """Fetch live quotes for one or more symbols."""
         ...
 
-    def get_depth(self, symbol: str, exchange: str, auth_token: str = "") -> Any:
+    def get_depth(self, symbol: str, auth_token: str = "") -> Any:
         """Fetch market depth (order book levels) for a symbol."""
         ...
 
-    def get_history(
-        self,
-        symbol: str,
-        exchange: str,
-        interval: str,
-        start: str,
-        end: str,
-        auth_token: str = "",
-    ) -> Any:
+    def get_history(self, params: dict[str, Any], auth_token: str = "") -> Any:
         """Fetch OHLCV history for a symbol."""
         ...
 
-    def search_symbols(self, query: str, exchange: str, auth_token: str = "") -> Any:
+    def get_option_chain(self, params: dict[str, Any], auth_token: str = "") -> Any:
+        """Fetch option-chain data for an underlying."""
+        ...
+
+    def search_symbols(self, query: str, auth_token: str = "") -> Any:
         """Search for symbols matching a query string."""
         ...
 
@@ -274,29 +298,116 @@ class _WrappedBrokerAdapter:
 
     # -- Market data ---------------------------------------------------------
 
-    def get_quotes(self, symbol: str, exchange: str, auth_token: str = "") -> Any:
-        """Delegate to broker data.get_quotes."""
-        return self._data.get_quotes(symbol, exchange, auth_token)
+    def get_quotes(self, symbols: list[str] | str, auth_token: str = "") -> Any:
+        """Delegate to broker data.get_quotes for one or more symbols.
 
-    def get_depth(self, symbol: str, exchange: str, auth_token: str = "") -> Any:
+        ``BrokerSession.get_quotes`` passes a list, while OpenAlgo broker modules
+        expose a single-symbol ``get_quotes(symbol, exchange, token)`` function.
+        Preserve the single-symbol response shape for one item and return a
+        keyed mapping for multi-symbol callers.
+        """
+        raw_symbols = symbols if isinstance(symbols, list) else [symbols]
+        if len(raw_symbols) == 1:
+            exchange, symbol = _split_exchange_symbol(raw_symbols[0])
+            return self._data.get_quotes(symbol, exchange, auth_token)
+        quotes: dict[str, Any] = {}
+        for raw in raw_symbols:
+            exchange, symbol = _split_exchange_symbol(raw)
+            quotes[str(raw)] = self._data.get_quotes(symbol, exchange, auth_token)
+        return quotes
+
+    def get_depth(self, symbol: str, auth_token: str = "") -> Any:
         """Delegate to broker data.get_depth."""
-        return self._data.get_depth(symbol, exchange, auth_token)
+        exchange, name = _split_exchange_symbol(symbol)
+        return self._data.get_depth(name, exchange, auth_token)
 
     def get_history(
         self,
-        symbol: str,
-        exchange: str,
-        interval: str,
-        start: str,
-        end: str,
+        params: dict[str, Any] | str,
+        exchange: str = "",
+        interval: str = "",
+        start: str = "",
+        end: str = "",
         auth_token: str = "",
     ) -> Any:
-        """Delegate to broker data.get_history."""
-        return self._data.get_history(symbol, exchange, interval, start, end, auth_token)
+        """Delegate to broker data.get_history.
 
-    def search_symbols(self, query: str, exchange: str, auth_token: str = "") -> Any:
+        Legacy callers used the OpenAlgo positional shape directly. The current
+        registry/session contract passes a params dict plus auth token. Accept
+        both so connected screener routes do not hit a TypeError and silently
+        fall back to sample data.
+        """
+        if isinstance(params, dict):
+            token = auth_token or (exchange if not interval and not start and not end else "")
+            symbol = str(params.get("symbol") or "")
+            exchange_name = str(params.get("exchange") or "NSE")
+            interval_name = str(params.get("interval") or "1d")
+            start_value = str(params.get("start") or params.get("from") or params.get("start_date") or "")
+            end_value = str(params.get("end") or params.get("to") or params.get("end_date") or "")
+            return self._data.get_history(symbol, exchange_name, interval_name, start_value, end_value, token)
+        return self._data.get_history(params, exchange, interval, start, end, auth_token)
+
+    def get_option_chain(
+        self,
+        params: dict[str, Any] | str,
+        exchange: str = "",
+        expiry: str | None = None,
+        auth_token: str = "",
+    ) -> Any:
+        """Delegate to the broker data module's option-chain reader.
+
+        FlintTrade's registry/session contract passes ``(params, token)`` while
+        OpenAlgo broker data modules have used a few names and positional
+        shapes over time. Keep the adaptation here so screener routes and
+        sessions do not learn broker-module naming quirks.
+        """
+        request: dict[str, Any]
+        if isinstance(params, dict):
+            token = auth_token or (exchange if expiry in (None, "") else "")
+            request = dict(params)
+            symbol = str(request.get("symbol") or request.get("underlying") or "")
+            exchange_name = str(request.get("exchange") or "NSE_INDEX")
+            expiry_value = request.get("expiry") or request.get("expiry_date")
+        else:
+            token = auth_token
+            symbol = str(params)
+            exchange_name = exchange or "NSE_INDEX"
+            expiry_value = expiry
+            request = {"symbol": symbol, "exchange": exchange_name}
+            if expiry_value:
+                request["expiry"] = expiry_value
+
+        candidates = [
+            (request, token),
+            (symbol, exchange_name, expiry_value, token),
+            (symbol, exchange_name, token),
+            (symbol, exchange_name, expiry_value),
+            (symbol, exchange_name),
+        ]
+        for method_name in ("get_option_chain", "option_chain", "optionchain"):
+            method = getattr(self._data, method_name, None)
+            if not callable(method):
+                continue
+            unknown_signature_error: TypeError | None = None
+            for args in candidates:
+                supported = _supports_positional_call(method, len(args))
+                if supported is False:
+                    continue
+                try:
+                    return method(*args)
+                except TypeError as exc:
+                    if supported is True:
+                        raise
+                    unknown_signature_error = exc
+            if unknown_signature_error is not None:
+                raise unknown_signature_error
+        raise NotImplementedError(
+            f"Broker data module for {self._broker!r} does not expose option-chain reads"
+        )
+
+    def search_symbols(self, query: str, auth_token: str = "") -> Any:
         """Delegate to broker data.search_symbols."""
-        return self._data.search_symbols(query, exchange, auth_token)
+        return self._data.search_symbols(query, "NSE", auth_token)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +435,14 @@ def _f(name: str, label: str, *, secret: bool = False, required: bool = True, he
 _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
     "dhan": [
         {
+            "id": "oauth", "label": "Log in with Dhan (OAuth)", "kind": "oauth",
+            "description": (
+                "Approve a DhanHQ app-consent login. Register the shown redirect URL in your DhanHQ app; "
+                "Dhan redirects back with a tokenId that FlintTrade consumes for a 24h access token."
+            ),
+            "fields": [_f("api_key", "App ID"), _f("api_secret", "App secret", secret=True)],
+        },
+        {
             "id": "access_token", "label": "Access token", "kind": "direct",
             "description": "Paste a 24h access token from web.dhan.co → Profile → Access DhanHQ APIs.",
             "fields": [_f("client_id", "Dhan client ID"), _f("access_token", "Access token", secret=True)],
@@ -337,7 +456,11 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
     "upstox": [
         {
             "id": "oauth", "label": "Log in with Upstox (OAuth)", "kind": "oauth",
-            "description": "Approve access on upstox.com. Register the shown redirect URL in your Upstox app (Developer → Apps).",
+            "description": (
+                "Approve access on upstox.com. In Developer → Apps, register the shown redirect URL and your "
+                "current outbound public IP under Primary/Secondary IP before using order APIs; changing those "
+                "IPs invalidates Upstox access tokens. Leave the optional Notifier Webhook Endpoint blank."
+            ),
             "fields": [_f("api_key", "API key (client ID)"), _f("api_secret", "API secret", secret=True)],
         },
         {
@@ -356,6 +479,13 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
                 _f("ucc", "UCC (client code)"),
                 _f("totp", "6-digit TOTP"),
                 _f("mpin", "MPIN", secret=True),
+                _f(
+                    "access_token",
+                    "Portal access token",
+                    secret=True,
+                    required=False,
+                    help_="Optional Trade API token from the Kotak Neo portal; the TOTP + MPIN session is still required.",
+                ),
                 _f("neo_fin_key", "Neo fin key", required=False),
             ],
         },
@@ -363,10 +493,137 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
     "indmoney": [
         {
             "id": "access_token", "label": "Access token", "kind": "direct",
-            "description": "Generate an access token on the INDstocks API dashboard and paste it here.",
-            "fields": [_f("user_id", "User ID", required=False), _f("access_token", "Access token", secret=True)],
+            "description": (
+                "Generate an access token on the INDstocks API dashboard and paste it here. Save your static "
+                "outbound IP before live algo orders; INDstocks resets tokens daily at 06:00 IST and allows "
+                "up to five active tokens."
+            ),
+            "fields": [
+                _f("user_id", "User ID", required=False),
+                _f(
+                    "access_token",
+                    "Access token",
+                    secret=True,
+                    help_="Generate a fresh INDstocks token after the daily 06:00 IST reset.",
+                ),
+            ],
         },
     ],
+}
+
+
+_BROKER_MCP: dict[str, dict[str, Any]] = {
+    "dhan": {
+        "remote_url": "https://mcp.dhan.co/mcp",
+        "docs_url": "https://docs.dhanhq.co/mcp/",
+        "auth_mode": "Authorize through Dhan's hosted MCP flow from the client.",
+        "reauth": "Re-authorize in the MCP client when Dhan prompts for a fresh session.",
+        "read_only": False,
+        "trading_supported": True,
+        "login_steps": [
+            "Add the Dhan remote MCP URL to a supported MCP client.",
+            "Complete the Dhan browser authorisation opened by that client.",
+            "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
+        ],
+        "use_cases": [
+            "Portfolio and account review",
+            "Order placement, modification, cancellation, and Super Orders in the external MCP client",
+            "Market data and historical data lookup",
+            "Margin, alerts, and instrument search",
+        ],
+        "cautions": [
+            "Broker MCP trade tools are outside FlintTrade's in-process safety gate; FlintTrade automation must still use gate_order or gate_broker_write through BrokerRouter.",
+        ],
+        "client_configs": [
+            {
+                "id": "remote_url",
+                "label": "Direct remote URL",
+                "url": "https://mcp.dhan.co/mcp",
+                "config": {"url": "https://mcp.dhan.co/mcp"},
+            },
+            {
+                "id": "mcp_remote",
+                "label": "mcp-remote",
+                "command": "npx",
+                "args": ["mcp-remote", "https://mcp.dhan.co/mcp"],
+            },
+        ],
+    },
+    "upstox": {
+        "remote_url": "https://mcp.upstox.com/mcp",
+        "docs_url": "https://upstox.com/developer/api-documentation/mcp-integration/",
+        "auth_mode": "Authorize through Upstox's hosted MCP flow from the client.",
+        "reauth": "Daily re-authorisation is required.",
+        "read_only": True,
+        "trading_supported": False,
+        "daily_reauthorization": True,
+        "login_steps": [
+            "Add the Upstox remote MCP URL to a supported MCP client.",
+            "Complete the browser authorisation opened by that client.",
+            "Repeat authorisation daily before relying on account context.",
+        ],
+        "use_cases": [
+            "Holdings review",
+            "Orders, positions, funds, mutual funds, and profile lookup",
+            "Read-only account context for analysis",
+        ],
+        "cautions": [
+            "Upstox MCP cannot place, modify, or cancel orders.",
+            "Use FlintTrade's native Upstox or OpenAlgo order path for live trading, with the normal safety gate.",
+        ],
+        "client_configs": [
+            {
+                "id": "remote_url",
+                "label": "Direct remote URL",
+                "url": "https://mcp.upstox.com/mcp",
+                "config": {"url": "https://mcp.upstox.com/mcp"},
+            },
+            {
+                "id": "mcp_remote",
+                "label": "mcp-remote",
+                "command": "npx",
+                "args": ["mcp-remote", "https://mcp.upstox.com/mcp"],
+            },
+        ],
+    },
+    "groww": {
+        "remote_url": "https://mcp.groww.in/mcp",
+        "docs_url": "https://groww.in/updates/groww-mcp",
+        "auth_mode": "Authorize through Groww's hosted MCP flow from the client with explicit account permission.",
+        "reauth": "Grant access when the MCP client asks; Groww documents explicit permission rather than background sync.",
+        "read_only": False,
+        "trading_supported": True,
+        "login_steps": [
+            "Add the Groww remote MCP URL to a supported MCP client.",
+            "Complete the Groww authorisation opened by that client.",
+            "Confirm DDPI status before sell-order workflows.",
+        ],
+        "use_cases": [
+            "Portfolio intelligence",
+            "F&O analysis",
+            "Smart order management in the external MCP client",
+            "Market context",
+        ],
+        "cautions": [
+            "Sell orders through Groww MCP require DDPI authorisation.",
+            "Groww is not a FlintTrade connectable native broker until a native adapter is built and live-tested.",
+            "The Groww Trade API page still requires static IP setup for API-key order placement.",
+        ],
+        "client_configs": [
+            {
+                "id": "remote_url",
+                "label": "Direct remote URL",
+                "url": "https://mcp.groww.in/mcp",
+                "config": {"url": "https://mcp.groww.in/mcp"},
+            },
+            {
+                "id": "mcp_remote_cursor_vscode",
+                "label": "Cursor / VS Code mcp-remote",
+                "command": "npx",
+                "args": ["mcp-remote@0.1.18", "https://mcp.groww.in/mcp", "52155"],
+            },
+        ],
+    },
 }
 
 
@@ -413,6 +670,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=True,  # tried-and-tested against a live account
         auth_methods=_NATIVE_AUTH["dhan"],
+        mcp=_BROKER_MCP["dhan"],
     ),
     "aliceblue": BrokerInfo(
         name="aliceblue",
@@ -431,6 +689,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=True,  # tried-and-tested against a live account
         auth_methods=_NATIVE_AUTH["upstox"],
+        mcp=_BROKER_MCP["upstox"],
     ),
     "compositedge": BrokerInfo(
         name="compositedge",
@@ -501,7 +760,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         display_name="Kotak Neo",
         # Native FlintTrade adapter (brokers/kotakneo.py). Distinct from the
         # bridge "kotak" (Kotak Securities) above. Built + mock-tested, not yet
-        # live-verified → native but "coming soon" (connectable=False).
+        # login/read verified → native but "coming soon" (connectable=False).
         auth_flow=AuthFlowType.totp_form,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "NSE_INDEX", "BSE_INDEX"],
         native=True,
@@ -550,6 +809,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         display_name="Groww",
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
+        mcp=_BROKER_MCP["groww"],
     ),
     "wisdom": BrokerInfo(
         name="wisdom",
@@ -594,7 +854,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
         native=True,
-        connectable=False,  # built + mock-tested, not yet live-verified → "coming soon"
+        connectable=True,  # login/read verified against INDstocks dashboard token read paths
         auth_methods=_NATIVE_AUTH["indmoney"],
     ),
     "fivepaisaxts": BrokerInfo(

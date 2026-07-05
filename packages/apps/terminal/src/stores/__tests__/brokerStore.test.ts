@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useBrokerStore } from "../brokerStore";
+import { brokerAccountKey, useBrokerStore } from "../brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 
 const makeAccount = (overrides: Partial<BrokerAccount> = {}): BrokerAccount => ({
@@ -33,6 +33,34 @@ describe("brokerStore", () => {
     expect(useBrokerStore.getState().accounts[1].account_id).toBe("acc-2");
   });
 
+  it("setAccounts clears the active account when a poll no longer returns it", () => {
+    const active = makeAccount({ account_id: "acc-1", broker: "dhan", source: "native" });
+    const replacement = makeAccount({ account_id: "acc-2", broker: "upstox", source: "native" });
+    useBrokerStore.getState().setAccounts([active]);
+    useBrokerStore.getState().setActiveAccount(brokerAccountKey(active));
+
+    useBrokerStore.getState().setAccounts([replacement]);
+
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
+  });
+
+  it("setAccounts preserves the active account when a refreshed poll still returns it", () => {
+    const active = makeAccount({ account_id: "acc-1", broker: "dhan", source: "native" });
+    const refreshed = makeAccount({
+      account_id: "acc-1",
+      broker: "dhan",
+      label: "Dhan refreshed",
+      source: "native",
+    });
+    const activeKey = brokerAccountKey(active);
+    useBrokerStore.getState().setAccounts([active]);
+    useBrokerStore.getState().setActiveAccount(activeKey);
+
+    useBrokerStore.getState().setAccounts([refreshed]);
+
+    expect(useBrokerStore.getState().activeAccountId).toBe(activeKey);
+  });
+
   it("addAccount appends", () => {
     const a1 = makeAccount({ account_id: "acc-1" });
     useBrokerStore.getState().addAccount(a1);
@@ -57,6 +85,18 @@ describe("brokerStore", () => {
     useBrokerStore.getState().setActiveAccount("acc-1");
     expect(useBrokerStore.getState().activeAccountId).toBe("acc-1");
     useBrokerStore.getState().removeAccount("acc-1");
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
+  });
+
+  it("removeAccount can target one broker-aware account when ids collide", () => {
+    const dhan = makeAccount({ account_id: "shared", broker: "dhan", label: "Dhan", source: "native" });
+    const upstox = makeAccount({ account_id: "shared", broker: "upstox", label: "Upstox", source: "native" });
+    useBrokerStore.getState().setAccounts([dhan, upstox]);
+    useBrokerStore.getState().setActiveAccount(brokerAccountKey(upstox));
+
+    useBrokerStore.getState().removeAccount(brokerAccountKey(upstox));
+
+    expect(useBrokerStore.getState().accounts).toEqual([dhan]);
     expect(useBrokerStore.getState().activeAccountId).toBeNull();
   });
 
@@ -93,6 +133,17 @@ describe("brokerStore", () => {
     useBrokerStore.getState().setActiveAccount("acc-2");
     const result = useBrokerStore.getState().getActiveAccount();
     expect(result?.account_id).toBe("acc-2");
+  });
+
+  it("getActiveAccount resolves broker-aware keys before legacy ids", () => {
+    const dhan = makeAccount({ account_id: "shared", broker: "dhan", label: "Dhan", source: "native" });
+    const upstox = makeAccount({ account_id: "shared", broker: "upstox", label: "Upstox", source: "native" });
+    useBrokerStore.getState().setAccounts([dhan, upstox]);
+    useBrokerStore.getState().setActiveAccount(brokerAccountKey(upstox));
+
+    const result = useBrokerStore.getState().getActiveAccount();
+
+    expect(result?.broker).toBe("upstox");
   });
 
   it("getActiveAccount returns undefined when no match", () => {

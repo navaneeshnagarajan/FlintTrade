@@ -16,13 +16,11 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { seedExploreDemoSession } from './helpers';
 
 test.describe('Keyboard shortcuts dialog', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      sessionStorage.setItem('flinttrade:dailyWelcomeDismissed', 'true');
-      localStorage.setItem('flinttrade:tourComplete', 'true');
-    });
+    await seedExploreDemoSession(page);
     await page.goto('/trade');
     // Wait for AppLayout to mount (TopBar is inside <header>)
     await page.locator('header').first().waitFor({ timeout: 15_000 });
@@ -36,7 +34,7 @@ test.describe('Keyboard shortcuts dialog', () => {
     // KeyboardShortcutsDialog uses shadcn Dialog which renders a [role="dialog"]
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog.getByText('Keyboard Shortcuts')).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeVisible();
   });
 
   test('dialog shows all shortcut categories', async ({ page }) => {

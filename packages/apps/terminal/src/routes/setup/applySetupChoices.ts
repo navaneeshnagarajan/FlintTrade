@@ -2,6 +2,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSkillStore } from "@/stores/skillStore";
+import { persistOpenAlgoConfigPatch } from "@/services/ftApi.openalgo";
 import type { Domain, SkillLevel } from "@/types/skill";
 
 import { deriveWsUrl, type ConnectionFormValues } from "./ConnectionStep";
@@ -79,14 +80,10 @@ function persistOpenAlgoConnection(connection: ConnectionFormValues): void {
     wsUrl,
   });
 
-  void fetch("/ft-api/v1/config/openalgo", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: connection.apiKey,
-      host: connection.host,
-      ws_port: connection.wsPort,
-    }),
+  void persistOpenAlgoConfigPatch({
+    apiKey: connection.apiKey,
+    host: connection.host,
+    wsPort: connection.wsPort,
   }).catch((err) => {
     console.warn("[setup] failed to persist connection to backend:", err);
   });

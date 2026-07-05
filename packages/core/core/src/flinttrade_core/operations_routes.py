@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 from datetime import timedelta as _td
@@ -438,19 +437,73 @@ def kill_switch_reset() -> tuple[Any, int]:
 # ------------------------------------------------------------------
 
 _WEBHOOK_SOURCES = ("tradingview", "chartink", "custom")
+_WEBHOOK_REGISTRY_KEY = "automation.webhooks"
 
 
 def _webhook_type(path: str) -> str:
     """Derive a webhook's source type from its registration path.
 
-    Paths look like ``/webhook/<source>/<slug>`` (tradingview / chartink /
-    custom). Returns the source segment, defaulting to ``"custom"`` for any
-    path that does not follow the convention.
+    Mounted receiver paths look like ``/v1/webhook/<source>/<slug>``. Legacy
+    UI paths such as ``/webhook/<source>/<slug>`` are also understood so old
+    workspace rows keep rendering with the correct badge.
     """
     parts = [p for p in path.split("/") if p]
+    if len(parts) >= 3 and parts[0] == "v1" and parts[1] == "webhook" and parts[2] in _WEBHOOK_SOURCES:
+        return parts[2]
     if len(parts) >= 2 and parts[0] == "webhook" and parts[1] in _WEBHOOK_SOURCES:
         return parts[1]
     return "custom"
+
+
+def _normalise_webhook_path(raw_path: str, webhook_type: str) -> str:
+    """Return the mounted receiver path for a UI-entered webhook path.
+
+    The Flows panel historically prompted for ``/webhook/...`` paths while the
+    Flask blueprint mounted the receiver at ``/v1/webhook``. Normalising here
+    lets existing operator muscle-memory keep working, but the stored/displayed
+    value always names a route that the backend actually serves.
+    """
+    source = webhook_type.strip().lower()
+    if source not in _WEBHOOK_SOURCES:
+        raise ValueError(f"type must be one of: {', '.join(_WEBHOOK_SOURCES)}")
+
+    parsed = urlparse(raw_path.strip())
+    if parsed.scheme or parsed.netloc:
+        raise ValueError("path must be relative, not a full URL")
+    if parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("path must not include params, query string, or fragment")
+
+    segments = [part for part in parsed.path.split("/") if part]
+    if not segments:
+        raise ValueError("path must include a webhook slug")
+
+    if len(segments) >= 4 and segments[0] == "ft-api" and segments[1] == "v1" and segments[2] == "webhook":
+        segments = segments[1:]
+
+    route_source = source
+    if len(segments) >= 3 and segments[0] == "v1" and segments[1] == "webhook":
+        route_source = segments[2].lower()
+        slug_segments = segments[3:]
+    elif segments[0] == "webhook":
+        if len(segments) >= 2 and segments[1].lower() in _WEBHOOK_SOURCES:
+            route_source = segments[1].lower()
+            slug_segments = segments[2:]
+        else:
+            slug_segments = segments[1:]
+    else:
+        slug_segments = segments
+
+    if route_source not in _WEBHOOK_SOURCES:
+        raise ValueError(f"path source must be one of: {', '.join(_WEBHOOK_SOURCES)}")
+    if route_source != source:
+        raise ValueError(f"path source '{route_source}' must match type '{source}'")
+    if not slug_segments:
+        raise ValueError("path must include a webhook slug after the source")
+    for segment in slug_segments:
+        if segment in {".", ".."} or any(ch.isspace() for ch in segment):
+            raise ValueError("path slug must not contain whitespace or traversal segments")
+
+    return f"/v1/webhook/{route_source}/{'/'.join(slug_segments)}"
 
 
 def _webhook_dict(path: str, name: str, enabled: bool) -> dict[str, Any]:
@@ -471,6 +524,59 @@ def _webhook_dict(path: str, name: str, enabled: bool) -> dict[str, Any]:
     }
 
 
+def _load_webhook_registry() -> tuple[Any, list[dict[str, Any]]]:
+    """Load the workspace-backed webhook metadata registry.
+
+    The registry is metadata only; incoming requests still flow through
+    ``webhook_bp``/``WebhookReceiver`` and secrets are intentionally not stored
+    here.
+    """
+    from .workspace import Workspace  # noqa: PLC0415
+
+    workspace = Workspace()
+    workspace.load()
+    raw_rows = workspace.get(_WEBHOOK_REGISTRY_KEY, [])
+    if not isinstance(raw_rows, list):
+        return workspace, []
+
+    rows: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            continue
+        raw_path = str(raw.get("path") or "").strip()
+        source = str(raw.get("type") or _webhook_type(raw_path)).strip().lower()
+        if source not in _WEBHOOK_SOURCES:
+            source = "custom"
+        try:
+            path = _normalise_webhook_path(raw_path, source)
+        except ValueError:
+            logger.warning("Ignoring invalid webhook registry path: %s", raw_path)
+            continue
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        name = str(raw.get("name") or "").strip() or path.rsplit("/", 1)[-1]
+        enabled_raw = raw.get("enabled", True)
+        enabled = enabled_raw if isinstance(enabled_raw, bool) else True
+        rows.append(_webhook_dict(path, name, enabled))
+    return workspace, rows
+
+
+def _save_webhook_registry(workspace: Any, rows: list[dict[str, Any]]) -> None:
+    """Persist the frontend-safe webhook registry to workspace.json."""
+    payload = [
+        {
+            "path": row["path"],
+            "name": row["name"],
+            "type": row["type"],
+            "enabled": bool(row["enabled"]),
+        }
+        for row in rows
+    ]
+    workspace.set(_WEBHOOK_REGISTRY_KEY, payload)
+
+
 @operations_bp.route("/webhooks", methods=["GET"])
 def webhooks_list() -> tuple[Any, int]:
     """Return all registered webhook endpoints and their status.
@@ -481,17 +587,7 @@ def webhooks_list() -> tuple[Any, int]:
         frontend WebhookConfig contract; the secret is never echoed).
     """
     try:
-        from flinttrade_webhooks.webhook_server import (  # noqa: PLC0415
-            WebhookServer,
-        )
-        server: WebhookServer | None = getattr(current_app, "_webhook_server", None)
-        if server is None:
-            return jsonify({"status": "success", "data": {"webhooks": [], "info": "Webhook server not started"}}), 200
-
-        webhooks = [
-            _webhook_dict(ep.path, ep.name, ep.enabled)
-            for ep in server._endpoints.values()
-        ]
+        _workspace, webhooks = _load_webhook_registry()
         return jsonify({"status": "success", "data": {"webhooks": webhooks}}), 200
     except Exception:
         logger.exception("webhooks_list error")
@@ -504,38 +600,45 @@ def webhooks_create() -> tuple[Any, int]:
 
     Request JSON:
         path (str): URL path for the webhook (e.g. ``"/webhook/custom/my_signal"``).
+            Stored as the mounted receiver path ``"/v1/webhook/<source>/<slug>"``.
         name (str): Human-readable name.
-        secret (str, optional): HMAC secret for request validation.
+        secret (str, optional): currently rejected until the encrypted
+            per-webhook secret + replay layer is wired into the receiver.
 
     Returns:
         JSON with ``status`` and the registered webhook details.
     """
     try:
-        from flinttrade_webhooks.webhook_server import (  # noqa: PLC0415
-            WebhookServer,
-        )
-        server: WebhookServer | None = getattr(current_app, "_webhook_server", None)
-        if server is None:
+        body = request.get_json(silent=True) or {}
+        path_raw = str(body.get("path") or "").strip()
+        name = str(body.get("name") or "").strip()
+        source = str(body.get("type") or "custom").strip().lower()
+        secret = str(body.get("secret") or "").strip()
+
+        if not path_raw or not name:
+            return jsonify({"status": "error", "message": "path and name are required"}), 400
+        if secret:
             return jsonify({
                 "status": "error",
-                "message": "Webhook server not started — initialise WebhookServer first",
-            }), 503
+                "message": (
+                    "Per-webhook secrets are not wired to the mounted receiver yet; "
+                    "create the webhook without a secret or wait for the encrypted secret/replay merge."
+                ),
+            }), 501
 
-        body = request.get_json(silent=True) or {}
-        path: str = body.get("path", "").strip()
-        name: str = body.get("name", "").strip()
-        secret: str = body.get("secret", "").strip()
+        try:
+            path = _normalise_webhook_path(path_raw, source)
+        except ValueError as exc:
+            return jsonify({"status": "error", "message": str(exc)}), 400
 
-        if not path or not name:
-            return jsonify({"status": "error", "message": "path and name are required"}), 400
-
-        def _noop_handler(raw_body: bytes, headers: dict[str, str]) -> dict[str, Any]:
-            return {"status": "received"}
-
-        server.register(path, name, _noop_handler, secret=secret)
+        workspace, rows = _load_webhook_registry()
+        row = _webhook_dict(path, name, bool(body.get("enabled", True)))
+        rows = [existing for existing in rows if existing["path"] != path]
+        rows.append(row)
+        _save_webhook_registry(workspace, rows)
         return jsonify({
             "status": "success",
-            "data": _webhook_dict(path, name, True),
+            "data": row,
         }), 201
     except Exception:
         logger.exception("webhooks_create error")
@@ -558,24 +661,24 @@ def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
         JSON with ``status`` and confirmation message.
     """
     try:
-        from flinttrade_webhooks.webhook_server import (  # noqa: PLC0415
-            WebhookServer,
-        )
-        server: WebhookServer | None = getattr(current_app, "_webhook_server", None)
-        if server is None:
-            return jsonify({"status": "error", "message": "Webhook server not started"}), 503
+        workspace, rows = _load_webhook_registry()
+        key = webhook_id.strip()
+        path_key = f"/{key}" if not key.startswith("/") else key
+        id_key = key.lstrip("/")
 
-        # webhook_id may be the path (URL-decoded) or name
-        path_key = f"/{webhook_id}" if not webhook_id.startswith("/") else webhook_id
-        if path_key in server._endpoints:
-            del server._endpoints[path_key]
-            return jsonify({"status": "success", "data": {"message": f"Webhook '{path_key}' removed"}}), 200
-
-        # Try matching by name
-        for ep_path, ep in list(server._endpoints.items()):
-            if ep.name == webhook_id:
-                del server._endpoints[ep_path]
-                return jsonify({"status": "success", "data": {"message": f"Webhook '{ep.name}' removed"}}), 200
+        kept: list[dict[str, Any]] = []
+        removed: dict[str, Any] | None = None
+        for row in rows:
+            if row["id"] == id_key or row["path"] == path_key or row["name"] == key:
+                removed = row
+                continue
+            kept.append(row)
+        if removed is not None:
+            _save_webhook_registry(workspace, kept)
+            return jsonify({
+                "status": "success",
+                "data": {"message": f"Webhook '{removed['path']}' removed"},
+            }), 200
 
         return jsonify({"status": "error", "message": f"Webhook '{webhook_id}' not found"}), 404
     except Exception:
@@ -839,54 +942,50 @@ def ditto_accounts() -> tuple[Any, int]:
     """List all managed accounts with status.
 
     Returns a list of broker accounts registered in the Ditto multi-account
-    manager.  When no real accounts are configured yet, returns sample data
-    so the UI can be developed and demonstrated.
+    manager. When no real accounts are configured yet, returns an empty list
+    rather than fabricating accounts.
     """
     try:
         from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
 
         mgr = AccountManager()
         raw = mgr.list_accounts()
-        if raw:
-            accounts = [_ditto_account_response(acct) for acct in raw]
-            return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
+        accounts = [_ditto_account_response(acct) for acct in raw]
+        return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
     except Exception as exc:
         logger.warning("Ditto account fetch failed: %s", exc)
-        if not (current_app.debug or os.environ.get("FLINTTRADE_DEV")):
-            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
-
-    # Fallback: sample data for UI development (dev mode only).
-    # Uses generic placeholder names + broker_01..07 tokens to avoid leaking
-    # real client identities or preferring any specific broker.
-    sample_accounts = [
-        {"id": "acc_1", "name": "Demo Account 1", "broker": "broker_01", "capital": 5000000, "pnl_today": 12500, "status": "active", "positions": 8, "group": "GroupA", "allocation_weight": 1.0, "is_master": True},
-        {"id": "acc_2", "name": "Demo Account 2", "broker": "broker_02", "capital": 3000000, "pnl_today": -8200, "status": "active", "positions": 5, "group": "GroupA", "allocation_weight": 0.6, "is_master": False},
-        {"id": "acc_3", "name": "Demo Account 3", "broker": "broker_03", "capital": 8000000, "pnl_today": 34100, "status": "active", "positions": 12, "group": "GroupA", "allocation_weight": 1.6, "is_master": False},
-        {"id": "acc_4", "name": "Demo Account 4", "broker": "broker_04", "capital": 2000000, "pnl_today": -3500, "status": "active", "positions": 3, "group": "GroupB", "allocation_weight": 0.4, "is_master": False},
-        {"id": "acc_5", "name": "Demo Account 5", "broker": "broker_05", "capital": 10000000, "pnl_today": 56200, "status": "active", "positions": 15, "group": "GroupA", "allocation_weight": 2.0, "is_master": False},
-        {"id": "acc_6", "name": "Demo Account 6", "broker": "broker_06", "capital": 4000000, "pnl_today": 0, "status": "disabled", "positions": 0, "group": "GroupB", "allocation_weight": 0.8, "is_master": False},
-        {"id": "acc_7", "name": "Demo Account 7", "broker": "broker_07", "capital": 6000000, "pnl_today": -12800, "status": "active", "positions": 9, "group": "GroupC", "allocation_weight": 1.2, "is_master": False},
-    ]
-    return jsonify({"status": "success", "data": {"accounts": sample_accounts}}), 200
+        return jsonify({"status": "error", "message": "Account service unavailable"}), 503
 
 
 @operations_bp.route("/accounts/status", methods=["GET"])
 def accounts_status() -> tuple[Any, int]:
     """Consolidated Account Manager status — per-broker connection + daily reauth.
 
-    For each connected account, reports whether its OpenAlgo is reachable, the
-    broker session is authenticated today, and whether re-authentication is
-    required (a live ping; 200 = authenticated, 4xx = re-auth needed, connection
-    error = offline) — the data that drives the Account Manager's per-broker
-    reauth indicators and the OpenAlgo connection state.
+    Reports both Ditto/OpenAlgo managed accounts and vault-backed native broker
+    accounts. Ditto rows live-ping OpenAlgo (200 = authenticated, 4xx = re-auth
+    needed, connection error = offline). Native rows reflect the gateway session
+    registry and stored replay status, so Dhan/Upstox/INDmoney accounts appear
+    in the Account Manager even when no OpenAlgo bridge account exists.
     """
+    statuses: list[dict[str, Any]] = []
+    ditto_failed = False
     try:
         from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
 
         with AccountManager() as mgr:
-            statuses = [s.to_dict() for s in mgr.account_status_all()]
+            statuses.extend({"source": "openalgo", **s.to_dict()} for s in mgr.account_status_all())
     except Exception as exc:
+        ditto_failed = True
         logger.warning("Account status fetch failed: %s", exc)
+
+    try:
+        statuses.extend(_native_account_statuses())
+    except Exception as exc:  # noqa: BLE001 - native status should not hide Ditto rows
+        logger.warning("Native account status fetch failed: %s", type(exc).__name__)
+        if ditto_failed:
+            return jsonify({"status": "error", "message": "Account status unavailable"}), 503
+
+    if ditto_failed and not statuses:
         return jsonify({"status": "error", "message": "Account status unavailable"}), 503
 
     summary = {
@@ -896,6 +995,70 @@ def accounts_status() -> tuple[Any, int]:
         "needs_reauth": sum(1 for s in statuses if s["needs_reauth"]),
     }
     return jsonify({"status": "success", "data": {"accounts": statuses, "summary": summary}}), 200
+
+
+def _native_account_statuses() -> list[dict[str, Any]]:
+    """Return Account Manager rows for vault-backed native broker accounts."""
+    from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
+    from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE  # noqa: PLC0415
+
+    store = current_app.config.get("CREDENTIAL_STORE")
+    if store is None:
+        return []
+    registry = current_app.config.get("REGISTRY")
+    login_status: dict[str, Any] = current_app.config.get("NATIVE_SESSION_STATUS") or {}
+    rows = store.list_accounts()
+    now = _dt.now(_IST).isoformat()
+    statuses: list[dict[str, Any]] = []
+    for row in rows:
+        adapter_id = str(row.get("adapter_id") or row.get("broker") or "").strip().lower()
+        info = BROKER_CATALOG.get(adapter_id)
+        if info is None or not info.native:
+            continue
+        account_id = str(row.get("account_id") or "").strip()
+        if not account_id:
+            continue
+        has_session = False
+        expires_at = None
+        if registry is not None:
+            try:
+                session = registry.get_session_for(adapter_id, account_id)
+                has_session = True
+                expires_at = getattr(session, "expires_at", None)
+            except Exception:  # noqa: BLE001 - no registered live session
+                has_session = False
+        connectable = bool(info.connectable)
+        selector = f"{adapter_id}:{account_id}"
+        last_login = str(login_status.get(selector) or "")
+        login_retryable = bool(connectable and not has_session and last_login == BROKER_LOGIN_RETRY_MESSAGE)
+        needs_reauth = bool(connectable and not has_session and not login_retryable)
+        error = ""
+        if not connectable:
+            error = "Native connect is coming soon."
+        elif login_retryable:
+            error = last_login
+        elif needs_reauth:
+            error = last_login if last_login and last_login != "ok" else "Needs fresh native broker login."
+        label = str(row.get("label") or "").strip()
+        display_name = info.display_name
+        return_label = label if label and label.lower() != adapter_id else f"{display_name} · {account_id}"
+        statuses.append({
+            "source": "native",
+            "broker": adapter_id,
+            "broker_display": display_name,
+            "account_id": account_id,
+            "name": return_label,
+            "enabled": connectable,
+            "connected": has_session,
+            "authenticated": has_session,
+            "needs_reauth": needs_reauth,
+            "login_retryable": login_retryable,
+            "latency_ms": 0,
+            "error": error,
+            "checked_at": now,
+            "expires_at": expires_at,
+        })
+    return statuses
 
 
 @operations_bp.route("/ditto/accounts", methods=["POST"])
@@ -1141,9 +1304,19 @@ def ai_openclaw_status() -> tuple[Any, int]:
 
         bridge = OpenClawBridge()
         healthy = bridge.check_health()
+        control_supported = getattr(bridge, "agent_control_supported", False)
+        if not isinstance(control_supported, bool):
+            control_supported = False
+        control_message = getattr(bridge, "agent_control_message", "")
+        if not isinstance(control_message, str):
+            control_message = ""
         return jsonify({
             "status": "success",
-            "data": {"connected": healthy},
+            "data": {
+                "connected": healthy,
+                "agent_control_supported": control_supported,
+                "message": control_message,
+            },
         }), 200
     except Exception:
         logger.exception("ai_openclaw_status error")
@@ -1187,7 +1360,8 @@ def ai_openclaw_deploy() -> tuple[Any, int]:
             return jsonify({"status": "error", "message": "agent 'name' is required"}), 400
         result = OpenClawBridge().deploy_agent(config)
         if isinstance(result, dict) and result.get("status") == "error":
-            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), 502
+            status_code = 501 if result.get("code") == "openclaw_agent_control_unsupported" else 502
+            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), status_code
         return jsonify({"status": "success", "data": result}), 200
     except Exception:
         logger.exception("ai_openclaw_deploy error")
@@ -1202,7 +1376,8 @@ def ai_openclaw_stop(agent_id: str) -> tuple[Any, int]:
 
         result = OpenClawBridge().stop_agent(agent_id)
         if isinstance(result, dict) and result.get("status") == "error":
-            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), 502
+            status_code = 501 if result.get("code") == "openclaw_agent_control_unsupported" else 502
+            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), status_code
         return jsonify({"status": "success", "data": result}), 200
     except Exception:
         logger.exception("ai_openclaw_stop error")
@@ -1328,8 +1503,8 @@ def positions_convert() -> tuple[Any, int]:
     Request JSON: either a ``req`` object, or the conversion fields inline
     (e.g. ``symbol``, ``exchange``, ``from_product``, ``to_product``,
     ``position_type``, ``quantity`` — broker-specific), plus optional
-    ``broker`` (default ``"openalgo"``) and ``account_id`` (default
-    ``"default"``). Live mode + PIN unlock required. A conversion changes the
+    ``broker`` and ``account_id`` (omitted target uses
+    ``brokers.execution.default``). Live mode + PIN unlock required. A conversion changes the
     margin profile of the book, so it is blocked while the L5 kill switch is
     latched. 501 for brokers whose adapter lacks the verb.
 

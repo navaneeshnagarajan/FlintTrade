@@ -8,7 +8,7 @@
  * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
  */
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -18,22 +18,16 @@ import {
   Loader2,
   Wifi,
   ArrowRight,
-  ArrowLeft,
-  PlusCircle,
   CheckCheck,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useBrokerStore } from "@/stores/brokerStore";
 import { ping } from "@/services/api";
-import { useBrokerAuth } from "@/hooks/useBrokerAuth";
-import { BrokerPicker } from "./BrokerPicker";
-import { ConnectedAccounts } from "./ConnectedAccounts";
-import { AuthFlowAPIKey } from "./AuthFlowAPIKey";
-import { AuthFlowTOTP } from "./AuthFlowTOTP";
-import type { BrokerInfo } from "@/types/broker";
+import { BrokerConnect } from "@/components/account/BrokerConnect";
+import { listNativeAccounts } from "@/services/ftApi.native";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -252,146 +246,31 @@ interface DirectConnectPanelProps {
   onComplete: (values: ConnectionFormValues) => void;
 }
 
-type DirectStep = "accounts" | "picking" | "auth";
-
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
-  const { flowState, startFlow, submitCredentials, reset } = useBrokerAuth();
-  const accounts = useBrokerStore((s) => s.accounts);
-  const [directStep, setDirectStep] = useState<DirectStep>("accounts");
-  const [selectedBroker, setSelectedBroker] = useState<BrokerInfo | null>(null);
+  const accountsQuery = useQuery({
+    queryKey: ["native", "accounts"],
+    queryFn: listNativeAccounts,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+  const hasNativeSession = (accountsQuery.data ?? []).some((account) => account.has_session === true);
 
-  // Derive which auth sub-form to show from useBrokerAuth state
-  const showAuthForm =
-    flowState.step === "entering_credentials" ||
-    flowState.step === "authenticating" ||
-    flowState.step === "error";
+  return (
+    <div className="space-y-4">
+      <BrokerConnect />
 
-  // When auth succeeds go back to accounts list (must be in useEffect, not render body)
-  useEffect(() => {
-    if (flowState.step === "success" && directStep === "auth") {
-      setDirectStep("accounts");
-      setSelectedBroker(null);
-    }
-  }, [flowState.step, directStep]);
-
-  function handleBrokerSelect(broker: BrokerInfo) {
-    setSelectedBroker(broker);
-    startFlow(broker);
-    setDirectStep("auth");
-  }
-
-  function handleAuthCancel() {
-    reset();
-    setSelectedBroker(null);
-    setDirectStep("accounts");
-  }
-
-  const isAuthLoading = flowState.step === "authenticating";
-  const authError = flowState.step === "error" ? flowState.message : undefined;
-
-  // Accounts list view
-  if (directStep === "accounts") {
-    return (
-      <div className="space-y-4">
-        <ConnectedAccounts />
-
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setDirectStep("picking")}
-          className="w-full border-border-default text-text-secondary hover:text-text-primary"
-        >
-          <PlusCircle className="size-3.5 mr-1.5" />
-          Add Broker Account
-        </Button>
-
-        <Button
-          type="button"
-          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-          disabled={accounts.length === 0}
-          onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
-        >
-          <CheckCheck className="size-4 mr-2" />
-          {accounts.length === 0 ? "Connect at least one broker" : "Continue"}
-          {accounts.length > 0 && <ArrowRight className="size-4 ml-2" />}
-        </Button>
-      </div>
-    );
-  }
-
-  // Broker picker grid
-  if (directStep === "picking") {
-    return (
-      <div className="space-y-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setDirectStep("accounts")}
-          className="text-text-muted hover:text-text-primary -ml-1"
-        >
-          <ArrowLeft className="size-3.5 mr-1" /> Back
-        </Button>
-
-        <p className="text-xs text-text-secondary">Select a broker to connect</p>
-
-        <div className="max-h-64 overflow-y-auto pr-1">
-          <BrokerPicker onSelect={handleBrokerSelect} />
-        </div>
-      </div>
-    );
-  }
-
-  // Auth form (api_key_direct or totp_form)
-  if (directStep === "auth" && selectedBroker) {
-    const broker = selectedBroker;
-
-    return (
-      <div className="space-y-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleAuthCancel}
-          className="text-text-muted hover:text-text-primary -ml-1"
-        >
-          <ArrowLeft className="size-3.5 mr-1" /> Back to broker list
-        </Button>
-
-        {authError && (
-          <p className="text-red-400 text-xs px-1">{authError}</p>
-        )}
-
-        {showAuthForm && broker.auth_flow === "api_key_direct" && (
-          <AuthFlowAPIKey
-            broker={broker}
-            onSubmit={(label, creds) => void submitCredentials(label, creds)}
-            onCancel={handleAuthCancel}
-            isLoading={isAuthLoading}
-          />
-        )}
-
-        {showAuthForm && broker.auth_flow === "totp_form" && (
-          <AuthFlowTOTP
-            broker={broker}
-            onSubmit={(label, creds) => void submitCredentials(label, creds)}
-            onCancel={handleAuthCancel}
-            isLoading={isAuthLoading}
-          />
-        )}
-
-        {!showAuthForm && (
-          <p className="text-xs text-text-secondary py-4 text-center">
-            Auth flow &ldquo;{broker.auth_flow}&rdquo; is not yet supported in the setup wizard.
-            Use Settings &rarr; Accounts after setup.
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return null;
+      <Button
+        type="button"
+        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+        disabled={!hasNativeSession}
+        onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
+      >
+        <CheckCheck className="size-4 mr-2" />
+        {hasNativeSession ? "Continue" : "Connect at least one broker"}
+        {hasNativeSession && <ArrowRight className="size-4 ml-2" />}
+      </Button>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

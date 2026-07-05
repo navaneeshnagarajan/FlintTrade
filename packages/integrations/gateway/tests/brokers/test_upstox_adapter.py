@@ -208,7 +208,17 @@ class MockUpstox:
 
     # -- market data --
     def full_quote(self, instrument_keys):
-        return {**_OK, "data": {}}
+        self.calls.append(("full_quote", instrument_keys))
+        return {**_OK, "data": {"NSE_EQ:RELIANCE": {
+            "symbol": "RELIANCE",
+            "instrument_token": "NSE_EQ|INE002A01018",
+            "last_price": 2905.5,
+            "ohlc": {"open": 2900, "high": 2920, "low": 2890, "close": 2899},
+            "depth": {
+                "buy": [{"price": 2905.0, "quantity": 10, "orders": 2}],
+                "sell": [{"price": 2906.0, "quantity": 8, "orders": 1}],
+            },
+        }}}
 
     def ohlc_quote_v3(self, instrument_keys, interval):
         self.calls.append(("ohlc_v3", instrument_keys, interval))
@@ -731,6 +741,35 @@ async def test_v3_quote_reads():
     kinds = [c[0] for c in mock.calls]
     assert kinds == ["ohlc_v3", "ltp_v3", "greeks_v3"]
     assert mock.calls[0][2] == "1d"  # interval forwarded
+
+
+@pytest.mark.asyncio
+async def test_market_depth_uses_full_quote_depth_ladder():
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    depth = await adapter.market_depth(session, ["NSE:RELIANCE"])
+
+    assert depth[0]["symbol"] == "RELIANCE"
+    assert depth[0]["bids"][0] == {"price": 2905.0, "quantity": 10, "orders": 2}
+    assert depth[0]["asks"][0] == {"price": 2906.0, "quantity": 8, "orders": 1}
+    assert mock.calls == [("full_quote", "NSE_EQ|INE002A01018")]
+
+
+@pytest.mark.asyncio
+async def test_market_data_resolves_by_instrument_search_and_reuses_cache():
+    mock = MockUpstox()
+    adapter = UpstoxAdapter(client_factory=lambda _s: mock)
+    session = await _session(adapter)
+
+    await adapter.ohlc_quotes(session, ["NSE:RELIANCE"], interval="1d")
+    await adapter.ltp_quotes(session, ["NSE:RELIANCE"])
+
+    kinds = [c[0] for c in mock.calls]
+    assert kinds == ["search", "ohlc_v3", "ltp_v3"]
+    assert mock.calls[1][1] == "NSE_EQ|INE002A01018"
+    assert mock.calls[2][1] == "NSE_EQ|INE002A01018"
 
 
 @pytest.mark.asyncio

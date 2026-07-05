@@ -24,10 +24,8 @@ import {
 import { downloadExcel } from "@/services/ftApi.data";
 import { post } from "@/services/ftApi.helpers";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
-import {
-  BrokerTargetSelect,
-  DEFAULT_BROKER_TARGET,
-} from "@/widgets/orders/OrdersManagerShared";
+import { BrokerTargetSelect, useBrokerOrderTarget } from "@/widgets/orders/OrdersManagerShared";
+import { useModeStore } from "@/stores/modeStore";
 import type { BrokerTarget } from "@/lib/brokerOrdersApi";
 import {
   type ColumnDef,
@@ -282,6 +280,7 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
 }
 
 function PositionsWidget(_props: WidgetProps) {
+  const appMode = useModeStore((s) => s.mode);
   const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
@@ -289,7 +288,7 @@ function PositionsWidget(_props: WidgetProps) {
   // Broker/account target for the gated convert + exit-all verbs. The OpenAlgo
   // bridge implements NEITHER verb (it would 501), so the operator picks a
   // native account (Dhan/Upstox/…) here, mirroring the orders widgets.
-  const [brokerTarget, setBrokerTarget] = useState<Required<BrokerTarget>>(DEFAULT_BROKER_TARGET);
+  const [brokerTarget, setBrokerTarget] = useBrokerOrderTarget(appMode);
 
   const rows = useMemo<PositionRow[]>(() => {
     const raw = (positionsData ?? []) as RawPositionRow[];

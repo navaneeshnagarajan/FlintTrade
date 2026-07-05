@@ -38,11 +38,11 @@ import {
   BrokerOrdersErrorNotice,
   BrokerTargetSelect,
   BrokerRowsTable,
-  DEFAULT_BROKER_TARGET,
   LiveModeNotice,
   extractRowId,
   parsePriceValue,
   parseWholeNumber,
+  useBrokerOrderTarget,
 } from "./OrdersManagerShared";
 
 const ORDER_ID_KEYS = ["order_id", "orderid", "orderId", "id"];
@@ -57,7 +57,7 @@ export default function SuperOrdersWidget() {
   const appMode = useModeStore((s) => s.mode);
   const isLive = appMode === "live";
 
-  const [target, setTarget] = useState(DEFAULT_BROKER_TARGET);
+  const [target, setTarget] = useBrokerOrderTarget(appMode);
 
   // Leg selection for the next cancel (per the widget, not per row — keeps
   // the table compact; the chosen leg applies to whichever row is cancelled).

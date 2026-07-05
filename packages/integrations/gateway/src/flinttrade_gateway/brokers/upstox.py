@@ -23,8 +23,9 @@ without the SDK.
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
 ``build_broker_router``'s native-activation factory registers this adapter
 automatically once its pinned SDK is attested AND vault credentials exist;
-until then it stays dormant (the ``brokers.lock`` Upstox pin is still
-PLACEHOLDER, so it is ``skipped`` and never activates today).
+until then it stays dormant. The catalogue's ``connectable`` flag is the
+operator-facing live-verification switch; SDK attestation alone does not expose
+an unverified broker in the connect UI.
 """
 
 from __future__ import annotations
@@ -468,6 +469,7 @@ class UpstoxAdapter(BrokerAdapter):
         self._feed_factory = feed_factory
         self._token_exchanger = token_exchanger
         self._local_state_provider = local_state_provider
+        self._instrument_cache: dict[tuple[str, str], str] = {}
         # instrument_key -> (symbol, exchange) for routing decoded feed ticks
         # back to FlintTrade names.
         self._feed_map: dict[str, tuple[str, str]] = {}
@@ -490,13 +492,60 @@ class UpstoxAdapter(BrokerAdapter):
             raise BrokerError("Upstox client not initialised — call login() first")
         return client
 
-    def _resolve_instrument(self, symbol: str, exchange: str) -> str:
-        if self._instrument_resolver is not None:
-            return str(self._instrument_resolver(symbol, exchange))
-        raise BrokerError(
-            f"Cannot resolve Upstox instrument_token for {symbol}/{exchange} — "
-            "configure an instrument resolver"
+    @staticmethod
+    def _instrument_cache_key(symbol: str, exchange: str) -> tuple[str, str]:
+        return (str(symbol).strip().upper(), str(exchange).strip().upper())
+
+    @staticmethod
+    def _search_row_matches(row: dict[str, Any], symbol: str, exchange: str) -> bool:
+        expected_symbol = str(symbol).strip().upper()
+        expected_exchange = str(exchange).strip().upper()
+        expected_segment = M.EXCHANGE_TO_UPSTOX.get(expected_exchange, expected_exchange)
+        row_symbol = str(row.get("symbol") or row.get("trading_symbol") or "").strip().upper()
+        row_exchange = str(row.get("exchange") or "").strip().upper()
+        row_segment = str(row.get("segment") or "").strip().upper()
+        instrument_key = str(row.get("instrument_key") or row.get("instrument_token") or "").strip()
+        instrument_segment = instrument_key.partition("|")[0].strip().upper()
+        row_exchange_as_flint = M.UPSTOX_TO_EXCHANGE.get(row_exchange, row_exchange)
+        if row_symbol != expected_symbol:
+            return False
+        return expected_exchange in {
+            row_exchange,
+            row_exchange_as_flint,
+            M.UPSTOX_TO_EXCHANGE.get(row_segment, row_segment),
+            M.UPSTOX_TO_EXCHANGE.get(instrument_segment, instrument_segment),
+        } or (
+            expected_segment in {row_exchange, row_segment, instrument_segment}
         )
+
+    @staticmethod
+    def _search_row_instrument_key(row: dict[str, Any]) -> str:
+        return str(row.get("instrument_key") or row.get("instrument_token") or "").strip()
+
+    async def _resolve_instrument(self, session: Session, symbol: str, exchange: str) -> str:
+        cache_key = self._instrument_cache_key(symbol, exchange)
+        cached = self._instrument_cache.get(cache_key)
+        if cached:
+            return cached
+        if self._instrument_resolver is not None:
+            resolved = str(self._instrument_resolver(symbol, exchange))
+            self._instrument_cache[cache_key] = resolved
+            return resolved
+        message = (
+            f"Cannot resolve Upstox instrument_token for {symbol}/{exchange} — "
+            "configure an instrument resolver or refresh the instruments master"
+        )
+        try:
+            rows = await self.search_instruments(session, str(symbol).strip())
+        except Exception as exc:  # noqa: BLE001 - surface a single resolver-family error
+            raise BrokerError(message) from exc
+        for row in rows:
+            if self._search_row_matches(row, symbol, exchange):
+                instrument_key = self._search_row_instrument_key(row)
+                if instrument_key:
+                    self._instrument_cache[cache_key] = instrument_key
+                    return instrument_key
+        raise BrokerError(message)
 
     @staticmethod
     async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -571,7 +620,7 @@ class UpstoxAdapter(BrokerAdapter):
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        token = self._resolve_instrument(order.symbol, order.exchange)
+        token = await self._resolve_instrument(session, order.symbol, order.exchange)
         tag = session.algo_id or None
         # Dispatch on order variety. Every variety travels this SAME gated method
         # (the router token is already required above and the variety + leg prices
@@ -625,7 +674,7 @@ class UpstoxAdapter(BrokerAdapter):
         """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         tag = session.algo_id or None
-        pairs = [(o, self._resolve_instrument(o.symbol, o.exchange)) for o in orders]
+        pairs = [(o, await self._resolve_instrument(session, o.symbol, o.exchange)) for o in orders]
         resp = await self._call(self._client(session).place_multi_order, M.to_multi_order_params(pairs, tag=tag))
         return M.from_upstox_multi_order(resp)
 
@@ -672,7 +721,7 @@ class UpstoxAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         token = str(
             req.get("instrument_token")
-            or self._resolve_instrument(str(req.get("symbol", "")), str(req.get("exchange", "NSE")))
+            or await self._resolve_instrument(session, str(req.get("symbol", "")), str(req.get("exchange", "NSE")))
         )
         params = M.to_convert_position_params({**req, "instrument_token": token})
         resp = await self._call(self._client(session).convert_position, params)
@@ -755,14 +804,14 @@ class UpstoxAdapter(BrokerAdapter):
 
         Read-only — places nothing, so it needs no gate.
         """
-        token = self._resolve_instrument(order.symbol, order.exchange)
+        token = await self._resolve_instrument(session, order.symbol, order.exchange)
         instrument = M.to_margin_instrument(order, token)
         resp = await self._call(self._client(session).margin, [instrument])
         return M.from_upstox_margin(resp)
 
     async def brokerage_calculator(self, session: Session, order: Order) -> dict:
         """Pre-trade brokerage + statutory charges (``GET /v2/charges/brokerage``)."""
-        token = self._resolve_instrument(order.symbol, order.exchange)
+        token = await self._resolve_instrument(session, order.symbol, order.exchange)
         q = M.to_brokerage_query(order, token)
         resp = await self._call(
             self._client(session).brokerage,
@@ -819,35 +868,60 @@ class UpstoxAdapter(BrokerAdapter):
         keys: list[str] = []
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            keys.append(self._resolve_instrument(name, exchange))
+            keys.append(await self._resolve_instrument(session, name, exchange))
         resp = await self._call(self._client(session).full_quote, ",".join(keys))
         data = resp.get("data", {}) if isinstance(resp, dict) else {}
         records = data.values() if isinstance(data, dict) else []
         return [Quote(**M.from_upstox_quote(rec)) for rec in records if isinstance(rec, dict)]
 
-    async def _resolve_keys(self, symbols: list[str]) -> list[str]:
+    async def market_depth(self, session: Session, symbols: list[str]) -> list[dict[str, Any]]:
+        """Five-level market depth from Upstox full-quote records.
+
+        Upstox's full-quote endpoint returns the L1 quote and the 5-level
+        ``depth.buy`` / ``depth.sell`` ladders together. Expose that ladder as a
+        first-class read so native-only Depth/DOM widgets do not require the
+        OpenAlgo bridge for market depth.
+        """
+        keys = await self._resolve_keys(session, symbols)
+        resp = await self._call(self._client(session).full_quote, ",".join(keys))
+        data = resp.get("data", {}) if isinstance(resp, dict) else {}
+        out: list[dict[str, Any]] = []
+        if not isinstance(data, dict):
+            return out
+        records = [rec for rec in data.values() if isinstance(rec, dict)]
+        for idx, key in enumerate(keys):
+            rec = data.get(key)
+            if not isinstance(rec, dict):
+                rec = next((r for r in records if str(r.get("instrument_token") or "") == key), None)
+            if not isinstance(rec, dict) and len(keys) == len(records):
+                rec = records[idx]
+            if isinstance(rec, dict):
+                out.append(M.from_upstox_depth(rec))
+        return out
+
+    async def _resolve_keys(self, session: Session, symbols: list[str]) -> list[str]:
         """Resolve ``"EXCHANGE:SYMBOL"`` strings to Upstox instrument keys."""
         keys: list[str] = []
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            keys.append(self._resolve_instrument(name, exchange))
+            keys.append(await self._resolve_instrument(session, name, exchange))
         return keys
 
     async def ohlc_quotes(self, session: Session, symbols: list[str], interval: str = "1d") -> list[dict]:
         """Bulk OHLC quotes, up to 500 instruments (``GET /v3/market-quote/ohlc``)."""
-        keys = await self._resolve_keys(symbols)
+        keys = await self._resolve_keys(session, symbols)
         resp = await self._call(self._client(session).ohlc_quote_v3, ",".join(keys), interval)
         return M.from_upstox_ohlc_v3(resp)
 
     async def ltp_quotes(self, session: Session, symbols: list[str]) -> list[dict]:
         """Bulk last-traded-price quotes (``GET /v3/market-quote/ltp``)."""
-        keys = await self._resolve_keys(symbols)
+        keys = await self._resolve_keys(session, symbols)
         resp = await self._call(self._client(session).ltp_quote_v3, ",".join(keys))
         return M.from_upstox_ltp_v3(resp)
 
     async def option_greeks(self, session: Session, symbols: list[str]) -> list[dict]:
         """Option Greeks + IV per contract (``GET /v3/market-quote/option-greek``)."""
-        keys = await self._resolve_keys(symbols)
+        keys = await self._resolve_keys(session, symbols)
         resp = await self._call(self._client(session).option_greeks_v3, ",".join(keys))
         return M.from_upstox_option_greeks(resp)
 
@@ -857,7 +931,7 @@ class UpstoxAdapter(BrokerAdapter):
         symbol = str(req.get("symbol", ""))
         exchange = str(req.get("exchange", "NSE"))
         interval = str(req.get("interval", req.get("timeframe", "1d")))
-        instrument_key = str(req.get("instrument_key") or self._resolve_instrument(symbol, exchange))
+        instrument_key = str(req.get("instrument_key") or await self._resolve_instrument(session, symbol, exchange))
         params = M.to_history_params({**req, "instrument_key": instrument_key})
         # Routing: an expired-instrument request uses the expired-history
         # endpoint (the key already encodes the dead contract); the v3
@@ -893,7 +967,7 @@ class UpstoxAdapter(BrokerAdapter):
         underlying = str(req.get("symbol") or req.get("underlying") or "")
         exchange = str(req.get("exchange", "NSE_INDEX"))
         expiry = str(req.get("expiry") or req.get("expiry_date") or "")
-        instrument_key = str(req.get("instrument_key") or self._resolve_instrument(underlying, exchange))
+        instrument_key = str(req.get("instrument_key") or await self._resolve_instrument(session, underlying, exchange))
         resp = await self._call(self._client(session).option_chain, instrument_key, expiry)
         oc = M.to_option_chain_dict(underlying, exchange, resp)
         return OptionChain(
@@ -905,13 +979,13 @@ class UpstoxAdapter(BrokerAdapter):
         self, session: Session, symbol: str, exchange: str = "NSE_INDEX", expiry: str | None = None
     ) -> list[dict]:
         """Option contracts for an underlying (``GET /v2/option/contract``) — a read."""
-        instrument_key = self._resolve_instrument(symbol, exchange)
+        instrument_key = await self._resolve_instrument(session, symbol, exchange)
         resp = await self._call(self._client(session).option_contracts, instrument_key, expiry)
         return M.from_upstox_instrument_rows(resp)
 
     async def expiry_list(self, session: Session, symbol: str, exchange: str = "NSE_INDEX") -> list[str]:
         """Expiry dates for an underlying (``GET /v2/expired-instruments/expiries``)."""
-        instrument_key = self._resolve_instrument(symbol, exchange)
+        instrument_key = await self._resolve_instrument(session, symbol, exchange)
         resp = await self._call(self._client(session).expiries, instrument_key)
         return M.from_upstox_expiries(resp)
 
@@ -919,7 +993,7 @@ class UpstoxAdapter(BrokerAdapter):
         self, session: Session, symbol: str, exchange: str, expiry: str, kind: str = "option"
     ) -> list[dict]:
         """Expired option/future contracts for a past expiry date — a read."""
-        instrument_key = self._resolve_instrument(symbol, exchange)
+        instrument_key = await self._resolve_instrument(session, symbol, exchange)
         client = self._client(session)
         if str(kind).lower().startswith("fut"):
             resp = await self._call(client.expired_future_contracts, instrument_key, expiry)
@@ -976,14 +1050,14 @@ class UpstoxAdapter(BrokerAdapter):
         # feed messages (keyed by instrument key) route back to the symbol.
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            key = self._resolve_instrument(name, exchange)
+            key = await self._resolve_instrument(session, name, exchange)
             self._feed_map[str(key)] = (name, exchange)
 
     async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
         for raw in symbols:
             exchange, name = _split_symbol(raw)
             try:
-                key = self._resolve_instrument(name, exchange)
+                key = await self._resolve_instrument(session, name, exchange)
             except BrokerError:
                 continue
             self._feed_map.pop(str(key), None)

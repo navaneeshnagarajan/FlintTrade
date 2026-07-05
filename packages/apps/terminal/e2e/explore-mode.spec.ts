@@ -11,6 +11,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { seedExploreDemoSession } from './helpers';
 
 test.describe('Explore mode', () => {
   test.beforeEach(async ({ page }) => {
@@ -45,24 +46,27 @@ test.describe('Explore mode', () => {
     await expect(page.getByText('Brokers supported', { exact: false })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByText('Modules', { exact: false })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Modules', { exact: true })).toBeVisible({ timeout: 10_000 });
   });
 
   test('TickerBar region is present on /trade', async ({ page }) => {
+    await seedExploreDemoSession(page);
     await page.goto('/trade');
     // TickerBar has role="region" aria-label="Market indices"
     const tickerBar = page.getByRole('region', { name: 'Market indices' });
     await expect(tickerBar).toBeVisible({ timeout: 10_000 });
   });
 
-  test('TickerBar shows "Connect OpenAlgo" prompt when disconnected', async ({ page }) => {
+  test('TickerBar shows broker-connect prompt when disconnected', async ({ page }) => {
+    await seedExploreDemoSession(page);
     await page.goto('/trade');
     // When no live data: TickerBar renders a button to navigate to settings
-    const prompt = page.getByText('Connect OpenAlgo for live prices', { exact: false });
+    const prompt = page.getByText('Connect broker for live prices', { exact: false });
     await expect(prompt).toBeVisible({ timeout: 10_000 });
   });
 
   test('/trade renders the Dockview workspace shell', async ({ page }) => {
+    await seedExploreDemoSession(page);
     await page.goto('/trade');
     // The TerminalRoute wraps Dockview inside a <main aria-label="Trading Workspace">
     // Wait for the main landmark — it is always present once AppLayout mounts

@@ -218,6 +218,12 @@ class TestEnsureConnected:
         with pytest.raises(SessionError):
             session.get_quotes(["NIFTY"])
 
+    def test_get_option_chain_when_disconnected_raises_session_error(self) -> None:
+        """get_option_chain() must raise SessionError when not connected."""
+        session = _make_session()
+        with pytest.raises(SessionError):
+            session.get_option_chain({"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+
     def test_get_funds_when_disconnected_raises_session_error(self) -> None:
         """get_funds() must raise SessionError when not connected."""
         session = _make_session()
@@ -443,6 +449,19 @@ class TestGetQuotesDelegation:
             session.authenticate({"api_key": "key"})
             session.get_history(params)
         mock_adapter.get_history.assert_called_once_with(params, _TOKEN)
+
+    def test_get_option_chain_delegates(self) -> None:
+        """get_option_chain() must call adapter.get_option_chain with params and token."""
+        mock_adapter = MagicMock()
+        mock_adapter.authenticate.return_value = (_TOKEN, None)
+        mock_adapter.get_option_chain.return_value = {"strikes": []}
+        session = _make_session()
+        params = {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": "2026-07-30"}
+        with patch(_PATCH_TARGET, return_value=mock_adapter):
+            session.authenticate({"api_key": "key"})
+            result = session.get_option_chain(params)
+        mock_adapter.get_option_chain.assert_called_once_with(params, _TOKEN)
+        assert result == {"strikes": []}
 
     def test_search_symbols_delegates(self) -> None:
         """search_symbols() must call adapter.search_symbols with query and token."""

@@ -72,9 +72,10 @@ run OpenAlgo.
 
 ### Steps
 
-1. **Choose a path.** Use the FlintTrade gateway as native adapters become
-   available, or install OpenAlgo separately if you want the OpenAlgo
-   integration path.
+1. **Choose a path.** Use the FlintTrade gateway for currently verified native
+   brokers (Dhan, Upstox, and INDmoney today), or install OpenAlgo separately
+   if you want the OpenAlgo integration path. Brokers shown as "coming soon"
+   are catalogued but not yet enabled for native connect.
 2. **Optional: configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
@@ -90,6 +91,12 @@ run OpenAlgo.
 5. **Verify the bridge.** Use the Test Connection button in the same UI. Source
    contributors can open `http://localhost:5173/setup`; desktop users use the
    in-app setup window.
+
+For native connect, use Setup → Brokers or Settings → Brokers. Dhan and Upstox
+offer OAuth-style flows, INDmoney uses a dashboard-generated 24-hour token, and
+Kotak Neo stays disabled until its live checks pass. Localhost postback URLs are
+for diagnostics unless you expose FlintTrade through a broker-reachable tunnel
+or public URL.
 
 ### Why two layers?
 

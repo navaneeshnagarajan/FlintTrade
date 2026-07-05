@@ -8,6 +8,34 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 
+class ModernOptionChainClient:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def option_chain(self, symbol, exchange="NFO"):
+        self.calls.append((symbol, exchange))
+        return self.response
+
+
+class GatewayOptionChainClient:
+    def __init__(self, response):
+        self.response = response
+        self.params = None
+
+    def get_option_chain(self, params):
+        self.params = params
+        return self.response
+
+
+class AsyncOptionChainClient:
+    def __init__(self, response):
+        self.response = response
+
+    async def option_chain(self, symbol, exchange="NFO", expiry=""):
+        return self.response
+
+
 # ---------------------------------------------------------------------------
 # Capture and retrieve snapshot
 # ---------------------------------------------------------------------------
@@ -19,7 +47,7 @@ class TestCaptureSnapshot:
         return ExpiryTracker(client=client, db_path=":memory:")
 
     def test_capture_stores_rows_in_duckdb(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
             {
                 "strike_price": 24000,
@@ -38,7 +66,7 @@ class TestCaptureSnapshot:
         assert count == 4
 
     def test_retrieve_after_capture(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
             {
                 "strike_price": 24000,
@@ -64,20 +92,86 @@ class TestCaptureSnapshot:
         tracker = self._tracker(client=None)
         count = tracker.capture_snapshot("NIFTY", "260326")
         assert count == 0
+        assert tracker.last_capture_error == "No OpenAlgo client configured"
 
     def test_capture_with_empty_response_returns_zero(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = []
         tracker = self._tracker(client)
         count = tracker.capture_snapshot("NIFTY", "260326")
         assert count == 0
 
     def test_capture_handles_api_error(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.side_effect = Exception("API timeout")
         tracker = self._tracker(client)
         count = tracker.capture_snapshot("NIFTY", "260326")
         assert count == 0
+        assert tracker.last_capture_error == "API timeout"
+
+    def test_capture_uses_modern_option_chain_client(self):
+        client = ModernOptionChainClient([
+            {
+                "strike_price": 24000,
+                "call_oi": 100,
+                "call_volume": 50,
+                "call_ltp": 150,
+                "call_iv": 12,
+                "put_oi": 80,
+                "put_volume": 40,
+                "put_ltp": 120,
+                "put_iv": 13,
+            },
+        ])
+        tracker = self._tracker(client)
+        count = tracker.capture_snapshot("NIFTY", "260326")
+        assert count == 2
+        assert client.calls == [("NIFTY", "NFO")]
+
+    def test_capture_uses_gateway_payload_with_expiry(self):
+        client = GatewayOptionChainClient({
+            "chain": [
+                {
+                    "strike": 24000,
+                    "ce": {"oi": 100, "volume": 50, "ltp": 150, "iv": 0.12},
+                    "pe": {"oi": 80, "volume": 40, "ltp": 120, "iv": 0.13},
+                },
+            ],
+        })
+        tracker = self._tracker(client)
+        count = tracker.capture_snapshot("NIFTY", "2026-03-26")
+        assert count == 2
+        assert client.params == {
+            "symbol": "NIFTY",
+            "underlying": "NIFTY",
+            "exchange": "NFO",
+            "expiry": "2026-03-26",
+            "expiry_date": "20260326",
+        }
+
+    def test_capture_resolves_async_typed_option_chain(self):
+        from flinttrade_core.models import OptionChain, OptionChainStrike
+
+        client = AsyncOptionChainClient(OptionChain(
+            underlying="NIFTY",
+            exchange="NFO",
+            strikes=[
+                OptionChainStrike(
+                    strike_price=24000,
+                    ce_oi=100,
+                    ce_volume=50,
+                    ce_ltp=150,
+                    ce_iv=12,
+                    pe_oi=80,
+                    pe_volume=40,
+                    pe_ltp=120,
+                    pe_iv=13,
+                ),
+            ],
+        ))
+        tracker = self._tracker(client)
+        count = tracker.capture_snapshot("NIFTY", "260326")
+        assert count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +182,7 @@ class TestCaptureSnapshot:
 class TestListExpiries:
     def _tracker_with_data(self):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         tracker = ExpiryTracker(client=client, db_path=":memory:")
 
         # Insert data for two expiries
@@ -202,7 +296,7 @@ class TestDownloadMetadata:
         assert tracker.has_snapshot("NIFTY", "260326") is False
 
     def test_has_snapshot_true_after_capture(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
             {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
              "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
@@ -213,7 +307,7 @@ class TestDownloadMetadata:
         assert tracker.has_snapshot("NIFTY", "260326") is True
 
     def test_get_download_history(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
             {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
              "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
@@ -231,7 +325,7 @@ class TestBulkCapture:
     """Verify bulk capture with skip-existing adapted from ExpiryFlow."""
 
     def test_capture_multiple_skips_existing(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
             {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
              "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
@@ -249,7 +343,7 @@ class TestBulkCapture:
         assert results["260402"] == 2  # 1 strike x 2 types
 
     def test_capture_multiple_no_skip(self):
-        client = MagicMock()
+        client = MagicMock(spec=["optionchain"])
         client.optionchain.return_value = [
             {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
              "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,

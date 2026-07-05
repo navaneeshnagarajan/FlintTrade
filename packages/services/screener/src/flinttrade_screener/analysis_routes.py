@@ -31,6 +31,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from . import broker_registry_reads as broker_reads
 from .gex import calculate_gex
 from .iv_smile import calculate_iv_smile
 from .oi_analysis import OIAnalysis
@@ -43,6 +44,8 @@ from .rrg import (
     SECTOR_EXCHANGE,
     _Series,
     build_sector_rrg,
+    classify_quadrant,
+    compute_rrg,
 )
 from .straddle_pnl import simulate_straddle_pnl
 from .vol_surface import calculate_vol_surface
@@ -131,31 +134,35 @@ def _get_registry() -> Any:
     return current_app.config.get("REGISTRY")
 
 
-def _live_option_chain(symbol: str, exchange: str) -> dict[str, Any] | None:
-    """Fetch a REAL option chain via the OpenAlgo bridge client (the functional
-    adapter), shaped for :func:`_snapshot_from_registry_data`.
+def _live_option_chain(symbol: str, exchange: str, expiry: str | None = None) -> dict[str, Any] | None:
+    """Fetch a REAL option chain via an existing configured broker read path.
 
     The OpenAlgo client's ``OptionChainStrike`` fields (strike_price, ce/pe ltp,
     oi, iv, greeks) match the keys the snapshot builder reads, so a ``model_dump``
-    per strike is a direct fit. The client is async; we drive it from this sync
-    route with a fresh event loop. Returns ``None`` when no client is configured
-    or the fetch fails (no OpenAlgo connection, empty chain, running-loop
-    conflict) — the caller then falls back to honest sample data.
+    per strike is a direct fit. The legacy registry may also expose a compatible
+    ``get_option_chain(account_id, params)`` method; use it only when present.
+    Returns ``None`` when no live source is configured or the fetch fails — the
+    caller then falls back to honest sample data.
     """
     client = current_app.config.get("OPENALGO_CLIENT")
-    if client is None:
-        return None
-    try:
-        import asyncio  # noqa: PLC0415
+    if client is not None:
+        try:
+            import asyncio  # noqa: PLC0415
 
-        chain = asyncio.run(client.option_chain(symbol, exchange))
-    except Exception as exc:  # noqa: BLE001 - any failure degrades to sample
-        logger.warning("Live option chain via OpenAlgo failed for %s %s: %s", symbol, exchange, exc)
-        return None
-    strikes = getattr(chain, "strikes", None) or []
-    if not strikes:
-        return None
-    return {"strikes": [s.model_dump() for s in strikes]}
+            chain = asyncio.run(client.option_chain(symbol, exchange))
+            strikes = getattr(chain, "strikes", None) or []
+            if strikes:
+                return {"strikes": [s.model_dump() for s in strikes]}
+        except Exception as exc:  # noqa: BLE001 - any failure degrades to the registry/sample path
+            logger.warning("Live option chain via OpenAlgo failed for %s %s: %s", symbol, exchange, exc)
+
+    registry = _get_registry()
+    if registry and registry.is_connected():
+        try:
+            return broker_reads.get_option_chain(registry, symbol=symbol, exchange=exchange, expiry=expiry)
+        except Exception as exc:  # noqa: BLE001 - any failure degrades to sample
+            logger.warning("Live option chain via registry failed for %s %s: %s", symbol, exchange, exc)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -415,9 +422,9 @@ def vol_surface_endpoint() -> Any:
     if registry and registry.is_connected():
         try:
             for expiry in expiries:
-                chain_data = registry.get_option_chain(
-                    symbol=symbol, exchange=exchange, expiry=expiry
-                )
+                chain_data = _live_option_chain(symbol, exchange, expiry)
+                if not chain_data:
+                    raise ValueError("No live option-chain data returned")
                 spot = float(chain_data.get("spot", spot))
                 chains_by_expiry[expiry] = _chain_to_vol_surface_format(chain_data, spot)
         except Exception as exc:
@@ -479,7 +486,7 @@ def iv_smile_endpoint() -> Any:
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    chain_data = _live_option_chain(symbol, exchange)
+    chain_data = _live_option_chain(symbol, exchange, expiry)
     if chain_data:
         spot = float(chain_data.get("spot", spot))
         snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
@@ -566,9 +573,12 @@ def straddle_pnl_endpoint() -> Any:
     registry = _get_registry()
     if registry and registry.is_connected():
         try:
-            hist = registry.get_history(
-                symbol=symbol, exchange=exchange,
-                interval=interval, days=1,
+            hist = broker_reads.get_history(
+                registry,
+                symbol=symbol,
+                exchange=exchange,
+                interval=interval,
+                days=1,
             )
             candles = hist.get("candles", [])
             spot = float(hist.get("spot", spot))
@@ -667,7 +677,7 @@ def oi_profile_endpoint() -> Any:
     snapshot: OptionChainSnapshot | None = None
     futures_candles: list[dict[str, Any]] = []
 
-    chain_data = _live_option_chain(symbol, exchange)
+    chain_data = _live_option_chain(symbol, exchange, expiry)
     if chain_data:
         spot = float(chain_data.get("spot", spot))
         snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
@@ -765,7 +775,7 @@ def max_pain_endpoint() -> Any:
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    chain_data = _live_option_chain(symbol, exchange)
+    chain_data = _live_option_chain(symbol, exchange, expiry)
     if chain_data:
         spot = float(chain_data.get("spot", spot))
         snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
@@ -887,12 +897,13 @@ def rrg_sectors_endpoint() -> Any:
             start_date = (date.today() - timedelta(weeks=n_bars + 4)).isoformat()
 
             # Fetch benchmark (NIFTY 50) weekly history
-            bench_hist = registry.get_history(
+            bench_hist = broker_reads.get_history(
+                registry,
                 symbol=BENCHMARK_SYMBOL,
                 exchange=BENCHMARK_EXCHANGE,
                 interval="W",
-                start_date=start_date,
-                end_date=end_date,
+                start=start_date,
+                end=end_date,
             )
             bench_candles = bench_hist.get("candles", [])
             if bench_candles:
@@ -902,12 +913,13 @@ def rrg_sectors_endpoint() -> Any:
             if benchmark_prices:
                 for symbol, _name in NIFTY_SECTORS:
                     try:
-                        sec_hist = registry.get_history(
+                        sec_hist = broker_reads.get_history(
+                            registry,
                             symbol=symbol,
                             exchange=SECTOR_EXCHANGE,
                             interval="W",
-                            start_date=start_date,
-                            end_date=end_date,
+                            start=start_date,
+                            end=end_date,
                         )
                         candles = sec_hist.get("candles", [])
                         if candles:
@@ -946,6 +958,127 @@ def rrg_sectors_endpoint() -> Any:
             "tail_length": tail_length,
             "is_sample_data": is_sample_data,
             "sectors": results,
+        },
+    })
+
+
+@analysis_bp.route("/rrg/portfolio", methods=["GET"])
+def rrg_portfolio_endpoint() -> Any:
+    """Relative Rotation Graph data for a user-selected symbol list.
+
+    Query params:
+        symbols (str): Comma-separated NSE symbols.
+        tail_length (int): Number of weekly tail points to return.
+
+    The SectorMap Portfolio tab has long exposed this feature but pointed at a
+    missing route. This endpoint reuses the same broker-history and synthetic
+    fallback path as sector RRG, keeping sample data flagged explicitly.
+    """
+    raw_symbols = request.args.get("symbols", "")
+    symbols = []
+    seen: set[str] = set()
+    for token in raw_symbols.split(","):
+        symbol = token.strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+        if len(symbols) >= 20:
+            break
+
+    tail_length = int(request.args.get("tail_length", 8))
+    tail_length = max(4, min(52, tail_length))
+    n_bars = max(60, tail_length + 52)
+
+    if not symbols:
+        return jsonify({
+            "status": "success",
+            "data": {
+                "benchmark": BENCHMARK_SYMBOL,
+                "tail_length": tail_length,
+                "is_sample_data": False,
+                "sectors": [],
+            },
+        })
+
+    is_sample_data = True
+    symbol_prices: dict[str, _Series] = {}
+    benchmark_prices: _Series | None = None
+
+    registry = _get_registry()
+    if registry and registry.is_connected():
+        try:
+            from datetime import timedelta  # noqa: PLC0415
+
+            end_date = date.today().isoformat()
+            start_date = (date.today() - timedelta(weeks=n_bars + 4)).isoformat()
+            bench_hist = broker_reads.get_history(
+                registry,
+                symbol=BENCHMARK_SYMBOL,
+                exchange=BENCHMARK_EXCHANGE,
+                interval="W",
+                start=start_date,
+                end=end_date,
+            )
+            bench_candles = bench_hist.get("candles", [])
+            if bench_candles:
+                benchmark_prices = _candles_to_series(bench_candles)
+
+            if benchmark_prices:
+                for symbol in symbols:
+                    try:
+                        hist = broker_reads.get_history(
+                            registry,
+                            symbol=symbol,
+                            exchange="NSE",
+                            interval="W",
+                            start=start_date,
+                            end=end_date,
+                        )
+                        candles = hist.get("candles", [])
+                        if candles:
+                            symbol_prices[symbol] = _candles_to_series(candles)
+                    except Exception as exc:
+                        logger.warning("Portfolio RRG: history failed for %s: %s", symbol, exc)
+
+                if symbol_prices:
+                    is_sample_data = False
+        except Exception as exc:
+            logger.warning("Portfolio RRG: live history unavailable, using sample data: %s", exc)
+            symbol_prices = {}
+            benchmark_prices = None
+
+    if is_sample_data or benchmark_prices is None:
+        logger.info("Portfolio RRG: using synthetic sample data")
+        benchmark_prices = _make_sample_rrg_series(
+            BENCHMARK_SYMBOL, n_weeks=n_bars, base_level=24000.0, drift=0.08, noise=1.5
+        )
+        for idx, symbol in enumerate(symbols):
+            drift = 0.02 + (idx % 7) * 0.025
+            symbol_prices[symbol] = _make_sample_rrg_series(
+                symbol, n_weeks=n_bars, base_level=1000.0 + idx * 75.0, drift=drift, noise=2.0
+            )
+
+    sectors = []
+    for symbol in symbols:
+        prices = symbol_prices.get(symbol)
+        if prices is None:
+            continue
+        tail = compute_rrg(prices, benchmark_prices, tail_length=tail_length)
+        sectors.append({
+            "symbol": symbol,
+            "name": symbol,
+            "tail": tail,
+            "current_quadrant": classify_quadrant(tail),
+        })
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "benchmark": BENCHMARK_SYMBOL,
+            "tail_length": tail_length,
+            "is_sample_data": is_sample_data,
+            "sectors": sectors,
         },
     })
 

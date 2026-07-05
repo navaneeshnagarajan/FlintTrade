@@ -9,8 +9,9 @@
 import { useState } from "react";
 import { Trash2, RefreshCw, Star } from "lucide-react";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import { useBrokerStore } from "@/stores/brokerStore";
+import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import { gatewayApi } from "@/services/gatewayApi";
+import { removeNativeAccount, reloginNativeAccount, setPrimaryNativeAccount } from "@/services/ftApi.native";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { BrokerAccount, AccountStatus } from "@/types/broker";
@@ -48,7 +49,7 @@ function statusLabel(status: AccountStatus): string {
 
 export function ConnectedAccounts() {
   // Trigger polling — UI reads from store (single source of truth)
-  useBrokerAccounts();
+  const accountsQuery = useBrokerAccounts();
   const accounts = useBrokerStore((s) => s.accounts);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,28 +64,47 @@ export function ConnectedAccounts() {
     );
   }
 
-  const handleRemove = async (accountId: string) => {
+  const refreshAccounts = async () => {
+    await accountsQuery.refetch();
+  };
+
+  const handleRemove = async (account: BrokerAccount) => {
     try {
       setError(null);
-      await gatewayApi.removeAccount(accountId);
+      if (account.source === "native") {
+        await removeNativeAccount(account.broker, account.account_id);
+      } else {
+        await gatewayApi.removeAccount(account.account_id);
+      }
+      await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to remove account");
     }
   };
 
-  const handleReconnect = async (accountId: string) => {
+  const handleReconnect = async (account: BrokerAccount) => {
     try {
       setError(null);
-      await gatewayApi.reconnectAccount(accountId);
+      if (account.source === "native") {
+        await reloginNativeAccount(account.broker, account.account_id);
+      } else {
+        await gatewayApi.reconnectAccount(account.account_id);
+      }
+      await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reconnect account");
     }
   };
 
-  const handleSetPrimary = async (accountId: string) => {
+  const handleSetPrimary = async (account: BrokerAccount) => {
     try {
       setError(null);
-      await gatewayApi.setPrimary(accountId);
+      if (account.source === "native") {
+        await setPrimaryNativeAccount(account.broker, account.account_id);
+      } else {
+        await gatewayApi.setPrimary(account.account_id);
+      }
+      await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set primary account");
     }
@@ -99,7 +119,7 @@ export function ConnectedAccounts() {
       )}
       {accounts.map((acct: BrokerAccount) => (
         <div
-          key={acct.account_id}
+          key={brokerAccountKey(acct)}
           className="flex items-center justify-between p-3 rounded-lg border border-border-default bg-surface-card"
         >
           <div className="flex items-center gap-3">
@@ -123,11 +143,11 @@ export function ConnectedAccounts() {
           <div className="flex items-center gap-2 shrink-0 ml-3">
             <Badge className={statusColor(acct.status)}>{statusLabel(acct.status)}</Badge>
 
-            {!acct.is_primary && (
+            {!acct.is_primary && (acct.source !== "native" || acct.status === "connected") && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => void handleSetPrimary(acct.account_id)}
+                onClick={() => void handleSetPrimary(acct)}
                 aria-label={`Set ${acct.label} as primary account`}
                 title="Set as primary"
               >
@@ -138,7 +158,7 @@ export function ConnectedAccounts() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => void handleReconnect(acct.account_id)}
+              onClick={() => void handleReconnect(acct)}
               aria-label={`Reconnect ${acct.label}`}
               title="Reconnect"
             >
@@ -148,7 +168,7 @@ export function ConnectedAccounts() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => void handleRemove(acct.account_id)}
+              onClick={() => void handleRemove(acct)}
               aria-label={`Remove ${acct.label}`}
               title="Remove account"
             >

@@ -78,10 +78,57 @@ def _passing_safety() -> MagicMock:
     return safety
 
 
+def _real_safety(**cfg: Any) -> object:
+    from flinttrade_engine.safety import SafetyConfig, SafetySystem
+
+    return SafetySystem(SafetyConfig(check_market_hours=False, **cfg))
+
+
 def _gated_router(result: Any = {"status": "ok"}) -> MagicMock:
     router = MagicMock()
     router.execute_gated = AsyncMock(return_value=result)
     return router
+
+
+def _app_with_native_state(
+    router: object | None,
+    safety: object | None,
+    *,
+    adapter_id: str,
+    account_id: str,
+    positions: list[Any] | None = None,
+    funds: dict[str, Any] | None = None,
+) -> tuple[Flask, MagicMock, MagicMock]:
+    app = _app(broker_router=router, safety=safety)
+    session = object()
+    registry = MagicMock()
+    registry.get_session_for.return_value = session
+    adapter = MagicMock()
+    adapter.positions = AsyncMock(return_value=positions or [])
+    adapter.funds = AsyncMock(return_value=funds or {})
+    app.config["REGISTRY"] = registry
+    app.config["NATIVE_ADAPTERS"] = {adapter_id: adapter}
+    return app, adapter, registry
+
+
+def test_gated_target_uses_execution_default_only_when_target_omitted() -> None:
+    """The shared gated-verb helper follows router config for omitted targets."""
+    from flinttrade_core.order_routes import _gated_target
+
+    class _Execution:
+        default = "upstox:U1"
+
+    class _Config:
+        execution = _Execution()
+
+    class _Router:
+        _config = _Config()
+
+    app = _app(broker_router=_Router())
+    with app.app_context():
+        assert _gated_target({}) == ("upstox", "U1")
+        assert _gated_target({"broker": "dhan"}) == ("dhan", "default")
+        assert _gated_target({"account_id": "D1"}) == ("openalgo", "D1")
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +635,30 @@ def test_trigger_modify_over_limit_leg_blocked_by_l1() -> None:
     router.execute_gated.assert_not_called()
 
 
+def test_trigger_place_native_l2_blocks_before_gate() -> None:
+    """Conditional-trigger legs also use the named native account for L2."""
+    from flinttrade_core.models import Position
+
+    router = _gated_router()
+    app, adapter, registry = _app_with_native_state(
+        router,
+        _real_safety(max_positions=1),
+        adapter_id="dhan",
+        account_id="D1",
+        positions=[Position(symbol="INFY", exchange="NSE", quantity="50")],
+        funds={"used_margin": "0", "total_balance": "100000"},
+    )
+    body = {**_TRIGGER_BODY, "account_id": "D1"}
+    resp = app.test_client().post("/api/v1/orders/triggers", json=body, headers=_live_headers())
+
+    assert resp.status_code == 403
+    assert "L2_POSITION" in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
+    registry.get_session_for.assert_called_once_with("dhan", "D1")
+    adapter.positions.assert_awaited_once()
+    adapter.funds.assert_awaited_once()
+
+
 def test_gated_verb_bounds_broker_rejection_message() -> None:
     """Broker/adapter detail is logged, not reflected to HTTP callers."""
     from flinttrade_core.exceptions import OrderRejectedByBroker
@@ -655,6 +726,30 @@ def test_multi_place_safety_block_returns_403() -> None:
     assert resp.status_code == 403
     assert "L1_ORDER" in resp.get_json()["message"]
     router.execute_gated.assert_not_called()
+
+
+def test_multi_place_native_l2_blocks_before_gate() -> None:
+    """Native multi-order legs feed the named account's live positions into L2."""
+    from flinttrade_core.models import Position
+
+    router = _gated_router()
+    app, adapter, registry = _app_with_native_state(
+        router,
+        _real_safety(max_positions=1),
+        adapter_id="upstox",
+        account_id="U1",
+        positions=[Position(symbol="INFY", exchange="NSE", quantity="50")],
+        funds={"used_margin": "0", "total_balance": "100000"},
+    )
+    body = {**_MULTI_BODY, "account_id": "U1"}
+    resp = app.test_client().post("/api/v1/orders/multi", json=body, headers=_live_headers())
+
+    assert resp.status_code == 403
+    assert "L2_POSITION" in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
+    registry.get_session_for.assert_called_once_with("upstox", "U1")
+    adapter.positions.assert_awaited_once()
+    adapter.funds.assert_awaited_once()
 
 
 def test_multi_place_empty_orders_returns_400() -> None:

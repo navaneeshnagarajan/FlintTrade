@@ -10,10 +10,19 @@ class TestWorkspaceResolution:
     """Test workspace directory resolution across platforms."""
 
     def test_flinttrade_home_env_override(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
         monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "custom"))
         from flinttrade_core.workspace import Workspace
         ws = Workspace()
         assert ws.workspace_dir == (tmp_path / "custom").resolve()
+
+    def test_workspace_dir_env_wins_over_home_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
+        from flinttrade_core.workspace import Workspace, workspace_dir
+        ws = Workspace()
+        assert ws.workspace_dir == workspace_dir()
+        assert ws.workspace_dir == (tmp_path / "workspace").resolve()
 
     def test_default_linux_path(self, monkeypatch):
         monkeypatch.delenv("FLINTTRADE_HOME", raising=False)

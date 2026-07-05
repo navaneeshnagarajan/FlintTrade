@@ -91,11 +91,12 @@ def _build_vault() -> Any | None:
     try:
         import os  # noqa: PLC0415
 
-        if not os.environ.get("FLINTTRADE_OBSIDIAN_VAULT"):
+        vault_path = os.environ.get("FLINTTRADE_OBSIDIAN_VAULT", "").strip()
+        if not vault_path:
             return None
         from flinttrade_ai.obsidian_bridge import ObsidianVault  # noqa: PLC0415
 
-        return ObsidianVault()
+        return ObsidianVault(vault_path)
     except Exception:  # pragma: no cover — the vault is never order-critical
         logger.warning("Obsidian vault unavailable for the agent", exc_info=True)
         return None
@@ -149,7 +150,7 @@ def start_agent() -> tuple[Any, int]:
         product (str, default "MIS") · max_position_size (int, default 1) ·
         stop_loss_pct / take_profit_pct (float) · daily_stop_loss (float) ·
         max_trades_per_symbol (int) · cycle_interval_sec (int) ·
-        broker (str, default "openalgo") · account_id (str, default "default")
+        optional broker/account_id target; omitted target uses brokers.execution.default
 
     Returns:
         202 with the initial snapshot; 400 (validation), 401 (no JWT),
@@ -161,6 +162,7 @@ def start_agent() -> tuple[Any, int]:
 
     from .order_routes import (  # noqa: PLC0415
         _decode_request_payload,
+        _gated_target,
         _is_live_mode_unlocked,
         _record_trade_journal,
     )
@@ -209,8 +211,7 @@ def start_agent() -> tuple[Any, int]:
     symbols = [str(s).strip().upper() for s in (body.get("symbols") or []) if str(s).strip()]
     exchange = str(body.get("exchange") or "NSE").strip().upper()
     product = str(body.get("product") or "MIS").strip().upper()
-    adapter_id = str(body.get("broker") or "openalgo").strip().lower()
-    account_id = str(body.get("account_id") or "default")
+    adapter_id, account_id = _gated_target(body)
     if not symbols:
         return jsonify({"status": "error", "message": "symbols is required (non-empty list)"}), 400
     try:
@@ -317,8 +318,17 @@ def start_agent() -> tuple[Any, int]:
         # correct choice. Best-effort: a failure yields empty state (L2 no-op).
         from .smart_order_routes import gather_portfolio_state  # noqa: PLC0415
 
+        native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
+        registry = current_app.config.get("REGISTRY")
+
         async def _agent_l2_provider() -> tuple[list[Any], float, float]:
-            return await gather_portfolio_state(client, adapter_id)
+            return await gather_portfolio_state(
+                client,
+                adapter_id,
+                account_id=account_id,
+                native_adapters=native_adapters,
+                registry=registry,
+            )
 
         executor = GatedChildExecutor(
             safety=safety,

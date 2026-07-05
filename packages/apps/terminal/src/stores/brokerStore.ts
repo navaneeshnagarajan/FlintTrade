@@ -2,6 +2,21 @@ import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { BrokerAccount } from "@/types/broker";
 
+type BrokerAccountIdentity = Pick<BrokerAccount, "account_id" | "broker" | "source">;
+
+export function brokerAccountKey(account: BrokerAccountIdentity): string {
+  return [
+    account.source ?? "gateway",
+    account.broker,
+    account.account_id,
+  ].map(encodeURIComponent).join(":");
+}
+
+export function isBrokerAccountMatch(account: BrokerAccountIdentity, selector: string | null): boolean {
+  if (!selector) return false;
+  return brokerAccountKey(account) === selector || account.account_id === selector;
+}
+
 interface BrokerState {
   accounts: BrokerAccount[];
   activeAccountId: string | null;
@@ -22,22 +37,32 @@ export const useBrokerStore = create<BrokerState>()(
         accounts: [],
         activeAccountId: null,
 
-        setAccounts: (accounts) => set({ accounts }),
+        setAccounts: (accounts) =>
+          set((state) => ({
+            accounts,
+            activeAccountId: accounts.some((account) => isBrokerAccountMatch(account, state.activeAccountId))
+              ? state.activeAccountId
+              : null,
+          })),
 
         addAccount: (account) =>
           set((state) => ({ accounts: [...state.accounts, account] })),
 
         removeAccount: (accountId) =>
           set((state) => ({
-            accounts: state.accounts.filter((a) => a.account_id !== accountId),
+            accounts: state.accounts.filter((a) => !isBrokerAccountMatch(a, accountId)),
             activeAccountId:
-              state.activeAccountId === accountId ? null : state.activeAccountId,
+              state.accounts.some((a) => (
+                isBrokerAccountMatch(a, accountId) && isBrokerAccountMatch(a, state.activeAccountId)
+              ))
+                ? null
+                : state.activeAccountId,
           })),
 
         updateAccount: (accountId, updates) =>
           set((state) => ({
             accounts: state.accounts.map((a) =>
-              a.account_id === accountId ? { ...a, ...updates } : a,
+              isBrokerAccountMatch(a, accountId) ? { ...a, ...updates } : a,
             ),
           })),
 
@@ -47,7 +72,7 @@ export const useBrokerStore = create<BrokerState>()(
 
         getActiveAccount: () => {
           const { accounts, activeAccountId } = get();
-          return accounts.find((a) => a.account_id === activeAccountId);
+          return accounts.find((a) => isBrokerAccountMatch(a, activeAccountId));
         },
       }),
       {
@@ -65,6 +90,7 @@ export const useBrokerStore = create<BrokerState>()(
             status: a.status,
             connected_at: a.connected_at,
             error_message: a.error_message,
+            source: a.source,
           })),
           activeAccountId: state.activeAccountId,
         }),

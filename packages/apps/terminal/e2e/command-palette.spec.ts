@@ -11,17 +11,19 @@
  *   - Escape closes the palette
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { seedExploreDemoSession } from './helpers';
+
+async function openCommandPalette(page: Page) {
+  await page.getByRole('button', { name: /Search/i }).click();
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible({ timeout: 5_000 });
+  return palette;
+}
 
 test.describe('Command palette', () => {
   test.beforeEach(async ({ page }) => {
-    // Skip DemoChoice / daily-welcome overlays
-    await page.addInitScript(() => {
-      localStorage.setItem('flinttrade:demoChoice', 'explore');
-      sessionStorage.setItem('flinttrade:dailyWelcomeDismissed', 'true');
-      // Mark tour complete so InteractiveTour doesn't steal focus
-      localStorage.setItem('flinttrade:tourComplete', 'true');
-    });
+    await seedExploreDemoSession(page);
     await page.goto('/trade');
     // Wait for the main workspace shell to be ready
     await page.getByRole('main', { name: /Trading Workspace/i }).waitFor({ timeout: 15_000 });
@@ -37,24 +39,21 @@ test.describe('Command palette', () => {
   });
 
   test('command palette input is auto-focused on open', async ({ page }) => {
-    await page.locator('body').click();
-    await page.keyboard.press('Control+k');
+    await openCommandPalette(page);
 
     // The combobox input should be focused
-    const input = page.getByRole('combobox', { name: /Search commands/i });
+    const input = page.getByRole('combobox', { name: /Search symbols, commands/i });
     await expect(input).toBeVisible({ timeout: 5_000 });
     await expect(input).toBeFocused();
   });
 
-  test('typing filters results and shows "Results" section label', async ({ page }) => {
-    await page.locator('body').click();
-    await page.keyboard.press('Control+k');
+  test('typing a command prefix filters command results', async ({ page }) => {
+    await openCommandPalette(page);
 
-    const input = page.getByRole('combobox', { name: /Search commands/i });
-    await input.fill('chart');
+    const input = page.getByRole('combobox', { name: /Search symbols, commands/i });
+    await input.fill('/settings');
 
-    // When query is non-empty, the results list renders a "Results" section label
-    await expect(page.getByText('Results', { exact: true })).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeVisible({ timeout: 3_000 });
   });
 
   test('Escape closes the command palette', async ({ page }) => {
@@ -82,11 +81,10 @@ test.describe('Command palette', () => {
   });
 
   test('no-match query shows empty state message', async ({ page }) => {
-    await page.locator('body').click();
-    await page.keyboard.press('Control+k');
+    await openCommandPalette(page);
 
-    const input = page.getByRole('combobox', { name: /Search commands/i });
-    await input.fill('xyzxyzxyz_nonexistent_query');
+    const input = page.getByRole('combobox', { name: /Search symbols, commands/i });
+    await input.fill('/xyzxyzxyz_nonexistent_query');
 
     // Empty state: "No commands match"
     await expect(page.getByText(/No commands match/i)).toBeVisible({ timeout: 3_000 });

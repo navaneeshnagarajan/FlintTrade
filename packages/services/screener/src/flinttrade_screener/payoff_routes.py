@@ -26,6 +26,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from . import broker_registry_reads as broker_reads
 from .correlation import CorrelationEngine, make_sample_returns
 from .options_payoff import OptionLeg, OptionsPayoffEngine
 from .regime_detector import RegimeDetector
@@ -280,8 +281,12 @@ def regime_current() -> Any:
     nifty_returns: list[float] = []
     if registry and registry.is_connected():
         try:
-            hist = registry.get_history(
-                symbol="NIFTY", exchange="NSE_INDEX", interval="1d", days=25
+            hist = broker_reads.get_history(
+                registry,
+                symbol="NIFTY",
+                exchange="NSE_INDEX",
+                interval="1d",
+                days=25,
             )
             candles = hist.get("candles", [])
             closes = [float(c.get("close", 0)) for c in candles if c.get("close")]
@@ -385,8 +390,12 @@ def correlation_matrix() -> Any:
     if registry and registry.is_connected() and symbols_raw:
         for sym in symbols_raw:
             try:
-                hist = registry.get_history(
-                    symbol=sym, exchange="NSE_INDEX", interval="1d", days=period + 5
+                hist = broker_reads.get_history(
+                    registry,
+                    symbol=sym,
+                    exchange="NSE_INDEX",
+                    interval="1d",
+                    days=period + 5,
                 )
                 candles = hist.get("candles", [])
                 closes = [float(c.get("close", 0)) for c in candles if c.get("close")]

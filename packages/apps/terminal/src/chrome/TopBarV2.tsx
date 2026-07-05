@@ -27,6 +27,7 @@ import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import { useTimings } from "@/hooks/useMarketStatus";
 import { ping } from "@/services/api";
@@ -290,6 +291,7 @@ export interface TopBarV2Props {
 
 export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) {
   const setStatus = useConnectionStore((s) => s.setStatus);
+  const directBrokerConnected = useDirectBrokerConnected();
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
@@ -298,20 +300,21 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const gearRef = useRef<HTMLButtonElement>(null);
   const toolsRef = useRef<HTMLButtonElement>(null);
 
-  // Ping OpenAlgo every 10 s to maintain connection status
+  // Maintain broker connection status from either OpenAlgo bridge ping or a
+  // live native/gateway broker session. This store still drives older widgets.
   useEffect(() => {
     const check = async () => {
       try {
         await ping();
         setStatus("connected");
       } catch {
-        setStatus("disconnected");
+        setStatus(directBrokerConnected ? "connected" : "disconnected");
       }
     };
     check();
     const id = setInterval(check, 10_000);
     return () => clearInterval(id);
-  }, [setStatus]);
+  }, [directBrokerConnected, setStatus]);
 
   // Close QuickAccessPanel on outside click
   useEffect(() => {

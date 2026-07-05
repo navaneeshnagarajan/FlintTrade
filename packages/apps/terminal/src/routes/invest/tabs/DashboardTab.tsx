@@ -307,7 +307,7 @@ export function DashboardTab() {
             Portfolio Allocation
           </h3>
           <p className="text-xs text-text-muted mt-0.5">
-            Equity + Cash from OpenAlgo. Debt / MF requires NAV data source.
+            Equity + Cash from your connected broker. Debt / MF requires NAV data source.
           </p>
         </div>
 
@@ -333,7 +333,7 @@ export function DashboardTab() {
           </div>
         ) : (
           <div className="text-center py-6 text-text-muted text-xs">
-            No holdings or cash data available. Connect to OpenAlgo to see allocation.
+            No holdings or cash data available. Connect a broker to see allocation.
           </div>
         )}
       </GlassCard>
@@ -343,7 +343,7 @@ export function DashboardTab() {
 
         {holdings.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
-            Connect to OpenAlgo to see movers.
+            Connect a broker to see movers.
           </div>
         ) : (
           <div className="space-y-3">
@@ -455,7 +455,7 @@ export function DashboardTab() {
       )}
 
       <p className="lg:col-span-3 text-xs text-text-muted">
-        Holdings refresh every 60s. Cash refreshes every 30s from OpenAlgo.
+        Holdings refresh every 60s. Cash refreshes every 30s from your active broker data source.
       </p>
     </div>
   );

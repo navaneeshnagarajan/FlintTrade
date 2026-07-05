@@ -13,6 +13,7 @@ from flinttrade_gateway.brokers.upstox_mapping import (
     from_upstox_margin,
     from_upstox_order,
     from_upstox_position,
+    from_upstox_depth,
     from_upstox_quote,
     to_history_params,
     to_margin_instrument,
@@ -179,6 +180,20 @@ def test_from_upstox_quote_uses_record_and_depth():
     assert q["symbol"] == "RELIANCE" and q["exchange"] == "NSE"
     assert q["ltp"] == 2905.5 and q["bid"] == 2905.0 and q["ask"] == 2906.0
     assert q["open"] == 2900.0 and q["volume"] == 120000
+
+
+def test_from_upstox_depth_uses_full_quote_ladder():
+    d = from_upstox_depth({
+        "symbol": "RELIANCE",
+        "instrument_token": "NSE_EQ|INE002A01018",
+        "depth": {
+            "buy": [{"price": "2905.0", "quantity": "10", "orders": "2"}],
+            "sell": [{"price": 2906.0, "quantity": 8, "orders": 1}],
+        },
+    })
+    assert d["symbol"] == "RELIANCE" and d["exchange"] == "NSE"
+    assert d["bids"][0] == {"price": 2905.0, "quantity": 10, "orders": 2}
+    assert d["asks"][0] == {"price": 2906.0, "quantity": 8, "orders": 1}
 
 
 def test_to_option_chain_dict_flattens_legs_and_greeks():

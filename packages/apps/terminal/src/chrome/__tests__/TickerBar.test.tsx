@@ -66,14 +66,14 @@ describe("TickerBar", () => {
     expect(container).toBeTruthy();
   });
 
-  it("shows 'Connect OpenAlgo' prompt when no live data", () => {
+  it("shows broker connect prompt when no live data", () => {
     setIndices([
       { name: "NIFTY 50", data: null },
       { name: "SENSEX", data: null },
     ]);
     renderTickerBar();
 
-    expect(screen.getByText(/connect openalgo for live prices/i)).toBeInTheDocument();
+    expect(screen.getByText(/connect broker for live prices/i)).toBeInTheDocument();
   });
 
   it("shows index names when data is present", () => {
@@ -110,7 +110,7 @@ describe("TickerBar", () => {
     ]);
     renderTickerBar();
 
-    expect(screen.queryByText(/connect openalgo for live prices/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/connect broker for live prices/i)).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------

@@ -77,8 +77,10 @@ vi.mock("@/components/ui/badge", () => ({
 }));
 
 const mockGetSectorConstituents = vi.fn();
+const mockGetPortfolioRRGData = vi.fn();
 
 vi.mock("@/services/ftApi", () => ({
+  getPortfolioRRGData: (...args: unknown[]) => mockGetPortfolioRRGData(...args),
   getSectorConstituents: (...args: unknown[]) => mockGetSectorConstituents(...args),
 }));
 

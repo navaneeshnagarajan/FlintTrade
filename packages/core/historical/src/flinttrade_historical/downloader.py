@@ -9,9 +9,12 @@ module automatically chunks large date ranges and stitches the results.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
 from flinttrade_core.models import OHLCV
 from flinttrade_core.openalgo_client import OpenAlgoClient
@@ -80,6 +83,17 @@ def compute_date_chunks(
         chunks.append((current, chunk_end))
         current = chunk_end + timedelta(days=1)
     return chunks
+
+
+def resolve_maybe_awaitable(value: Any, *, caller: str) -> Any:
+    """Resolve an awaitable from sync historical helpers when no loop is active."""
+    if not inspect.isawaitable(value):
+        return value
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(value)
+    raise RuntimeError(f"{caller} cannot resolve async client calls inside a running event loop")
 
 
 class HistoricalDownloader:
@@ -151,16 +165,20 @@ class HistoricalDownloader:
             )
 
             try:
-                bars = self._client.history(
-                    symbol=symbol,
-                    exchange=exchange,
-                    interval=canonical,
-                    start_date=c_start_str,
-                    end_date=c_end_str,
+                bars = resolve_maybe_awaitable(
+                    self._client.history(
+                        symbol=symbol,
+                        exchange=exchange,
+                        interval=canonical,
+                        start_date=c_start_str,
+                        end_date=c_end_str,
+                    ),
+                    caller="HistoricalDownloader.download",
                 )
-                all_bars.extend(bars)
+                chunk_bars = list(bars or [])
+                all_bars.extend(chunk_bars)
                 result.chunks_fetched += 1
-                logger.info("    Got %d bars", len(bars))
+                logger.info("    Got %d bars", len(chunk_bars))
             except Exception as exc:
                 msg = f"Chunk {i} ({c_start_str} to {c_end_str}) failed: {exc}"
                 result.errors.append(msg)

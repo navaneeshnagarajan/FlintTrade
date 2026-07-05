@@ -1,4 +1,5 @@
 import { get, post, postV1 } from "./ftApi.helpers";
+import { classifySector } from "@/lib/sectors";
 import type {
   GEXData,
   VolSurfaceData,
@@ -128,6 +129,45 @@ export interface EarningsCalendarEntry {
   estimate?: number;
   actual?: number;
   sector: string;
+}
+
+type BackendEarningsResult = "beat" | "miss" | "meet" | "missed" | "inline" | null | undefined;
+
+interface BackendEarningsCalendarEntry {
+  symbol: string;
+  company?: string;
+  company_name?: string;
+  date: string;
+  result?: BackendEarningsResult;
+  estimate?: number | null;
+  estimated_eps?: number | null;
+  actual?: number | null;
+  actual_eps?: number | null;
+  sector?: string | null;
+}
+
+interface BackendEarningsCalendarResponse {
+  entries?: BackendEarningsCalendarEntry[];
+  events?: BackendEarningsCalendarEntry[];
+}
+
+function normaliseEarningsResult(result: BackendEarningsResult): EarningsCalendarEntry["result"] | undefined {
+  if (result === "beat" || result === "missed" || result === "inline") return result;
+  if (result === "miss") return "missed";
+  if (result === "meet") return "inline";
+  return undefined;
+}
+
+function normaliseEarningsEntry(entry: BackendEarningsCalendarEntry): EarningsCalendarEntry {
+  return {
+    symbol: entry.symbol,
+    company: entry.company ?? entry.company_name ?? entry.symbol,
+    date: entry.date,
+    result: normaliseEarningsResult(entry.result),
+    estimate: entry.estimate ?? entry.estimated_eps ?? undefined,
+    actual: entry.actual ?? entry.actual_eps ?? undefined,
+    sector: entry.sector ?? classifySector(entry.symbol),
+  };
 }
 
 export interface GlobalIndexEntry {
@@ -470,10 +510,13 @@ export const getCorrelationMatrix = () =>
 export const getCryptoFundingRates = () =>
   get<FundingRatesResponse>("crypto/funding_rates");
 
-export const getEarningsCalendar = (year: number, month: number) =>
-  get<{ entries: EarningsCalendarEntry[] }>(
+export const getEarningsCalendar = async (year: number, month: number) => {
+  const raw = await get<BackendEarningsCalendarResponse>(
     `earnings/calendar?year=${year}&month=${month}`,
   );
+  const rows = raw.entries ?? raw.events ?? [];
+  return { entries: rows.map(normaliseEarningsEntry) };
+};
 
 export const getGlobalIndices = () =>
   get<{ indices: GlobalIndexEntry[]; updated_at: string }>("market/global_indices");

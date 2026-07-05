@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { BrokerInfo, AuthFlowState } from "@/types/broker";
+import { initialAuthFlowState } from "../useBrokerAuth";
 
 // Test the state machine logic without React rendering
 // (the hook is pure state transitions + API calls)
@@ -28,22 +29,16 @@ const mockOAuthBroker: BrokerInfo = {
 
 describe("AuthFlowState transitions", () => {
   it("TOTP broker starts at entering_credentials", () => {
-    // When startFlow(angel) is called, state should be entering_credentials with totp fields
-    const expected: AuthFlowState = {
-      step: "entering_credentials",
-      broker: mockTOTPBroker,
-      fields: { client_id: true, password: true, totp: true, pin: false },
-    };
+    const expected = initialAuthFlowState(mockTOTPBroker);
     expect(expected.step).toBe("entering_credentials");
+    if (expected.step !== "entering_credentials") {
+      throw new Error("expected entering_credentials state");
+    }
     expect(expected.fields.totp).toBe(true);
   });
 
   it("OAuth broker starts at awaiting_redirect", () => {
-    const expected: AuthFlowState = {
-      step: "awaiting_redirect",
-      broker: mockOAuthBroker,
-      redirectUrl: "",
-    };
+    const expected = initialAuthFlowState(mockOAuthBroker);
     expect(expected.step).toBe("awaiting_redirect");
   });
 
@@ -53,12 +48,15 @@ describe("AuthFlowState transitions", () => {
       name: "groww",
       auth_flow: "api_key_direct",
     };
-    // api_key_direct: only client_id needed
-    const fields = { client_id: true, password: false, totp: false, pin: false };
-    // Confirm the broker shape is valid
+    const state = initialAuthFlowState(apiKeyBroker);
     expect(apiKeyBroker.auth_flow).toBe("api_key_direct");
-    expect(fields.password).toBe(false);
-    expect(fields.totp).toBe(false);
+    expect(state.step).toBe("entering_credentials");
+    if (state.step !== "entering_credentials") {
+      throw new Error("expected entering_credentials state");
+    }
+    expect(state.fields.api_key).toBe(true);
+    expect(state.fields.api_secret).toBe(true);
+    expect(state.fields.client_id).toBeUndefined();
   });
 
   it("OTP broker starts at awaiting_otp", () => {
@@ -67,8 +65,27 @@ describe("AuthFlowState transitions", () => {
       name: "definedge",
       auth_flow: "otp_sms",
     };
-    const state: AuthFlowState = { step: "awaiting_otp", broker: otpBroker };
+    const state = initialAuthFlowState(otpBroker);
     expect(state.step).toBe("awaiting_otp");
+  });
+
+  it("multi-step OTP brokers fail explicitly in the legacy connector", () => {
+    const samcoBroker: BrokerInfo = {
+      ...mockTOTPBroker,
+      name: "samco",
+      display_name: "Samco",
+      auth_flow: "otp_multistep",
+      aux_params: ["secret_api_key", "primary_ip", "secondary_ip"],
+    };
+
+    const state = initialAuthFlowState(samcoBroker);
+
+    expect(state.step).toBe("error");
+    if (state.step !== "error") {
+      throw new Error("expected error state");
+    }
+    expect(state.message).toContain("multi-step OTP");
+    expect(state.message).toContain("legacy gateway connector");
   });
 
   it("success state contains account", () => {

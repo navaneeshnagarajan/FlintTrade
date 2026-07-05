@@ -321,7 +321,7 @@ class CredentialsRotator:
                     "jobs": [
                         jid
                         for jid in self._job_ids
-                        if broker in jid
+                        if jid in {f"cred_refresh_{broker}", f"cred_rotate_{broker}"}
                     ],
                 }
                 for broker in sorted(all_brokers)

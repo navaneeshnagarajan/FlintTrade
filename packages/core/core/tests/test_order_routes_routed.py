@@ -63,6 +63,18 @@ def _passing_safety() -> MagicMock:
     return safety
 
 
+def _router_with_execution_default(selector: str) -> MagicMock:
+    class _Execution:
+        default = selector
+
+    class _Config:
+        execution = _Execution()
+
+    router = MagicMock()
+    router._config = _Config()
+    return router
+
+
 # ---------------------------------------------------------------------------
 # Auth + registration (pre-existing)
 # ---------------------------------------------------------------------------
@@ -77,6 +89,8 @@ def test_routed_order_requires_auth() -> None:
 def test_routed_order_route_is_registered() -> None:
     rules = {r.rule for r in _app().url_map.iter_rules()}
     assert "/api/v1/orders/<broker>/place" in rules
+    assert "/api/v1/orders/<broker>/modify" in rules
+    assert "/api/v1/orders/<broker>/cancel" in rules
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +199,22 @@ def test_routed_happy_path_returns_200() -> None:
     assert dispatched.symbol == "RELIANCE"
 
 
+def test_legacy_place_uses_configured_execution_default_when_target_omitted() -> None:
+    router = _router_with_execution_default("upstox:U1")
+    router.place_order = AsyncMock(return_value="UP-1")
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+
+    resp = client.post("/api/v1/orders/place", json=_LIVE_BODY, headers=_live_headers())
+
+    assert resp.status_code == 200
+    router.place_order.assert_awaited_once()
+    request_ctx = router.place_order.await_args.args[0]
+    kw = router.place_order.await_args.kwargs
+    assert request_ctx.selector == "upstox:U1"
+    assert kw["hint"].adapter_id == "upstox"
+    assert kw["hint"].account_id == "U1"
+
+
 # ---------------------------------------------------------------------------
 # L2 enforcement from LIVE portfolio state (cumulative-exposure brake)
 # ---------------------------------------------------------------------------
@@ -200,6 +230,29 @@ def _app_with_client(router, safety, client):
     app = _app(broker_router=router, safety=safety)
     app.config["OPENALGO_CLIENT"] = client
     return app
+
+
+def _app_with_native_state(
+    router,
+    safety,
+    *,
+    adapter_id="dhan",
+    account_id="D1",
+    positions=None,
+    funds=None,
+    positions_side_effect=None,
+    funds_side_effect=None,
+):
+    app = _app(broker_router=router, safety=safety)
+    session = object()
+    registry = MagicMock()
+    registry.get_session_for.return_value = session
+    adapter = MagicMock()
+    adapter.positions = AsyncMock(side_effect=positions_side_effect, return_value=positions or [])
+    adapter.funds = AsyncMock(side_effect=funds_side_effect, return_value=funds or {})
+    app.config["REGISTRY"] = registry
+    app.config["NATIVE_ADAPTERS"] = {adapter_id: adapter}
+    return app, adapter, registry
 
 
 def _fake_client(positions, used_margin="0", total_balance="0"):
@@ -275,17 +328,41 @@ def test_L2_infinity_quantity_does_not_500() -> None:
     assert resp.status_code == 200  # not a 500
 
 
-def test_gather_l2_state_only_reads_openalgo_client() -> None:
-    """_gather_l2_state must NOT feed OpenAlgo's portfolio for a non-openalgo
-    selector — it would enforce L2 against the wrong account. For native
-    adapters it returns empty (L2 no-op) until a per-adapter gather ships."""
+def test_gather_l2_state_uses_selector_matched_broker_state() -> None:
+    """_gather_l2_state must read the selector's broker account.
+
+    OpenAlgo state is valid only for ``openalgo:*``; native selectors must use
+    their active native adapter + registry session so L2 is enforced against the
+    account that will receive the order.
+    """
     from flinttrade_core.order_routes import _gather_l2_state
 
-    app = _app(broker_router=MagicMock(), safety=_passing_safety())
-    app.config["OPENALGO_CLIENT"] = _fake_client([_pos("INFY", 50)], used_margin="9", total_balance="10")
+    app, adapter, registry = _app_with_native_state(
+        MagicMock(),
+        _passing_safety(),
+        positions=[_pos("TCS", 25)],
+        funds={"used_margin": "9", "total_balance": "10"},
+    )
+    openalgo_client = _fake_client([_pos("INFY", 50)], used_margin="90", total_balance="100")
+    app.config["OPENALGO_CLIENT"] = openalgo_client
     with app.app_context():
-        assert _gather_l2_state("openalgo") != ([], 0.0, 0.0)  # openalgo: real state
-        assert _gather_l2_state("dhan") == ([], 0.0, 0.0)       # native: no-op, not OpenAlgo's
+        openalgo_positions, openalgo_used, openalgo_total = _gather_l2_state("openalgo")
+        assert openalgo_positions[0].quantity == "50"
+        assert openalgo_used == 90.0
+        assert openalgo_total == 100.0
+
+        openalgo_client.positionbook.reset_mock()
+        openalgo_client.funds.reset_mock()
+
+        native_positions, native_used, native_total = _gather_l2_state("dhan", account_id="D1")
+        assert native_positions[0].quantity == "25"
+        assert native_used == 9.0
+        assert native_total == 10.0
+        registry.get_session_for.assert_called_with("dhan", "D1")
+        adapter.positions.assert_awaited_once()
+        adapter.funds.assert_awaited_once()
+        openalgo_client.positionbook.assert_not_awaited()
+        openalgo_client.funds.assert_not_awaited()
 
 
 def test_L2_state_fetch_failure_does_not_block_order() -> None:
@@ -304,6 +381,71 @@ def test_L2_state_fetch_failure_does_not_block_order() -> None:
     # L2 enforced nothing (empty state) → order proceeds through L1/L4/L5.
     assert resp.status_code == 200
     router.place_order.assert_awaited_once()
+
+
+def test_native_L2_blocks_when_at_max_positions_from_live_state() -> None:
+    """Native routed orders feed native live positions into L2 before dispatch."""
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    safety = _real_safety(max_positions=1)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        positions=[_pos("INFY", 50)],
+        funds={"used_margin": "0", "total_balance": "100000"},
+    )
+    resp = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json={**_LIVE_BODY, "account_id": "D1"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 403
+    assert "L2_POSITION" in resp.get_json()["message"]
+    router.place_order.assert_not_called()
+    adapter.positions.assert_awaited_once()
+    adapter.funds.assert_awaited_once()
+
+
+def test_native_L2_blocks_when_margin_over_limit_from_live_funds() -> None:
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    safety = _real_safety(max_positions=10, max_margin_pct=60.0)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        positions=[],
+        funds={"used_margin": "80000", "total_balance": "100000"},
+    )
+    resp = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json={**_LIVE_BODY, "account_id": "D1"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 403
+    assert "Margin usage" in resp.get_json()["message"]
+    router.place_order.assert_not_called()
+    adapter.positions.assert_awaited_once()
+    adapter.funds.assert_awaited_once()
+
+
+def test_native_L2_state_fetch_failure_does_not_block_order() -> None:
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="DH-1")
+    safety = _real_safety(max_positions=1)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        positions_side_effect=RuntimeError("broker read unavailable"),
+        funds={"used_margin": "80000", "total_balance": "100000"},
+    )
+    resp = app.test_client().post(
+        "/api/v1/orders/dhan/place",
+        json={**_LIVE_BODY, "account_id": "D1"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 200
+    router.place_order.assert_awaited_once()
+    adapter.positions.assert_awaited_once()
 
 
 def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -444,6 +586,24 @@ def test_modify_happy_path_returns_200() -> None:
     assert kw["order"]["_op"] == "modify"
 
 
+def test_routed_modify_happy_path_targets_named_broker_account() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    client = _app(broker_router=router).test_client()
+    resp = client.post(
+        "/api/v1/orders/upstox/modify",
+        json={**_MODIFY_BODY, "account_id": "U1"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 200
+    router.modify_order.assert_awaited_once()
+    request_ctx = router.modify_order.await_args.args[0]
+    kw = router.modify_order.await_args.kwargs
+    assert request_ctx.selector == "upstox:U1"
+    assert kw["hint"].adapter_id == "upstox"
+    assert kw["hint"].account_id == "U1"
+
+
 def test_modify_missing_orderid_returns_400() -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
@@ -472,6 +632,24 @@ def test_cancel_happy_path_returns_200() -> None:
     assert resp.get_json()["orderid"] == "OA-7"
     router.cancel_order.assert_awaited_once()
     assert router.cancel_order.await_args.kwargs["order_id"] == "OA-7"
+
+
+def test_routed_cancel_happy_path_targets_named_broker_account() -> None:
+    router = MagicMock()
+    router.cancel_order = AsyncMock(return_value=None)
+    client = _app(broker_router=router).test_client()
+    resp = client.post(
+        "/api/v1/orders/upstox/cancel",
+        json={"orderid": "UP-7", "account_id": "U1"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 200
+    router.cancel_order.assert_awaited_once()
+    request_ctx = router.cancel_order.await_args.args[0]
+    kw = router.cancel_order.await_args.kwargs
+    assert request_ctx.selector == "upstox:U1"
+    assert kw["hint"].adapter_id == "upstox"
+    assert kw["hint"].account_id == "U1"
 
 
 def test_cancel_missing_orderid_returns_400() -> None:

@@ -82,6 +82,16 @@ export const getRRGData = (tailLength?: number): Promise<RRGResponse> => {
   return get<RRGResponse>("rrg/sectors" + (qs ? "?" + qs : ""));
 };
 
+export const getPortfolioRRGData = (
+  symbols: string[],
+  tailLength?: number,
+): Promise<RRGResponse> => {
+  const params = new URLSearchParams();
+  params.set("symbols", symbols.join(","));
+  if (tailLength !== undefined) params.set("tail_length", String(tailLength));
+  return get<RRGResponse>("rrg/portfolio?" + params.toString());
+};
+
 // ─── Shareholding ─────────────────────────────────────────────────────────────
 
 export interface QuarterlyHolding {

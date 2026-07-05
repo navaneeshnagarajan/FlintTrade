@@ -32,7 +32,7 @@ export interface PortfolioSummary {
 }
 
 export interface InvestContextValue {
-  /** Raw holdings list from OpenAlgo. Empty while loading. */
+  /** Raw holdings list from the active broker data source. Empty while loading. */
   holdings: Holding[];
   /** Aggregated portfolio numbers derived from holdings + funds. */
   summary: PortfolioSummary;
@@ -40,7 +40,7 @@ export interface InvestContextValue {
   isLoading: boolean;
   /** True when holdings query has errored. */
   isError: boolean;
-  /** Force-refetch holdings from OpenAlgo. */
+  /** Force-refetch holdings from the active broker data source. */
   refetchHoldings: () => void;
 }
 

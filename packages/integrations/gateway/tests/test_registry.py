@@ -529,6 +529,17 @@ class TestDelegatedReads:
         mock_session.get_funds.assert_called_once()
         assert result == {"available": 50000.0}
 
+    def test_delegated_get_option_chain_calls_session(self) -> None:
+        """get_option_chain() must delegate to session.get_option_chain()."""
+        mock_session = _make_mock_session()
+        mock_session.get_option_chain.return_value = {"strikes": []}
+        registry, _ = _registry_with_account("AB1234", mock_session=mock_session)
+        params = {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": "2026-07-30"}
+
+        result = registry.get_option_chain("AB1234", params)
+        mock_session.get_option_chain.assert_called_once_with(params)
+        assert result == {"strikes": []}
+
 
 # ---------------------------------------------------------------------------
 # 13. reconnect_with_credentials

@@ -80,10 +80,11 @@ The terminal always talks to FlintTrade on port 5100 through `/ft-api`.
 OpenAlgo on 5000 and its WebSocket on 8765 are optional external integration
 origins, proxied through Vite only when that bridge is enabled. The native
 gateway contract and routing are present, and the four founder-broker adapters
-(Dhan, Upstox, Kotak Neo, IndMoney) remain dormant unless their activation gates
-pass. Dhan has the active SDK pin today; Upstox and Kotak Neo are placeholder
-future waves, and Kotak Neo also needs upstream licence clearance before any SDK
-pin or install guidance is published.
+(Dhan, Upstox, Kotak Neo, INDmoney) remain dormant unless their activation gates
+pass. The current connectable native set is Dhan, Upstox, and INDmoney after
+live login/read verification. Kotak Neo is built and catalogued but kept
+`connectable=false` until its live adapter login/read checks pass; its portal
+consumer-key/static-IP evidence is not enough by itself to promote it.
 
 ---
 

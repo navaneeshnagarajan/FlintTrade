@@ -1,38 +1,27 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import { ConnectionStep } from "./ConnectionStep";
 
-vi.mock("@/hooks/useBrokerAuth", () => ({
-  useBrokerAuth: () => ({
-    flowState: { step: "idle" },
-    startFlow: vi.fn(),
-    submitCredentials: vi.fn(),
-    reset: vi.fn(),
-  }),
+let _nativeAccounts: Array<{ has_session?: boolean }> = [];
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({ data: _nativeAccounts, isLoading: false, isError: false }),
 }));
 
-vi.mock("@/stores/brokerStore", () => ({
-  useBrokerStore: (selector: (state: { accounts: unknown[] }) => unknown) => selector({ accounts: [] }),
+vi.mock("@/components/account/BrokerConnect", () => ({
+  BrokerConnect: () => <div>Native brokers section</div>,
 }));
 
-vi.mock("./ConnectedAccounts", () => ({
-  ConnectedAccounts: () => <div>Connected accounts</div>,
-}));
-
-vi.mock("./BrokerPicker", () => ({
-  BrokerPicker: () => <div>Broker picker</div>,
-}));
-
-vi.mock("./AuthFlowAPIKey", () => ({
-  AuthFlowAPIKey: () => <div>API key auth</div>,
-}));
-
-vi.mock("./AuthFlowTOTP", () => ({
-  AuthFlowTOTP: () => <div>TOTP auth</div>,
+vi.mock("@/services/ftApi.native", () => ({
+  listNativeAccounts: vi.fn(),
 }));
 
 describe("ConnectionStep", () => {
+  beforeEach(() => {
+    _nativeAccounts = [];
+  });
+
   it("defaults to FlintTrade's direct broker gateway", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
 
@@ -41,5 +30,15 @@ describe("ConnectionStep", () => {
       "true",
     );
     expect(screen.getByText(/No separate OpenAlgo setup needed/i)).toBeInTheDocument();
+    expect(screen.getByText("Native brokers section")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /connect at least one broker/i })).toBeDisabled();
+  });
+
+  it("allows continuing when a native broker has a live session", () => {
+    _nativeAccounts = [{ has_session: true }];
+
+    render(<ConnectionStep onComplete={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
   });
 });

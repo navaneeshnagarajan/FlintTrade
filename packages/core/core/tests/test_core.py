@@ -412,6 +412,39 @@ class TestClientInit:
         # broker-wide search behaviour from earlier versions.
         assert params["exchange"].default is None
 
+    @pytest.mark.asyncio
+    async def test_option_chain_sends_expiry_and_normalises_chain_shape(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": {
+                "underlying": "NIFTY",
+                "exchange": "NFO",
+                "chain": [
+                    {
+                        "strike": 24000,
+                        "ce": {"ltp": 150, "oi": 100, "volume": 50, "iv": 12.5},
+                        "pe": {"ltp": 120, "oi": 80, "volume": 40, "iv": 13.0},
+                    },
+                ],
+            },
+        })
+
+        chain = await client.option_chain("NIFTY", "NFO", "2026-03-26")
+
+        endpoint, payload = client._post.await_args.args[:2]
+        assert endpoint == "optionchain"
+        assert payload["symbol"] == "NIFTY"
+        assert payload["underlying"] == "NIFTY"
+        assert payload["exchange"] == "NFO"
+        assert payload["expiry"] == "2026-03-26"
+        assert payload["expiry_date"] == "20260326"
+        assert chain.underlying == "NIFTY"
+        assert chain.strikes[0].strike_price == 24000
+        assert chain.strikes[0].ce_oi == 100
+        assert chain.strikes[0].pe_ltp == 120
+        await client.close()
+
 
 # ======================================================================
 # Rate limiter tests

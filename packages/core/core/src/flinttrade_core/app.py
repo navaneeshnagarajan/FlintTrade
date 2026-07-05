@@ -171,6 +171,7 @@ def _reconnect_saved_accounts(
         credential_store: The CredentialStore that holds persisted credentials.
         reconnect_logger: Logger instance to use for progress messages.
     """
+    from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
     from flinttrade_gateway.session import BrokerSession  # noqa: PLC0415
 
     saved = credential_store.list_accounts()
@@ -182,7 +183,12 @@ def _reconnect_saved_accounts(
     for acct in saved:
         account_id: str = acct["account_id"]
         broker: str = acct["broker"]
+        adapter_id = str(acct.get("adapter_id") or broker)
         label: str = acct["label"]
+        info = BROKER_CATALOG.get(adapter_id) or BROKER_CATALOG.get(broker)
+        if info is not None and info.native:
+            reconnect_logger.info("  Skipped native account: %s (%s)", label, adapter_id)
+            continue
         try:
             creds = credential_store.retrieve(account_id)
             session = BrokerSession(account_id, broker, label)
@@ -704,6 +710,7 @@ def build_broker_router(
     """
     from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
     from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
+    from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
     from flinttrade_gateway.brokers.native_factory import (  # noqa: PLC0415
         build_native_adapters,
         is_native_broker,
@@ -728,6 +735,10 @@ def build_broker_router(
             try:
                 adapter_id, _account = parse_selector(selector)
             except ValueError:
+                continue
+            info = BROKER_CATALOG.get(adapter_id)
+            if info is not None and info.native and not info.connectable:
+                logger.info("Native adapter %s dormant: coming-soon-not-live-verified", adapter_id)
                 continue
             native_ids.append(adapter_id)
         activated = build_native_adapters(
@@ -927,7 +938,7 @@ def configure_broker_router(
         )
 
 
-def _reestablish_native_sessions(app: Flask, *, verify: bool = False) -> dict[str, Any]:
+def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str, Any]:
     """Log in every active native selector whose credentials are in the vault.
 
     Runs the credential-replay login step (G3) for the natives that
@@ -935,12 +946,13 @@ def _reestablish_native_sessions(app: Flask, *, verify: bool = False) -> dict[st
     ``establish_native_sessions`` — safe to call from the factory and from a
     Flask route (both run outside an event loop). Never raises.
 
-    ``verify`` (True from the interactive connect/re-authenticate routes, False
-    at boot) probes each freshly-established session with a cheap authenticated
-    read so a dead token surfaces honestly as ``needs_relogin`` instead of a
-    false "connected".
+    ``verify`` probes each freshly-established session with a cheap
+    authenticated read so a dead token surfaces honestly as ``needs_relogin``
+    instead of a false "connected". Transient broker/service-window failures
+    are treated as inconclusive and keep the session.
     """
     import asyncio  # noqa: PLC0415
+    import threading  # noqa: PLC0415
 
     from flinttrade_gateway.native_login import establish_native_sessions  # noqa: PLC0415
 
@@ -952,11 +964,30 @@ def _reestablish_native_sessions(app: Flask, *, verify: bool = False) -> dict[st
     try:
         brokers_cfg = _read_workspace_brokers() or {}
         selectors = [str(s) for s in (brokers_cfg.get("registered") or [])]
-        results = asyncio.run(
-            establish_native_sessions(
+        async def _run() -> dict[str, Any]:
+            return await establish_native_sessions(
                 native_adapters, registry, credential_store, selectors, verify=verify,
             )
-        )
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            results = asyncio.run(_run())
+        else:
+            box: dict[str, Any] = {}
+
+            def _thread_run() -> None:
+                try:
+                    box["results"] = asyncio.run(_run())
+                except BaseException as exc:  # noqa: BLE001 - re-raise in caller thread
+                    box["error"] = exc
+
+            thread = threading.Thread(target=_thread_run, name="native-session-replay", daemon=True)
+            thread.start()
+            thread.join()
+            if "error" in box:
+                raise box["error"]
+            results = box.get("results", {})
         # G7 — surface per-selector login outcomes so the accounts list can say
         # "needs fresh login: <reason>" instead of a bare red "no live session".
         # Merged (not replaced) so a boot result survives later partial reruns.
@@ -1295,9 +1326,9 @@ def create_flask_app(
     # Re-establish native sessions for any selector whose credentials are
     # already in the vault (a restart after the operator connected a broker
     # earlier). First boot with an empty vault is a no-op. Best-effort — a
-    # broker whose token expired overnight just stays sessionless until the
-    # operator re-authenticates.
-    _reestablish_native_sessions(app)
+    # broker whose token expired overnight is marked as needing re-login while
+    # transient service-window/network failures keep the session.
+    _reestablish_native_sessions(app, verify=True)
 
     # Store RAG instance
     app.config["RAG"] = rag
@@ -1714,6 +1745,10 @@ def create_flask_app(
     from flinttrade_automation.whatsapp_routes import whatsapp_bp  # noqa: PLC0415
     app.register_blueprint(whatsapp_bp)
 
+    # Register Telegram Alerts blueprint (/api/v1/telegram)
+    from .telegram_routes import telegram_bp  # noqa: PLC0415
+    app.register_blueprint(telegram_bp)
+
     # Register Historical Expiry Tracker blueprint (/api/v1/historical/*)
     from flinttrade_historical.expiry_tracker_routes import expiry_tracker_bp  # noqa: PLC0415
     app.register_blueprint(expiry_tracker_bp)
@@ -1745,6 +1780,10 @@ def create_flask_app(
     # Register PNL by Symbols blueprint (/api/v1/pnl/symbols)
     from flinttrade_data.pnl_symbols_routes import pnl_symbols_bp  # noqa: PLC0415
     app.register_blueprint(pnl_symbols_bp)
+
+    # Register Chart Preferences blueprint (/api/v1/chart)
+    from .chart_prefs_routes import chart_prefs_bp  # noqa: PLC0415
+    app.register_blueprint(chart_prefs_bp)
 
     # Register Bracket Order blueprint (/api/v1/orders/bracket*)
     from flinttrade_engine.bracket_routes import bracket_bp  # noqa: PLC0415

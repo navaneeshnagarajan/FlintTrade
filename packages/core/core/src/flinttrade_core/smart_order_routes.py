@@ -67,35 +67,55 @@ _MAX_JOBS = 50
 # ---------------------------------------------------------------------------
 
 
-async def gather_portfolio_state(client: Any, adapter_id: str) -> tuple[list[Any], float, float]:
+async def gather_portfolio_state(
+    client: Any,
+    adapter_id: str,
+    *,
+    account_id: str = "default",
+    native_adapters: dict[str, Any] | None = None,
+    registry: Any = None,
+) -> tuple[list[Any], float, float]:
     """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
 
     Async sibling of ``order_routes._gather_l2_state`` for the gated-executor
-    paths (smart route + agent), which run inside an event loop. Scoped to the
-    OpenAlgo bridge (the only functional adapter — feeding it for a native
-    selector would enforce L2 against the wrong account). Any failure returns
-    empty/zero state so L2 simply enforces nothing rather than blocking.
+    paths (smart route + agent), which run inside an event loop. Reads from the
+    same selector the child order will use: OpenAlgo for the bridge path, or the
+    active native adapter + registry session for native brokers. Any failure
+    returns empty/zero state so L2 simply enforces nothing rather than blocking.
     """
-    if adapter_id != "openalgo" or client is None:
+    from .l2_state import normalise_l2_state  # noqa: PLC0415
+
+    if adapter_id == "openalgo":
+        if client is None:
+            return [], 0.0, 0.0
+        try:
+            positions = await client.positionbook()
+            funds = await client.funds()
+        except Exception:
+            logger.debug("L2 portfolio-state fetch failed — L2 limits not enforced", exc_info=True)
+            return [], 0.0, 0.0
+        return normalise_l2_state(positions, funds)
+
+    adapter = (native_adapters or {}).get(adapter_id)
+    if adapter is None or registry is None:
         return [], 0.0, 0.0
     try:
-        positions = await client.positionbook()
-        funds = await client.funds()
+        session = registry.get_session_for(adapter_id, account_id)
     except Exception:
-        logger.debug("L2 portfolio-state fetch failed — L2 limits not enforced", exc_info=True)
         return [], 0.0, 0.0
 
-    def _to_float(value: Any) -> float:
-        try:
-            return float(str(value))
-        except (TypeError, ValueError):
-            return 0.0
+    positions_reader = getattr(adapter, "positions", None)
+    funds_reader = getattr(adapter, "funds", None)
+    if not callable(positions_reader) or not callable(funds_reader):
+        return [], 0.0, 0.0
+    try:
+        positions = await positions_reader(session)
+        funds = await funds_reader(session)
+    except Exception:
+        logger.debug("Native L2 portfolio-state fetch failed — L2 limits not enforced", exc_info=True)
+        return [], 0.0, 0.0
 
-    return (
-        list(positions or []),
-        _to_float(getattr(funds, "used_margin", 0)),
-        _to_float(getattr(funds, "total_balance", 0)),
-    )
+    return normalise_l2_state(positions, funds)
 
 
 # ---------------------------------------------------------------------------
@@ -370,22 +390,30 @@ def _reset_jobs_for_tests() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Providers — depth/volume from the OpenAlgo bridge client
+# Providers — optional depth/volume from the OpenAlgo bridge client
 # ---------------------------------------------------------------------------
 
 
 def _make_providers(client: Any) -> tuple[Any, Any]:
-    """Build async depth/volume providers over the OpenAlgo client.
+    """Build async depth/volume providers over the optional OpenAlgo client.
 
-    The smart router consumes raw OpenAlgo-shaped dicts; the client returns
-    typed models — convert at this boundary. A depth-fetch failure returns an
-    empty book; medium urgency then FAILS CLOSED (refuses, no orders placed)
-    rather than blindly market-ordering, and high/low urgency do not consult
-    depth at all. Empty-on-failure keeps the job from crashing while the
-    router enforces the safe outcome.
+    The smart router consumes raw OpenAlgo-shaped dicts; when the bridge
+    client exists it returns typed models, so convert at this boundary. A
+    missing client or depth-fetch failure returns an empty book; medium
+    urgency then FAILS CLOSED (refuses, no orders placed) rather than blindly
+    market-ordering, and high/low urgency do not consult depth at all.
+    Empty-on-failure keeps the job from crashing while the router enforces the
+    safe outcome.
     """
 
     async def depth_provider(symbol: str, exchange: str) -> dict[str, Any]:
+        if client is None:
+            logger.warning(
+                "smart-route depth unavailable for %s/%s: OpenAlgo client is not configured",
+                symbol,
+                exchange,
+            )
+            return {"asks": [], "bids": []}
         try:
             depth = await client.depth(symbol, exchange)
             return {
@@ -397,6 +425,8 @@ def _make_providers(client: Any) -> tuple[Any, Any]:
             return {"asks": [], "bids": []}
 
     async def volume_provider(symbol: str, exchange: str) -> int:
+        if client is None:
+            return 0
         try:
             quote = await client.quotes(symbol, exchange)
             return int(quote.volume)
@@ -425,7 +455,7 @@ def start_smart_route() -> tuple[Any, int]:
         action ("BUY"|"SELL", required) · quantity (int > 0, required) ·
         urgency ("low"|"medium"|"high", default "medium") ·
         max_slippage_bps (int, default 20) · product (str, default "MIS") ·
-        account_id (str, default "default") · broker (str, default "openalgo")
+        optional broker/account_id target; omitted target uses brokers.execution.default
 
     Returns:
         202 with the initial job snapshot; 400 (validation), 401 (no JWT),
@@ -439,6 +469,7 @@ def start_smart_route() -> tuple[Any, int]:
 
     from .order_routes import (  # noqa: PLC0415
         _decode_request_payload,
+        _gated_target,
         _is_live_mode_unlocked,
         _record_trade_journal,
     )
@@ -477,7 +508,7 @@ def start_smart_route() -> tuple[Any, int]:
 
     router = current_app.config.get("BROKER_ROUTER")
     client = current_app.config.get("OPENALGO_CLIENT")
-    if router is None or client is None:
+    if router is None:
         return jsonify({
             "status": "error",
             "message": (
@@ -492,8 +523,7 @@ def start_smart_route() -> tuple[Any, int]:
     action = str(body.get("action") or "").strip().upper()
     urgency = str(body.get("urgency") or "medium").strip().lower()
     product = str(body.get("product") or "MIS").strip().upper()
-    adapter_id = str(body.get("broker") or "openalgo").strip().lower()
-    account_id = str(body.get("account_id") or "default")
+    adapter_id, account_id = _gated_target(body)
     try:
         quantity = int(body.get("quantity") or 0)
         # Distinguish an explicit 0 (a real "zero slippage tolerance" budget)
@@ -634,10 +664,18 @@ def start_smart_route() -> tuple[Any, int]:
     # bounded — a single market order or a few-minute TWAP — so a per-child
     # re-fetch would just add latency for negligible freshness gain).
     _l2_cache: dict[str, tuple[list[Any], float, float]] = {}
+    native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
+    registry = current_app.config.get("REGISTRY")
 
     async def _route_l2_provider() -> tuple[list[Any], float, float]:
         if "state" not in _l2_cache:
-            _l2_cache["state"] = await gather_portfolio_state(client, adapter_id)
+            _l2_cache["state"] = await gather_portfolio_state(
+                client,
+                adapter_id,
+                account_id=account_id,
+                native_adapters=native_adapters,
+                registry=registry,
+            )
         return _l2_cache["state"]
 
     executor = GatedChildExecutor(

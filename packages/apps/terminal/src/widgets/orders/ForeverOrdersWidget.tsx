@@ -39,11 +39,11 @@ import {
   BrokerOrdersErrorNotice,
   BrokerTargetSelect,
   BrokerRowsTable,
-  DEFAULT_BROKER_TARGET,
   LiveModeNotice,
   extractRowId,
   parsePriceValue,
   parseWholeNumber,
+  useBrokerOrderTarget,
 } from "./OrdersManagerShared";
 
 const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
@@ -58,7 +58,7 @@ export default function ForeverOrdersWidget() {
   const appMode = useModeStore((s) => s.mode);
   const isLive = appMode === "live";
 
-  const [target, setTarget] = useState(DEFAULT_BROKER_TARGET);
+  const [target, setTarget] = useBrokerOrderTarget(appMode);
 
   // --- place form -----------------------------------------------------------
   const [symbol, setSymbol] = useState("");

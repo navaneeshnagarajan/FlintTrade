@@ -17,6 +17,8 @@ from datetime import date, datetime, timedelta
 
 from flinttrade_core.openalgo_client import OpenAlgoClient
 
+from .downloader import resolve_maybe_awaitable
+
 logger = logging.getLogger("flinttrade.historical.expiry")
 
 
@@ -133,7 +135,10 @@ class ExpiryManager:
         info = ExpiryInfo(symbol=symbol, exchange=exchange)
 
         try:
-            data = self._client.expiry(symbol, exchange)
+            data = resolve_maybe_awaitable(
+                self._client.expiry(symbol, exchange),
+                caller="ExpiryManager.get_expiries",
+            )
             # OpenAlgo returns expiries in various formats depending on broker
             if isinstance(data, dict):
                 expiry_list = data.get("expiry", data.get("expiries", []))
@@ -226,16 +231,20 @@ class ExpiryManager:
                 break
 
             try:
-                bars = self._client.history(
-                    symbol=contract_symbol,
-                    exchange=exchange,
-                    interval=interval,
-                    start_date=c_start.isoformat(),
-                    end_date=c_end.isoformat(),
+                bars = resolve_maybe_awaitable(
+                    self._client.history(
+                        symbol=contract_symbol,
+                        exchange=exchange,
+                        interval=interval,
+                        start_date=c_start.isoformat(),
+                        end_date=c_end.isoformat(),
+                    ),
+                    caller="ExpiryManager.build_continuous_futures",
                 )
 
+                contract_bars = list(bars or [])
                 is_first = True
-                for bar in bars:
+                for bar in contract_bars:
                     continuous.append(ContinuousFuturesBar(
                         timestamp=bar.timestamp,
                         open=bar.open,
@@ -250,7 +259,7 @@ class ExpiryManager:
 
                 logger.info(
                     "Continuous futures: %s %s to %s — %d bars",
-                    contract_symbol, c_start, c_end, len(bars),
+                    contract_symbol, c_start, c_end, len(contract_bars),
                 )
             except Exception as exc:
                 logger.warning(

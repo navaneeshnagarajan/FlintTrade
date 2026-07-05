@@ -2,14 +2,14 @@
  * HealthWidget — System health and security status for FlintTrade terminal.
  *
  * Shows real-time status of:
- *  - Connection layer: OpenAlgo API, WebSocket, FlintTrade backend
+ *  - Connection layer: broker session, OpenAlgo bridge, WebSocket, FlintTrade backend
  *  - System health: uptime, last heartbeat, disk, memory
  *  - Security: failed logins, active sessions, banned IPs
  *  - Performance: API latency (avg / p95 / p99), WS message rate
  *  - Active alerts
  *
  * Data sources:
- *  - ping              → @/services/api (OpenAlgo health check)
+ *  - ping              → @/services/api (optional OpenAlgo bridge health check)
  *  - getHealth         → @/services/ftApi (FT backend health)
  *  - getTrafficStats   → @/services/ftApi (API request metrics)
  *  - getLatencyStats   → @/services/ftApi (per-endpoint latency)
@@ -46,6 +46,7 @@ import {
 } from "@/services/ftApi";
 import type { SystemHealth, TrafficStats, LatencyStats, SecurityStats } from "@/services/ftApi";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -175,7 +176,9 @@ function MetricRow({ label, value }: { label: string; value: string | number }) 
 // ---------------------------------------------------------------------------
 
 function HealthWidget() {
-  const { status: connStatus, wsConnected, lastPing } = useConnectionStore();
+  const { status: connStatus, wsConnected, lastPing, apiKey } = useConnectionStore();
+  const directBrokerConnected = useDirectBrokerConnected();
+  const openAlgoConfigured = (apiKey ?? "").trim().length > 0;
 
   const [openAlgoStatus, setOpenAlgoStatus]   = useState<ServiceStatus>("unknown");
   const [openAlgoLatency, setOpenAlgoLatency] = useState<number | null>(null);
@@ -194,14 +197,18 @@ function HealthWidget() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      // OpenAlgo ping
+      // Optional OpenAlgo bridge ping. A live native/gateway broker session keeps
+      // the broker layer healthy even when no OpenAlgo bridge key is configured.
       const t0 = Date.now();
       try {
+        if (!openAlgoConfigured) {
+          throw new Error("OpenAlgo API key not configured");
+        }
         await ping();
         setOpenAlgoStatus(connStatus === "connected" ? "ok" : "degraded");
         setOpenAlgoLatency(Date.now() - t0);
       } catch {
-        setOpenAlgoStatus("error");
+        setOpenAlgoStatus(directBrokerConnected ? "degraded" : "error");
         setOpenAlgoLatency(null);
       }
 
@@ -242,25 +249,31 @@ function HealthWidget() {
       setLoading(false);
       setLastRefresh(new Date());
     }
-  }, [connStatus]);
+  }, [connStatus, directBrokerConnected, openAlgoConfigured]);
 
   // Initial load + 30s polling
   useEffect(() => {
     void refresh();
     const id = setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]);
 
   // ---------------------------------------------------------------------------
   // Derived data
   // ---------------------------------------------------------------------------
 
   const wsStatus: ServiceStatus = wsConnected ? "ok" : "error";
+  const brokerSessionStatus: ServiceStatus =
+    connStatus === "connected" || directBrokerConnected ? "ok" : "degraded";
 
   const connectionRows: ConnectionRow[] = [
     {
-      name: "OpenAlgo API",
+      name: "Broker session",
+      status: brokerSessionStatus,
+      latencyMs: null,
+    },
+    {
+      name: "OpenAlgo bridge",
       status: openAlgoStatus,
       latencyMs: openAlgoLatency,
     },
@@ -289,7 +302,8 @@ function HealthWidget() {
 
   // Active alerts: surface degraded/error subsystems
   const alerts: string[] = [];
-  if (openAlgoStatus === "error")           alerts.push("OpenAlgo API unreachable");
+  if (brokerSessionStatus !== "ok")         alerts.push("No broker session connected");
+  if (openAlgoStatus === "error")           alerts.push("OpenAlgo bridge unreachable");
   if (!wsConnected)                         alerts.push("WebSocket disconnected");
   if (ftStatus === "error")                 alerts.push("FT backend unreachable");
   if (health?.broker?.status === "error")   alerts.push("Broker connection error");

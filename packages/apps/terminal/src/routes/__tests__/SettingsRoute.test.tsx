@@ -55,8 +55,8 @@ vi.mock("@/tools/Settings/AppearanceSection", () => ({
 vi.mock("@/tools/Settings/ConnectionSection", () => ({
   ConnectionSection: () => <div data-testid="connection-section">Connection</div>,
 }));
-vi.mock("@/tools/Settings/BrokersSection", () => ({
-  BrokersSection: () => <div data-testid="brokers-section">Brokers</div>,
+vi.mock("@/components/account/BrokerConnect", () => ({
+  BrokerConnect: () => <div data-testid="brokers-section">Brokers</div>,
 }));
 vi.mock("@/tools/Settings/TradingSection", () => ({
   TradingSection: () => <div data-testid="trading-section">Trading</div>,

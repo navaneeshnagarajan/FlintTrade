@@ -10,6 +10,10 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
+const { mockDirectBrokerConnected } = vi.hoisted(() => ({
+  mockDirectBrokerConnected: { value: false },
+}));
+
 // ---------------------------------------------------------------------------
 // Mocks — factories must not reference outer variables (Vitest hoisting rule)
 // ---------------------------------------------------------------------------
@@ -45,11 +49,12 @@ vi.mock("@/services/ftApi", () => ({
 }));
 
 // Zustand connection store mock
-type MockStore = { status: string; wsConnected: boolean; lastPing: number | null };
+type MockStore = { status: string; wsConnected: boolean; lastPing: number | null; apiKey: string };
 let mockStoreState: MockStore = {
   status: "connected",
   wsConnected: true,
   lastPing: Date.now() - 5000,
+  apiKey: "test-openalgo-key",
 };
 
 vi.mock("@/stores/connectionStore", () => ({
@@ -57,6 +62,10 @@ vi.mock("@/stores/connectionStore", () => ({
     if (typeof selector === "function") return selector(mockStoreState);
     return mockStoreState;
   },
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useDirectBrokerConnected: () => mockDirectBrokerConnected.value,
 }));
 
 // ---------------------------------------------------------------------------
@@ -140,7 +149,9 @@ describe("HealthWidget", () => {
       status: "connected",
       wsConnected: true,
       lastPing: Date.now() - 5000,
+      apiKey: "test-openalgo-key",
     };
+    mockDirectBrokerConnected.value = false;
   });
 
   afterEach(() => {
@@ -205,9 +216,26 @@ describe("HealthWidget", () => {
 
   // ---- Connection status rows ----------------------------------------------
 
-  it("shows OpenAlgo API row", async () => {
+  it("shows Broker session row", async () => {
     await renderWidget();
-    expect(screen.getByText("OpenAlgo API")).toBeInTheDocument();
+    expect(screen.getByText("Broker session")).toBeInTheDocument();
+  });
+
+  it("shows OpenAlgo bridge row", async () => {
+    await renderWidget();
+    expect(screen.getByText("OpenAlgo bridge")).toBeInTheDocument();
+  });
+
+  it("does not mark OpenAlgo online when only a native broker session is connected", async () => {
+    mockStoreState = { ...mockStoreState, status: "disconnected", apiKey: "" };
+    mockDirectBrokerConnected.value = true;
+
+    await renderWidget();
+
+    expect(mockPing).not.toHaveBeenCalled();
+    expect(screen.getByText("Broker session")).toBeInTheDocument();
+    expect(screen.getByText("OpenAlgo bridge")).toBeInTheDocument();
+    expect(screen.getByText("Degraded")).toBeInTheDocument();
   });
 
   it("shows WebSocket row", async () => {

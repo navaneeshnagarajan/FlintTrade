@@ -20,6 +20,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, TrendingUp, Zap } from "lucide-react";
 import { basketOrder } from "@/services/api";
+import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { NUM, NUM0, fmtLtp } from "./formatters";
 import type { StrikeRow } from "./types";
 import PayoffChart from "./PayoffChart";
@@ -571,20 +572,6 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   // Order placement
   // ---------------------------------------------------------------------------
 
-  /** Convert "2026-04-10" → "10APR26" for OpenAlgo symbol construction */
-  function normaliseExpiry(exp: string): string {
-    try {
-      const d = new Date(exp);
-      if (isNaN(d.getTime())) return exp;
-      const dd  = String(d.getUTCDate()).padStart(2, "0");
-      const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
-      const yy  = String(d.getUTCFullYear()).slice(-2);
-      return `${dd}${mon}${yy}`;
-    } catch {
-      return exp;
-    }
-  }
-
   async function handlePlaceStrategy() {
     if (legs.length < 1) return;
     if (!STRATEGY_PLACEMENT_AVAILABLE) {
@@ -600,11 +587,11 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
     }
 
     setPlacing(true);
-    const normExpiry = normaliseExpiry(expiry);
 
     try {
       const orders = legs.map((leg) => ({
-        symbol:        `${symLabel}${normExpiry}${leg.strike}${leg.optionType}`,
+        symbol:        buildCompactOptionSymbol(symLabel, expiry, leg.strike, leg.optionType)
+          ?? `${symLabel}${expiry}${leg.strike}${leg.optionType}`,
         exchange,
         action:        leg.side,
         quantity:      leg.lots * lotSize,

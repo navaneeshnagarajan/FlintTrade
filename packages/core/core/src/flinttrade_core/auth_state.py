@@ -9,9 +9,9 @@ Without persistence:
   call, so a second request on a different worker skips the cap.
 
 This module backs all three stores with a single DuckDB file at
-``~/.flinttrade/auth_state.duckdb``. DuckDB is chosen for consistency
-with the rest of FlintTrade's persistence layer (same dependency already
-in use). Every operation takes a per-process lock plus relies on DuckDB's
+``<workspace>/auth_state.duckdb``. DuckDB is chosen for consistency with
+the rest of FlintTrade's persistence layer (same dependency already in
+use). Every operation takes a per-process lock plus relies on DuckDB's
 internal mutex so concurrent writes from multiple gunicorn workers
 serialise correctly.
 
@@ -29,7 +29,12 @@ from typing import Optional
 
 logger = logging.getLogger("flinttrade.core.auth_state")
 
-_DEFAULT_DB_PATH = Path.home() / ".flinttrade" / "auth_state.duckdb"
+
+def _default_db_path() -> Path:
+    """Return the workspace-scoped AuthState database path."""
+    from .workspace import workspace_dir  # noqa: PLC0415
+
+    return workspace_dir() / "auth_state.duckdb"
 
 _CREATE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS revoked_jtis (
@@ -58,7 +63,7 @@ class AuthState:
         import duckdb  # lazy — deliberate; avoids cost when unused
 
         if db_path is None:
-            db_path = _DEFAULT_DB_PATH
+            db_path = _default_db_path()
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = duckdb.connect(str(self._db_path))

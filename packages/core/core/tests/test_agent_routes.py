@@ -23,6 +23,7 @@ from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate
 pytestmark = pytest.mark.unit
 
 SECRET = b"0123456789abcdef0123456789abcdef"
+_ORIGINAL_BUILD_VAULT = mod._build_vault  # noqa: SLF001
 
 
 class _FakeTrader:
@@ -77,10 +78,10 @@ def live_auth(monkeypatch):
     monkeypatch.setattr(order_routes_mod, "_is_live_mode_unlocked", lambda: True)
 
 
-def _make_app() -> Flask:
+def _make_app(broker_router: object | None = None) -> Flask:
     app = Flask(__name__)
     app.config["TESTING"] = True
-    app.config["BROKER_ROUTER"] = object()
+    app.config["BROKER_ROUTER"] = broker_router if broker_router is not None else object()
     app.config["OPENALGO_CLIENT"] = object()
     app.config["SAFETY"] = SafetySystem(SafetyConfig(check_market_hours=False))
     app.register_blueprint(mod.agent_bp)
@@ -89,6 +90,20 @@ def _make_app() -> Flask:
 
 def _start_body() -> dict:
     return {"symbols": ["RELIANCE"], "exchange": "NSE", "cycle_interval_sec": 1}
+
+
+# ---------------------------------------------------------------------------
+# Optional context builders
+# ---------------------------------------------------------------------------
+
+
+def test_build_vault_uses_configured_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_OBSIDIAN_VAULT", str(tmp_path))
+
+    vault = _ORIGINAL_BUILD_VAULT()
+
+    assert vault is not None
+    assert vault.root == tmp_path
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +183,26 @@ def test_start_wires_gated_executor_with_agent_principal(live_auth):
     snap = resp.get_json()["data"]
     assert snap["running"] is True
     assert snap["actor_id"] == "autonomous-trader"
+
+
+def test_start_uses_configured_execution_default_when_target_omitted(live_auth):
+    """Direct agent starts inherit brokers.execution.default when no target is sent."""
+
+    class _Execution:
+        default = "upstox:U1"
+
+    class _Config:
+        execution = _Execution()
+
+    class _Router:
+        _config = _Config()
+
+    app = _make_app(broker_router=_Router())
+    resp = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+    assert resp.status_code == 202
+
+    executor = _FakeTrader.instances[-1].kwargs["order_executor"]
+    assert executor._request_ctx.selector == "upstox:U1"  # noqa: SLF001
 
 
 def test_double_start_409(live_auth):

@@ -202,3 +202,14 @@ class TestRotationStatus:
         brokers = {b["broker"] for b in rotator.rotation_status()}
         assert "zerodha" in brokers
         assert "angel" in brokers
+
+    def test_rotation_status_jobs_match_exact_broker_ids(
+        self, rotator: CredentialsRotator
+    ) -> None:
+        rotator.schedule_daily_refresh("dhan", "08:00")
+        rotator.schedule_daily_refresh("dhan_sandbox", "08:05")
+
+        by_broker = {row["broker"]: row["jobs"] for row in rotator.rotation_status()}
+
+        assert by_broker["dhan"] == ["cred_refresh_dhan"]
+        assert by_broker["dhan_sandbox"] == ["cred_refresh_dhan_sandbox"]

@@ -223,6 +223,7 @@ class HistorifyDownloader:
     ) -> None:
         self._client = client
         self._storage = storage
+        self._storage.initialise()
         self._max_concurrent = max_concurrent
         # Sync downloader for the underlying chunked fetch
         self._downloader = _AsyncDownloader(client)

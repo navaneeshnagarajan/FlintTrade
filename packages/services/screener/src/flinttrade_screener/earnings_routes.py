@@ -80,6 +80,8 @@ def earnings_calendar() -> tuple[Any, int]:
 
     Query parameters:
         days (int): Look-ahead window in calendar days (1–365, default 30).
+        year/month (int): Optional calendar month filter used by the terminal
+            widget. When both are present, ``days`` is ignored.
 
     Returns:
         JSON with upcoming events sorted by date then symbol::
@@ -108,6 +110,33 @@ def earnings_calendar() -> tuple[Any, int]:
             }
     """
     try:
+        year_raw = request.args.get("year")
+        month_raw = request.args.get("month")
+        if year_raw is not None or month_raw is not None:
+            if year_raw is None or month_raw is None:
+                return jsonify({"status": "error", "message": "year and month must be provided together"}), 400
+            try:
+                year = int(year_raw)
+                month = int(month_raw)
+                date(year, month, 1)
+            except (ValueError, TypeError):
+                return jsonify({"status": "error", "message": "year and month must be valid integers"}), 400
+
+            cal = _get_calendar()
+            events = cal.get_by_month(year, month)
+            rows = [e.to_dict() for e in events]
+            return jsonify({
+                "status": "success",
+                "is_sample_data": True,
+                "data": {
+                    "year": year,
+                    "month": month,
+                    "count": len(events),
+                    "events": rows,
+                    "entries": rows,
+                },
+            }), 200
+
         days = int(request.args.get("days", 30))
     except (ValueError, TypeError):
         return jsonify({"status": "error", "message": "days must be an integer"}), 400
@@ -116,13 +145,15 @@ def earnings_calendar() -> tuple[Any, int]:
     cal = _get_calendar()
     events = cal.get_upcoming(days=days)
 
+    rows = [e.to_dict() for e in events]
     return jsonify({
         "status": "success",
         "is_sample_data": True,
         "data": {
             "days": days,
             "count": len(events),
-            "events": [e.to_dict() for e in events],
+            "events": rows,
+            "entries": rows,
         },
     }), 200
 

@@ -20,7 +20,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
+import { pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { queryKeys } from "@/services/queryKeys";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Error type — keeps the HTTP status so the UI can map 501 honestly
@@ -46,7 +49,7 @@ export function isUnsupportedForBroker(error: unknown): boolean {
 // Shared types
 // ---------------------------------------------------------------------------
 
-/** Broker/account routing target. Defaults server-side to openalgo/default. */
+/** Broker/account routing target. Defaults to the active native account in native-only Live mode, else OpenAlgo/default. */
 export interface BrokerTarget {
   broker?: string;
   account_id?: string;
@@ -129,8 +132,26 @@ export interface CancelAllParams {
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
+function withNativeBrokerTarget<T extends BrokerTarget>(target: T): T {
+  if (target.broker || target.account_id) return target;
+  const nativeTarget = pickNativeBrokerOrderTarget(
+    useModeStore.getState().mode,
+    useConnectionStore.getState().apiKey,
+  );
+  return nativeTarget ? ({ ...target, ...nativeTarget } as T) : target;
+}
+
 function targetQuery(target: BrokerTarget): Record<string, string | undefined> {
-  return { broker: target.broker, account_id: target.account_id };
+  const resolvedTarget = withNativeBrokerTarget(target);
+  return { broker: resolvedTarget.broker, account_id: resolvedTarget.account_id };
+}
+
+function resolvedBrokerOrderTarget(target: BrokerTarget): Required<BrokerTarget> {
+  const resolvedTarget = withNativeBrokerTarget(target);
+  return {
+    broker: resolvedTarget.broker ?? "openalgo",
+    account_id: resolvedTarget.account_id ?? "default",
+  };
 }
 
 function extractMessage(json: unknown): string | null {
@@ -207,16 +228,16 @@ export async function listForeverOrders(target: BrokerTarget = {}): Promise<Brok
 
 export function placeForeverOrder(params: ForeverOrderPlaceParams): Promise<unknown> {
   return request<unknown>("POST", "orders/forever", {
-    body: { variety: "gtt", ...params },
+    body: { variety: "gtt", ...withNativeBrokerTarget(params) },
   });
 }
 
 export function modifyForeverOrder(
   params: { order_id: string; changes: OrderChanges } & BrokerTarget,
 ): Promise<unknown> {
-  const { order_id, changes, broker, account_id } = params;
+  const { order_id, changes, ...target } = params;
   return request<unknown>("PUT", `orders/forever/${encodeURIComponent(order_id)}`, {
-    body: { changes, broker, account_id },
+    body: { changes, ...withNativeBrokerTarget(target) },
   });
 }
 
@@ -240,9 +261,9 @@ export async function listSuperOrders(target: BrokerTarget = {}): Promise<Broker
 export function modifySuperOrder(
   params: { order_id: string; changes: OrderChanges } & BrokerTarget,
 ): Promise<unknown> {
-  const { order_id, changes, broker, account_id } = params;
+  const { order_id, changes, ...target } = params;
   return request<unknown>("PUT", `orders/super/${encodeURIComponent(order_id)}`, {
-    body: { changes, broker, account_id },
+    body: { changes, ...withNativeBrokerTarget(target) },
   });
 }
 
@@ -266,7 +287,9 @@ export async function listConditionalTriggers(
 }
 
 export function placeConditionalTrigger(params: ConditionalTriggerParams): Promise<unknown> {
-  return request<unknown>("POST", "orders/triggers", { body: params });
+  return request<unknown>("POST", "orders/triggers", {
+    body: withNativeBrokerTarget(params),
+  });
 }
 
 /** Full replacement modify — condition + orders are resent in entirety. */
@@ -274,7 +297,9 @@ export function modifyConditionalTrigger(
   params: { alert_id: string } & ConditionalTriggerParams,
 ): Promise<unknown> {
   const { alert_id, ...body } = params;
-  return request<unknown>("PUT", `orders/triggers/${encodeURIComponent(alert_id)}`, { body });
+  return request<unknown>("PUT", `orders/triggers/${encodeURIComponent(alert_id)}`, {
+    body: withNativeBrokerTarget(body),
+  });
 }
 
 export function cancelConditionalTrigger(
@@ -293,12 +318,16 @@ export function cancelConditionalTrigger(
 export function placeMultiOrder(
   params: { orders: TypedOrderFields[] } & BrokerTarget,
 ): Promise<unknown> {
-  return request<unknown>("POST", "orders/multi", { body: params });
+  return request<unknown>("POST", "orders/multi", {
+    body: withNativeBrokerTarget(params),
+  });
 }
 
 /** Cancel all open orders for a broker (optionally narrowed by tag/segment). */
 export function cancelAllOrders(params: CancelAllParams): Promise<unknown> {
-  return request<unknown>("POST", "orders/cancel-all", { body: params });
+  return request<unknown>("POST", "orders/cancel-all", {
+    body: withNativeBrokerTarget(params),
+  });
 }
 
 /** Cancel a smart order (IndMoney-native), optionally narrowed by segment. */
@@ -318,30 +347,36 @@ export const brokerOrderKeys = {
   all: ["brokerOrders"] as const,
   forever: {
     all: ["brokerOrders", "forever"] as const,
-    list: (target: BrokerTarget = {}) =>
-      [
+    list: (target: BrokerTarget = {}) => {
+      const resolvedTarget = resolvedBrokerOrderTarget(target);
+      return [
         ...brokerOrderKeys.forever.all,
-        target.broker ?? "openalgo",
-        target.account_id ?? "default",
-      ] as const,
+        resolvedTarget.broker,
+        resolvedTarget.account_id,
+      ] as const;
+    },
   },
   superOrders: {
     all: ["brokerOrders", "super"] as const,
-    list: (target: BrokerTarget = {}) =>
-      [
+    list: (target: BrokerTarget = {}) => {
+      const resolvedTarget = resolvedBrokerOrderTarget(target);
+      return [
         ...brokerOrderKeys.superOrders.all,
-        target.broker ?? "openalgo",
-        target.account_id ?? "default",
-      ] as const,
+        resolvedTarget.broker,
+        resolvedTarget.account_id,
+      ] as const;
+    },
   },
   triggers: {
     all: ["brokerOrders", "triggers"] as const,
-    list: (target: BrokerTarget = {}) =>
-      [
+    list: (target: BrokerTarget = {}) => {
+      const resolvedTarget = resolvedBrokerOrderTarget(target);
+      return [
         ...brokerOrderKeys.triggers.all,
-        target.broker ?? "openalgo",
-        target.account_id ?? "default",
-      ] as const,
+        resolvedTarget.broker,
+        resolvedTarget.account_id,
+      ] as const;
+    },
   },
 } as const;
 

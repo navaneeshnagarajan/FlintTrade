@@ -421,6 +421,20 @@ class TestEarningsCalendarRoute:
         data = resp.get_json()
         assert data["data"]["days"] == 60
 
+    def test_year_month_params_filter_events_and_entries_alias(self, route_client):
+        from datetime import date as _date
+
+        today = _date.today()
+        resp = _get(route_client, "/api/v1/earnings/calendar", year=today.year, month=today.month)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["year"] == today.year
+        assert data["month"] == today.month
+        assert data["entries"] == data["events"]
+        assert data["count"] == len(data["entries"])
+        for row in data["entries"]:
+            assert row["date"].startswith(f"{today.year:04d}-{today.month:02d}-")
+
     def test_invalid_days_returns_400(self, route_client):
         resp = _get(route_client, "/api/v1/earnings/calendar", days="abc")
         assert resp.status_code == 400

@@ -83,6 +83,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
+  useDirectBrokerConnected: vi.fn().mockReturnValue(false),
 }));
 
 // react-query: panels read data through useQuery. Return a stable, non-loading

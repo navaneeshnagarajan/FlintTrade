@@ -160,6 +160,11 @@ class MockLogin:
         return {"dhanClientId": self.client_id, "accessToken": "NEWTOK",
                 "expiryTime": "2026-06-13T00:00:00"}
 
+    def consume_token_id(self, token_id, app_id, app_secret):
+        self.calls.append(("consume", token_id, app_id, app_secret))
+        return {"dhanClientId": self.client_id, "accessToken": "OAUTH-TOK",
+                "expiryTime": "2026-06-13T00:00:00"}
+
     def renew_token(self, access_token):
         self.calls.append(("renew", access_token))
         return {"accessToken": "RENEWED", "expiryTime": "2026-06-13T00:00:00"}
@@ -517,8 +522,11 @@ async def test_user_profile_and_token_helpers() -> None:
     assert profile["dhanClientId"] == "C1" and login.calls[0] == ("profile", "TOK")
     generated = await adapter.generate_token("C1", "123456", "000000")
     assert generated["accessToken"] == "NEWTOK" and login.calls[1] == ("generate", "123456", "000000")
+    consumed = await adapter.consume_token_id("C1", "TOKENID1", "APPID", "SECRET")
+    assert consumed["accessToken"] == "OAUTH-TOK"
+    assert login.calls[2] == ("consume", "TOKENID1", "APPID", "SECRET")
     renewed = await adapter.renew_token(session)
-    assert renewed["accessToken"] == "RENEWED" and login.calls[2] == ("renew", "TOK")
+    assert renewed["accessToken"] == "RENEWED" and login.calls[3] == ("renew", "TOK")
 
 
 async def test_static_ip_management() -> None:
@@ -717,3 +725,26 @@ def test_replay_credentials_drops_totp_and_keeps_minted_token() -> None:
         {"client_id": "111", "pin": "1234", "totp": "000111"}, session
     )
     assert replay == {"client_id": "111", "pin": "1234", "access_token": "minted-24h"}
+
+
+def test_replay_credentials_drops_oauth_token_id_and_keeps_minted_token() -> None:
+    from flinttrade_gateway.brokers._base import Session
+
+    adapter = DhanAdapter(client_factory=lambda _s: object())
+    session = Session(access_token="oauth-24h", expires_at=9e9, account_id="111", adapter_id="dhan")
+    replay = adapter.replay_credentials(
+        {
+            "client_id": "111",
+            "api_key": "APPID",
+            "api_secret": "SECRET",
+            "token_id": "single-use-token-id",
+            "code": "single-use-code",
+        },
+        session,
+    )
+    assert replay == {
+        "client_id": "111",
+        "api_key": "APPID",
+        "api_secret": "SECRET",
+        "access_token": "oauth-24h",
+    }

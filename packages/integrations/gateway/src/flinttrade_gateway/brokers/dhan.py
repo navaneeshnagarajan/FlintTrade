@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from urllib.parse import urlencode
 
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_gateway.capabilities import (
@@ -255,11 +256,62 @@ class DhanAdapter(BrokerAdapter):
 
     # ---------- auth lifecycle ----------
 
+    @staticmethod
+    def build_login_url(
+        app_id: str,
+        _redirect_uri: str,
+        _state: str | None = None,
+        *,
+        account_id: str = "",
+        api_secret: str = "",
+    ) -> str:
+        """Generate the DhanHQ consent URL for the operator's browser.
+
+        Dhan's app-consent flow is not a normal ``client_id + redirect_uri``
+        URL. The server first calls ``/app/generate-consent`` with the Dhan
+        client id plus app credentials, then opens the returned
+        ``consentAppId`` URL. The app's registered redirect URL controls where
+        Dhan sends the final ``tokenId`` callback.
+        """
+        if not account_id:
+            raise BrokerError("Dhan OAuth login requires the Dhan client ID as the account ID")
+        if not app_id or not api_secret:
+            raise BrokerError("Dhan OAuth login requires app_id and app_secret")
+        import requests  # noqa: PLC0415
+
+        resp = requests.post(
+            "https://auth.dhan.co/app/generate-consent",
+            params={"client_id": account_id},
+            headers={"app_id": app_id, "app_secret": api_secret},
+            timeout=20,
+        )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise BrokerError("Dhan consent generation returned a non-JSON response") from exc
+        if resp.status_code != 200 or payload.get("status") != "success" or not payload.get("consentAppId"):
+            raise BrokerError(f"Dhan consent generation failed with status {resp.status_code}")
+        return "https://auth.dhan.co/login/consentApp-login?" + urlencode(
+            {"consentAppId": str(payload["consentAppId"])}
+        )
+
     async def login(self, credentials: dict) -> Session:
         client_id = str(credentials.get("client_id") or credentials.get("dhan_client_id") or "")
         access_token = str(credentials.get("access_token") or "")
         pin = str(credentials.get("pin") or "")
         totp = str(credentials.get("totp") or "")
+        token_id = str(credentials.get("token_id") or credentials.get("code") or "")
+        app_id = str(credentials.get("app_id") or credentials.get("api_key") or "")
+        app_secret = str(credentials.get("app_secret") or credentials.get("api_secret") or "")
+        if not access_token and token_id:
+            if not client_id:
+                raise BrokerError("Dhan OAuth login requires client_id")
+            if not (app_id and app_secret):
+                raise BrokerError("Dhan OAuth login requires app_id and app_secret")
+            resp = await self.consume_token_id(client_id, token_id, app_id, app_secret)
+            access_token = str(resp.get("accessToken") or resp.get("access_token") or "")
+            if not access_token:
+                raise BrokerError("Dhan OAuth token consumption failed")
         if not access_token and pin and totp:
             # PIN + TOTP path: mint a fresh 24h token via the v2.5 token API
             # (generate_token needs no existing token), then log in with it. Lets
@@ -270,7 +322,7 @@ class DhanAdapter(BrokerAdapter):
             resp = await self.generate_token(client_id, pin, totp)
             access_token = str(resp.get("accessToken") or resp.get("access_token") or "")
             if not access_token:
-                raise BrokerError(f"Dhan PIN+TOTP token generation failed: {resp}")
+                raise BrokerError("Dhan PIN+TOTP token generation failed")
         if not access_token:
             raise BrokerError("Dhan login requires an access_token (or client_id + pin + totp)")
         client = None if self._client_factory is not None else _build_dhan_client(client_id, access_token)
@@ -285,12 +337,13 @@ class DhanAdapter(BrokerAdapter):
     def replay_credentials(self, credentials: dict, session: Session) -> dict:
         """The replayable vault payload after a successful login (G7).
 
-        A pasted TOTP is a 30-second one-time code — replaying it at the next
-        boot is guaranteed to fail. Swap it for the minted 24h ``access_token``
-        (restart-within-validity reconnects cleanly); keep ``client_id`` and
-        ``pin`` so a UI-assisted re-auth only needs a fresh TOTP.
+        A pasted TOTP and the OAuth ``tokenId``/``code`` are one-time artefacts
+        — replaying them at the next boot is guaranteed to fail. Swap them for
+        the minted 24h ``access_token`` (restart-within-validity reconnects
+        cleanly); keep ``client_id`` and ``pin`` so a UI-assisted re-auth only
+        needs a fresh TOTP.
         """
-        replayable = {k: v for k, v in credentials.items() if k != "totp"}
+        replayable = {k: v for k, v in credentials.items() if k not in {"totp", "token_id", "code"}}
         replayable["access_token"] = session.access_token
         return replayable
 
@@ -536,7 +589,12 @@ class DhanAdapter(BrokerAdapter):
 
     async def holdings(self, session: Session) -> list[dict]:
         resp = await self._call(self._client(session).get_holdings)
-        rows = M.unwrap(resp) or []
+        try:
+            rows = M.unwrap(resp) or []
+        except M.DhanMappingError as exc:
+            if "no holdings available" in str(exc).lower():
+                return []
+            raise
         return [M.from_dhan_holding(r) for r in rows]
 
     async def funds(self, session: Session) -> dict:
@@ -761,6 +819,12 @@ class DhanAdapter(BrokerAdapter):
         """
         login = self._login_helper(str(client_id))
         resp = await self._call(login.generate_token, str(pin), str(totp))
+        return resp if isinstance(resp, dict) else {"status": str(resp)}
+
+    async def consume_token_id(self, client_id: str, token_id: str, app_id: str, app_secret: str) -> dict:
+        """Consume a DhanHQ OAuth ``tokenId`` into a 24h access token."""
+        login = self._login_helper(str(client_id))
+        resp = await self._call(login.consume_token_id, str(token_id), str(app_id), str(app_secret))
         return resp if isinstance(resp, dict) else {"status": str(resp)}
 
     async def renew_token(self, session: Session) -> dict:

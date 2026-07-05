@@ -187,4 +187,12 @@ _BACKEND_ONLY_LEAVES: set[str] = {
     "super",
     "triggers",
     "multi",
+    # Legacy OpenAlgo-style GTT leaves. The terminal compatibility exports
+    # (`placeGtt` / `modifyGtt` / `cancelGtt` / `getGttOrderbook`) now call the
+    # canonical gated `/orders/forever` client instead of `postOrder("gtt-*")`.
+    # Keep these backend leaves documented as legacy/fail-closed compatibility
+    # routes rather than reintroducing a second frontend write path.
+    "gtt-place",
+    "gtt-modify",
+    "gtt-cancel",
 }

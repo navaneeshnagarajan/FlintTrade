@@ -2,7 +2,7 @@
  * NetWorthTab.tsx
  *
  * Full net worth breakdown: known total, donut allocation chart, and
- * per-asset-class status cards. Equity + Cash live from OpenAlgo;
+ * per-asset-class status cards. Equity + Cash live from the connected broker;
  * other asset classes show "Not connected" with a disabled Add button.
  *
  * Adapted pattern from etftracker Dashboard3_SectorRotation: side-by-side
@@ -72,24 +72,24 @@ export function NetWorthTab() {
     {
       label: "Equity Holdings",
       value: isLoading ? null : currentValue,
-      note: "Live from OpenAlgo",
+      note: "Live from broker",
       hexColor: "#3b82f6",
       tailwindBg: "bg-blue-500",
       tailwindText: "text-blue-400",
       icon: TrendingUp,
       addLabel: "Add Equity",
-      addTooltip: "Buy via your broker through OpenAlgo — holdings sync automatically.",
+      addTooltip: "Buy via your connected broker — holdings sync automatically.",
     },
     {
       label: "Available Cash",
       value: isLoading ? null : availableCash,
-      note: "Live from OpenAlgo",
+      note: "Live from broker",
       hexColor: "#22c55e",
       tailwindBg: "bg-emerald-500",
       tailwindText: "text-emerald-400",
       icon: Wallet,
       addLabel: "Add Cash",
-      addTooltip: "Deposit funds via your broker — balance syncs from OpenAlgo.",
+      addTooltip: "Deposit funds via your broker — balance syncs automatically.",
     },
     {
       label: "Mutual Funds",
@@ -137,7 +137,7 @@ export function NetWorthTab() {
           Net Worth Breakdown
         </h3>
         <p className="text-xs text-text-muted mt-0.5">
-          Live equity and cash from OpenAlgo. Other asset classes require additional data sources.
+          Live equity and cash from your connected broker. Other asset classes require additional data sources.
         </p>
       </div>
 
@@ -233,7 +233,7 @@ export function NetWorthTab() {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
-              Connect to OpenAlgo to see allocation chart.
+              Connect a broker to see allocation chart.
             </div>
           )}
         </GlassCard>

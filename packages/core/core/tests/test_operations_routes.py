@@ -444,6 +444,54 @@ class TestDittoAccountCrud:
         }
         monkeypatch.setattr(account_manager, "AccountManager", self._FakeManager)
 
+    def test_list_accounts_returns_configured_accounts(self, client, monkeypatch):
+        self._patch_manager(monkeypatch, [self._FakeAccount("acc_1", name="Primary", enabled=True)])
+
+        resp = client.get("/api/v1/ditto/accounts", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["data"]["accounts"] == [
+            {
+                "id": "acc_1",
+                "name": "Primary",
+                "broker": "OpenAlgo",
+                "capital": 0,
+                "pnl_today": 0,
+                "status": "active",
+                "positions": 0,
+                "group": "default",
+                "allocation_weight": 1.0,
+                "is_master": False,
+            }
+        ]
+        assert "api_key" not in data["data"]["accounts"][0]
+
+    def test_list_accounts_returns_empty_list_when_none_configured(self, client, monkeypatch):
+        self._patch_manager(monkeypatch)
+
+        resp = client.get("/api/v1/ditto/accounts", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["data"]["accounts"] == []
+
+    def test_list_accounts_returns_503_when_manager_unavailable(self, client, monkeypatch):
+        class _BoomManager:
+            def __init__(self, *args, **kwargs) -> None:
+                raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _BoomManager)
+
+        resp = client.get("/api/v1/ditto/accounts", headers=_auth_headers())
+
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert data["message"] == "Account service unavailable"
+
     def test_create_account_returns_sanitised_account(self, client, monkeypatch):
         self._patch_manager(monkeypatch)
         resp = client.post("/api/v1/ditto/accounts", json={
@@ -549,6 +597,23 @@ class TestAccountsStatus:
         def account_status_all(self):
             return self._statuses
 
+    class _NativeStore:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def list_accounts(self):
+            return self._rows
+
+    class _NativeRegistry:
+        def __init__(self, sessions=None):
+            self._sessions = sessions or {}
+
+        def get_session_for(self, adapter_id, account_id):
+            key = (adapter_id, account_id)
+            if key not in self._sessions:
+                raise KeyError(key)
+            return self._sessions[key]
+
     def test_returns_summary_and_per_account_status(self, client, monkeypatch):
         statuses = [
             self._FakeStatus(connected=True, authenticated=True, needs_reauth=False),
@@ -572,6 +637,129 @@ class TestAccountsStatus:
             "needs_reauth": 1,
         }
 
+    def test_merges_native_account_status(self, flask_app, client, monkeypatch):
+        monkeypatch.setattr(
+            "flinttrade_ditto.account_manager.AccountManager",
+            lambda: self._FakeAM([]),
+        )
+        session = type("Session", (), {"expires_at": 4_102_444_800.0})()
+        original_store = flask_app.config.get("CREDENTIAL_STORE")
+        original_registry = flask_app.config.get("REGISTRY")
+        original_login_status = flask_app.config.get("NATIVE_SESSION_STATUS")
+        flask_app.config["CREDENTIAL_STORE"] = self._NativeStore([
+            {
+                "adapter_id": "upstox",
+                "account_id": "UPX-LIVE",
+                "label": "Upstox main",
+                "is_primary": True,
+            }
+        ])
+        flask_app.config["REGISTRY"] = self._NativeRegistry({("upstox", "UPX-LIVE"): session})
+        flask_app.config["NATIVE_SESSION_STATUS"] = {}
+        try:
+            resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
+        finally:
+            flask_app.config["CREDENTIAL_STORE"] = original_store
+            flask_app.config["REGISTRY"] = original_registry
+            flask_app.config["NATIVE_SESSION_STATUS"] = original_login_status
+
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["summary"] == {
+            "total": 1,
+            "connected": 1,
+            "authenticated": 1,
+            "needs_reauth": 0,
+        }
+        row = data["accounts"][0]
+        assert row["source"] == "native"
+        assert row["broker"] == "upstox"
+        assert row["broker_display"] == "Upstox"
+        assert row["name"] == "Upstox main"
+        assert row["connected"] is True
+        assert row["authenticated"] is True
+        assert row["expires_at"] == 4_102_444_800.0
+
+    def test_returns_native_status_when_ditto_unavailable(self, flask_app, client, monkeypatch):
+        def _boom():
+            raise RuntimeError("credential vault locked")
+
+        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
+        original_store = flask_app.config.get("CREDENTIAL_STORE")
+        original_registry = flask_app.config.get("REGISTRY")
+        original_login_status = flask_app.config.get("NATIVE_SESSION_STATUS")
+        flask_app.config["CREDENTIAL_STORE"] = self._NativeStore([
+            {
+                "adapter_id": "indmoney",
+                "account_id": "IND-LIVE",
+                "label": "INDmoney main",
+            }
+        ])
+        flask_app.config["REGISTRY"] = self._NativeRegistry()
+        flask_app.config["NATIVE_SESSION_STATUS"] = {"indmoney:IND-LIVE": "login-failed: token expired"}
+        try:
+            resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
+        finally:
+            flask_app.config["CREDENTIAL_STORE"] = original_store
+            flask_app.config["REGISTRY"] = original_registry
+            flask_app.config["NATIVE_SESSION_STATUS"] = original_login_status
+
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["summary"] == {
+            "total": 1,
+            "connected": 0,
+            "authenticated": 0,
+            "needs_reauth": 1,
+        }
+        row = data["accounts"][0]
+        assert row["source"] == "native"
+        assert row["broker"] == "indmoney"
+        assert row["needs_reauth"] is True
+        assert row["login_retryable"] is False
+        assert row["error"] == "login-failed: token expired"
+
+    def test_native_retryable_login_status_is_not_reauth(self, flask_app, client, monkeypatch):
+        from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
+
+        def _boom():
+            raise RuntimeError("credential vault locked")
+
+        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
+        original_store = flask_app.config.get("CREDENTIAL_STORE")
+        original_registry = flask_app.config.get("REGISTRY")
+        original_login_status = flask_app.config.get("NATIVE_SESSION_STATUS")
+        flask_app.config["CREDENTIAL_STORE"] = self._NativeStore([
+            {
+                "adapter_id": "upstox",
+                "account_id": "UPX-RETRY",
+                "label": "Upstox retry",
+            }
+        ])
+        flask_app.config["REGISTRY"] = self._NativeRegistry()
+        flask_app.config["NATIVE_SESSION_STATUS"] = {"upstox:UPX-RETRY": BROKER_LOGIN_RETRY_MESSAGE}
+        try:
+            resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
+        finally:
+            flask_app.config["CREDENTIAL_STORE"] = original_store
+            flask_app.config["REGISTRY"] = original_registry
+            flask_app.config["NATIVE_SESSION_STATUS"] = original_login_status
+
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["summary"] == {
+            "total": 1,
+            "connected": 0,
+            "authenticated": 0,
+            "needs_reauth": 0,
+        }
+        row = data["accounts"][0]
+        assert row["source"] == "native"
+        assert row["broker"] == "upstox"
+        assert row["needs_reauth"] is False
+        assert row["login_retryable"] is True
+        assert row["error"] == BROKER_LOGIN_RETRY_MESSAGE
+
     def test_returns_503_when_account_manager_unavailable(self, client, monkeypatch):
         def _boom():
             raise RuntimeError("credential vault locked")
@@ -591,54 +779,83 @@ class TestWebhooksManagement:
     renders the source badge off ``type``.
     """
 
-    @pytest.fixture()
-    def server(self, flask_app):
-        from flinttrade_webhooks.webhook_server import WebhookServer
+    @pytest.fixture(autouse=True)
+    def registry(self):
+        from flinttrade_core.workspace import Workspace
 
-        srv = WebhookServer()
+        workspace = Workspace()
+        workspace.load()
+        previous = workspace.get("automation.webhooks", [])
+        workspace.set("automation.webhooks", [])
+        yield
+        workspace.set("automation.webhooks", previous)
 
-        def _h(_body: bytes, _headers: dict) -> dict:
-            return {"status": "received"}
-
-        srv.register("/webhook/tradingview/algo1", "TV Algo", _h)
-        srv.register("/webhook/custom/my_signal", "My Signal", _h)
-        flask_app._webhook_server = srv
-        yield srv
-        flask_app._webhook_server = None
-
-    def test_list_emits_id_and_type(self, client, server):
-        resp = client.get("/api/v1/webhooks", headers=_auth_headers())
-        assert resp.status_code == 200
-        webhooks = resp.get_json()["data"]["webhooks"]
-        by_name = {w["name"]: w for w in webhooks}
-        tv = by_name["TV Algo"]
-        # id drops the leading slash (round-trips through encodeURIComponent);
-        # path keeps it for display.
-        assert tv["id"] == "webhook/tradingview/algo1"
-        assert tv["path"] == "/webhook/tradingview/algo1"
-        assert tv["type"] == "tradingview"
-        assert tv["enabled"] is True
-        assert by_name["My Signal"]["type"] == "custom"
-        # secret is never leaked in the list
-        assert "secret" not in tv
-
-    def test_create_returns_full_config(self, client, server):
-        resp = client.post(
+    def _create(self, client, *, path: str, name: str, webhook_type: str = "custom", secret: str = ""):
+        return client.post(
             "/api/v1/webhooks",
             headers=_auth_headers(),
-            json={"path": "/webhook/chartink/scan1", "name": "Chartink Scan"},
+            json={"path": path, "name": name, "type": webhook_type, "secret": secret},
+        )
+
+    def test_list_starts_empty_without_standalone_server(self, client):
+        resp = client.get("/api/v1/webhooks", headers=_auth_headers())
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data == {"webhooks": []}
+
+    def test_create_returns_full_config(self, client):
+        resp = self._create(
+            client,
+            path="/webhook/chartink/scan1",
+            name="Chartink Scan",
+            webhook_type="chartink",
         )
         assert resp.status_code == 201
         data = resp.get_json()["data"]
-        assert data["id"] == "webhook/chartink/scan1"
-        assert data["path"] == "/webhook/chartink/scan1"
+        assert data["id"] == "v1/webhook/chartink/scan1"
+        assert data["path"] == "/v1/webhook/chartink/scan1"
         assert data["type"] == "chartink"
         assert data["enabled"] is True
+        assert "secret" not in data
 
-    def test_list_id_round_trips_through_delete(self, client, server):
+    def test_path_without_source_uses_selected_type(self, client):
+        resp = self._create(
+            client,
+            path="/webhook/nifty-breakout",
+            name="TV Breakout",
+            webhook_type="tradingview",
+        )
+        assert resp.status_code == 201
+        data = resp.get_json()["data"]
+        assert data["id"] == "v1/webhook/tradingview/nifty-breakout"
+        assert data["path"] == "/v1/webhook/tradingview/nifty-breakout"
+        assert data["type"] == "tradingview"
+
+    def test_rejects_secret_until_encrypted_receiver_store_exists(self, client):
+        resp = self._create(
+            client,
+            path="/webhook/chartink/scan1",
+            name="Chartink Scan",
+            webhook_type="chartink",
+            secret="do-not-store-in-workspace-json",
+        )
+        assert resp.status_code == 501
+        body = resp.get_json()
+        assert body["status"] == "error"
+        assert "Per-webhook secrets are not wired" in body["message"]
+
+    def test_list_id_round_trips_through_delete(self, client):
         """The id the list emits must, URL-encoded as the frontend does, delete
         that exact webhook — proving the encoded-path id survives routing."""
         from urllib.parse import quote
+
+        created = self._create(
+            client,
+            path="/webhook/custom/my_signal",
+            name="My Signal",
+            webhook_type="custom",
+        )
+        assert created.status_code == 201
 
         listed = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
         target = next(w for w in listed if w["name"] == "My Signal")

@@ -301,6 +301,85 @@ class TestLoadBrokerAdapter:
 
 
 # ---------------------------------------------------------------------------
+# Wrapped adapter read-contract compatibility
+# ---------------------------------------------------------------------------
+
+
+class _FakeAuth:
+    def authenticate_broker(self, *args):
+        return "token", None
+
+
+class _FakeOrder:
+    pass
+
+
+class _FakeFunds:
+    pass
+
+
+class _FakeData:
+    def __init__(self) -> None:
+        self.history_calls: list[tuple[str, str, str, str, str, str]] = []
+        self.option_chain_calls: list[tuple[str, str, str | None, str]] = []
+        self.quote_calls: list[tuple[str, str, str]] = []
+
+    def get_history(self, symbol: str, exchange: str, interval: str, start: str, end: str, token: str):
+        self.history_calls.append((symbol, exchange, interval, start, end, token))
+        return {"candles": []}
+
+    def get_quotes(self, symbol: str, exchange: str, token: str):
+        self.quote_calls.append((symbol, exchange, token))
+        return {"symbol": symbol, "exchange": exchange, "ltp": 1.0}
+
+    def get_depth(self, symbol: str, exchange: str, token: str):
+        return {"symbol": symbol, "exchange": exchange, "bids": [], "asks": []}
+
+    def get_option_chain(self, symbol: str, exchange: str, expiry: str | None, token: str):
+        self.option_chain_calls.append((symbol, exchange, expiry, token))
+        return {"underlying": symbol, "exchange": exchange, "strikes": []}
+
+    def search_symbols(self, query: str, exchange: str, token: str):
+        return {"query": query, "exchange": exchange, "token": token}
+
+
+class TestWrappedAdapterReadContract:
+    def test_get_history_accepts_registry_param_dict_contract(self):
+        data = _FakeData()
+        adapter = _WrappedBrokerAdapter("demo", _FakeAuth(), _FakeOrder(), data, _FakeFunds())
+
+        result = adapter.get_history(
+            {"symbol": "NIFTY", "exchange": "NSE_INDEX", "interval": "1d", "start": "2026-07-01",
+             "end": "2026-07-04"},
+            "TOKEN",
+        )
+
+        assert result == {"candles": []}
+        assert data.history_calls == [("NIFTY", "NSE_INDEX", "1d", "2026-07-01", "2026-07-04", "TOKEN")]
+
+    def test_get_option_chain_accepts_registry_param_dict_contract(self):
+        data = _FakeData()
+        adapter = _WrappedBrokerAdapter("demo", _FakeAuth(), _FakeOrder(), data, _FakeFunds())
+
+        result = adapter.get_option_chain(
+            {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": "2026-07-30"},
+            "TOKEN",
+        )
+
+        assert result == {"underlying": "NIFTY", "exchange": "NSE_INDEX", "strikes": []}
+        assert data.option_chain_calls == [("NIFTY", "NSE_INDEX", "2026-07-30", "TOKEN")]
+
+    def test_get_quotes_accepts_session_symbol_list_contract(self):
+        data = _FakeData()
+        adapter = _WrappedBrokerAdapter("demo", _FakeAuth(), _FakeOrder(), data, _FakeFunds())
+
+        result = adapter.get_quotes(["NSE:INFY"], "TOKEN")
+
+        assert result == {"symbol": "INFY", "exchange": "NSE", "ltp": 1.0}
+        assert data.quote_calls == [("INFY", "NSE", "TOKEN")]
+
+
+# ---------------------------------------------------------------------------
 # Parameterised: broker directory existence
 # ---------------------------------------------------------------------------
 

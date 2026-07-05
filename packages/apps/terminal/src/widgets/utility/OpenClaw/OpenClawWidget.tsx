@@ -1,11 +1,11 @@
 /**
  * OpenClawWidget — control plane for OpenClaw AI agent sessions.
  *
- * Lists agents running on the EXTERNAL OpenClaw gateway, deploys new ones, and
- * stops running ones, via /api/v1/ai/openclaw/*. All data is real: when the
- * gateway is unreachable the status shows offline and the list is empty — there
- * are no fabricated agents. The agents trade through OpenClaw's own broker
- * connection, so nothing here touches FlintTrade's gated order path.
+ * Reports the EXTERNAL OpenClaw gateway state via /api/v1/ai/openclaw/*.
+ * All data is real: when the gateway is unreachable the status shows offline
+ * and the list is empty; when the installed OpenClaw exposes no HTTP agent
+ * lifecycle API, deploy/stop controls stay disabled instead of fabricating a
+ * control plane.
  */
 
 import { useState } from "react";
@@ -47,6 +47,8 @@ export default function OpenClawWidget() {
   });
 
   const connected = statusQuery.data?.connected ?? false;
+  const agentControlSupported = statusQuery.data?.agent_control_supported ?? false;
+  const statusMessage = statusQuery.data?.message ?? "";
   const agents = agentsQuery.data?.agents ?? [];
 
   const invalidateAgents = () =>
@@ -78,9 +80,13 @@ export default function OpenClawWidget() {
           <Bot size={14} className="text-accent" aria-hidden="true" />
           <span className="text-sm font-semibold text-text-primary">OpenClaw Agents</span>
         </div>
-        {connected ? (
+        {connected && agentControlSupported ? (
           <span className="inline-flex items-center gap-1 text-xxs text-profit">
             <Wifi size={11} aria-hidden="true" /> Connected
+          </span>
+        ) : connected ? (
+          <span className="inline-flex items-center gap-1 text-xxs text-warning">
+            <Wifi size={11} aria-hidden="true" /> Gateway connected
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-xxs text-text-muted">
@@ -124,18 +130,22 @@ export default function OpenClawWidget() {
           type="submit"
           size="sm"
           className="h-7 text-xs"
-          disabled={!name.trim() || deploy.isPending || !connected}
+          disabled={!name.trim() || deploy.isPending || !connected || !agentControlSupported}
         >
           <Play size={12} className="mr-1" aria-hidden="true" />
           {deploy.isPending ? "Deploying…" : "Deploy agent"}
         </Button>
-        {!connected && (
+        {!connected ? (
           <p className="text-xxs text-text-muted">
             Connect the OpenClaw gateway to deploy agents.
           </p>
-        )}
+        ) : !agentControlSupported ? (
+          <p className="text-xxs text-warning">
+            {statusMessage || "OpenClaw HTTP agent lifecycle controls are unavailable."}
+          </p>
+        ) : null}
         {deploy.isError && (
-          <p className="text-xxs text-loss">Deploy failed — is OpenClaw reachable?</p>
+          <p className="text-xxs text-loss">Deploy failed — OpenClaw rejected the request.</p>
         )}
       </form>
 
@@ -143,7 +153,11 @@ export default function OpenClawWidget() {
       <div className="flex-1 overflow-y-auto space-y-1.5" aria-label="OpenClaw agents">
         {agents.length === 0 ? (
           <p className="text-xs text-text-muted py-4 text-center">
-            {connected ? "No agents running." : "Gateway offline — no agents."}
+            {!connected
+              ? "Gateway offline — no agents."
+              : !agentControlSupported
+                ? "Gateway connected — HTTP agent lifecycle unavailable."
+                : "No agents running."}
           </p>
         ) : (
           agents.map((a) => (

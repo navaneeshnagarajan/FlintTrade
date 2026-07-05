@@ -28,6 +28,7 @@ class _FakeRouter:
 def app(tmp_path, monkeypatch):
     # Workspace persistence must write to a throwaway home, not ~/.flinttrade.
     monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
     limiter = BrokerRateLimiter({"openalgo": {"order": 10.0, "data": 5.0}})

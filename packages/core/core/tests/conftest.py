@@ -1,10 +1,9 @@
 """Shared fixtures for packages/core tests.
 
-The ``AuthState`` singleton persists a DuckDB file at
-``~/.flinttrade/auth_state.duckdb`` by default, which causes test
-isolation failures: OTP request counts and JWT revocations from one
-test leak into the next, flipping rate-limit assertions non-
-deterministically.
+The ``AuthState`` singleton persists a DuckDB file under the active workspace
+by default. We still bind it per test because OTP request counts and JWT
+revocations are process-wide singleton state; sharing one store across tests
+would flip rate-limit assertions non-deterministically.
 
 The autouse fixture below rebinds the singleton to a throw-away
 DuckDB under the pytest ``tmp_path`` so every test starts with an

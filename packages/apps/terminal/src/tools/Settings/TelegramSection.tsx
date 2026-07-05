@@ -1,8 +1,8 @@
 /**
  * TelegramSection — Telegram bot token, chat ID, enable/disable toggle, and test send.
  *
- * The "Test Send" button calls the OpenAlgo POST /api/v1/telegram endpoint
- * to verify the bot token and chat ID are working.
+ * The "Test Send" button calls the FlintTrade backend Telegram route with
+ * in-memory credentials; the bot token is not persisted.
  */
 
 import { useState, useCallback } from "react";
@@ -29,7 +29,10 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
 
   const testMutation = useMutation({
     mutationFn: () =>
-      sendTelegram("FlintTrade test message — your Telegram integration is working!"),
+      sendTelegram("FlintTrade test message — your Telegram integration is working!", {
+        botToken: settings.botToken,
+        chatId: settings.chatId,
+      }),
     onSuccess: () => {
       setTestStatus("success");
       setTestError("");
@@ -92,7 +95,12 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
             variant="outline"
             size="sm"
             onClick={handleTestSend}
-            disabled={testMutation.isPending || !settings.enabled}
+            disabled={
+              testMutation.isPending
+              || !settings.enabled
+              || !settings.botToken.trim()
+              || !settings.chatId.trim()
+            }
             className="flex items-center gap-1.5 text-xs h-7"
           >
             {testMutation.isPending ? (

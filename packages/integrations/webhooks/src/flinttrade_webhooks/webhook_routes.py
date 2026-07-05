@@ -5,6 +5,8 @@ the WSGI prefix stripper in app.py rewrites to /v1/webhook/* before Flask dispat
 
 - ``POST /ft-api/v1/webhook/<source>`` — receive, verify, parse, and
   dispatch a webhook from ``tradingview``, ``chartink``, or ``custom``.
+- ``POST /ft-api/v1/webhook/<source>/<id>`` — named endpoint form used by the
+  Flows panel registry; handled by the same receiver path.
 - ``GET  /ft-api/v1/webhook/log`` — return recent webhook history.
 
 Blueprint registered at ``/v1/webhook`` (post-strip form).
@@ -135,11 +137,13 @@ _VALID_SOURCES = frozenset({"tradingview", "chartink", "custom"})
 
 
 @webhook_bp.route("/<source>", methods=["POST"])
-def receive_webhook(source: str) -> tuple[Response, int]:
+@webhook_bp.route("/<source>/<path:webhook_id>", methods=["POST"])
+def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Response, int]:
     """Receive a webhook from an external source, verify, parse, and dispatch.
 
     Path parameters:
         source: One of ``tradingview``, ``chartink``, ``custom``.
+        webhook_id: Optional named endpoint slug from the UI registry.
 
     Headers (optional):
         X-Signature: ``sha256=<hex>`` HMAC-SHA256 signature of the raw body.
@@ -152,6 +156,8 @@ def receive_webhook(source: str) -> tuple[Response, int]:
     """
     source = source.lower()
     receiver = _get_receiver()
+    if webhook_id:
+        logger.debug("Named webhook endpoint matched: source=%s id=%s", source, webhook_id)
 
     # Validate source
     if source not in _VALID_SOURCES and source not in receiver._config.allowed_sources:

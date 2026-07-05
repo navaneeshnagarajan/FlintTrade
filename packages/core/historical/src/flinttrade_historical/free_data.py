@@ -11,10 +11,31 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time as datetime_time
 from typing import Any
 
 logger = logging.getLogger("flinttrade.historical.free_data")
+
+
+def _openchart_segment(exchange: str, symbol: str) -> str:
+    exchange_upper = exchange.upper()
+    symbol_upper = symbol.upper()
+    if exchange_upper.endswith("_INDEX") or symbol_upper in {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"}:
+        return "IDX"
+    if exchange_upper in {"NFO", "BFO"}:
+        return "FO"
+    return "EQ"
+
+
+def _to_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    parsed = date.fromisoformat(value)
+    return datetime.combine(parsed, datetime_time.min)
+
+
+def _openchart_interval(interval: str) -> str:
+    return "1d" if interval == "D" else interval
 
 
 @dataclass
@@ -106,13 +127,25 @@ class NSEData:
 
         try:
             chart = self._get_chart()
-            df = chart.historical(
-                symbol=symbol,
-                exchange=exchange,
-                start=start_date,
-                end=end_date,
-                interval=interval,
-            )
+            segment = _openchart_segment(exchange, symbol)
+            start = _to_datetime(start_date)
+            end = _to_datetime(end_date)
+            try:
+                df = chart.historical(
+                    symbol=symbol,
+                    segment=segment,
+                    start=start,
+                    end=end,
+                    interval=_openchart_interval(interval),
+                )
+            except TypeError:
+                df = chart.historical(
+                    symbol=symbol,
+                    exchange=exchange,
+                    start=start,
+                    end=end,
+                    interval=interval,
+                )
 
             if df is None or df.empty:
                 result.error = "No data returned from OpenChart"

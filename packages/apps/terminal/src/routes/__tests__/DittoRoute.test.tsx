@@ -26,6 +26,7 @@ vi.mock("@/lib/motion", () => ({
 
 // Mock the ftApi module
 vi.mock("@/services/ftApi", () => ({
+  get: vi.fn(),
   getDittoAccounts: vi.fn(),
   addDittoAccount: vi.fn(),
   removeDittoAccount: vi.fn(),
@@ -37,9 +38,17 @@ vi.mock("@/services/ftApi", () => ({
   dittoKillAll: vi.fn(),
 }));
 
+vi.mock("@/services/gatewayApi", () => ({
+  gatewayApi: {
+    getRateLimits: vi.fn().mockResolvedValue({}),
+    setRateLimit: vi.fn(),
+  },
+}));
+
 import DittoRoute from "../DittoRoute";
 import {
   addDittoAccount,
+  get,
   getDittoAccounts,
   getDittoMirrorStatus,
   getDittoRisk,
@@ -47,6 +56,7 @@ import {
   setDittoAccountEnabled,
 } from "@/services/ftApi";
 
+const mockGet = get as unknown as ReturnType<typeof vi.fn>;
 const mockGetAccounts = getDittoAccounts as ReturnType<typeof vi.fn>;
 const mockAddAccount = addDittoAccount as ReturnType<typeof vi.fn>;
 const mockRemoveAccount = removeDittoAccount as ReturnType<typeof vi.fn>;
@@ -137,6 +147,32 @@ const sampleRisk = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGet.mockImplementation((path: string) => {
+    if (path === "accounts/status") {
+      return Promise.resolve({
+        accounts: [
+          {
+            account_id: "upstox-live-20260704",
+            source: "native",
+            broker: "upstox",
+            broker_display: "Upstox",
+            name: "Upstox live token test",
+            enabled: true,
+            connected: true,
+            authenticated: true,
+            needs_reauth: false,
+            latency_ms: 0,
+            error: "",
+          },
+        ],
+        summary: { total: 1, connected: 1, authenticated: 1, needs_reauth: 0 },
+      });
+    }
+    if (path === "broker/recommendations") {
+      return Promise.resolve({ status: "success", use_cases: {} });
+    }
+    return Promise.resolve({});
+  });
   mockGetAccounts.mockResolvedValue(sampleAccounts);
   mockAddAccount.mockResolvedValue(sampleAccounts.accounts[0]);
   mockRemoveAccount.mockResolvedValue({ id: "acc_2", removed: true });
@@ -169,6 +205,15 @@ describe("DittoRoute", () => {
     });
     expect(screen.getByText("Client: Rajesh Mehta")).toBeInTheDocument();
     expect(screen.getByText("Client: Priya Sharma")).toBeInTheDocument();
+  });
+
+  it("keeps live broker status visible when there are no Ditto managed accounts", async () => {
+    mockGetAccounts.mockResolvedValue({ accounts: [] });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Upstox live token test")).toBeInTheDocument();
+    expect(screen.getByText(/Upstox · Native/i)).toBeInTheDocument();
+    expect(screen.getByText("No accounts connected")).toBeInTheDocument();
   });
 
   it("shows Master badge on master account", async () => {

@@ -2,9 +2,10 @@
  * Tests for useBrokerAccounts
  *
  * Strategy:
- *   - useBrokerAccounts uses TanStack Query to poll /ft-api/v1/accounts every
- *     10 s, and as a side-effect syncs the result into brokerStore via setAccounts.
- *   - gatewayApi.listAccounts is mocked to control the network responses.
+ *   - useBrokerAccounts uses TanStack Query to poll gateway + native account
+ *     routes every 10 s, then syncs the merged result into brokerStore.
+ *   - gatewayApi.listAccounts and listNativeAccounts are mocked to control the
+ *     network responses independently.
  *   - useBrokerStore is mocked so we can capture calls to setAccounts without
  *     involving Zustand's persist/devtools layers.
  *   - renderHook is wrapped in a QueryClientProvider (retry: false, gcTime: 0)
@@ -19,6 +20,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { NativeAccount } from "@/services/ftApi.native";
 import type { BrokerAccount } from "@/types/broker";
 
 // ---------------------------------------------------------------------------
@@ -26,11 +28,16 @@ import type { BrokerAccount } from "@/types/broker";
 // ---------------------------------------------------------------------------
 
 const mockListAccounts = vi.fn<() => Promise<BrokerAccount[]>>();
+const mockListNativeAccounts = vi.fn<() => Promise<NativeAccount[]>>();
 
 vi.mock("@/services/gatewayApi", () => ({
   gatewayApi: {
     listAccounts: () => mockListAccounts(),
   },
+}));
+
+vi.mock("@/services/ftApi.native", () => ({
+  listNativeAccounts: () => mockListNativeAccounts(),
 }));
 
 const mockSetAccounts = vi.fn<(accounts: BrokerAccount[]) => void>();
@@ -92,6 +99,8 @@ let queryClient: QueryClient;
 beforeEach(() => {
   queryClient = makeQueryClient();
   mockListAccounts.mockReset();
+  mockListNativeAccounts.mockReset();
+  mockListNativeAccounts.mockResolvedValue([]);
   mockSetAccounts.mockReset();
 });
 
@@ -159,7 +168,7 @@ describe("useBrokerAccounts — successful response", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("calls gatewayApi.listAccounts exactly once on mount", async () => {
+  it("calls both account-list routes exactly once on mount", async () => {
     // Arrange
     mockListAccounts.mockResolvedValue([]);
 
@@ -169,6 +178,7 @@ describe("useBrokerAccounts — successful response", () => {
     });
 
     await waitFor(() => expect(mockListAccounts).toHaveBeenCalledTimes(1));
+    expect(mockListNativeAccounts).toHaveBeenCalledTimes(1);
   });
 
   it("syncs returned accounts to brokerStore when query succeeds", async () => {
@@ -187,6 +197,96 @@ describe("useBrokerAccounts — successful response", () => {
     // Assert — setAccounts is called with the full accounts array
     await waitFor(() => expect(mockSetAccounts).toHaveBeenCalledOnce());
     expect(mockSetAccounts).toHaveBeenCalledWith(accounts);
+  });
+
+  it("maps native accounts into brokerStore rows", async () => {
+    mockListAccounts.mockResolvedValue([]);
+    mockListNativeAccounts.mockResolvedValue([
+      {
+        adapter_id: "upstox",
+        account_id: "UPX-1",
+        label: "Upstox main",
+        is_primary: true,
+        has_session: true,
+        expires_at: 9_999,
+      },
+      {
+        adapter_id: "dhan",
+        account_id: "DHAN-1",
+        needs_relogin: true,
+        login_error: "login-failed",
+      },
+      {
+        adapter_id: "indmoney",
+        account_id: "IND-1",
+        login_retryable: true,
+        login_error: "Broker login is temporarily unavailable; retry later.",
+      },
+    ]);
+
+    renderHook(() => useBrokerAccounts(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await waitFor(() => expect(mockSetAccounts).toHaveBeenCalledOnce());
+    expect(mockSetAccounts).toHaveBeenCalledWith([
+      {
+        account_id: "UPX-1",
+        broker: "upstox",
+        label: "Upstox main",
+        status: "connected",
+        connected_at: null,
+        error_message: null,
+        is_primary: true,
+        source: "native",
+      },
+      {
+        account_id: "DHAN-1",
+        broker: "dhan",
+        label: "DHAN-1",
+        status: "token_expired",
+        connected_at: null,
+        error_message: "login-failed",
+        is_primary: false,
+        source: "native",
+      },
+      {
+        account_id: "IND-1",
+        broker: "indmoney",
+        label: "IND-1",
+        status: "disconnected",
+        connected_at: null,
+        error_message: "Broker login is temporarily unavailable; retry later.",
+        is_primary: false,
+        source: "native",
+      },
+    ]);
+  });
+
+  it("keeps native accounts visible when the gateway account route fails", async () => {
+    mockListAccounts.mockRejectedValue(new Error("Gateway down"));
+    mockListNativeAccounts.mockResolvedValue([
+      { adapter_id: "indmoney", account_id: "IND-1", has_session: true },
+    ]);
+
+    const { result } = renderHook(() => useBrokerAccounts(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(mockSetAccounts).toHaveBeenCalledWith([
+      {
+        account_id: "IND-1",
+        broker: "indmoney",
+        label: "IND-1",
+        status: "connected",
+        connected_at: null,
+        error_message: null,
+        is_primary: false,
+        source: "native",
+      },
+    ]);
   });
 
   it("syncs an empty accounts array to the store when the API returns none", async () => {
@@ -228,9 +328,10 @@ describe("useBrokerAccounts — successful response", () => {
 // ---------------------------------------------------------------------------
 
 describe("useBrokerAccounts — error state", () => {
-  it("sets error when gatewayApi.listAccounts throws", async () => {
+  it("sets error when both account routes throw", async () => {
     // Arrange
     mockListAccounts.mockRejectedValue(new Error("Gateway API error: 503"));
+    mockListNativeAccounts.mockRejectedValue(new Error("Native API error: 503"));
 
     // Act
     const { result } = renderHook(() => useBrokerAccounts(), {
@@ -244,10 +345,11 @@ describe("useBrokerAccounts — error state", () => {
     expect(result.current.error).toBeInstanceOf(Error);
   });
 
-  it("reports error message from the thrown Error", async () => {
+  it("reports gateway error message when both account routes throw", async () => {
     // Arrange
     const networkError = new Error("Gateway API error: 503");
     mockListAccounts.mockRejectedValue(networkError);
+    mockListNativeAccounts.mockRejectedValue(new Error("Native API error: 503"));
 
     // Act
     const { result } = renderHook(() => useBrokerAccounts(), {
@@ -260,9 +362,10 @@ describe("useBrokerAccounts — error state", () => {
     expect((result.current.error as Error).message).toBe("Gateway API error: 503");
   });
 
-  it("does not call setAccounts when the query fails", async () => {
+  it("does not call setAccounts when both account routes fail", async () => {
     // Arrange — the API is down
     mockListAccounts.mockRejectedValue(new Error("network error"));
+    mockListNativeAccounts.mockRejectedValue(new Error("native network error"));
 
     // Act
     renderHook(() => useBrokerAccounts(), {
@@ -283,6 +386,7 @@ describe("useBrokerAccounts — error state", () => {
   it("recovers: isLoading becomes false and error is set (no infinite loading)", async () => {
     // Arrange
     mockListAccounts.mockRejectedValue(new Error("timeout"));
+    mockListNativeAccounts.mockRejectedValue(new Error("native timeout"));
 
     // Act
     const { result } = renderHook(() => useBrokerAccounts(), {
@@ -383,7 +487,7 @@ describe("useBrokerAccounts — store sync side-effect", () => {
 // ---------------------------------------------------------------------------
 
 describe("useBrokerAccounts — query configuration", () => {
-  it("uses the query key ['gateway', 'accounts'] enabling cross-component cache sharing", async () => {
+  it("uses one unified query enabling cross-component cache sharing", async () => {
     // Arrange
     mockListAccounts.mockResolvedValue([]);
 
@@ -402,5 +506,6 @@ describe("useBrokerAccounts — query configuration", () => {
 
     // Assert — both hooks share cache: listAccounts called only once (deduplication)
     expect(mockListAccounts).toHaveBeenCalledTimes(1);
+    expect(mockListNativeAccounts).toHaveBeenCalledTimes(1);
   });
 });

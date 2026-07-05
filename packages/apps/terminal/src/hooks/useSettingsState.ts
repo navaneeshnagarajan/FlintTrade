@@ -10,6 +10,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { resetWsService } from "@/services/websocket";
+import {
+  persistOpenAlgoConfigPatch,
+  readOpenAlgoConfig,
+} from "@/services/ftApi.openalgo";
 
 // ---------------------------------------------------------------------------
 // Section data shapes (mirror the section component prop interfaces)
@@ -77,19 +81,7 @@ export interface DataPathsData {
   archiveStoragePath: string;
 }
 
-interface OpenAlgoConfigResponse {
-  status: string;
-  data?: {
-    api_key_configured?: boolean;
-    api_key_last4?: string;
-    host?: string;
-    ws_port?: string | number;
-  };
-}
-
-export function isAcceptedOpenAlgoConfigStatus(status?: string): boolean {
-  return !status || ["ok", "success", "partial"].includes(status);
-}
+export { isAcceptedOpenAlgoConfigStatus } from "@/services/ftApi.openalgo";
 
 function deriveWsUrl(host: string, wsPort: string): string {
   if (!host.trim()) return "";
@@ -112,20 +104,7 @@ function wsPortFromUrl(wsUrl: string): string {
 }
 
 async function persistOpenAlgoPatch(connection: Partial<ConnectionData>): Promise<void> {
-  const body: Record<string, string> = {};
-  if ("apiKey" in connection) body.api_key = connection.apiKey ?? "";
-  if ("host" in connection) body.host = connection.host ?? "";
-  if ("wsPort" in connection) body.ws_port = connection.wsPort ?? "";
-
-  const response = await fetch("/ft-api/v1/config/openalgo", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => ({})) as { status?: string; message?: string };
-  if (!response.ok || !isAcceptedOpenAlgoConfigStatus(payload.status)) {
-    throw new Error(payload.message || `HTTP ${response.status}`);
-  }
+  await persistOpenAlgoConfigPatch(connection);
 }
 
 // ---------------------------------------------------------------------------
@@ -192,11 +171,7 @@ export function useSettingsState(): SettingsState {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/ft-api/v1/config/openalgo")
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json() as Promise<OpenAlgoConfigResponse>;
-      })
+    void readOpenAlgoConfig()
       .then((payload) => {
         if (cancelled || payload.status !== "success") return;
         const data = payload.data ?? {};

@@ -526,6 +526,22 @@ class BrokerRegistry:
         """
         return self.get_session(account_id).get_history(params)
 
+    def get_option_chain(self, account_id: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Fetch option-chain data via the specified account.
+
+        Args:
+            account_id: Target account identifier.
+            params: Query parameters (symbol/underlying, exchange, optional expiry).
+
+        Returns:
+            Broker response dict with option-chain strikes.
+
+        Raises:
+            BrokerNotFoundError: If ``account_id`` is not registered.
+            SessionError: If the session is not connected.
+        """
+        return self.get_session(account_id).get_option_chain(params)
+
     def search_symbols(self, account_id: str, query: str) -> dict[str, Any]:
         """Search for instruments via the specified account.
 

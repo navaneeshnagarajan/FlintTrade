@@ -1,9 +1,8 @@
 /**
  * LeverageSection — displays current leverage settings for crypto brokers.
  *
- * Only visible when the connected broker supports leverage (crypto brokers
- * like Delta Exchange). Fetches from GET /api/broker/leverage via the
- * OpenAlgo API client.
+ * Only visible when the connected broker supports leverage. Fetches
+ * FlintTrade's backend margin/leverage snapshot.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -69,6 +68,15 @@ export function LeverageSection() {
   }
 
   const data = leverageQuery.data;
+  const hasMarginSnapshot =
+    typeof data?.available === "number"
+    || typeof data?.used === "number"
+    || typeof data?.total === "number"
+    || typeof data?.leverage_ratio === "number";
+  const usedPct =
+    typeof data?.leverage_ratio === "number"
+      ? `${Math.round(data.leverage_ratio * 1000) / 10}%`
+      : "—";
 
   return (
     <div className="space-y-6">
@@ -91,9 +99,19 @@ export function LeverageSection() {
       {data && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <LeverageTile label="Current Leverage" value={`${data.leverage}x`} />
-            <LeverageTile label="Max Leverage" value={`${data.max_leverage}x`} />
-            <LeverageTile label="Margin Mode" value={data.margin_mode} />
+            {hasMarginSnapshot ? (
+              <>
+                <LeverageTile label="Available Margin" value={data.available ?? "—"} />
+                <LeverageTile label="Used Margin" value={data.used ?? "—"} />
+                <LeverageTile label="Utilisation" value={usedPct} />
+              </>
+            ) : (
+              <>
+                <LeverageTile label="Current Leverage" value={`${data.leverage ?? "—"}x`} />
+                <LeverageTile label="Max Leverage" value={`${data.max_leverage ?? "—"}x`} />
+                <LeverageTile label="Margin Mode" value={data.margin_mode ?? "—"} />
+              </>
+            )}
           </div>
 
           {/* Info notice */}

@@ -19,9 +19,9 @@ Auth follows the public NEO v2 SDK shape:
 consumer_key=...)`` then ``totp_login(mobile_number, ucc, totp)`` mints a view
 token + session id and ``totp_validate(mpin)`` mints the trade token. The v1
 mobile+password / OTP ``session_2fa`` flow was removed in v2 — TOTP+MPIN is the
-only login. ``refresh`` is a full daily re-login. The live SDK remains
-placeholder-gated in ``brokers.lock`` until upstream licensing is cleared; do
-not add a git-install pin or redistribution path without that evidence.
+only login. ``refresh`` is a full daily re-login. The SDK pin is present and the
+adapter is mock-tested; native connect stays disabled until a maintainer-entered
+live account login/read probe passes.
 
 Cost: Kotak Neo advertises **zero brokerage** on API order execution and a free
 API. The one documented exception is that a bracket order's square-off leg
@@ -38,8 +38,9 @@ wraps the websocket callbacks into an async queue) while ``subscribe`` /
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
 ``build_broker_router``'s native-activation factory registers this adapter
 automatically once its pinned SDK is attested AND vault credentials exist;
-until then it stays dormant (the ``brokers.lock`` Kotak Neo pin is still
-PLACEHOLDER, so it is ``skipped`` and never activates today).
+until then it stays dormant. Kotak Neo remains ``connectable=False`` in the
+catalogue until the live account, static-IP, and order-path requirements are
+verified end to end.
 """
 
 from __future__ import annotations

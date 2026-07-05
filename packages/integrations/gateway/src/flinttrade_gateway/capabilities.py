@@ -174,6 +174,10 @@ class Capabilities:
     options_history_supported: bool = False
     options_history_rolling: bool = False
     streaming_supported: bool = False
+    # True only when FlintTrade has a runtime path that can open the live stream
+    # without a caller injecting a test/feed-factory shim. ``streaming_supported``
+    # records broker/API capability; this records product readiness.
+    streaming_runtime_ready: bool = False
     streaming_max_connections_per_user: int | None = None
     streaming_max_symbols_per_connection: int | None = None
     streaming_max_total_symbols: int | None = None

@@ -12,12 +12,43 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // module because Vite inlines `import.meta.env.DEV` at module-load time.
 vi.stubEnv("DEV", true);
 
+const storeState = vi.hoisted(() => ({
+  mode: "live",
+  apiKey: "test-api-key",
+  token: "test-jwt",
+  brokerState: {
+    accounts: [] as Array<{
+      account_id: string;
+      broker: string;
+      source?: "gateway" | "native";
+      status?: string;
+    }>,
+    activeAccountId: null as string | null,
+  },
+}));
+
 // buildHeaders reads these stores imperatively on every call.
 vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: { getState: () => ({ apiKey: "test-api-key" }) },
+  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey }) },
 }));
 vi.mock("@/stores/authStore", () => ({
-  useAuthStore: { getState: () => ({ token: "test-jwt" }) },
+  useAuthStore: { getState: () => ({ token: storeState.token }) },
+}));
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: { getState: () => ({ mode: storeState.mode }) },
+}));
+vi.mock("@/stores/brokerStore", () => ({
+  isBrokerAccountMatch: (
+    account: { account_id: string; broker: string; source?: "gateway" | "native" },
+    selector: string | null,
+  ) => {
+    if (!selector) return false;
+    const key = [account.source ?? "gateway", account.broker, account.account_id]
+      .map(encodeURIComponent)
+      .join(":");
+    return selector === key || selector === account.account_id;
+  },
+  useBrokerStore: { getState: () => storeState.brokerState },
 }));
 
 import {
@@ -62,6 +93,10 @@ function lastBody(): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  storeState.mode = "live";
+  storeState.apiKey = "test-api-key";
+  storeState.token = "test-jwt";
+  storeState.brokerState = { accounts: [], activeAccountId: null };
   vi.stubGlobal("fetch", vi.fn());
 });
 
@@ -92,6 +127,21 @@ describe("forever orders", () => {
     const rows = await listForeverOrders();
     expect(lastCall().url).toBe("/ft-api/api/v1/orders/forever");
     expect(rows).toStrictEqual([{ order_id: "G1" }]);
+  });
+
+  it("defaults list requests to the active native account in live native-only mode", async () => {
+    storeState.apiKey = "";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+    fetchMock().mockResolvedValue(jsonResponse({ status: "success", data: [] }));
+
+    await listForeverOrders();
+
+    expect(lastCall().url).toBe("/ft-api/api/v1/orders/forever?broker=upstox&account_id=U1");
   });
 
   it("places with variety gtt, the OCO trio, and auth headers", async () => {
@@ -127,6 +177,48 @@ describe("forever orders", () => {
     expect(body.trigger_price1).toBe(3105);
     expect(body.quantity1).toBe(10);
     expect(body.broker).toBe("dhan");
+  });
+
+  it("defaults place requests to the active native account in live native-only mode", async () => {
+    storeState.apiKey = "";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+    fetchMock().mockResolvedValue(jsonResponse({ status: "success", orderid: "G2" }));
+
+    await placeForeverOrder({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 10,
+    });
+
+    expect(lastBody()).toMatchObject({ broker: "upstox", account_id: "U1" });
+  });
+
+  it("does not override an explicit broker target when a native account is active", async () => {
+    storeState.apiKey = "";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+    fetchMock().mockResolvedValue(jsonResponse({ status: "success", orderid: "G2" }));
+
+    await placeForeverOrder({
+      broker: "dhan",
+      account_id: "D1",
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 10,
+    });
+
+    expect(lastBody()).toMatchObject({ broker: "dhan", account_id: "D1" });
   });
 
   it("modifies via PUT with an encoded order id and a changes body", async () => {
@@ -179,6 +271,28 @@ describe("super orders", () => {
     expect(url).toBe("/ft-api/api/v1/orders/super/S1");
     expect(init.method).toBe("PUT");
     expect(lastBody().changes).toStrictEqual({ leg_name: "TARGET_LEG", price: 105 });
+  });
+
+  it("defaults leg modifies to the active native account in live native-only mode", async () => {
+    storeState.apiKey = "";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+    fetchMock().mockResolvedValue(jsonResponse({ status: "success", orderid: "S1" }));
+
+    await modifySuperOrder({
+      order_id: "S1",
+      changes: { leg_name: "TARGET_LEG", price: 105 },
+    });
+
+    expect(lastBody()).toMatchObject({
+      changes: { leg_name: "TARGET_LEG", price: 105 },
+      broker: "upstox",
+      account_id: "U1",
+    });
   });
 
   it("cancels one leg via the ?leg= query parameter", async () => {
@@ -363,5 +477,34 @@ describe("brokerOrderKeys", () => {
       "A1",
     ]);
     expect(brokerOrderKeys.triggers.all).toStrictEqual(["brokerOrders", "triggers"]);
+  });
+
+  it("keys omitted targets by the active native account in live native-only mode", () => {
+    storeState.apiKey = "";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    expect(brokerOrderKeys.forever.list()).toStrictEqual([
+      "brokerOrders",
+      "forever",
+      "upstox",
+      "U1",
+    ]);
+    expect(brokerOrderKeys.superOrders.list()).toStrictEqual([
+      "brokerOrders",
+      "super",
+      "upstox",
+      "U1",
+    ]);
+    expect(brokerOrderKeys.triggers.list()).toStrictEqual([
+      "brokerOrders",
+      "triggers",
+      "upstox",
+      "U1",
+    ]);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * useBrokerCapabilities — fetches broker metadata from OpenAlgo 2.0.0.2.
+ * useBrokerCapabilities — fetches broker metadata for OpenAlgo or native mode.
  *
  * Returns supported exchanges, broker type (equity/crypto/commodity/multi),
  * and feature flags (market_protection, leverage, bracket_orders, etc.).

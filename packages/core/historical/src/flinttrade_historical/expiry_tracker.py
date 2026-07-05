@@ -22,6 +22,8 @@ Usage::
 from __future__ import annotations
 
 import logging
+import asyncio
+import inspect
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -179,6 +181,7 @@ class ExpiryTracker:
         self._db_path = db_path
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._rate_limiter = rate_limiter or SnapshotRateLimiter()
+        self.last_capture_error: str | None = None
         self._ensure_schema()
 
     # ------------------------------------------------------------------
@@ -236,13 +239,16 @@ class ExpiryTracker:
         Returns:
             Number of rows inserted.
         """
+        self.last_capture_error = None
         if self._client is None:
-            logger.error("No OpenAlgo client — cannot capture snapshot")
+            self.last_capture_error = "No OpenAlgo client configured"
+            logger.error("No OpenAlgo client configured — cannot capture snapshot")
             return 0
 
         try:
-            data = self._client.optionchain(symbol, exchange, expiry)
+            data = self._fetch_option_chain(symbol, exchange, expiry)
         except Exception as exc:
+            self.last_capture_error = str(exc)
             logger.error("Failed to fetch option chain for %s %s: %s", symbol, expiry, exc)
             return 0
 
@@ -275,6 +281,83 @@ class ExpiryTracker:
         )
         return len(insert_rows)
 
+    def _fetch_option_chain(self, symbol: str, exchange: str, expiry: str) -> Any:
+        """Call the configured broker/OpenAlgo client using supported chain shapes."""
+        if self._client is None:
+            raise RuntimeError("No OpenAlgo client configured")
+
+        payload = {
+            "symbol": symbol,
+            "underlying": symbol,
+            "exchange": exchange,
+            "expiry": expiry,
+            "expiry_date": expiry.replace("-", ""),
+        }
+        attempts: list[tuple[str, tuple[Any, ...]]] = [
+            ("get_option_chain", (payload,)),
+            ("option_chain", (symbol, exchange, expiry)),
+            ("option_chain", (symbol, exchange)),
+            ("option_chain", (symbol,)),
+            ("optionchain", (symbol, exchange, expiry)),
+            ("optionchain", (symbol, exchange)),
+            ("optionchain", (symbol,)),
+        ]
+
+        last_type_error: TypeError | None = None
+        for method_name, args in attempts:
+            method = getattr(self._client, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                return self._resolve_client_result(method(*args))
+            except TypeError as exc:
+                last_type_error = exc
+                continue
+
+        if last_type_error is not None:
+            raise last_type_error
+        raise AttributeError("Configured client does not expose an option-chain method")
+
+    @staticmethod
+    def _resolve_client_result(value: Any) -> Any:
+        """Resolve async client calls from this synchronous capture API."""
+        if not inspect.isawaitable(value):
+            return value
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(value)
+        raise RuntimeError("capture_snapshot cannot resolve async option-chain calls inside a running event loop")
+
+    @staticmethod
+    def _as_mapping(value: Any) -> dict[str, Any] | None:
+        if isinstance(value, dict):
+            return value
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump()
+            return dumped if isinstance(dumped, dict) else None
+        legacy_dict = getattr(value, "dict", None)
+        if callable(legacy_dict):
+            dumped = legacy_dict()
+            return dumped if isinstance(dumped, dict) else None
+        return None
+
+    @staticmethod
+    def _get_number(entry: dict[str, Any], keys: tuple[str, ...], default: float = 0.0) -> float:
+        for key in keys:
+            value = entry.get(key)
+            if value not in (None, ""):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+        return default
+
+    @staticmethod
+    def _get_int(entry: dict[str, Any], keys: tuple[str, ...]) -> int:
+        return int(ExpiryTracker._get_number(entry, keys, 0.0))
+
     @staticmethod
     def _parse_option_chain(
         data: Any,
@@ -291,11 +374,16 @@ class ExpiryTracker:
         """
         records: list[dict[str, Any]] = []
 
-        # Unwrap nested response
-        if isinstance(data, dict):
-            chain_list = data.get("data", data.get("optionchain", []))
+        # Unwrap typed clients, OpenAlgo envelopes, and gateway/native shapes.
+        data_map = ExpiryTracker._as_mapping(data)
+        if data_map is not None:
+            chain_list = data_map.get(
+                "chain",
+                data_map.get("strikes", data_map.get("data", data_map.get("optionchain", []))),
+            )
             if isinstance(chain_list, dict):
-                chain_list = chain_list.get("data", [])
+                chain_map = ExpiryTracker._as_mapping(chain_list) or {}
+                chain_list = chain_map.get("chain", chain_map.get("strikes", chain_map.get("data", [])))
         elif isinstance(data, list):
             chain_list = data
         else:
@@ -305,12 +393,16 @@ class ExpiryTracker:
             return records
 
         for entry in chain_list:
-            if not isinstance(entry, dict):
+            entry_map = ExpiryTracker._as_mapping(entry)
+            if entry_map is None:
                 continue
 
-            strike = float(entry.get("strike_price", entry.get("strike", 0)))
+            strike = ExpiryTracker._get_number(entry_map, ("strike_price", "strike", "strikePrice"))
             if strike <= 0:
                 continue
+
+            ce = ExpiryTracker._as_mapping(entry_map.get("ce")) or {}
+            pe = ExpiryTracker._as_mapping(entry_map.get("pe")) or {}
 
             # CE row
             records.append({
@@ -319,10 +411,14 @@ class ExpiryTracker:
                 "expiry_date": expiry,
                 "strike": strike,
                 "option_type": "CE",
-                "oi": int(entry.get("call_oi", entry.get("ce_oi", 0))),
-                "volume": int(entry.get("call_volume", entry.get("ce_volume", 0))),
-                "ltp": float(entry.get("call_ltp", entry.get("ce_ltp", 0))),
-                "iv": float(entry.get("call_iv", entry.get("ce_iv", 0))),
+                "oi": ExpiryTracker._get_int(ce, ("oi", "open_interest"))
+                or ExpiryTracker._get_int(entry_map, ("call_oi", "ce_oi")),
+                "volume": ExpiryTracker._get_int(ce, ("volume",))
+                or ExpiryTracker._get_int(entry_map, ("call_volume", "ce_volume")),
+                "ltp": ExpiryTracker._get_number(ce, ("ltp", "last_price"))
+                or ExpiryTracker._get_number(entry_map, ("call_ltp", "ce_ltp")),
+                "iv": ExpiryTracker._get_number(ce, ("iv", "implied_volatility"))
+                or ExpiryTracker._get_number(entry_map, ("call_iv", "ce_iv")),
             })
 
             # PE row
@@ -332,10 +428,14 @@ class ExpiryTracker:
                 "expiry_date": expiry,
                 "strike": strike,
                 "option_type": "PE",
-                "oi": int(entry.get("put_oi", entry.get("pe_oi", 0))),
-                "volume": int(entry.get("put_volume", entry.get("pe_volume", 0))),
-                "ltp": float(entry.get("put_ltp", entry.get("pe_ltp", 0))),
-                "iv": float(entry.get("put_iv", entry.get("pe_iv", 0))),
+                "oi": ExpiryTracker._get_int(pe, ("oi", "open_interest"))
+                or ExpiryTracker._get_int(entry_map, ("put_oi", "pe_oi")),
+                "volume": ExpiryTracker._get_int(pe, ("volume",))
+                or ExpiryTracker._get_int(entry_map, ("put_volume", "pe_volume")),
+                "ltp": ExpiryTracker._get_number(pe, ("ltp", "last_price"))
+                or ExpiryTracker._get_number(entry_map, ("put_ltp", "pe_ltp")),
+                "iv": ExpiryTracker._get_number(pe, ("iv", "implied_volatility"))
+                or ExpiryTracker._get_number(entry_map, ("put_iv", "pe_iv")),
             })
 
         return records

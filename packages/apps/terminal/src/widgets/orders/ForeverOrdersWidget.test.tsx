@@ -21,9 +21,51 @@ beforeAll(() => {
 });
 
 let mockMode = "live";
+const mockConnectionState = vi.hoisted(() => ({
+  apiKey: "test-openalgo-key",
+}));
+const mockBrokerState = vi.hoisted(() => ({
+  accounts: [] as Array<{
+    account_id: string;
+    broker: string;
+    label: string;
+    source?: string;
+    status?: string;
+  }>,
+  activeAccountId: null as string | null,
+}));
+
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector?: (s: { mode: string }) => unknown) =>
     typeof selector === "function" ? selector({ mode: mockMode }) : { mode: mockMode },
+}));
+
+vi.mock("@/stores/connectionStore", () => ({
+  useConnectionStore: Object.assign(
+    (selector?: (s: { apiKey: string }) => unknown) =>
+      typeof selector === "function" ? selector(mockConnectionState) : mockConnectionState,
+    { getState: () => mockConnectionState },
+  ),
+}));
+
+vi.mock("@/stores/brokerStore", () => ({
+  isBrokerAccountMatch: (
+    account: { account_id: string; broker: string; source?: string },
+    selector: string | null,
+  ) => {
+    if (!selector) return false;
+    const key = [
+      account.source ?? "gateway",
+      account.broker,
+      account.account_id,
+    ].map(encodeURIComponent).join(":");
+    return key === selector || account.account_id === selector;
+  },
+  useBrokerStore: Object.assign(
+    (selector?: (s: typeof mockBrokerState) => unknown) =>
+      typeof selector === "function" ? selector(mockBrokerState) : mockBrokerState,
+    { getState: () => mockBrokerState },
+  ),
 }));
 
 import ForeverOrdersWidget from "./ForeverOrdersWidget";
@@ -78,6 +120,9 @@ function renderWidget() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockMode = "live";
+  mockConnectionState.apiKey = "test-openalgo-key";
+  mockBrokerState.accounts = [];
+  mockBrokerState.activeAccountId = null;
   listRows = [LIST_ROW];
   listStatus = 200;
   listMessage = "";
@@ -109,6 +154,28 @@ describe("ForeverOrdersWidget", () => {
     const [url] = callsByMethod("GET")[0];
     expect(url).toContain("/api/v1/orders/forever");
     expect(url).toContain("broker=openalgo");
+  });
+
+  it("defaults to the active native account in live native-only mode", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      {
+        account_id: "U1",
+        broker: "upstox",
+        label: "Upstox Live",
+        source: "native",
+        status: "connected",
+      },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    const [url] = callsByMethod("GET")[0];
+    expect(url).toContain("/api/v1/orders/forever");
+    expect(url).toContain("broker=upstox");
+    expect(url).toContain("account_id=U1");
   });
 
   it("places a GTT order through the gated POST with typed fields", async () => {

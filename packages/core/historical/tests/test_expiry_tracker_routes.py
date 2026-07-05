@@ -28,6 +28,8 @@ def _mock_tracker() -> MagicMock:
             "iv": 0.18,
         }
     ]
+    tracker.capture_snapshot.return_value = 2
+    tracker.last_capture_error = None
     return tracker
 
 
@@ -35,7 +37,9 @@ def _mock_tracker() -> MagicMock:
 def app():
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
-    mod.init_expiry_tracker_routes(_mock_tracker())
+    tracker = _mock_tracker()
+    flask_app.config["TRACKER"] = tracker
+    mod.init_expiry_tracker_routes(tracker)
     flask_app.register_blueprint(mod.expiry_tracker_bp)
     return flask_app
 
@@ -96,3 +100,52 @@ def test_historical_chain_exchange_param(client):
     resp = client.get("/api/v1/historical/chain/BANKNIFTY/260327?exchange=NSE")
     assert resp.status_code == 200
     assert resp.get_json()["data"]["exchange"] == "NSE"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/historical/chain/<symbol>/<expiry>/capture
+# ---------------------------------------------------------------------------
+
+
+def test_capture_historical_chain_ok(client):
+    """200 with capture result and rows inserted."""
+    resp = client.post("/api/v1/historical/chain/nifty/260327/capture")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "success"
+    assert body["data"] == {
+        "symbol": "NIFTY",
+        "expiry": "260327",
+        "exchange": "NFO",
+        "rows_inserted": 2,
+        "captured": True,
+    }
+    client.application.config["TRACKER"].capture_snapshot.assert_called_with("NIFTY", "260327", "NFO")
+
+
+def test_capture_historical_chain_body_exchange(client):
+    """Capture accepts the exchange in the JSON body."""
+    resp = client.post(
+        "/api/v1/historical/chain/sensex/260327/capture",
+        json={"exchange": "bfo"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["data"]["symbol"] == "SENSEX"
+    assert body["data"]["exchange"] == "BFO"
+    client.application.config["TRACKER"].capture_snapshot.assert_called_with("SENSEX", "260327", "BFO")
+
+
+def test_capture_historical_chain_reports_capture_failure(client):
+    """Upstream broker/OpenAlgo failures are surfaced to the caller."""
+    tracker = client.application.config["TRACKER"]
+    tracker.capture_snapshot.return_value = 0
+    tracker.last_capture_error = "[403] optionchain: Authentication failed"
+
+    resp = client.post("/api/v1/historical/chain/NIFTY/260327/capture")
+
+    assert resp.status_code == 502
+    body = resp.get_json()
+    assert body["status"] == "error"
+    assert body["data"]["captured"] is False
+    assert body["data"]["rows_inserted"] == 0

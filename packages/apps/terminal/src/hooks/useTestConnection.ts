@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback } from "react";
+import { testOpenAlgoConnection } from "@/services/ftApi.openalgo";
 
 export type TestConnectionStatus = "idle" | "testing" | "ok" | "error";
 
@@ -22,29 +23,14 @@ export function useTestConnection(): UseTestConnectionResult {
     setStatus("testing");
     setMessage("");
     try {
-      // Route the test through our backend (same-origin) — browser → OpenAlgo
-      // direct is blocked by CORS because OpenAlgo does not send
-      // Access-Control-Allow-Origin for our origin. The backend pings
-      // server-to-server and returns a structured result.
-      const response = await fetch("/ft-api/v1/test-connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          host: host.replace(/\/+$/, ""),   // strip one or more trailing slashes
-          api_key: apiKey,
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      const data: { status?: string; message?: string } = await response
-        .json()
-        .catch(() => ({ status: "error", message: "Invalid JSON from backend" }));
+      const data = await testOpenAlgoConnection({ host, apiKey });
 
-      if (response.ok && data.status === "ok") {
+      if (data.status === "ok") {
         setStatus("ok");
         setMessage(data.message || "Connected successfully");
       } else {
         setStatus("error");
-        setMessage(data.message || `Server returned ${response.status}`);
+        setMessage(data.message || (data.httpStatus ? `Server returned ${data.httpStatus}` : "Connection test failed"));
       }
     } catch (err) {
       setStatus("error");

@@ -63,6 +63,61 @@ describe("AccountStatusPanel", () => {
     expect(link).toHaveAttribute("href", "/settings#api");
   });
 
+  it("deep-links native broker reauth to the broker settings section", async () => {
+    mockGet.mockResolvedValue({
+      accounts: [
+        {
+          account_id: "UPX1",
+          source: "native",
+          broker: "upstox",
+          broker_display: "Upstox",
+          name: "Upstox main",
+          enabled: true,
+          connected: false,
+          authenticated: false,
+          needs_reauth: true,
+          latency_ms: 0,
+          error: "Needs fresh native broker login.",
+        },
+      ],
+      summary: { total: 1, connected: 0, authenticated: 0, needs_reauth: 1 },
+    });
+    renderPanel();
+
+    expect(await screen.findByText("Upstox main")).toBeInTheDocument();
+    expect(screen.getByText(/Upstox · Native/i)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /re-authenticate upstox main/i });
+    expect(link).toHaveAttribute("href", "/settings#brokers");
+  });
+
+  it("shows retryable native broker login outages without a reauth link", async () => {
+    mockGet.mockResolvedValue({
+      accounts: [
+        {
+          account_id: "UPX1",
+          source: "native",
+          broker: "upstox",
+          broker_display: "Upstox",
+          name: "Upstox retry",
+          enabled: true,
+          connected: false,
+          authenticated: false,
+          needs_reauth: false,
+          login_retryable: true,
+          latency_ms: 0,
+          error: "Broker login is temporarily unavailable; retry later.",
+        },
+      ],
+      summary: { total: 1, connected: 0, authenticated: 0, needs_reauth: 0 },
+    });
+    renderPanel();
+
+    expect(await screen.findByText("Upstox retry")).toBeInTheDocument();
+    expect(screen.getByText("Retry later")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /re-authenticate upstox retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/need re-auth/i)).not.toBeInTheDocument();
+  });
+
   it("shows an empty state when no accounts are connected", async () => {
     mockGet.mockResolvedValue({ accounts: [], summary: { total: 0, connected: 0, authenticated: 0, needs_reauth: 0 } });
     renderPanel();

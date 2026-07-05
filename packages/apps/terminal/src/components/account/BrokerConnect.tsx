@@ -1,0 +1,600 @@
+/**
+ * BrokerConnect — shared native broker connect surface.
+ *
+ * Lets the operator connect Dhan / Upstox / Kotak Neo / IndMoney using their
+ * preferred login method (access token, PIN+TOTP, OAuth, TOTP+MPIN). The method
+ * catalogue + form fields come from the backend (`/native/brokers`), so the UI
+ * stays in lockstep with what each adapter supports. Credentials are POSTed to
+ * the local backend only. OAuth opens the broker's approval page in a new tab;
+ * the backend's loopback callback establishes the session.
+ */
+
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  Bot,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Trash2,
+  ExternalLink,
+  AlertTriangle,
+  RefreshCw,
+  Copy,
+  Star,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { BROKER_ACCOUNTS_QUERY_KEY } from "@/hooks/useBrokerAccounts";
+import {
+  listNativeBrokers,
+  listBrokerMcpCatalogue,
+  listNativeAccounts,
+  connectNativeAccount,
+  oauthStartNativeAccount,
+  removeNativeAccount,
+  setPrimaryNativeAccount,
+  reloginNativeAccount,
+  type BrokerMcpCatalogueEntry,
+  type NativeAuthMethod,
+} from "@/services/ftApi.native";
+
+const BROKERS_KEY = ["native", "brokers"] as const;
+const ACCOUNTS_KEY = ["native", "accounts"] as const;
+const MCP_KEY = ["broker", "mcp"] as const;
+
+function expiryLabel(expiresAt?: number | null): string {
+  if (!expiresAt) return "";
+  const ms = expiresAt * 1000 - Date.now();
+  if (ms <= 0) return "expired";
+  const hours = Math.floor(ms / 3_600_000);
+  const mins = Math.floor((ms % 3_600_000) / 60_000);
+  return hours > 0 ? `expires in ${hours}h ${mins}m` : `expires in ${mins}m`;
+}
+
+export function BrokerConnect() {
+  const qc = useQueryClient();
+  const brokersQuery = useQuery({ queryKey: BROKERS_KEY, queryFn: listNativeBrokers });
+  const mcpQuery = useQuery({ queryKey: MCP_KEY, queryFn: listBrokerMcpCatalogue });
+  const accountsQuery = useQuery({ queryKey: ACCOUNTS_KEY, queryFn: listNativeAccounts });
+
+  const brokers = brokersQuery.data ?? [];
+  const mcpBrokers = mcpQuery.data ?? [];
+  const [selectedBroker, setSelectedBroker] = useState<string>("");
+  const [selectedMethodId, setSelectedMethodId] = useState<string>("");
+  const [accountId, setAccountId] = useState<string>("");
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string>("");
+  const [notice, setNotice] = useState<string>("");
+
+  const broker = brokers.find((b) => b.adapter_id === selectedBroker);
+  const method: NativeAuthMethod | undefined = broker?.auth_methods.find((m) => m.id === selectedMethodId);
+  const brokerConnectable = broker?.connectable ?? false;
+  const oauthRedirectUri = broker?.oauth_redirect_uri ?? "http://127.0.0.1:5100/api/v1/native/oauth/callback";
+  const brokerPostbackUri = broker?.postback_uri ?? (
+    selectedBroker ? `http://127.0.0.1:5100/api/v1/native/postbacks/${selectedBroker}` : ""
+  );
+
+  function resetForm() {
+    setFields({});
+    setAccountId("");
+    setError("");
+    setNotice("");
+  }
+
+  function invalidateAccountQueries(delay = 0) {
+    const refresh = () => {
+      void qc.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+      void qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
+    };
+    if (delay > 0) {
+      setTimeout(refresh, delay);
+    } else {
+      refresh();
+    }
+  }
+
+  const connectMutation = useMutation({
+    mutationFn: async () => {
+      if (!broker || !method) throw new Error("Pick a broker and a login method.");
+      if (!broker.connectable) throw new Error(`${broker.display_name} native connect is coming soon.`);
+      if (!accountId.trim()) throw new Error("Enter an account ID / client code.");
+      for (const f of method.fields) {
+        if (f.required && !fields[f.name]?.trim()) throw new Error(`${f.label} is required.`);
+      }
+      if (method.kind === "oauth") {
+        const started = await oauthStartNativeAccount({
+          adapter_id: broker.adapter_id,
+          account_id: accountId.trim(),
+          api_key: fields.api_key ?? "",
+          api_secret: fields.api_secret ?? "",
+        });
+        window.open(started.auth_url, "_blank", "noopener");
+        const postback = started.postback_uri ?? brokerPostbackUri;
+        return {
+          oauth: true,
+          message: (
+            `Approve access in the new tab. Use redirect ${started.redirect_uri}. ` +
+            `Postback ${postback} is optional and needs a broker-reachable public or tunnel URL.`
+          ),
+        };
+      }
+      const result = await connectNativeAccount({
+        adapter_id: broker.adapter_id,
+        account_id: accountId.trim(),
+        credentials: Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
+      });
+      // A failed connect is a non-2xx that already threw the backend message
+      // inside connectNativeAccount; a 2xx always carries connected:true.
+      if (!result.connected) throw new Error("Login did not establish a session.");
+      return { oauth: false, message: `${broker.display_name} account ${accountId.trim()} connected.` };
+    },
+    onSuccess: (r) => {
+      setError("");
+      if (!r.oauth) {
+        setFields({});
+        setAccountId("");
+      }
+      setNotice(r.message);
+      // OAuth completes out-of-band in the callback tab; refresh accounts shortly after.
+      if (r.oauth) invalidateAccountQueries(4000);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown) => {
+      setNotice("");
+      setError(e instanceof Error ? e.message : "Connection failed.");
+    },
+  });
+
+  function copySetupUrl(label: string, value: string) {
+    void navigator.clipboard?.writeText(value);
+    setError("");
+    setNotice(`${label} copied.`);
+  }
+
+  function mcpCommand(entry: BrokerMcpCatalogueEntry): string {
+    const runnable = entry.mcp.client_configs.find((config) => config.command);
+    if (!runnable?.command) return "";
+    return [runnable.command, ...(runnable.args ?? [])].join(" ");
+  }
+
+  const removeMutation = useMutation({
+    mutationFn: (sel: { adapter: string; account: string }) => removeNativeAccount(sel.adapter, sel.account),
+    onSuccess: (_r, sel) => {
+      setError("");
+      setNotice(`${sel.adapter} account ${sel.account} disconnected.`);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown, sel) => {
+      setNotice("");
+      setError(
+        e instanceof Error
+          ? e.message
+          : `Could not disconnect ${sel.adapter} account ${sel.account}.`,
+      );
+    },
+  });
+
+  const setPrimaryMutation = useMutation({
+    mutationFn: (sel: { adapter: string; account: string }) => setPrimaryNativeAccount(sel.adapter, sel.account),
+    onSuccess: (_r, sel) => {
+      setError("");
+      setNotice(`${sel.adapter} account ${sel.account} set as primary.`);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown, sel) => {
+      setNotice("");
+      setError(
+        e instanceof Error
+          ? e.message
+          : `Could not set ${sel.adapter} account ${sel.account} as primary.`,
+      );
+    },
+  });
+
+  const reloginMutation = useMutation({
+    // Replay the stored (replayable) material first — a one-click morning
+    // re-auth for accounts whose vault token is still valid (G5).
+    mutationFn: (sel: { adapter: string; account: string }) => reloginNativeAccount(sel.adapter, sel.account),
+    onSuccess: (_r, sel) => {
+      setError("");
+      setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
+      invalidateAccountQueries();
+    },
+    onError: (e: unknown, sel) => {
+      // Stored material is stale (single-use TOTP/OAuth code, expired token) —
+      // prefill the connect form so the operator only enters what's missing.
+      setSelectedBroker(sel.adapter);
+      const first = brokers.find((b) => b.adapter_id === sel.adapter)?.auth_methods[0]?.id ?? "";
+      setSelectedMethodId(first);
+      setFields({});
+      setAccountId(sel.account);
+      setNotice("");
+      setError(
+        e instanceof Error
+          ? `${e.message} Enter fresh credentials below to re-authenticate.`
+          : "Re-login failed — enter fresh credentials below.",
+      );
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-heading font-semibold text-base text-text-primary mb-1">Brokers</h2>
+        <p className="text-sm text-text-muted">
+          Connect your broker accounts. Pick the login method you prefer for each broker — credentials
+          go only to your local FlintTrade backend.
+        </p>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-secondary">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+        <p>
+          Native broker login and reads are verified for Dhan, Upstox, and INDmoney. Kotak Neo stays
+          visible here as a catalogued adapter and remains disabled until its live checks pass.
+        </p>
+      </div>
+
+      {mcpBrokers.length > 0 && (
+        <div className="space-y-3" aria-label="Broker MCP assistants">
+          <div className="flex items-center gap-2">
+            <Bot className="size-4 text-accent" aria-hidden="true" />
+            <h3 className="text-sm font-medium text-text-secondary">Broker MCP assistants</h3>
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
+            {mcpBrokers.map((entry) => {
+              const command = mcpCommand(entry);
+              const loginSteps = entry.mcp.login_steps.slice(0, 3);
+              const cautions = entry.mcp.cautions.slice(0, 3);
+              return (
+                <article
+                  key={entry.adapter_id}
+                  className="rounded-lg border border-border-default bg-surface-card/60 p-3"
+                  data-testid={`broker-mcp-${entry.adapter_id}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-medium text-text-primary">{entry.display_name}</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <Badge variant="outline" className="text-xxs">
+                          {entry.mcp.read_only ? "Read-only" : "MCP trade tools"}
+                        </Badge>
+                        {!entry.native && (
+                          <Badge variant="outline" className="text-xxs">No native connect</Badge>
+                        )}
+                      </div>
+                    </div>
+                    <a
+                      href={entry.mcp.docs_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`${entry.display_name} MCP docs`}
+                      className="inline-flex size-8 items-center justify-center rounded-md text-text-muted hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      <ExternalLink className="size-4" aria-hidden="true" />
+                    </a>
+                  </div>
+
+                  <p className="mt-2 text-xs text-text-muted">{entry.mcp.auth_mode}</p>
+                  <p className="mt-1 text-xxs text-text-muted">{entry.mcp.reauth}</p>
+
+                  {loginSteps.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      <div className="text-xs font-medium text-text-secondary">MCP login</div>
+                      <ol className="list-decimal space-y-1 pl-4 text-xxs text-text-muted">
+                        {loginSteps.map((step, index) => (
+                          <li key={`${entry.adapter_id}-mcp-login-${index}`} className="break-words">
+                            {step}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+
+                  <div className="mt-3 grid grid-cols-[1fr_auto] items-end gap-2">
+                    <div>
+                      <Label className="text-xs text-text-secondary mb-1.5 block">MCP URL</Label>
+                      <code
+                        aria-label={`${entry.display_name} MCP URL value`}
+                        className="block min-h-9 rounded-md border border-border-default bg-surface-elevated px-3 py-2 font-mono text-xs text-text-primary break-all"
+                      >
+                        {entry.mcp.remote_url}
+                      </code>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Copy ${entry.display_name} MCP URL`}
+                      onClick={() => copySetupUrl(`${entry.display_name} MCP URL`, entry.mcp.remote_url)}
+                    >
+                      <Copy className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+
+                  {command && (
+                    <div className="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
+                      <div>
+                        <Label className="text-xs text-text-secondary mb-1.5 block">Command</Label>
+                        <code
+                          aria-label={`${entry.display_name} MCP command value`}
+                          className="block min-h-9 rounded-md border border-border-default bg-surface-elevated px-3 py-2 font-mono text-xs text-text-primary break-all"
+                        >
+                          {command}
+                        </code>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Copy ${entry.display_name} MCP command`}
+                        onClick={() => copySetupUrl(`${entry.display_name} MCP command`, command)}
+                      >
+                        <Copy className="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {entry.mcp.use_cases.slice(0, 4).map((useCase) => (
+                      <Badge
+                        key={useCase}
+                        variant="secondary"
+                        className="max-w-full whitespace-normal break-words text-left text-xxs leading-snug"
+                      >
+                        {useCase}
+                      </Badge>
+                    ))}
+                  </div>
+
+                  {cautions.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-xxs text-warning">
+                      {cautions.map((caution, index) => (
+                        <li key={`${entry.adapter_id}-mcp-caution-${index}`} className="break-words">
+                          {caution}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Connected accounts */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium text-text-secondary">Connected accounts</h3>
+        {(accountsQuery.data ?? []).length === 0 ? (
+          <p className="text-sm text-text-muted">No broker accounts connected yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {(accountsQuery.data ?? []).map((a) => (
+              <li
+                key={`${a.adapter_id}:${a.account_id}`}
+                className="flex items-center justify-between rounded-lg border border-border-default bg-surface-card p-3"
+              >
+                <div className="flex items-center gap-3">
+                  {a.has_session ? (
+                    <CheckCircle2 className="size-4 text-profit" aria-hidden="true" />
+                  ) : a.needs_relogin || a.login_retryable ? (
+                    <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
+                  ) : (
+                    <XCircle className="size-4 text-loss" aria-hidden="true" />
+                  )}
+                  <div>
+                    <div className="text-sm text-text-primary font-medium">
+                      {a.label || a.adapter_id} · {a.account_id}
+                    </div>
+                    <div className="text-xs text-text-muted">
+                      {a.adapter_id}
+                      {a.is_primary ? " · primary" : ""}
+                      {a.has_session
+                        ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
+                        : a.needs_relogin
+                          ? " · needs fresh login"
+                          : a.login_retryable
+                            ? " · retry later"
+                          : " · no live session"}
+                    </div>
+                    {!a.has_session && (a.needs_relogin || a.login_retryable) && a.login_error && (
+                      <div className="text-xxs text-warning mt-0.5">{a.login_error}</div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {a.has_session && !a.is_primary && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Set ${a.adapter_id} ${a.account_id} as primary`}
+                      onClick={() => setPrimaryMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                      disabled={setPrimaryMutation.isPending}
+                    >
+                      <Star className="size-4" aria-hidden="true" />
+                    </Button>
+                  )}
+                  {!a.has_session && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Re-authenticate ${a.adapter_id} ${a.account_id}`}
+                      onClick={() => reloginMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                      disabled={reloginMutation.isPending}
+                    >
+                      <RefreshCw
+                        className={`size-4 ${reloginMutation.isPending ? "animate-spin" : ""}`}
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Disconnect ${a.adapter_id} ${a.account_id}`}
+                    onClick={() => removeMutation.mutate({ adapter: a.adapter_id, account: a.account_id })}
+                    disabled={removeMutation.isPending}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Connect a new account */}
+      <div className="space-y-4 rounded-lg border border-border-default bg-surface-card/60 p-4">
+        <h3 className="text-sm font-medium text-text-secondary">Connect a broker</h3>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="broker-select" className="text-xs text-text-secondary mb-1.5 block">Broker</Label>
+            <Select
+              value={selectedBroker}
+              onValueChange={(v) => {
+                setSelectedBroker(v);
+                const first = brokers.find((b) => b.adapter_id === v)?.auth_methods[0]?.id ?? "";
+                setSelectedMethodId(first);
+                resetForm();
+              }}
+            >
+              <SelectTrigger id="broker-select"><SelectValue placeholder="Select a broker" /></SelectTrigger>
+              <SelectContent>
+                {brokers.map((b) => (
+                  <SelectItem key={b.adapter_id} value={b.adapter_id} disabled={!b.connectable}>
+                    <span>{b.display_name}</span>
+                    {!b.connectable && <span className="text-xs text-text-muted"> · Coming soon</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {broker && brokerConnectable && (
+            <div>
+              <Label htmlFor="method-select" className="text-xs text-text-secondary mb-1.5 block">Login method</Label>
+              <Select value={selectedMethodId} onValueChange={(v) => { setSelectedMethodId(v); setFields({}); setError(""); }}>
+                <SelectTrigger id="method-select"><SelectValue placeholder="Select a method" /></SelectTrigger>
+                <SelectContent>
+                  {broker.auth_methods.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+
+        {broker && !brokerConnectable && (
+          <div role="status" className="flex items-center gap-2 text-sm text-warning">
+            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+            {broker.display_name} native connect is coming soon.
+          </div>
+        )}
+
+        {method && brokerConnectable && (
+          <div className="space-y-3">
+            <p className="text-xs text-text-muted">{method.description}</p>
+            {method.kind === "oauth" && <Badge variant="outline" className="text-xs">Opens {broker?.display_name} in a new tab</Badge>}
+
+            {method.kind === "oauth" && (
+              <div className="space-y-2">
+                {[
+                  {
+                    label: "Redirect URL",
+                    value: oauthRedirectUri,
+                    help: "Required for OAuth approval callbacks.",
+                  },
+                  {
+                    label: "Postback URL (optional)",
+                    value: brokerPostbackUri,
+                    help: "Use only with a broker-reachable public or tunnel URL. Localhost is for FlintTrade diagnostics.",
+                  },
+                ].map(({ label, value, help }) => (
+                  <div key={label} className="grid grid-cols-[1fr_auto] items-end gap-2">
+                    <div>
+                      <Label className="text-xs text-text-secondary mb-1.5 block">{label}</Label>
+                      <Input readOnly value={value} className="font-mono text-xs" />
+                      <p className="text-xxs text-text-muted mt-1">{help}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Copy ${label.toLowerCase()}`}
+                      onClick={() => copySetupUrl(label, value)}
+                    >
+                      <Copy className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="account-id" className="text-xs text-text-secondary mb-1.5 block">Account ID / client code</Label>
+              <Input
+                id="account-id"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                placeholder="e.g. your client code"
+              />
+            </div>
+
+            {method.fields.map((f) => (
+              <div key={f.name}>
+                <Label htmlFor={`field-${f.name}`} className="text-xs text-text-secondary mb-1.5 block">
+                  {f.label}{!f.required && <span className="text-text-muted"> (optional)</span>}
+                </Label>
+                <Input
+                  id={`field-${f.name}`}
+                  type={f.secret ? "password" : "text"}
+                  autoComplete={f.secret ? "off" : undefined}
+                  value={fields[f.name] ?? ""}
+                  onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                />
+                {f.help && <p className="text-xxs text-text-muted mt-1">{f.help}</p>}
+              </div>
+            ))}
+
+            <Button
+              onClick={() => connectMutation.mutate()}
+              disabled={connectMutation.isPending || !brokerConnectable}
+              className="w-full sm:w-auto"
+            >
+              {connectMutation.isPending && <Loader2 className="size-4 mr-2 animate-spin" aria-hidden="true" />}
+              {method.kind === "oauth" ? `Log in with ${broker?.display_name}` : "Connect"}
+            </Button>
+          </div>
+        )}
+
+        {/* Shared feedback — visible for connect AND re-authenticate actions,
+            so a relogin result shows even before a broker is picked. */}
+        {error && (
+          <div role="alert" className="text-sm text-loss flex items-center gap-2">
+            <XCircle className="size-4 shrink-0" aria-hidden="true" />{error}
+          </div>
+        )}
+        {notice && (
+          <div role="status" className="text-sm text-profit flex items-center gap-2">
+            {method?.kind === "oauth" ? <ExternalLink className="size-4 shrink-0" aria-hidden="true" /> : <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />}
+            {notice}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

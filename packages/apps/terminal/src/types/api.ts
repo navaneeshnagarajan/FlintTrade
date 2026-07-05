@@ -146,11 +146,15 @@ export interface BrokerCapabilities {
   };
 }
 
-// --- Leverage Settings (crypto brokers) ---
+// --- Leverage / Margin Settings ---
 export interface LeverageSettings {
-  leverage: number;
-  max_leverage: number;
-  margin_mode: string;
+  leverage?: number;
+  max_leverage?: number;
+  margin_mode?: string;
+  available?: number;
+  used?: number;
+  total?: number;
+  leverage_ratio?: number;
   [key: string]: unknown;
 }
 
@@ -300,6 +304,11 @@ export interface IVSmileEntry {
 // --- Max Pain ---
 export interface MaxPainData {
   max_pain_strike: number;
+  total_loss_at_max_pain?: number;
+  strike_losses?: Array<{
+    strike: number;
+    total_loss: number;
+  }>;
   strikes: Array<{
     strike: number;
     call_oi: number;

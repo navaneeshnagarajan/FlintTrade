@@ -88,6 +88,22 @@ def test_receive_tradingview_ok(client):
     assert body["status"] in {"success", "error", "executed"}
 
 
+def test_receive_named_chartink_endpoint_ok(client):
+    """Named registry endpoints dispatch through the same receiver path."""
+    payload = {"symbol": "NIFTY", "action": "BUY", "qty": 50}
+    with patch(
+        "flinttrade_webhooks.webhook_routes._run_dispatch",
+        return_value={"status": "executed", "order_id": "OID123"},
+    ):
+        resp = client.post(
+            "/v1/webhook/chartink/scan1",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "success"
+
+
 def test_receive_invalid_source(client):
     """404 for unknown webhook source."""
     resp = client.post(

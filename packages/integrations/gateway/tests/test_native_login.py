@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import pytest
 
 from flinttrade_gateway.native_login import (
+    BROKER_LOGIN_RETRY_MESSAGE,
+    CREDENTIALS_UNAVAILABLE_MESSAGE,
+    SESSION_INVALID_RELOGIN_MESSAGE,
     establish_native_session,
     establish_native_sessions,
 )
@@ -80,7 +84,7 @@ def test_establish_native_session_fails_closed() -> None:
     assert registry.sessions == {}
 
 
-def test_establish_all_isolates_per_selector_failures() -> None:
+def test_establish_all_isolates_per_selector_failures(caplog) -> None:
     adapters = {"dhan": _FakeAdapter("dhan"), "upstox": _FakeAdapter("upstox", fail=True)}
     registry = _FakeRegistry()
     store = _FakeStore(
@@ -89,27 +93,48 @@ def test_establish_all_isolates_per_selector_failures() -> None:
             ("upstox", "222"): {"access_token": "u"},
         }
     )
-    results = asyncio.run(
-        establish_native_sessions(
-            adapters, registry, store, ["dhan:111", "upstox:222", "openalgo:default"]
-        )
-    )
+    caplog.set_level(logging.INFO, logger="flinttrade.gateway.native_login")
+    results = asyncio.run(establish_native_sessions(
+        adapters, registry, store, ["dhan:111", "upstox:222", "openalgo:default"]
+    ))
     # Dhan logs in; Upstox fails but is isolated; the bridge selector is skipped.
     assert results["dhan:111"] == "ok"
-    assert results["upstox:222"].startswith("login-failed")
+    assert results["upstox:222"] == SESSION_INVALID_RELOGIN_MESSAGE
     assert "openalgo:default" not in results
     assert ("dhan", "111") in registry.sessions
     assert ("upstox", "222") not in registry.sessions
+    logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "upstox:222" not in logs
+    assert "broker rejected credentials" not in logs
 
 
-def test_establish_all_skips_selectors_without_credentials() -> None:
+def test_establish_all_skips_selectors_without_credentials(caplog) -> None:
     adapters = {"dhan": _FakeAdapter("dhan")}
     registry = _FakeRegistry()
     store = _FakeStore({})  # no rows
-    results = asyncio.run(
-        establish_native_sessions(adapters, registry, store, ["dhan:111"])
-    )
-    assert results["dhan:111"].startswith("no-credentials")
+    caplog.set_level(logging.INFO, logger="flinttrade.gateway.native_login")
+    results = asyncio.run(establish_native_sessions(adapters, registry, store, ["dhan:111"]))
+    assert results["dhan:111"] == CREDENTIALS_UNAVAILABLE_MESSAGE
+    assert registry.sessions == {}
+    logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "dhan:111" not in logs
+
+
+def test_establish_all_reports_retry_for_transient_login_failure() -> None:
+    import requests
+
+    class _TransientLoginAdapter:
+        async def login(self, _credentials):
+            raise requests.exceptions.ConnectionError("temporary network outage for account UPXTRANSIENT")
+
+    adapters = {"upstox": _TransientLoginAdapter()}
+    registry = _FakeRegistry()
+    store = _FakeStore({("upstox", "UPXTRANSIENT"): {"access_token": "token-value"}})
+
+    results = asyncio.run(establish_native_sessions(adapters, registry, store, ["upstox:UPXTRANSIENT"]))
+
+    assert results["upstox:UPXTRANSIENT"] == BROKER_LOGIN_RETRY_MESSAGE
+    assert "UPXTRANSIENT" not in results["upstox:UPXTRANSIENT"]
     assert registry.sessions == {}
 
 
@@ -294,9 +319,34 @@ def test_verify_drops_session_on_real_auth_failure() -> None:
     registry = _FakeRegistry()
     registry.sessions[("upstox", "DEAD")] = _FakeSession("upstox", "DEAD")
     err = asyncio.run(verify_native_session(_DeadTokenAdapter(), registry, "upstox", "DEAD"))
-    assert err is not None
-    assert "token verification failed" in err
+    assert err == SESSION_INVALID_RELOGIN_MESSAGE
     assert ("upstox", "DEAD") not in registry.sessions  # dropped
+
+
+def test_verify_auth_failure_status_does_not_echo_broker_payload() -> None:
+    """Broker SDK exceptions can contain account ids or raw payload fragments.
+
+    The replay verifier should only return the safe re-login status that the UI
+    can surface, never the exception string itself.
+    """
+    import asyncio
+
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class _DeadTokenAdapter:
+        async def funds(self, _session):
+            raise RuntimeError(
+                "401 Unauthorized: access token expired for account UPXSECRET123 token abcdef1234567890"
+            )
+
+    registry = _FakeRegistry()
+    registry.sessions[("upstox", "UPXSECRET123")] = _FakeSession("upstox", "UPXSECRET123")
+    err = asyncio.run(verify_native_session(_DeadTokenAdapter(), registry, "upstox", "UPXSECRET123"))
+
+    assert err == SESSION_INVALID_RELOGIN_MESSAGE
+    assert "UPXSECRET123" not in err
+    assert "abcdef1234567890" not in err
+    assert ("upstox", "UPXSECRET123") not in registry.sessions
 
 
 def test_verify_evicts_typed_auth_failure_despite_service_phrasing() -> None:

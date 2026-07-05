@@ -23,6 +23,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from . import broker_registry_reads as broker_reads
 from .oi_analytics import OIAnalytics, OISnapshot
 from .option_chain import LOT_SIZES  # noqa: F401 — imported for symmetry with analysis_routes
 
@@ -101,8 +102,11 @@ def _chain_from_registry(
     Raises:
         Exception: If the registry call fails.
     """
-    chain_data = registry.get_option_chain(
-        symbol=symbol, exchange=exchange, expiry=expiry
+    chain_data = broker_reads.get_option_chain(
+        registry,
+        symbol=symbol,
+        exchange=exchange,
+        expiry=expiry,
     )
     spot = float(chain_data.get("spot", 24000.0))
     snapshots: list[OISnapshot] = []

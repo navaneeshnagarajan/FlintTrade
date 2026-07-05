@@ -162,7 +162,7 @@ export function HoldingsTab() {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
         <RefreshCw className="size-5 animate-spin" />
-        <span className="text-sm">Fetching holdings from OpenAlgo...</span>
+        <span className="text-sm">Fetching holdings from your active broker...</span>
       </div>
     );
   }

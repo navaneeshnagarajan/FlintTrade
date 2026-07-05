@@ -343,6 +343,22 @@ class BrokerSession:
         assert self._auth_token is not None
         return self._load_adapter().get_history(params, self._auth_token)
 
+    def get_option_chain(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Fetch option-chain data for an underlying.
+
+        Args:
+            params: Query parameters (symbol/underlying, exchange, optional expiry).
+
+        Returns:
+            Broker response dict with option-chain strikes.
+
+        Raises:
+            SessionError: If the session is not connected.
+        """
+        self._ensure_connected()
+        assert self._auth_token is not None
+        return self._load_adapter().get_option_chain(params, self._auth_token)
+
     def search_symbols(self, query: str) -> dict[str, Any]:
         """Search for instruments by name or ticker.
 

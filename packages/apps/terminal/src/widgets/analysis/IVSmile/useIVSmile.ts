@@ -1,6 +1,6 @@
 /**
  * useIVSmile — TanStack Query hook for IV Smile curve data.
- * Fetches from FlintTrade backend /ft-api/api/v1/iv_smile via POST.
+ * Fetches from FlintTrade backend /ft-api/api/v1/ivsmile via POST.
  */
 
 import { useQuery } from "@tanstack/react-query";

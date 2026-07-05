@@ -174,10 +174,10 @@ export default function TickerBar() {
 
       {!hasData && (
         <button
-          onClick={() => navigate("/settings#api")}
+          onClick={() => navigate("/settings#brokers")}
           className="text-xxs text-text-muted hover:text-accent px-3 select-none transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none rounded"
         >
-          Connect OpenAlgo for live prices →
+          Connect broker for live prices →
         </button>
       )}
 

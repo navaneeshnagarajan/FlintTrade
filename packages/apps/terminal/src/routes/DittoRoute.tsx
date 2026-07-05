@@ -128,6 +128,21 @@ const DEFAULT_ACCOUNT_FORM = {
   isMaster: false,
 };
 
+function BrokerOperationsPanels() {
+  return (
+    <>
+      {/* Connected brokers + daily reauth status + OpenAlgo connection state */}
+      <AccountStatusPanel />
+
+      {/* Smart routing suggestions — which native broker for which job */}
+      <BrokerRecommendations />
+
+      {/* Per-broker API rate-limit controls */}
+      <BrokerRateLimitsPanel />
+    </>
+  );
+}
+
 function AccountsTab() {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -394,7 +409,8 @@ function AccountsTab() {
 
   if (!isLoading && accounts.length === 0) {
     return (
-      <>
+      <div className="space-y-6">
+        <BrokerOperationsPanels />
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <Users className="size-8 text-text-muted" />
           <p className="text-sm text-text-muted">No accounts connected</p>
@@ -405,7 +421,7 @@ function AccountsTab() {
           </Button>
         </div>
         {addAccountDialog}
-      </>
+      </div>
     );
   }
 
@@ -426,14 +442,7 @@ function AccountsTab() {
         <SummaryCard label="Active Accounts" value={`${activeCount} / ${accounts.length}`} />
       </div>
 
-      {/* Connected brokers + daily reauth status + OpenAlgo connection state */}
-      <AccountStatusPanel />
-
-      {/* Smart routing suggestions — which native broker for which job */}
-      <BrokerRecommendations />
-
-      {/* Per-broker API rate-limit controls */}
-      <BrokerRateLimitsPanel />
+      <BrokerOperationsPanels />
 
       {/* Actions row */}
       <div className="flex items-center justify-between">

@@ -22,21 +22,29 @@ authenticated app session may mutate broker registration, ACLs, and the
 credential vault). The JWT's ``sub`` doubles as the ACL actor so the right
 operator principal is authorised (falls back to the single-operator account
 username otherwise). The OAuth callback is a browser redirect GET protected by
-its one-shot ``state`` token, so the write guard does not apply to it.
+its one-shot ``state`` token when the broker returns one; Dhan's app-consent
+flow is limited to one unambiguous pending ``tokenId`` callback.
 """
 
 from __future__ import annotations
 
 import functools
 import html
+import inspect
 import json
 import logging
+import re
 import threading
+import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, jsonify, request
 
+from flinttrade_core.models import Order
 from flinttrade_gateway.adapter import BROKER_CATALOG
+from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.native_accounts")
@@ -81,6 +89,8 @@ def _guard_account_writes() -> Any | None:
     the loopback allowance; POST/DELETE/PUT/PATCH mutate broker registration,
     ACLs, or the vault and must come from the operator's app session.
     """
+    if request.path.startswith(f"{native_accounts_bp.url_prefix}/postbacks/"):
+        return None
     if request.method in ("POST", "DELETE", "PUT", "PATCH"):
         from .auth_routes import require_operator_session  # noqa: PLC0415
 
@@ -142,6 +152,94 @@ def _public_connect_failure_body() -> dict[str, Any]:
         },
         "message": "Login did not establish a session; credentials were not kept.",
     }
+
+
+def _default_native_postback_uri(adapter_id: str) -> str:
+    """Return the native postback receiver URL.
+
+    The default loopback URL is useful for local diagnostics only; broker
+    portals can deliver postbacks to it only when the base URL is replaced with a
+    broker-reachable public or tunnelled URL.
+    """
+    import os  # noqa: PLC0415
+
+    base = os.environ.get("FLINTTRADE_NATIVE_POSTBACK_BASE_URL", "http://127.0.0.1:5100").rstrip("/")
+    return f"{base}/api/v1/native/postbacks/{adapter_id}"
+
+
+_POSTBACK_SECRET_KEYS = {
+    "accountid",
+    "apikey",
+    "apisecret",
+    "authorization",
+    "auth",
+    "bearer",
+    "brokerorderid",
+    "clientcode",
+    "clientid",
+    "email",
+    "exchangeorderid",
+    "ip",
+    "ipaddress",
+    "mobile",
+    "mobilenumber",
+    "omsorderid",
+    "orderid",
+    "phone",
+    "phonenumber",
+    "primaryip",
+    "raw",
+    "secondaryip",
+    "secret",
+    "token",
+    "tradeid",
+    "ucc",
+    "userid",
+}
+_POSTBACK_VALUE_PATTERNS = (
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+    re.compile(r"(?<!\d)(?:\+?91[-\s]?)?[6-9]\d{9}(?!\d)"),
+    re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"),
+    re.compile(r"\b[A-Za-z0-9_-]{20,}\b"),
+)
+
+
+def _normalise_postback_key(key: Any) -> str:
+    """Return a lower alphanumeric key for secret-field matching."""
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+def _redact_postback_string(value: str) -> str:
+    """Redact token-like substrings from otherwise useful status text."""
+    redacted = value
+    for pattern in _POSTBACK_VALUE_PATTERNS:
+        redacted = pattern.sub("[redacted]", redacted)
+    return redacted
+
+
+def _redacted_postback_snapshot(payload: Any) -> Any:
+    """Keep a small in-memory postback trail without retaining direct IDs."""
+    if isinstance(payload, dict):
+        redacted: dict[str, Any] = {}
+        for key, value in payload.items():
+            key_l = _normalise_postback_key(key)
+            if key_l in _POSTBACK_SECRET_KEYS or any(
+                len(secret) > 3 and secret in key_l for secret in _POSTBACK_SECRET_KEYS
+            ):
+                redacted[str(key)] = "[redacted]"
+            elif isinstance(value, dict | list):
+                redacted[str(key)] = _redacted_postback_snapshot(value)
+            elif isinstance(value, str):
+                redacted[str(key)] = _redact_postback_string(value)
+            else:
+                redacted[str(key)] = value
+        return redacted
+    if isinstance(payload, list):
+        return [_redacted_postback_snapshot(item) for item in payload[:20]]
+    if isinstance(payload, str):
+        return _redact_postback_string(payload)
+    return payload
 
 
 def _register_selector_in_workspace(
@@ -234,8 +332,15 @@ def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> None:
     if selector in brokers.get("registered", []):
         brokers["registered"].remove(selector)
     brokers.get("account_acls", {}).get(adapter_id, {}).pop(account_id, None)
-    if brokers.get("execution", {}).get("default") == selector:
-        brokers["execution"]["default"] = ""
+    execution = brokers.setdefault("execution", {})
+    registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
+    if execution.get("default") == selector:
+        if "openalgo:default" in registered:
+            execution["default"] = "openalgo:default"
+        elif registered:
+            execution["default"] = registered[0]
+        else:
+            execution["default"] = ""
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -275,6 +380,16 @@ def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str
     }
 
 
+def _stored_native_account(store: Any, adapter_id: str, account_id: str) -> dict[str, Any] | None:
+    """Return a vault metadata row for one native selector, without decrypting it."""
+    for row in store.list_accounts():
+        row_adapter = str(row.get("adapter_id") or row.get("broker") or "")
+        row_account = str(row.get("account_id") or "")
+        if row_adapter == adapter_id and row_account == account_id:
+            return row
+    return None
+
+
 def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, Any]:
     """Rebuild the router and log the native in; return its login result.
 
@@ -293,6 +408,36 @@ def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, A
     )
     results = _reestablish_native_sessions(app, verify=True)
     return results
+
+
+def _restore_vault_after_failed_store(
+    store: Any,
+    *,
+    account_id: str,
+    adapter_id: str,
+    label: str,
+    is_new_account: bool,
+    prior_meta: dict[str, Any] | None,
+    prior_credentials: dict[str, Any] | None,
+) -> None:
+    """Undo the vault overwrite made by a failed connect transaction."""
+    if is_new_account:
+        try:
+            remove_for = getattr(store, "remove_for", None)
+            if callable(remove_for):
+                remove_for(adapter_id, account_id)
+            else:
+                store.remove(account_id)
+        except Exception:  # noqa: BLE001 - best effort; nothing to clean up
+            pass
+    elif prior_credentials is not None:
+        try:
+            store.store(
+                account_id, adapter_id, str((prior_meta or {}).get("label") or label),
+                prior_credentials, is_primary=bool((prior_meta or {}).get("is_primary")), adapter_id=adapter_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not restore prior native broker vault row")
 
 
 @_serialized
@@ -352,6 +497,19 @@ def _do_connect(
         _register_selector_in_workspace(adapter_id, account_id, actor_id, is_primary)
     except Exception:  # noqa: BLE001
         logger.error("Failed to register native broker selector in workspace")
+        try:
+            _restore_workspace(ws_snapshot)
+        except Exception:  # noqa: BLE001
+            logger.warning("Workspace rollback failed after native selector registration error")
+        _restore_vault_after_failed_store(
+            store,
+            account_id=account_id,
+            adapter_id=adapter_id,
+            label=label,
+            is_new_account=is_new_account,
+            prior_meta=prior_meta,
+            prior_credentials=prior_credentials,
+        )
         return {"status": "error", "message": "Could not register broker selector"}, 500
 
     login_results = _activate_after_credentials(adapter_id, account_id)
@@ -375,22 +533,29 @@ def _do_connect(
         if is_new_account:
             # Brand-new connect that never established a session — purge the
             # just-stored row so a dead OAuth code / stale TOTP is not replayed.
-            try:
-                store.remove(account_id)
-            except Exception:  # noqa: BLE001 - best effort; nothing to clean up
-                pass
+            _restore_vault_after_failed_store(
+                store,
+                account_id=account_id,
+                adapter_id=adapter_id,
+                label=label,
+                is_new_account=is_new_account,
+                prior_meta=prior_meta,
+                prior_credentials=prior_credentials,
+            )
         elif prior_credentials is not None:
             # Re-connect of an existing account: restore the FULL prior vault row
             # (credentials + label + is_primary) the store.store() overwrite just
             # clobbered — update_credentials_for alone would leave the metadata
             # wrong.
-            try:
-                store.store(
-                    account_id, adapter_id, str(prior_meta.get("label") or label),
-                    prior_credentials, is_primary=bool(prior_meta.get("is_primary")), adapter_id=adapter_id,
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning("Could not restore prior native broker vault row")
+            _restore_vault_after_failed_store(
+                store,
+                account_id=account_id,
+                adapter_id=adapter_id,
+                label=label,
+                is_new_account=is_new_account,
+                prior_meta=prior_meta,
+                prior_credentials=prior_credentials,
+            )
     return {
         "status": "success" if connected else "error",
         "data": {
@@ -422,6 +587,9 @@ def list_native_brokers() -> Any:
             "display_name": info.display_name,
             "connectable": info.connectable,
             "auth_methods": [m.model_dump() for m in info.auth_methods],
+            "mcp": info.mcp.model_dump() if info.mcp is not None else None,
+            "oauth_redirect_uri": _default_oauth_redirect_uri(),
+            "postback_uri": _default_native_postback_uri(info.name),
         }
         for info in BROKER_CATALOG.values()
         if info.native
@@ -464,11 +632,12 @@ def connect_native_account() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# OAuth redirect flow (Upstox, and any native with an oauth_redirect auth flow).
-# The operator opens the broker's authorisation dialog; the broker redirects the
-# browser back to our loopback callback with a single-use ``code``, which the
-# adapter's login() exchanges for an access token. The app's api_secret is held
-# only transiently in the in-memory pending store for the exchange.
+# OAuth redirect flow (Upstox, Dhan app-consent, and any native with an
+# oauth_redirect auth flow). The operator opens the broker's authorisation
+# dialog; the broker redirects the browser back to our loopback callback with a
+# single-use ``code`` or Dhan ``tokenId``, which the adapter's login() exchanges
+# for an access token. The app's api_secret is held only transiently in the
+# in-memory pending store for the exchange.
 # ---------------------------------------------------------------------------
 
 _OAUTH_PENDING: dict[str, dict[str, Any]] = {}
@@ -497,6 +666,35 @@ def _purge_expired_oauth() -> None:
         _OAUTH_PENDING.pop(state, None)
 
 
+def _pop_pending_oauth_callback(*, state: str, returned_token_id: bool) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve a callback to a pending OAuth start without leaking pending secrets.
+
+    Most brokers echo our CSRF ``state`` and must match it exactly. Dhan's app
+    consent docs only promise a ``tokenId`` on redirect, so support that broker
+    shape when there is one clear pending Dhan login. Multiple pending Dhan
+    approvals are ambiguous and fail closed; a broker ``code`` without state is
+    never accepted.
+    """
+
+    if state:
+        pending = _OAUTH_PENDING.pop(state, None)
+        if pending is None:
+            return None, "Login link expired or invalid - start again from FlintTrade."
+        return pending, None
+
+    if not returned_token_id:
+        return None, "Login link expired or invalid - start again from FlintTrade."
+
+    matches = [(s, v) for s, v in _OAUTH_PENDING.items() if v.get("adapter_id") == "dhan"]
+    if len(matches) == 1:
+        matched_state, pending = matches[0]
+        _OAUTH_PENDING.pop(matched_state, None)
+        return pending, None
+    if not matches:
+        return None, "Login link expired or invalid - start again from FlintTrade."
+    return None, "Dhan login link is ambiguous or expired - start again from FlintTrade."
+
+
 @native_accounts_bp.route("/oauth/start", methods=["POST"])
 def native_oauth_start() -> Any:
     """Begin an OAuth connect: return the broker authorisation URL.
@@ -504,7 +702,7 @@ def native_oauth_start() -> Any:
     Body: ``{adapter_id, account_id, api_key, api_secret, label?, is_primary?}``.
     Stores the app secret + account transiently keyed by a CSRF ``state``; the
     operator opens ``auth_url`` and approves; the broker redirects to our
-    callback with the ``code``.
+    callback with the ``code`` or Dhan ``tokenId``.
     """
     import secrets  # noqa: PLC0415
     import time  # noqa: PLC0415
@@ -558,26 +756,45 @@ def native_oauth_start() -> Any:
         "is_primary": bool(body.get("is_primary", False)),
         "ts": time.time(),
     }
-    auth_url = builder(api_key, redirect_uri, state)
-    return jsonify({"status": "success", "data": {"auth_url": auth_url, "state": state, "redirect_uri": redirect_uri}})
+    try:
+        params = inspect.signature(builder).parameters
+        if "account_id" in params or "api_secret" in params:
+            auth_url = builder(api_key, redirect_uri, state, account_id=account_id, api_secret=api_secret)
+        else:
+            auth_url = builder(api_key, redirect_uri, state)
+    except Exception as exc:  # noqa: BLE001 - never echo app secrets / broker responses
+        _OAUTH_PENDING.pop(state, None)
+        logger.warning("Native OAuth start failed for %s (%s)", adapter_id, type(exc).__name__)
+        return jsonify({"status": "error", "message": "Could not start broker OAuth login."}), 502
+    return jsonify({
+        "status": "success",
+        "data": {
+            "auth_url": auth_url,
+            "state": state,
+            "redirect_uri": redirect_uri,
+            "postback_uri": _default_native_postback_uri(adapter_id),
+        },
+    })
 
 
 @native_accounts_bp.route("/oauth/callback", methods=["GET"])
 def native_oauth_callback() -> Any:
     """Broker OAuth redirect target: exchange the code and connect the account.
 
-    Query: ``?code=<single-use>&state=<csrf>``. Looks up the pending app
-    secret/account by ``state``, runs the connect transaction with
-    ``{code, api_key, api_secret, redirect_uri}`` (the adapter's login()
-    exchanges the code for an access token), and returns a small HTML result the
-    operator sees in the redirected tab.
+    Query: ``?code=<single-use>&state=<csrf>`` or Dhan's
+    ``?tokenId=<single-use>``. Looks up the pending app secret/account, runs the
+    connect transaction with ``{code, api_key, api_secret, redirect_uri}`` (the
+    adapter's login() exchanges the code/token for an access token), and returns
+    a small HTML result the operator sees in the redirected tab.
     """
-    code = request.args.get("code", "")
+    oauth_code = request.args.get("code") or ""
+    token_id = request.args.get("tokenId") or request.args.get("token_id") or ""
+    code = oauth_code or token_id
     state = request.args.get("state", "")
     _purge_expired_oauth()
-    pending = _OAUTH_PENDING.pop(state, None)
+    pending, error = _pop_pending_oauth_callback(state=state, returned_token_id=bool(token_id and not oauth_code))
     if pending is None:
-        return _oauth_result_html("Login link expired or invalid — start again from FlintTrade.", ok=False), 400
+        return _oauth_result_html(error or "Login link expired or invalid - start again from FlintTrade.", ok=False), 400
     if not code:
         # The broker can redirect with an error instead of a code.
         logger.warning("Native OAuth callback returned no authorisation code")
@@ -585,11 +802,14 @@ def native_oauth_callback() -> Any:
 
     adapter_id = pending["adapter_id"]
     account_id = pending["account_id"]
+    client_id = account_id if adapter_id == "dhan" else pending["api_key"]
     credentials = {
         "code": code,
+        "token_id": code,
         "api_key": pending["api_key"],
+        "app_id": pending["api_key"],
         "api_secret": pending["api_secret"],
-        "client_id": pending["api_key"],
+        "client_id": client_id,
         "redirect_uri": pending["redirect_uri"],
     }
     body_out, http_code = _do_connect(
@@ -597,9 +817,9 @@ def native_oauth_callback() -> Any:
     )
     connected = bool(body_out.get("data", {}).get("connected"))
     msg = (
-        f"{adapter_id} account {account_id} connected — you can close this tab and return to FlintTrade."
+        f"{adapter_id} account connected - you can close this tab and return to FlintTrade."
         if connected
-        else "Login failed — return to FlintTrade and try again."
+        else "Login failed - return to FlintTrade and try again."
     )
     return _oauth_result_html(msg, ok=connected), (200 if connected else 502)
 
@@ -617,6 +837,40 @@ def _oauth_result_html(message: str, ok: bool) -> str:
     )
 
 
+@native_accounts_bp.route("/postbacks/<adapter_id>", methods=["POST"])
+def native_broker_postback(adapter_id: str) -> Any:
+    """Receive native broker order-update postbacks.
+
+    Upstox requires an open unauthenticated POST endpoint for app registration.
+    The live order path still uses gated broker reads/writes; this endpoint only
+    acknowledges broker push updates and keeps a bounded in-memory, redacted
+    trail for diagnostics/runtime consumers.
+    """
+    adapter_id = adapter_id.strip().lower()
+    if adapter_id not in _NATIVE_BROKER_IDS:
+        return jsonify({"status": "error", "message": "adapter_id is not a native broker."}), 404
+    if request.content_length is not None and request.content_length > 256_000:
+        return jsonify({"status": "error", "message": "postback payload too large."}), 413
+
+    payload: Any = request.get_json(silent=True) if request.is_json else None
+    if payload is None:
+        raw = request.get_data(cache=False, as_text=True)[:8_192]
+        payload = {"raw": raw}
+    event = {
+        "adapter_id": adapter_id,
+        "received_at": time.time(),
+        "update_type": str(payload.get("update_type") or payload.get("type") or "unknown")
+        if isinstance(payload, dict)
+        else "unknown",
+        "payload": _redacted_postback_snapshot(payload),
+    }
+    bucket = current_app.config.setdefault("NATIVE_POSTBACK_EVENTS", {}).setdefault(adapter_id, [])
+    bucket.append(event)
+    del bucket[:-100]
+    logger.info("Native broker postback received for %s (%s)", adapter_id, event["update_type"])
+    return jsonify({"status": "success", "data": {"accepted": True}}), 200
+
+
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/login", methods=["POST"])
 def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     """Re-authenticate a native account (daily re-auth / token refresh).
@@ -627,6 +881,11 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     adapter_id = adapter_id.strip().lower()
     if adapter_id not in _NATIVE_BROKER_IDS:
         return jsonify({"status": "error", "message": f"'{adapter_id}' is not a native broker."}), 400
+    if adapter_id not in _CONNECTABLE_BROKER_IDS:
+        return jsonify({
+            "status": "error",
+            "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
+        }), 400
 
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")
@@ -684,21 +943,219 @@ def list_native_accounts() -> Any:
             entry.update(_session_status(registry, adapter_id, account_id))
         # G7 — a sessionless selector whose last replay attempt failed needs a
         # FRESH login (stale/single-use credentials), not just "no session".
+        # Keep retryable broker/login outages distinct so the UI does not tell
+        # the operator to re-authenticate when FlintTrade simply could not
+        # reach/verify the broker yet.
         if not entry.get("has_session"):
             last = str(login_status.get(f"{adapter_id}:{account_id}") or "")
             if last and last != "ok":
-                entry["needs_relogin"] = True
                 entry["login_error"] = last
+                if last == BROKER_LOGIN_RETRY_MESSAGE:
+                    entry["login_retryable"] = True
+                else:
+                    entry["needs_relogin"] = True
         accounts.append(entry)
     return jsonify({"status": "success", "data": {"accounts": accounts}})
 
 
-_READ_KINDS = {"funds", "positions", "holdings", "profile"}
+_READ_METHODS = {
+    "funds": ("funds",),
+    "positions": ("positions",),
+    "holdings": ("holdings",),
+    "profile": ("profile", "user_profile"),
+    "orders": ("order_book",),
+    "orderstatus": ("order_details",),
+    "trades": ("trade_book",),
+    "quotes": ("quotes",),
+    "depth": ("market_depth",),
+    "margin": ("margin_calculator",),
+    "holidays": ("market_holidays",),
+    "timings": ("market_timings",),
+    "optiongreeks": ("option_greeks",),
+    "history": ("historical",),
+    "expiry": ("expiry_list",),
+    "optionchain": ("option_chain",),
+    "search": ("search_instruments", "search_symbols"),
+}
+_READ_KINDS = set(_READ_METHODS)
+
+
+def _split_query_list(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _native_quote_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    symbols: list[str] = []
+    for value in request.args.getlist("symbols"):
+        symbols.extend(_split_query_list(value))
+    symbol = str(request.args.get("symbol") or "").strip()
+    if symbol:
+        exchange = str(request.args.get("exchange") or "NSE").strip().upper() or "NSE"
+        symbols.append(symbol if ":" in symbol else f"{exchange}:{symbol}")
+    if not symbols:
+        return None, "quotes read requires symbol or symbols."
+    return (symbols,), None
+
+
+def _native_depth_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    symbols: list[str] = []
+    for value in request.args.getlist("symbols"):
+        symbols.extend(_split_query_list(value))
+    symbol = str(request.args.get("symbol") or "").strip()
+    if symbol:
+        exchange = str(request.args.get("exchange") or "NSE").strip().upper() or "NSE"
+        symbols.append(symbol if ":" in symbol else f"{exchange}:{symbol}")
+    if not symbols:
+        return None, "depth read requires symbol or symbols."
+    return (symbols,), None
+
+
+def _native_margin_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    symbol = str(request.args.get("symbol") or "").strip()
+    if not symbol:
+        return None, "margin read requires symbol."
+    quantity = str(request.args.get("quantity") or request.args.get("qty") or "").strip()
+    if not quantity:
+        return None, "margin read requires quantity or qty."
+    try:
+        if float(quantity) <= 0:
+            return None, "margin read requires a positive quantity."
+    except ValueError:
+        return None, "margin read requires a numeric quantity."
+    try:
+        order = Order(
+            symbol=symbol,
+            exchange=str(request.args.get("exchange") or "NSE").strip().upper() or "NSE",
+            action=str(request.args.get("action") or request.args.get("side") or "BUY").strip().upper() or "BUY",
+            product=str(request.args.get("product") or "MIS").strip().upper() or "MIS",
+            quantity=quantity,
+            pricetype=str(request.args.get("pricetype") or request.args.get("order_type") or "MARKET").strip().upper()
+            or "MARKET",
+            price=str(request.args.get("price") or "0").strip() or "0",
+            trigger_price=str(request.args.get("trigger_price") or request.args.get("triggerPrice") or "0").strip()
+            or "0",
+        )
+    except Exception:  # noqa: BLE001 - public route returns a fixed validation message
+        return None, "margin read received invalid order fields."
+    return (order,), None
+
+
+def _native_order_status_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    order_id = str(
+        request.args.get("order_id")
+        or request.args.get("orderId")
+        or request.args.get("orderid")
+        or ""
+    ).strip()
+    if not order_id:
+        return None, "orderstatus read requires order_id or orderId."
+    return (order_id,), None
+
+
+def _native_holidays_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    holiday_date = str(request.args.get("date") or "").strip()
+    return ((holiday_date,) if holiday_date else ()), None
+
+
+def _native_timings_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    timing_date = str(request.args.get("date") or "").strip()
+    if not timing_date:
+        timing_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    return (timing_date,), None
+
+
+def _native_history_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    payload: dict[str, Any] = {}
+    flag_keys = {"intraday", "expired"}
+    for key in (
+        "symbol",
+        "exchange",
+        "interval",
+        "timeframe",
+        "start_date",
+        "end_date",
+        "from_date",
+        "to_date",
+        "start",
+        "end",
+        "start_time",
+        "end_time",
+        "instrument",
+        "instrument_type",
+        "instrument_key",
+        "intraday",
+        "expired",
+    ):
+        if key in request.args:
+            value = str(request.args.get(key) or "")
+            payload[key] = value.strip().lower() in {"1", "true", "yes", "on"} if key in flag_keys else value
+    if not str(payload.get("symbol") or payload.get("instrument_key") or "").strip():
+        return None, "history read requires symbol or instrument_key."
+    return (payload,), None
+
+
+def _native_expiry_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    symbol = str(request.args.get("symbol") or request.args.get("underlying") or "").strip()
+    if not symbol:
+        return None, "expiry read requires symbol or underlying."
+    exchange = str(request.args.get("exchange") or "NSE_INDEX").strip().upper() or "NSE_INDEX"
+    return (symbol, exchange), None
+
+
+def _native_option_chain_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    payload: dict[str, Any] = {}
+    symbol = str(request.args.get("symbol") or request.args.get("underlying") or "").strip()
+    if not symbol:
+        return None, "optionchain read requires symbol or underlying."
+    payload["symbol"] = symbol
+    payload["underlying"] = symbol
+    payload["exchange"] = str(request.args.get("exchange") or "NSE_INDEX").strip().upper() or "NSE_INDEX"
+    expiry = str(request.args.get("expiry") or request.args.get("expiry_date") or "").strip()
+    if expiry:
+        payload["expiry"] = expiry
+        payload["expiry_date"] = expiry
+    instrument_key = str(request.args.get("instrument_key") or "").strip()
+    if instrument_key:
+        payload["instrument_key"] = instrument_key
+    return (payload,), None
+
+
+def _native_search_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
+    query = str(request.args.get("query") or request.args.get("q") or "").strip()
+    if not query:
+        return None, "search read requires query or q."
+    return (query[:80],), None
+
+
+def _native_read_args(kind: str) -> tuple[tuple[Any, ...] | None, str | None]:
+    if kind == "quotes":
+        return _native_quote_read_args()
+    if kind == "depth":
+        return _native_depth_read_args()
+    if kind == "margin":
+        return _native_margin_read_args()
+    if kind == "orderstatus":
+        return _native_order_status_read_args()
+    if kind == "holidays":
+        return _native_holidays_read_args()
+    if kind == "timings":
+        return _native_timings_read_args()
+    if kind == "optiongreeks":
+        return _native_quote_read_args()
+    if kind == "history":
+        return _native_history_read_args()
+    if kind == "expiry":
+        return _native_expiry_read_args()
+    if kind == "optionchain":
+        return _native_option_chain_read_args()
+    if kind == "search":
+        return _native_search_read_args()
+    return (), None
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/<kind>", methods=["GET"])
 def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
-    """Read a native account's funds/positions/holdings/profile via its adapter.
+    """Read a native account's account book or read-only market data via its adapter.
 
     Exercises the live broker session end-to-end (a real broker API call using
     the stored token). Reads are not gated (no order), only require an
@@ -727,13 +1184,51 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
             "message": f"No live session for {adapter_id}:{account_id} — connect or re-login first.",
         }), 409
 
-    reader = getattr(adapter, kind, None)
+    reader = None
+    for method_name in _READ_METHODS[kind]:
+        reader = getattr(adapter, method_name, None)
+        if reader is not None:
+            break
     if reader is None:
         return jsonify({"status": "error", "message": f"{adapter_id} adapter has no '{kind}' read."}), 400
+    args, message = _native_read_args(kind)
+    if message is not None:
+        return jsonify({"status": "error", "message": message}), 400
     try:
-        result = asyncio.run(reader(session))
-    except Exception as exc:  # noqa: BLE001 - surface the broker error verbatim
-        logger.warning("Native read %s/%s %s failed: %s", adapter_id, account_id, kind, exc)
+        result = asyncio.run(reader(session, *(args or ())))
+    except NotImplementedError:
+        return jsonify({"status": "error", "message": f"{adapter_id} adapter does not support {kind} reads."}), 501
+    except Exception as exc:  # noqa: BLE001 - classify before surfacing a public route error
+        from flinttrade_gateway.native_login import (  # noqa: PLC0415
+            should_drop_session_after_probe_error,
+            should_keep_session_after_probe_error,
+        )
+
+        if should_keep_session_after_probe_error(exc):
+            logger.info(
+                "Native read %s %s temporarily unavailable but session remains connected: %s",
+                adapter_id,
+                kind,
+                exc,
+            )
+            return jsonify({
+                "status": "error",
+                "message": "Broker read is temporarily unavailable; the session remains connected.",
+                "data": {"retryable": True},
+            }), 503
+        if should_drop_session_after_probe_error(exc):
+            try:
+                registry.remove_session_for(adapter_id, account_id)
+            except Exception:  # noqa: BLE001 - read failure response must still be deterministic
+                pass
+            login_status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
+            login_status[f"{adapter_id}:{account_id}"] = "Broker session expired or invalid; re-login required."
+            logger.warning("Native read %s %s proved the session invalid; session dropped", adapter_id, kind)
+            return jsonify({
+                "status": "error",
+                "message": "Broker session expired or invalid; re-login required.",
+            }), 409
+        logger.warning("Native read %s %s failed: %s", adapter_id, kind, exc)
         return jsonify({"status": "error", "message": "Broker read failed"}), 502
 
     # Pydantic models -> dicts for JSON.
@@ -745,6 +1240,73 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
         return v
 
     return jsonify({"status": "success", "data": _dump(result)})
+
+
+@native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/set-primary", methods=["POST"])
+def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
+    """Promote a live native selector to the workspace execution default."""
+    adapter_id = adapter_id.strip().lower()
+    if adapter_id not in _NATIVE_BROKER_IDS:
+        return jsonify({"status": "error", "message": "Broker is not a native broker."}), 404
+    if adapter_id not in _CONNECTABLE_BROKER_IDS:
+        return jsonify({"status": "error", "message": "Native broker connect is coming soon."}), 400
+
+    store = current_app.config.get("CREDENTIAL_STORE")
+    registry = current_app.config.get("REGISTRY")
+    if store is None or registry is None:
+        return jsonify({"status": "error", "message": "Credential store or registry unavailable."}), 503
+
+    try:
+        row = _stored_native_account(store, adapter_id, account_id)
+    except Exception:  # noqa: BLE001
+        return jsonify({"status": "error", "message": "Could not list accounts"}), 500
+    if row is None:
+        return jsonify({"status": "error", "message": "Native broker account not found."}), 404
+
+    try:
+        registry.get_session_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001
+        return jsonify({
+            "status": "error",
+            "message": "Broker account has no live session; re-authenticate first.",
+        }), 409
+
+    snapshot = _snapshot_workspace()
+    try:
+        _register_selector_in_workspace(adapter_id, account_id, _operator_actor_id(), True)
+
+        from .app import configure_broker_router  # noqa: PLC0415
+
+        app = current_app._get_current_object()  # type: ignore[attr-defined]
+        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+
+        set_primary = getattr(store, "set_primary", None)
+        if not callable(set_primary):
+            raise RuntimeError("Credential store cannot set primary accounts")
+        set_primary(account_id)
+    except Exception:  # noqa: BLE001
+        _restore_workspace(snapshot)
+        try:
+            from .app import configure_broker_router  # noqa: PLC0415
+
+            app = current_app._get_current_object()  # type: ignore[attr-defined]
+            configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+        except Exception:  # noqa: BLE001 - best-effort rollback refresh
+            pass
+        logger.warning("Could not set native primary broker account")
+        return jsonify({"status": "error", "message": "Could not set primary native account."}), 500
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "account": {
+                "adapter_id": adapter_id,
+                "account_id": account_id,
+                "label": row.get("label"),
+                "is_primary": True,
+            }
+        },
+    })
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>", methods=["DELETE"])
@@ -762,7 +1324,11 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
     except Exception:  # noqa: BLE001 - no session is fine
         pass
     try:
-        store.remove(account_id)
+        remove_for = getattr(store, "remove_for", None)
+        if callable(remove_for):
+            remove_for(adapter_id, account_id)
+        else:
+            store.remove(account_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Credential delete failed for %s:%s: %s", adapter_id, account_id, exc)
 

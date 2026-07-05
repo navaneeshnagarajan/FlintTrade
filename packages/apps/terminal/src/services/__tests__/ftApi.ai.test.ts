@@ -1,0 +1,147 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const storeState = vi.hoisted(() => ({
+  mode: "live",
+  apiKey: "",
+  token: "",
+  brokerState: {
+    accounts: [] as Array<{
+      account_id: string;
+      broker: string;
+      source?: "gateway" | "native";
+      status?: string;
+    }>,
+    activeAccountId: null as string | null,
+  },
+}));
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: { getState: () => ({ mode: storeState.mode }) },
+}));
+
+vi.mock("@/stores/connectionStore", () => ({
+  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey }) },
+}));
+
+vi.mock("@/stores/authStore", () => ({
+  useAuthStore: { getState: () => ({ token: storeState.token }) },
+}));
+
+vi.mock("@/stores/brokerStore", () => ({
+  isBrokerAccountMatch: (
+    account: { account_id: string; broker: string; source?: "gateway" | "native" },
+    selector: string | null,
+  ) => {
+    if (!selector) return false;
+    const key = [account.source ?? "gateway", account.broker, account.account_id]
+      .map(encodeURIComponent)
+      .join(":");
+    return selector === key || selector === account.account_id;
+  },
+  useBrokerStore: { getState: () => storeState.brokerState },
+}));
+
+import { startAgent, type AgentSnapshot, type AgentStartParams } from "../ftApi.ai";
+
+const BASE_PARAMS: AgentStartParams = {
+  symbols: ["RELIANCE"],
+  exchange: "NSE",
+  max_position_size: 1,
+};
+
+const AGENT_SNAPSHOT: AgentSnapshot = {
+  enabled: true,
+  running: true,
+  started_at: "2026-07-05T00:00:00Z",
+  params: {},
+  actor_id: "autonomous-trader",
+};
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
+  const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  return JSON.parse(String(init.body)) as Record<string, unknown>;
+}
+
+describe("startAgent", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    storeState.mode = "live";
+    storeState.apiKey = "";
+    storeState.token = "";
+    storeState.brokerState = { accounts: [], activeAccountId: null };
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: AGENT_SNAPSHOT }));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("adds the active native target for live native-only agent starts", async () => {
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    await startAgent(BASE_PARAMS);
+
+    expect(requestBody(fetchMock)).toMatchObject({
+      symbols: ["RELIANCE"],
+      broker: "upstox",
+      account_id: "U1",
+    });
+  });
+
+  it("does not override an explicit agent target", async () => {
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    await startAgent({ ...BASE_PARAMS, broker: "dhan", account_id: "D1" });
+
+    expect(requestBody(fetchMock)).toMatchObject({ broker: "dhan", account_id: "D1" });
+  });
+
+  it("keeps OpenAlgo primary when a bridge API key is configured", async () => {
+    storeState.apiKey = "openalgo-key";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    await startAgent(BASE_PARAMS);
+
+    expect(requestBody(fetchMock)).not.toHaveProperty("broker");
+    expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
+  });
+
+  it("does not add a native target outside live mode", async () => {
+    storeState.mode = "practice";
+    storeState.brokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+
+    await startAgent(BASE_PARAMS);
+
+    expect(requestBody(fetchMock)).not.toHaveProperty("broker");
+    expect(requestBody(fetchMock)).not.toHaveProperty("account_id");
+  });
+});

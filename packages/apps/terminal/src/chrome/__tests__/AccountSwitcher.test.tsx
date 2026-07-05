@@ -10,7 +10,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockAccounts = [
+type MockAccount = {
+  account_id: string;
+  broker: string;
+  label: string;
+  status: "connected" | "disconnected";
+  connected_at: string | null;
+  error_message: string | null;
+  source?: "gateway" | "native";
+};
+
+const mockAccounts: MockAccount[] = [
   {
     account_id: "acc-1",
     broker: "zerodha",
@@ -29,12 +39,26 @@ const mockAccounts = [
   },
 ];
 
-let storeState: { accounts: typeof mockAccounts; activeAccountId: string | null } = {
+let storeState: { accounts: MockAccount[]; activeAccountId: string | null } = {
   accounts: mockAccounts,
   activeAccountId: "acc-1",
 };
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: MockAccount) => [
+    account.source ?? "gateway",
+    account.broker,
+    account.account_id,
+  ].map(encodeURIComponent).join(":"),
+  isBrokerAccountMatch: (account: MockAccount, selector: string | null) => {
+    if (!selector) return false;
+    const key = [
+      account.source ?? "gateway",
+      account.broker,
+      account.account_id,
+    ].map(encodeURIComponent).join(":");
+    return key === selector || account.account_id === selector;
+  },
   useBrokerStore: (selector: (s: typeof storeState & { setActiveAccount: () => void }) => unknown) =>
     selector({ ...storeState, setActiveAccount: vi.fn() }),
 }));
@@ -77,5 +101,33 @@ describe("AccountSwitcher", () => {
     storeState = { accounts: [], activeAccountId: null };
     const { container } = renderWithProviders();
     expect(container.innerHTML).toBe("");
+  });
+
+  it("uses broker-aware active keys when account ids collide", () => {
+    storeState = {
+      accounts: [
+        {
+          account_id: "same",
+          broker: "dhan",
+          label: "Dhan",
+          status: "connected",
+          connected_at: "2026-04-08T09:00:00Z",
+          error_message: null,
+          source: "native",
+        },
+        {
+          account_id: "same",
+          broker: "upstox",
+          label: "Upstox",
+          status: "connected",
+          connected_at: "2026-04-08T09:00:00Z",
+          error_message: null,
+          source: "native",
+        },
+      ],
+      activeAccountId: "native:upstox:same",
+    };
+    renderWithProviders();
+    expect(screen.getByText("UPSTOX · Upstox")).toBeInTheDocument();
   });
 });

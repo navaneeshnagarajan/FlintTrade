@@ -2,9 +2,10 @@
  * BrokerRecommendations — broker capability metadata for routing setup.
  *
  * Surfaces the backend recommendation engine
- * (GET /api/v1/broker/recommendations) which ranks native broker metadata per
- * operator-selected job from declared capabilities (lowest cost, market depth,
- * historical data, options analytics, throughput, streaming, advanced orders).
+ * (GET /api/v1/broker/recommendations) which ranks login/read verified native
+ * broker metadata per operator-selected job from declared capabilities (lowest
+ * cost, market depth, historical data, options analytics, throughput,
+ * runtime-ready streaming, advanced orders).
  *
  * This is capability-derived metadata, not live prices or financial advice, so
  * it carries no isConnected guard.
@@ -16,6 +17,8 @@ import { get } from "@/services/ftApi";
 
 interface BrokerRec {
   broker_id: string;
+  display_name?: string;
+  connectable?: boolean;
   score: number;
   raw_score: number;
   rationale: string;
@@ -37,16 +40,8 @@ const USE_CASE_LABELS: Record<string, string> = {
   advanced_orders: "Advanced orders",
 };
 
-const BROKER_NAMES: Record<string, string> = {
-  dhan: "Dhan",
-  upstox: "Upstox",
-  kotakneo: "Kotak Neo",
-  zerodha: "Zerodha",
-  indmoney: "IndMoney",
-};
-
-function brokerName(id: string): string {
-  return BROKER_NAMES[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
+function brokerName(rec: BrokerRec): string {
+  return rec.display_name ?? rec.broker_id.charAt(0).toUpperCase() + rec.broker_id.slice(1);
 }
 
 export function BrokerRecommendations() {
@@ -56,9 +51,12 @@ export function BrokerRecommendations() {
     staleTime: 5 * 60_000,
   });
 
-  // Pick the top broker per use-case (engine returns each list ranked desc).
+  // Pick the top positive-scoring, connectable broker per use-case.
   const top = Object.entries(data?.use_cases ?? {})
-    .map(([useCase, recs]) => ({ useCase, rec: recs[0] }))
+    .map(([useCase, recs]) => ({
+      useCase,
+      rec: recs.find((rec) => rec.connectable !== false && rec.raw_score > 0),
+    }))
     .filter((r): r is { useCase: string; rec: BrokerRec } => Boolean(r.rec));
 
   return (
@@ -101,7 +99,7 @@ export function BrokerRecommendations() {
                   {USE_CASE_LABELS[useCase] ?? useCase}
                 </span>
                 <span className="text-xs font-semibold text-accent">
-                  {brokerName(rec.broker_id)}
+                  {brokerName(rec)}
                 </span>
               </div>
               <p className="mt-0.5 text-xxs text-text-secondary leading-snug">
@@ -114,13 +112,12 @@ export function BrokerRecommendations() {
 
       {top.length > 0 && (
         // Honest scope note: these rankings are derived from each broker's
-        // ADVERTISED API capabilities, not a live execution test. The native
-        // Dhan/Upstox/Kotak adapters require their SDK + activation before they
-        // can place orders; until then orders route through the OpenAlgo bridge.
+        // advertised API capabilities and default to connectable native brokers.
+        // Built-but-disabled adapters such as Kotak Neo stay out until their
+        // live checks pass.
         <p className="text-xxs text-text-muted leading-snug border-t border-border-default pt-2">
-          Capability-based suggestions. Native broker execution needs the broker
-          SDK and activation; until activated, orders route via the OpenAlgo
-          bridge.
+          Capability-based suggestions for login/read verified native brokers. Coming-soon
+          adapters stay hidden here until their live checks pass.
         </p>
       )}
     </section>

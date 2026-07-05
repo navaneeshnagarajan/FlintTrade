@@ -8,9 +8,34 @@ import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 let mockMode = "live";
+let mockApiKey = "";
+let mockBrokerState: {
+  accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native"; status: string }>;
+  activeAccountId: string | null;
+} = { accounts: [], activeAccountId: null };
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector?: (s: { mode: string }) => unknown) =>
     typeof selector === "function" ? selector({ mode: mockMode }) : { mode: mockMode },
+}));
+vi.mock("@/stores/connectionStore", () => ({
+  useConnectionStore: {
+    getState: () => ({ apiKey: mockApiKey }),
+  },
+}));
+vi.mock("@/stores/brokerStore", () => ({
+  isBrokerAccountMatch: (
+    account: { account_id: string; broker: string; source?: "gateway" | "native" },
+    selector: string | null,
+  ) => {
+    if (!selector) return false;
+    const key = [account.source ?? "gateway", account.broker, account.account_id]
+      .map(encodeURIComponent)
+      .join(":");
+    return selector === key || selector === account.account_id;
+  },
+  useBrokerStore: {
+    getState: () => mockBrokerState,
+  },
 }));
 vi.mock("@/services/ftApi", () => ({
   startSmartRoute: vi.fn(),
@@ -70,6 +95,8 @@ describe("SmartOrderWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMode = "live";
+    mockApiKey = "";
+    mockBrokerState = { accounts: [], activeAccountId: null };
     vi.mocked(listSmartRouteJobs).mockResolvedValue([]);
   });
 
@@ -133,6 +160,58 @@ describe("SmartOrderWidget", () => {
     // "accepted", not "filled" — order ids returned ≠ confirmed fills.
     expect(screen.getByText(/accepted 10\/10/)).toBeInTheDocument();
     expect(screen.getByText("Complete")).toBeInTheDocument();
+  });
+
+  it("routes through the active native account when no OpenAlgo key is configured", async () => {
+    mockBrokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+    vi.mocked(startSmartRoute).mockResolvedValue({ ...DONE_JOB, status: "running" });
+    vi.mocked(getSmartRouteJob).mockResolvedValue(DONE_JOB);
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("Smart order symbol"), {
+      target: { value: "reliance" },
+    });
+    fireEvent.change(screen.getByLabelText("Smart order quantity"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /route order/i }));
+
+    await waitFor(() => expect(startSmartRoute).toHaveBeenCalledOnce());
+    expect(vi.mocked(startSmartRoute).mock.calls[0][0]).toMatchObject({
+      symbol: "RELIANCE",
+      broker: "upstox",
+      account_id: "U1",
+    });
+  });
+
+  it("keeps OpenAlgo primary when an OpenAlgo key is configured", async () => {
+    mockApiKey = "openalgo-key";
+    mockBrokerState = {
+      accounts: [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ],
+      activeAccountId: "native:upstox:U1",
+    };
+    vi.mocked(startSmartRoute).mockResolvedValue({ ...DONE_JOB, status: "running" });
+    vi.mocked(getSmartRouteJob).mockResolvedValue(DONE_JOB);
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("Smart order symbol"), {
+      target: { value: "reliance" },
+    });
+    fireEvent.change(screen.getByLabelText("Smart order quantity"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /route order/i }));
+
+    await waitFor(() => expect(startSmartRoute).toHaveBeenCalledOnce());
+    expect(vi.mocked(startSmartRoute).mock.calls[0][0]).not.toHaveProperty("broker");
+    expect(vi.mocked(startSmartRoute).mock.calls[0][0]).not.toHaveProperty("account_id");
   });
 
   it("surfaces the backend's refusal message verbatim", async () => {

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from flinttrade_ai.openclaw_bridge import OpenClawBridge
 
 
@@ -42,6 +41,22 @@ class TestOpenClawHealth:
         bridge = OpenClawBridge()
         assert bridge.check_health() is True
         assert bridge.is_connected is True
+        client.get.assert_called_once_with("http://127.0.0.1:18789/healthz")
+
+    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
+    def test_health_check_falls_back_to_legacy_health_alias(self, mock_client_cls):
+        client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        client.get.side_effect = [_mock_response(404), _mock_response(200)]
+
+        bridge = OpenClawBridge()
+        assert bridge.check_health() is True
+        assert bridge.is_connected is True
+        assert [c.args[0] for c in client.get.call_args_list] == [
+            "http://127.0.0.1:18789/healthz",
+            "http://127.0.0.1:18789/health",
+        ]
 
     @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
     def test_health_check_service_down(self, mock_client_cls):
@@ -75,36 +90,15 @@ class TestOpenClawHealth:
 class TestOpenClawDeploy:
     """Test agent deploy operations."""
 
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_deploy_agent_success(self, mock_client_cls):
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        client.post.return_value = _mock_response(200, {
-            "status": "success", "agent_id": "agent-123",
-        })
-
+    def test_deploy_agent_returns_explicit_unsupported(self):
         bridge = OpenClawBridge()
         result = bridge.deploy_agent({
             "name": "scalper-nifty",
             "strategy": "momentum",
             "symbols": ["NIFTY"],
         })
-        assert result["status"] == "success"
-        assert result["agent_id"] == "agent-123"
-
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_deploy_agent_connection_error(self, mock_client_cls):
-        import httpx as _httpx
-
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        client.post.side_effect = _httpx.ConnectError("Connection refused")
-
-        bridge = OpenClawBridge()
-        result = bridge.deploy_agent({"name": "test"})
         assert result["status"] == "error"
+        assert result["code"] == "openclaw_agent_control_unsupported"
 
 
 # ======================================================================
@@ -115,43 +109,7 @@ class TestOpenClawDeploy:
 class TestOpenClawListAgents:
     """Test list agents with different response formats."""
 
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_list_agents_wrapped_format(self, mock_client_cls):
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        agents = [
-            {"id": "a1", "name": "scalper", "status": "running"},
-            {"id": "a2", "name": "hedger", "status": "stopped"},
-        ]
-        client.get.return_value = _mock_response(200, {"agents": agents})
-
-        bridge = OpenClawBridge()
-        result = bridge.list_agents()
-        assert len(result) == 2
-        assert result[0]["name"] == "scalper"
-
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_list_agents_bare_list_format(self, mock_client_cls):
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        agents = [{"id": "a1", "name": "test", "status": "running"}]
-        client.get.return_value = _mock_response(200, agents)
-
-        bridge = OpenClawBridge()
-        result = bridge.list_agents()
-        assert len(result) == 1
-
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_list_agents_connection_error(self, mock_client_cls):
-        import httpx as _httpx
-
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        client.get.side_effect = _httpx.ConnectError("Connection refused")
-
+    def test_list_agents_returns_empty_without_nonexistent_http_api(self):
         bridge = OpenClawBridge()
         result = bridge.list_agents()
         assert result == []
@@ -165,41 +123,13 @@ class TestOpenClawListAgents:
 class TestOpenClawAgentControl:
     """Test stop and log retrieval."""
 
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_stop_agent_success(self, mock_client_cls):
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        client.post.return_value = _mock_response(200, {
-            "status": "success", "stopped": True,
-        })
-
+    def test_stop_agent_returns_explicit_unsupported(self):
         bridge = OpenClawBridge()
         result = bridge.stop_agent("agent-123")
-        assert result["status"] == "success"
+        assert result["status"] == "error"
+        assert result["code"] == "openclaw_agent_control_unsupported"
 
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_get_agent_logs_success(self, mock_client_cls):
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        logs = ["2026-04-08 10:00 INFO Agent started", "2026-04-08 10:01 INFO Order placed"]
-        client.get.return_value = _mock_response(200, {"logs": logs})
-
-        bridge = OpenClawBridge()
-        result = bridge.get_agent_logs("agent-123")
-        assert len(result) == 2
-        assert "Agent started" in result[0]
-
-    @patch("flinttrade_ai.openclaw_bridge.httpx.Client")
-    def test_get_agent_logs_connection_error(self, mock_client_cls):
-        import httpx as _httpx
-
-        client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        client.get.side_effect = _httpx.ConnectError("Connection refused")
-
+    def test_get_agent_logs_returns_empty_without_nonexistent_http_api(self):
         bridge = OpenClawBridge()
         result = bridge.get_agent_logs("agent-123")
         assert result == []

@@ -46,6 +46,18 @@ def test_two_adapters_disambiguated(tmp_path) -> None:
     assert store.retrieve_for("openalgo", "acc-o") == {"k": "oa"}
 
 
+def test_remove_for_is_selector_scoped(tmp_path) -> None:
+    store = CredentialStore(tmp_path / "c.db", _MP)
+    store.store("acc-d", "dhan", "D", {"k": "dhan"}, adapter_id="dhan")
+
+    store.remove_for("upstox", "acc-d")
+    assert store.retrieve_for("dhan", "acc-d") == {"k": "dhan"}
+
+    store.remove_for("dhan", "acc-d")
+    with pytest.raises(CredentialError, match="selector"):
+        store.retrieve_for("dhan", "acc-d")
+
+
 def test_legacy_db_backfills_adapter_id_from_broker(tmp_path) -> None:
     db = tmp_path / "legacy.db"
     # 1. create a store so we can reuse its key derivation, then replicate a

@@ -20,6 +20,7 @@ import {
   runBacktest,
   getSafetyConfig,
   getPnLSummary,
+  getPnlSymbols,
   getSecuritySettings,
   analyzeSentiment,
   getCronJobs,
@@ -28,6 +29,8 @@ import {
   activateKillSwitch,
   resetKillSwitch,
   getHealth,
+  getEarningsCalendar,
+  getPortfolioRRGData,
 } from "../ftApi";
 
 // ---------------------------------------------------------------------------
@@ -77,6 +80,61 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     // getHealth returns whatever parseResponse produces
     const result = await getHealth();
     expect(result).toHaveProperty("score", 42);
+  });
+
+  it("getEarningsCalendar() normalises the backend events contract", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          events: [
+            {
+              symbol: "INFY",
+              company_name: "Infosys Ltd",
+              date: "2026-07-15",
+              result: "meet",
+              estimated_eps: 18.5,
+              actual_eps: 18.6,
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await getEarningsCalendar(2026, 7);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toContain(
+      "/api/v1/earnings/calendar?year=2026&month=7",
+    );
+    expect(result.entries).toEqual([
+      {
+        symbol: "INFY",
+        company: "Infosys Ltd",
+        date: "2026-07-15",
+        result: "inline",
+        estimate: 18.5,
+        actual: 18.6,
+        sector: "IT",
+      },
+    ]);
+  });
+
+  it("getPortfolioRRGData() calls the backend portfolio RRG route through ftApi", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { benchmark: "NIFTY 50", tail_length: 8, is_sample_data: true, sectors: [] },
+      }),
+    );
+
+    const result = await getPortfolioRRGData(["RELIANCE", "TCS"], 8);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toContain(
+      "/api/v1/rrg/portfolio?symbols=RELIANCE%2CTCS&tail_length=8",
+    );
+    expect(result).toEqual({ benchmark: "NIFTY 50", tail_length: 8, is_sample_data: true, sectors: [] });
   });
 
   // ---- POST sends JSON body ----
@@ -249,6 +307,39 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result).toHaveProperty("min_total", 0);
     expect(result).toHaveProperty("trade_count");
     expect(result).toHaveProperty("data_points");
+  });
+
+  it("getPnlSymbols() uses the FlintTrade backend route with date filters", async () => {
+    const response = {
+      status: "success",
+      date_from: "2026-07-01",
+      date_to: "2026-07-05",
+      series_count: 2,
+      period: {
+        realized_pnl: 1200,
+        unrealized_pnl: -50,
+        total_pnl: 1150,
+        trade_count: 3,
+      },
+      overall_summary: {
+        realized: 1200,
+        unrealized: -50,
+        total: 1150,
+        max_total: 1500,
+        min_total: -100,
+        trade_count: 3,
+        data_points: 2,
+      },
+    };
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
+
+    const result = await getPnlSymbols("2026-07-01", "2026-07-05");
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/ft-api/api/v1/pnl/symbols?date_from=2026-07-01&date_to=2026-07-05");
+    expect(init.method).toBeUndefined();
   });
 
   // ---- getSecuritySettings fields ----

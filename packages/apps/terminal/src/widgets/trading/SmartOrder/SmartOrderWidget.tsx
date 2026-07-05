@@ -35,6 +35,8 @@ import {
   type SmartRouteJob,
 } from "@/services/ftApi";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { pickNativeWriteTarget } from "@/services/brokerTargets";
 
 /**
  * Strict numeric field parsers: an explicit 0-bps budget must stay 0 (not
@@ -151,6 +153,7 @@ export default function SmartOrderWidget() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit || qty === null || bps === null) return;
+    const nativeTarget = pickNativeWriteTarget(appMode, useConnectionStore.getState().apiKey);
     startMutation.mutate({
       symbol: symbol.trim().toUpperCase(),
       exchange,
@@ -158,6 +161,7 @@ export default function SmartOrderWidget() {
       quantity: qty,
       urgency,
       max_slippage_bps: bps,
+      ...(nativeTarget ? { broker: nativeTarget.broker, account_id: nativeTarget.accountId } : {}),
     });
   }
 

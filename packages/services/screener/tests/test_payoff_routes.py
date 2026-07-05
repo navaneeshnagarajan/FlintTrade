@@ -23,6 +23,30 @@ _LEG = {
 }
 
 
+def _history_candles(n: int = 40) -> list[dict]:
+    base = 1_700_000_000
+    return [
+        {"timestamp": base + i * 86_400, "open": 100 + i, "high": 102 + i, "low": 99 + i,
+         "close": 101 + i, "volume": 10_000 + i}
+        for i in range(n)
+    ]
+
+
+class _ConnectedRegistry:
+    def __init__(self) -> None:
+        self.history_calls: list[tuple[str, dict]] = []
+
+    def is_connected(self) -> bool:
+        return True
+
+    def get_primary_account_id(self) -> str:
+        return "acc-primary"
+
+    def get_history(self, account_id: str, params: dict) -> dict:
+        self.history_calls.append((account_id, params))
+        return {"candles": _history_candles()}
+
+
 @pytest.fixture()
 def app():
     """Minimal Flask app with payoff_bp registered."""
@@ -220,6 +244,24 @@ def test_regime_current_detector_error(client):
     assert body["status"] == "error"
 
 
+def test_regime_current_uses_connected_registry_history_contract(app, client):
+    registry = _ConnectedRegistry()
+    app.config["REGISTRY"] = registry
+    signal = _make_regime_signal()
+
+    with patch.object(mod._regime_detector, "detect", return_value=signal) as detect:
+        resp = client.get("/api/v1/regime/current?vix=15.0")
+
+    assert resp.status_code == 200
+    account_id, params = registry.history_calls[0]
+    assert account_id == "acc-primary"
+    assert params["symbol"] == "NIFTY"
+    assert params["exchange"] == "NSE_INDEX"
+    assert params["interval"] == "1d"
+    assert "start" in params and "end" in params
+    assert detect.call_args.kwargs["nifty_returns"]
+
+
 # ---------------------------------------------------------------------------
 # POST /ft-api/v1/analytics/correlation
 # ---------------------------------------------------------------------------
@@ -297,3 +339,25 @@ def test_correlation_engine_error(client):
     assert resp.status_code == 500
     body = resp.get_json()
     assert body["status"] == "error"
+
+
+def test_correlation_uses_connected_registry_history_contract(app, client):
+    registry = _ConnectedRegistry()
+    app.config["REGISTRY"] = registry
+    result = _make_corr_result()
+
+    with patch.object(mod._correlation_engine, "compute", return_value=result):
+        resp = client.post(
+            "/api/v1/analytics/correlation",
+            json={"symbols": ["NIFTY", "BANKNIFTY"], "vix": 15.0},
+        )
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["data"]["is_sample_data"] is False
+    assert len(registry.history_calls) == 2
+    for account_id, params in registry.history_calls:
+        assert account_id == "acc-primary"
+        assert params["exchange"] == "NSE_INDEX"
+        assert params["interval"] == "1d"
+        assert "start" in params and "end" in params

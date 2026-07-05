@@ -245,7 +245,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
   { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Pre-market gap scanner filtering by OI buildup, IV rank, and price action" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Price and indicator alerts with Telegram and in-app notifications" },
-  { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "OpenAlgo connection status, WebSocket latency, and API health metrics" },
+  { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "Broker gateway/OpenAlgo bridge status, WebSocket latency, and API health metrics" },
   { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },
   { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates across exchanges for arbitrage tracking" },
   { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility", description: "Live currency converter for INR, USD, and major pairs" },

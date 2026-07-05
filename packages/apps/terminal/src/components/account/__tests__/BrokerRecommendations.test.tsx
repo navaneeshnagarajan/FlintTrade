@@ -30,22 +30,69 @@ describe("BrokerRecommendations", () => {
       status: "success",
       use_cases: {
         low_cost_execution: [
-          { broker_id: "kotakneo", score: 1, raw_score: 10, rationale: "Zero brokerage." },
+          {
+            broker_id: "kotakneo",
+            display_name: "Kotak Neo",
+            connectable: false,
+            score: 1,
+            raw_score: 10,
+            rationale: "Zero brokerage.",
+          },
+          {
+            broker_id: "upstox",
+            display_name: "Upstox",
+            connectable: true,
+            score: 0.5,
+            raw_score: 5,
+            rationale: "Free API access.",
+          },
         ],
         market_depth: [
-          { broker_id: "dhan", score: 0.9, raw_score: 9, rationale: "20-level depth." },
+          {
+            broker_id: "dhan",
+            display_name: "Dhan",
+            connectable: true,
+            score: 0.9,
+            raw_score: 9,
+            rationale: "20-level depth.",
+          },
+        ],
+        historical_data: [
+          {
+            broker_id: "indmoney",
+            display_name: "INDmoney",
+            connectable: true,
+            score: 0.7,
+            raw_score: 7,
+            rationale: "REST token supports account reads.",
+          },
+        ],
+        streaming: [
+          {
+            broker_id: "dhan",
+            display_name: "Dhan",
+            connectable: true,
+            score: 0,
+            raw_score: 0,
+            rationale: "Feed not wired yet.",
+          },
         ],
       },
     });
     renderPanel();
-    expect(await screen.findByText("Kotak Neo")).toBeInTheDocument();
+    expect(await screen.findByText("Upstox")).toBeInTheDocument();
+    expect(screen.queryByText("Kotak Neo")).not.toBeInTheDocument();
     expect(screen.getByText("Dhan")).toBeInTheDocument();
+    expect(screen.getByText("INDmoney")).toBeInTheDocument();
+    expect(screen.queryByText("IndMoney")).not.toBeInTheDocument();
     expect(screen.getByText("Lowest cost")).toBeInTheDocument();
-    expect(screen.getByText("Zero brokerage.")).toBeInTheDocument();
-    // Honest scope note: the rankings are capability-derived, and native
-    // execution needs SDK activation (orders route via the OpenAlgo bridge).
+    expect(screen.getByText("Free API access.")).toBeInTheDocument();
+    expect(screen.queryByText("Live streaming")).not.toBeInTheDocument();
+    expect(screen.queryByText("Feed not wired yet.")).not.toBeInTheDocument();
+    // Honest scope note: the rankings are capability-derived and default to
+    // login/read-verified connectable native brokers.
     expect(screen.getByText(/capability-based suggestions/i)).toBeInTheDocument();
-    expect(screen.getByText(/route via the OpenAlgo/i)).toBeInTheDocument();
+    expect(screen.getByText(/coming-soon adapters stay hidden/i)).toBeInTheDocument();
   });
 
   it("shows an unavailable message on error", async () => {

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 
@@ -127,6 +127,22 @@ class TestHistoricalDownloader:
         assert not result.success
         assert len(result.errors) == 1
         assert "API down" in result.errors[0]
+
+    def test_download_resolves_async_openalgo_history(self):
+        from flinttrade_core.models import OHLCV
+        from flinttrade_historical.downloader import HistoricalDownloader
+
+        mock_client = MagicMock()
+        mock_client.history = AsyncMock(return_value=[
+            OHLCV(timestamp="2026-03-01T09:15:00", open=100, high=101, low=99, close=100, volume=1000),
+        ])
+
+        dl = HistoricalDownloader(mock_client)
+        result = dl.download("RELIANCE", "NSE", "1d", "2026-03-01", "2026-03-01")
+
+        assert result.success
+        assert result.total_bars == 1
+        assert mock_client.history.await_count == 1
 
     def test_download_interval_normalization(self):
         dl, client = self._make_downloader()
@@ -434,6 +450,35 @@ class TestExpiryManager:
         assert info.count == 3
         mock_client.expiry.assert_called_once_with("NIFTY", "NFO")
 
+    def test_get_expiries_resolves_async_client(self):
+        from flinttrade_historical.expiry_manager import ExpiryManager
+
+        mock_client = MagicMock()
+        mock_client.expiry = AsyncMock(return_value={"expiry": ["260326", "260402"]})
+
+        mgr = ExpiryManager(mock_client)
+        info = mgr.get_expiries("NIFTY", "NFO")
+
+        assert info.expiry_dates == ["260326", "260402"]
+        assert mock_client.expiry.await_count == 1
+
+    def test_build_continuous_futures_resolves_async_history(self):
+        from flinttrade_core.models import OHLCV
+        from flinttrade_historical.expiry_manager import ExpiryManager
+
+        mock_client = MagicMock()
+        mock_client.expiry = AsyncMock(return_value={"expiry": ["260131"]})
+        mock_client.history = AsyncMock(return_value=[
+            OHLCV(timestamp="2026-01-15T09:15:00", open=100, high=101, low=99, close=100.5, volume=1000),
+        ])
+
+        mgr = ExpiryManager(mock_client)
+        bars = mgr.build_continuous_futures("NIFTY", "NFO", "1d", "2026-01-01", "2026-01-31")
+
+        assert len(bars) == 1
+        assert bars[0].contract == "NIFTY26JANFUT"
+        assert mock_client.history.await_count == 1
+
     def test_get_expiries_cached(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
         mock_client = MagicMock()
@@ -493,6 +538,47 @@ class TestFreeDataSource:
             result = nse.historical("RELIANCE", "NSE", "2026-01-01", "2026-03-16")
             # Either ImportError or graceful error
             assert not result.success or result.error
+
+    def test_nse_data_uses_openchart_segment_and_datetime_contract(self):
+        from flinttrade_historical.free_data import NSEData
+
+        captured = {}
+
+        class _Row(dict):
+            @property
+            def index(self):
+                return list(self.keys())
+
+        class _Frame:
+            empty = False
+
+            @staticmethod
+            def iterrows():
+                yield 0, _Row({
+                    "datetime": "2026-01-01T09:15:00",
+                    "open": 100,
+                    "high": 101,
+                    "low": 99,
+                    "close": 100.5,
+                    "volume": 1000,
+                })
+
+        class _Chart:
+            @staticmethod
+            def historical(**kwargs):
+                captured.update(kwargs)
+                return _Frame()
+
+        nse = NSEData()
+        nse._chart = _Chart()
+
+        result = nse.historical("NIFTY", "NSE_INDEX", "2026-01-01", "2026-01-02", "D")
+
+        assert result.success
+        assert captured["segment"] == "IDX"
+        assert captured["interval"] == "1d"
+        assert captured["start"].timestamp() > 0
+        assert captured["end"].timestamp() > 0
 
     def test_commodity_data_unknown_commodity(self):
         from flinttrade_historical.free_data import CommodityData

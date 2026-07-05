@@ -13,10 +13,13 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 
 import {
   listNativeBrokers,
+  listBrokerMcpCatalogue,
   listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
+  readNativeAccount,
   reloginNativeAccount,
+  setPrimaryNativeAccount,
 } from "../ftApi.native";
 
 function envelope(data: unknown, status = 200): Response {
@@ -45,13 +48,43 @@ describe("ftApi.native envelope unwrapping", () => {
     expect(brokers[0].adapter_id).toBe("dhan");
   });
 
+  it("listBrokerMcpCatalogue returns broker-hosted MCP metadata", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      envelope({
+        brokers: [
+          {
+            adapter_id: "upstox",
+            display_name: "Upstox",
+            native: true,
+            connectable: true,
+            mcp: { remote_url: "https://mcp.upstox.com/mcp", read_only: true, trading_supported: false },
+          },
+        ],
+      }),
+    );
+    const brokers = await listBrokerMcpCatalogue();
+    expect(brokers).toHaveLength(1);
+    expect(brokers[0].adapter_id).toBe("upstox");
+    expect(brokers[0].mcp.read_only).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/broker/mcp"),
+      expect.anything(),
+    );
+  });
+
   it("listNativeAccounts returns the accounts array (not an empty list)", async () => {
     fetchSpy.mockResolvedValueOnce(
-      envelope({ accounts: [{ adapter_id: "dhan", account_id: "A1", needs_relogin: true }] }),
+      envelope({
+        accounts: [
+          { adapter_id: "dhan", account_id: "A1", needs_relogin: true },
+          { adapter_id: "upstox", account_id: "U1", login_retryable: true },
+        ],
+      }),
     );
     const accounts = await listNativeAccounts();
-    expect(accounts).toHaveLength(1);
+    expect(accounts).toHaveLength(2);
     expect(accounts[0].needs_relogin).toBe(true);
+    expect(accounts[1].login_retryable).toBe(true);
   });
 
   it("connectNativeAccount reads connected/login from the unwrapped data", async () => {
@@ -65,9 +98,33 @@ describe("ftApi.native envelope unwrapping", () => {
     expect(r.login).toBe("ok");
   });
 
+  it("readNativeAccount reads a specific live native account book", async () => {
+    fetchSpy.mockResolvedValueOnce(envelope([{ symbol: "INFY", order_id: "O1" }]));
+    const rows = await readNativeAccount<Array<{ symbol: string }>>("dhan", "A1", "orders");
+    expect(rows).toEqual([{ symbol: "INFY", order_id: "O1" }]);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/native/accounts/dhan/A1/orders"),
+      expect.anything(),
+    );
+  });
+
+  it("setPrimaryNativeAccount posts to the selector-scoped primary route", async () => {
+    fetchSpy.mockResolvedValueOnce(envelope({ account: { adapter_id: "upstox", account_id: "U1" } }));
+    await setPrimaryNativeAccount("upstox", "U1");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/native/accounts/upstox/U1/set-primary"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("oauthStartNativeAccount returns the unwrapped auth_url payload", async () => {
     fetchSpy.mockResolvedValueOnce(
-      envelope({ auth_url: "https://api.upstox.com/x", state: "S", redirect_uri: "http://cb" }),
+      envelope({
+        auth_url: "https://api.upstox.com/x",
+        state: "S",
+        redirect_uri: "http://cb",
+        postback_uri: "http://postback",
+      }),
     );
     const r = await oauthStartNativeAccount({
       adapter_id: "upstox",
@@ -76,6 +133,7 @@ describe("ftApi.native envelope unwrapping", () => {
       api_secret: "S",
     });
     expect(r.auth_url).toContain("upstox.com");
+    expect(r.postback_uri).toBe("http://postback");
   });
 
   it("reloginNativeAccount resolves a live session from {data:{session}}", async () => {

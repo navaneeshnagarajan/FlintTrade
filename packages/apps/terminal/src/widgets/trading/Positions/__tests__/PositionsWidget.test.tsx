@@ -29,6 +29,22 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 const mockUsePositions = vi.fn();
+const mockConnectionState = vi.hoisted(() => ({
+  apiKey: "",
+}));
+const mockModeState = vi.hoisted(() => ({
+  mode: "live",
+}));
+const mockBrokerState = vi.hoisted(() => ({
+  accounts: [] as Array<{
+    broker: string;
+    account_id: string;
+    label: string;
+    source?: string;
+    status?: string;
+  }>,
+  activeAccountId: null as string | null,
+}));
 
 vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
@@ -43,10 +59,18 @@ vi.mock("@/stores/tradingStore", () => ({
 
 // ftApi.helpers reads these stores for auth headers on every call.
 vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: { getState: () => ({ apiKey: "" }) },
+  useConnectionStore: Object.assign(
+    (selector?: (s: { apiKey: string }) => unknown) =>
+      typeof selector === "function" ? selector(mockConnectionState) : mockConnectionState,
+    { getState: () => mockConnectionState },
+  ),
 }));
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: "" }) },
+}));
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector?: (s: { mode: string }) => unknown) =>
+    typeof selector === "function" ? selector(mockModeState) : mockModeState,
 }));
 
 const mockDownloadExcel = vi.fn();
@@ -59,14 +83,24 @@ vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
   emitNotification: (...args: unknown[]) => mockEmitNotification(...args),
 }));
 
-// brokerStore feeds BrokerTargetSelect's native-account options. Default empty
-// (only the OpenAlgo bridge default); tests can push a native account.
-let mockBrokerAccounts: { broker: string; account_id: string; label: string }[] = [];
 vi.mock("@/stores/brokerStore", () => ({
-  useBrokerStore: (selector?: (s: { accounts: unknown[] }) => unknown) => {
-    const state = { accounts: mockBrokerAccounts };
-    return typeof selector === "function" ? selector(state) : state;
+  isBrokerAccountMatch: (
+    account: { account_id: string; broker: string; source?: string },
+    selector: string | null,
+  ) => {
+    if (!selector) return false;
+    const key = [
+      account.source ?? "gateway",
+      account.broker,
+      account.account_id,
+    ].map(encodeURIComponent).join(":");
+    return key === selector || account.account_id === selector;
   },
+  useBrokerStore: Object.assign(
+    (selector?: (s: typeof mockBrokerState) => unknown) =>
+      typeof selector === "function" ? selector(mockBrokerState) : mockBrokerState,
+    { getState: () => mockBrokerState },
+  ),
 }));
 
 // ---------------------------------------------------------------------------
@@ -102,7 +136,10 @@ function queryResult(overrides = {}) {
 describe("PositionsWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockBrokerAccounts = [];
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
   });
 
@@ -461,10 +498,35 @@ describe("PositionsWidget", () => {
       expect(screen.getByRole("combobox", { name: /broker account/i })).toBeInTheDocument();
     });
 
+    it("defaults gated position writes to the active native account in native-only Live mode", async () => {
+      mockBrokerState.accounts = [
+        {
+          broker: "upstox",
+          account_id: "UP-9",
+          label: "F&O",
+          source: "native",
+          status: "connected",
+        },
+      ];
+      mockBrokerState.activeAccountId = "native:upstox:UP-9";
+      const fetchMock = stubFetch();
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Convert NIFTY24APR24000CE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Convert NIFTY24APR24000CE to MIS" }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as { broker: string; account_id: string };
+      expect(body.broker).toBe("upstox");
+      expect(body.account_id).toBe("UP-9");
+    });
+
     it("threads the selected native broker into the convert request", async () => {
       // A native account is available — the operator can target it instead of
       // the OpenAlgo bridge (which implements neither verb → always 501).
-      mockBrokerAccounts = [{ broker: "dhan", account_id: "DHAN-1", label: "Primary" }];
+      mockBrokerState.accounts = [{ broker: "dhan", account_id: "DHAN-1", label: "Primary", status: "connected" }];
       const fetchMock = stubFetch();
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
@@ -484,7 +546,7 @@ describe("PositionsWidget", () => {
     });
 
     it("threads the selected native broker into the exit-all request", async () => {
-      mockBrokerAccounts = [{ broker: "upstox", account_id: "UP-9", label: "F&O" }];
+      mockBrokerState.accounts = [{ broker: "upstox", account_id: "UP-9", label: "F&O", status: "connected" }];
       const fetchMock = stubFetch({ status: "success", data: { status: "ok" } });
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);

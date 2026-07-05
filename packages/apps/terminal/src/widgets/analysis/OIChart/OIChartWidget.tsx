@@ -45,7 +45,14 @@ interface RawOptionRow {
   open_interest?: number;
 }
 
+interface RawOptionChainEntry {
+  strike?: number;
+  ce?: RawOptionRow | null;
+  pe?: RawOptionRow | null;
+}
+
 interface RawOptionChain {
+  chain?: RawOptionChainEntry[];
   calls?: RawOptionRow[];
   puts?: RawOptionRow[];
   atm_strike?: number;
@@ -90,6 +97,33 @@ function fmtExpiry(raw: string): string {
   } catch {
     return raw;
   }
+}
+
+function optionLegWithStrike(row: RawOptionRow | null | undefined, strike: unknown): RawOptionRow | null {
+  if (!row) return null;
+  const strikeValue = Number(row.strike_price ?? row.strike ?? strike);
+  if (!Number.isFinite(strikeValue) || strikeValue <= 0) return null;
+  return { ...row, strike: strikeValue, strike_price: strikeValue };
+}
+
+function chainCalls(chain: RawOptionChain): RawOptionRow[] {
+  if (chain.chain?.length) {
+    return chain.chain.flatMap((entry) => {
+      const row = optionLegWithStrike(entry.ce, entry.strike);
+      return row ? [row] : [];
+    });
+  }
+  return chain.calls ?? [];
+}
+
+function chainPuts(chain: RawOptionChain): RawOptionRow[] {
+  if (chain.chain?.length) {
+    return chain.chain.flatMap((entry) => {
+      const row = optionLegWithStrike(entry.pe, entry.strike);
+      return row ? [row] : [];
+    });
+  }
+  return chain.puts ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -205,11 +239,11 @@ function OIChartWidget() {
       if (chainRes.status === "fulfilled") {
         const newChain = chainRes.value as unknown as RawOptionChain;
         const snapshot: Record<string, number> = {};
-        (newChain.calls ?? []).forEach((c) => {
+        chainCalls(newChain).forEach((c) => {
           const k = `${c.strike_price ?? c.strike}_CE`;
           snapshot[k] = Number(c.oi ?? c.open_interest ?? 0);
         });
-        (newChain.puts ?? []).forEach((p) => {
+        chainPuts(newChain).forEach((p) => {
           const k = `${p.strike_price ?? p.strike}_PE`;
           snapshot[k] = Number(p.oi ?? p.open_interest ?? 0);
         });
@@ -257,8 +291,8 @@ function OIChartWidget() {
     const callMap: Record<number, RawOptionRow> = {};
     const putMap:  Record<number, RawOptionRow> = {};
 
-    (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike ?? 0] = c; });
-    (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike  ?? 0] = p; });
+    chainCalls(chain).forEach((c) => { callMap[c.strike_price ?? c.strike ?? 0] = c; });
+    chainPuts(chain).forEach((p) => { putMap[p.strike_price  ?? p.strike  ?? 0] = p; });
 
     const allStrikes = Array.from(
       new Set([...Object.keys(callMap).map(Number), ...Object.keys(putMap).map(Number)])

@@ -12,7 +12,7 @@
  *   - BASKET toggle — select strikes, badge count, basket panel
  *   - Color-coded change%, OI bars, ATM accent border
  *   - Flash animation on LTP change: green flash (price up), red flash (price down) — 500ms
- *   - Max Pain badge in header (fetched from OpenAlgo max_pain endpoint)
+ *   - Max Pain badge in header (fetched from FlintTrade backend maxpain endpoint)
  *   - Auto-refresh: 3 s market hours, 30 s off-hours
  *   - Dense layout: text-xs data, text-xs headers, font-mono numbers
  *   - Glide theme uses design token hex values (surface/border/text tokens)
@@ -35,6 +35,7 @@ import {
   Layers,
 } from "lucide-react";
 import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
+import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { isMarketHours } from "@/lib/market";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
@@ -250,28 +251,14 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
     setBasket((prev) => prev.filter((b) => !(b.strike === strike && b.optionType === optionType)));
   }
 
-  // Normalize an expiry string (YYYY-MM-DD or ISO) to DDMMMYY (e.g. 27MAR25)
-  // as required by the OpenAlgo fallback symbol format.
-  function normalizeExpiryForSymbol(expiry: string): string {
-    try {
-      const d = new Date(expiry);
-      if (isNaN(d.getTime())) return expiry;
-      const dd  = String(d.getDate()).padStart(2, "0");
-      const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
-      const yy  = String(d.getUTCFullYear()).slice(-2);
-      return `${dd}${mon}${yy}`;
-    } catch {
-      return expiry;
-    }
-  }
-
   // Order placement — resolves canonical trading symbol via getOptionSymbol
   async function handleOrder({ strike, optionType, expiry, action }: OrderParams) {
-    const normalizedExpiry = normalizeExpiryForSymbol(expiry);
-    let orderSymbol   = `${symDef.label}${normalizedExpiry}${strike}${optionType}`;
+    const typedOptionType = optionType === "PE" ? "PE" : "CE";
+    let orderSymbol   = buildCompactOptionSymbol(symDef.label, expiry, strike, typedOptionType)
+      ?? `${symDef.label}${expiry}${strike}${typedOptionType}`;
     let orderExchange = exchange;
     try {
-      const resolved = await getOptionSymbol(symDef.label, exchange, expiry, optionType, String(strike));
+      const resolved = await getOptionSymbol(symDef.label, exchange, expiry, typedOptionType, String(strike));
       orderSymbol   = resolved.symbol;
       orderExchange = resolved.exchange;
     } catch {

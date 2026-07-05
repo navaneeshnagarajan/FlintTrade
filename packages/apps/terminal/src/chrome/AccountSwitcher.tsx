@@ -19,8 +19,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useBrokerStore } from "@/stores/brokerStore";
-import type { AccountStatus } from "@/types/broker";
+import { brokerAccountKey, isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
+import type { AccountStatus, BrokerAccount } from "@/types/broker";
 
 // ---------------------------------------------------------------------------
 // Status dot colour
@@ -70,12 +70,12 @@ export default function AccountSwitcher() {
     })),
   );
 
-  const activeAccount = accounts.find((a) => a.account_id === activeAccountId);
+  const activeAccount = accounts.find((a) => isBrokerAccountMatch(a, activeAccountId));
 
   const handleSwitch = useCallback(
-    (accountId: string) => {
-      if (accountId === activeAccountId) return;
-      setActiveAccount(accountId);
+    (account: BrokerAccount) => {
+      if (isBrokerAccountMatch(account, activeAccountId)) return;
+      setActiveAccount(brokerAccountKey(account));
       // Invalidate all queries so data refreshes for the new account context
       void queryClient.invalidateQueries();
     },
@@ -117,11 +117,12 @@ export default function AccountSwitcher() {
         <DropdownMenuSeparator />
 
         {accounts.map((account) => {
-          const isActive = account.account_id === activeAccountId;
+          const key = brokerAccountKey(account);
+          const isActive = isBrokerAccountMatch(account, activeAccountId);
           return (
             <DropdownMenuItem
-              key={account.account_id}
-              onClick={() => handleSwitch(account.account_id)}
+              key={key}
+              onClick={() => handleSwitch(account)}
               className="flex items-center justify-between gap-2 cursor-pointer"
             >
               <div className="flex items-center gap-2 min-w-0">

@@ -121,6 +121,25 @@ def _native_brokers_cfg() -> dict:
     }
 
 
+def _all_native_brokers_cfg() -> dict:
+    return {
+        "registered": ["dhan:D1", "upstox:U1", "indmoney:I1", "kotakneo:K1"],
+        "account_acls": {
+            "dhan": {"D1": ["me"]},
+            "upstox": {"U1": ["me"]},
+            "indmoney": {"I1": ["me"]},
+            "kotakneo": {"K1": ["me"]},
+        },
+        "execution": {"default": "dhan:D1"},
+        "data": {
+            "ticks": "dhan:D1", "historical": "dhan:D1",
+            "option_chains": "dhan:D1", "quote": "dhan:D1",
+        },
+        "failover": {"enabled": False, "order": []},
+        "cost_aware": {"enabled": False, "tasks": []},
+    }
+
+
 def test_natives_stay_dormant_without_activation_checks() -> None:
     # Default: no native_* callables → no native adapter constructed.
     router = build_broker_router(BrokerRegistry(), _native_brokers_cfg())
@@ -137,6 +156,24 @@ def test_native_activates_only_when_attested_and_credentialled() -> None:
     # dhan passes both gates; upstox is attested but has no creds → dormant.
     assert set(router._adapters) == {"dhan"}
     assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
+
+
+def test_only_connectable_natives_activate_from_registered_selectors() -> None:
+    """Boot activation follows the live-verified native set, not stale rows.
+
+    Kotak Neo is built/catalogued but still ``connectable=false`` until live
+    login/read verification passes, so even an attested+credentialled stale row
+    must remain dormant after restart. Capability metadata remains available via
+    the recommendation/capability routes; this only guards runtime activation.
+    """
+    router = build_broker_router(
+        BrokerRegistry(),
+        _all_native_brokers_cfg(),
+        native_attest_ok=lambda _b: True,
+        native_has_credentials=lambda _b: True,
+    )
+    assert set(router._adapters) == {"dhan", "upstox", "indmoney"}
+    assert "kotakneo" not in router._adapters
 
 
 def test_native_activation_gates_fail_closed() -> None:

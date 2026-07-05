@@ -53,6 +53,76 @@ def _post(client, path: str, body: dict | None = None):
     return response, response.get_json()
 
 
+def _chain_payload() -> dict:
+    return {
+        "spot": 24000.0,
+        "strikes": [
+            {
+                "strike_price": 23800,
+                "ce_ltp": 260,
+                "ce_oi": 30000,
+                "ce_iv": 13.5,
+                "ce_delta": 0.72,
+                "pe_ltp": 40,
+                "pe_oi": 70000,
+                "pe_iv": 14.0,
+                "pe_delta": -0.28,
+            },
+            {
+                "strike_price": 24000,
+                "ce_ltp": 130,
+                "ce_oi": 80000,
+                "ce_iv": 13.0,
+                "ce_delta": 0.52,
+                "pe_ltp": 110,
+                "pe_oi": 82000,
+                "pe_iv": 13.1,
+                "pe_delta": -0.48,
+            },
+            {
+                "strike_price": 24200,
+                "ce_ltp": 55,
+                "ce_oi": 35000,
+                "ce_iv": 13.8,
+                "ce_delta": 0.31,
+                "pe_ltp": 230,
+                "pe_oi": 28000,
+                "pe_iv": 14.3,
+                "pe_delta": -0.69,
+            },
+        ],
+    }
+
+
+def _history_candles(n: int = 80) -> list[dict]:
+    base = 1_700_000_000
+    return [
+        {"timestamp": base + i * 604_800, "open": 100 + i, "high": 102 + i, "low": 99 + i,
+         "close": 101 + i, "volume": 10_000 + i}
+        for i in range(n)
+    ]
+
+
+class _ConnectedRegistry:
+    def __init__(self) -> None:
+        self.history_calls: list[tuple[str, dict]] = []
+        self.chain_calls: list[tuple[str, dict]] = []
+
+    def is_connected(self) -> bool:
+        return True
+
+    def get_primary_account_id(self) -> str:
+        return "acc-primary"
+
+    def get_history(self, account_id: str, params: dict) -> dict:
+        self.history_calls.append((account_id, params))
+        return {"candles": _history_candles(), "spot": 24000.0}
+
+    def get_option_chain(self, account_id: str, params: dict) -> dict:
+        self.chain_calls.append((account_id, params))
+        return _chain_payload()
+
+
 # ---------------------------------------------------------------------------
 # GEX endpoint
 # ---------------------------------------------------------------------------
@@ -92,6 +162,15 @@ class TestGEXEndpoint:
     def test_gex_symbol_in_response(self, client):
         _, body = _post(client, "/api/v1/gex", {"symbol": "BANKNIFTY", "exchange": "NFO"})
         assert body["symbol"] == "BANKNIFTY"
+
+    def test_gex_uses_connected_registry_option_chain(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+
+        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
+
+        assert body["is_sample_data"] is False
+        assert registry.chain_calls == [("acc-primary", {"symbol": "NIFTY", "exchange": "NFO"})]
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +229,22 @@ class TestVolSurfaceEndpoint:
         })
         assert len(body["data"]["strikes"]) <= 5
 
+    def test_volsurface_uses_connected_registry_option_chain(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+
+        _, body = _post(client, "/api/v1/volsurface", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiries": ["26MAR26"],
+        })
+
+        assert body["is_sample_data"] is False
+        assert registry.chain_calls[0] == (
+            "acc-primary",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"},
+        )
+
 
 # ---------------------------------------------------------------------------
 # IV Smile endpoint
@@ -193,6 +288,15 @@ class TestIVSmileEndpoint:
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         assert body["data"]["curves"][0]["atm_iv"] > 0
 
+    def test_ivsmile_uses_connected_registry_option_chain(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+
+        _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
+
+        assert body["is_sample_data"] is False
+        assert registry.chain_calls[0][1]["expiry"] == "26MAR26"
+
 
 # ---------------------------------------------------------------------------
 # Straddle P&L endpoint
@@ -232,6 +336,20 @@ class TestStraddlePnLEndpoint:
         _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         data = body["data"]
         assert len(data["pnl_series"]) == len(data["timestamps"])
+
+    def test_straddlepnl_uses_connected_registry_history_contract(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+
+        _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+
+        assert body["is_sample_data"] is False
+        account_id, params = registry.history_calls[0]
+        assert account_id == "acc-primary"
+        assert params["symbol"] == "NIFTY"
+        assert params["exchange"] == "NSE_INDEX"
+        assert params["interval"] == "5m"
+        assert "start" in params and "end" in params
 
 
 # ---------------------------------------------------------------------------
@@ -525,3 +643,22 @@ class TestLiveOptionChain:
         assert body["is_sample_data"] is False
         curve = body["data"]["curves"][0]
         assert curve["days_to_expiry"] > 0, "ISO expiry must yield a real positive DTE"
+
+
+class TestLiveRegistryHistory:
+    def test_rrg_uses_connected_registry_history_contract(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+
+        resp = client.get("/api/v1/rrg/sectors?tail_length=4")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["data"]["is_sample_data"] is False
+        assert len(registry.history_calls) >= 4
+        account_id, params = registry.history_calls[0]
+        assert account_id == "acc-primary"
+        assert params["symbol"] == "NIFTY 50"
+        assert params["exchange"] == "NSE_INDEX"
+        assert params["interval"] == "W"
+        assert "start" in params and "end" in params

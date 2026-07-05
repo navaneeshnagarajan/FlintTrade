@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,10 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/services/api", () => ({
   getPositionbook: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/services/ftApi.native", () => ({
+  listNativeAccounts: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -47,6 +52,15 @@ function makePosition(symbol: string, pnl: number, qty = 1) {
   };
 }
 
+function renderWidget() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <IntradayPnLWidget />
+    </QueryClientProvider>,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -62,18 +76,18 @@ describe("IntradayPnLWidget", () => {
   });
 
   it("renders without crashing", async () => {
-    const { container } = render(<IntradayPnLWidget />);
+    const { container } = renderWidget();
     expect(container.firstChild).toBeInTheDocument();
   });
 
   it("shows the Intraday P&L heading", async () => {
-    render(<IntradayPnLWidget />);
+    renderWidget();
     // Header text includes "Intraday" and "P&L" (entity encoded in JSX)
     expect(screen.getByText(/intraday/i)).toBeInTheDocument();
   });
 
   it("shows stat card labels", async () => {
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("Realised")).toBeInTheDocument();
     expect(screen.getByText("Unrealised")).toBeInTheDocument();
@@ -83,7 +97,7 @@ describe("IntradayPnLWidget", () => {
 
   it("displays net P&L as zero when no positions", async () => {
     mockGetPositionbook.mockResolvedValue([]);
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     const netEl = screen.getByTestId("net-pnl");
     expect(netEl.textContent).toContain("0.00");
@@ -91,7 +105,7 @@ describe("IntradayPnLWidget", () => {
 
   it("displays positive net P&L in profit colour", async () => {
     mockGetPositionbook.mockResolvedValue([makePosition("SBIN", 500)]);
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     const netEl = screen.getByTestId("net-pnl");
     expect(netEl.textContent).toContain("500");
@@ -103,7 +117,7 @@ describe("IntradayPnLWidget", () => {
       .mockResolvedValueOnce([makePosition("SBIN", 500)])
       .mockResolvedValueOnce([makePosition("SBIN", -250)]);
 
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
 
@@ -116,7 +130,7 @@ describe("IntradayPnLWidget", () => {
 
   it("displays negative net P&L in loss colour", async () => {
     mockGetPositionbook.mockResolvedValue([makePosition("SBIN", -300)]);
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     const netEl = screen.getByTestId("net-pnl");
     expect(netEl.textContent).toContain("300");
@@ -125,7 +139,7 @@ describe("IntradayPnLWidget", () => {
 
   it("shows error indicator when API fails", async () => {
     mockGetPositionbook.mockRejectedValue(new Error("Network error"));
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     // Error dot has a title attribute equal to the error message
     const errorDot = document.querySelector(".bg-loss.rounded-full");
@@ -137,7 +151,7 @@ describe("IntradayPnLWidget", () => {
       makePosition("SBIN", 200),
       makePosition("RELIANCE", 300),
     ]);
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     const netEl = screen.getByTestId("net-pnl");
     expect(netEl.textContent).toContain("500");
@@ -148,7 +162,7 @@ describe("IntradayPnLWidget", () => {
       makePosition("SBIN",     200, 0), // realised
       makePosition("RELIANCE", 300, 1), // unrealised
     ]);
-    render(<IntradayPnLWidget />);
+    renderWidget();
     await act(async () => { await Promise.resolve(); });
     // Net should still be 500
     const netEl = screen.getByTestId("net-pnl");

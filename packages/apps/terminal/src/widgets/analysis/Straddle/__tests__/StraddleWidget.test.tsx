@@ -195,4 +195,32 @@ describe("StraddleWidget", () => {
       }),
     ]);
   });
+
+  it("uses native chain[] option legs for headline prices", async () => {
+    apiMocks.getExpiry.mockResolvedValue(["2026-07-30"]);
+    apiMocks.getQuotes.mockResolvedValue({ ltp: 25000, prev_close: 24990 });
+    apiMocks.getOptionChain.mockResolvedValue({
+      atm_strike: 25000,
+      chain: [
+        {
+          strike: 25000,
+          ce: { ltp: 112.5 },
+          pe: { ltp: 98.25 },
+        },
+      ],
+    });
+
+    render(<StraddleWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByText("210.75")).toBeInTheDocument();
+    });
+    expect(screen.getByText("112.5")).toBeInTheDocument();
+    expect(screen.getByText("98.25")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(chartMocks.createdLineSeries[0]?.setData).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ value: 210.75 })]),
+      );
+    });
+  });
 });

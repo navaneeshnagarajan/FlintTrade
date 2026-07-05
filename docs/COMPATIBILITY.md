@@ -40,14 +40,16 @@ is not tracked or pulled.
 FlintTrade supports two broker paths: the native FlintTrade gateway and an
 optional OpenAlgo-compatible bridge. The native path is beta: the gateway
 contract, routing, credentials, capabilities, and founder-broker adapter code are
-present in the repo, but live native execution stays disabled unless that broker
-has an active attested SDK pin plus vault credentials. Dhan, Upstox, and Kotak
-Neo now carry active native SDK pins (`brokers.lock`); IndMoney is REST-only
-(no SDK pin, credentials-only). The credential-replay login step, in-app
-credential capture (Settings → Brokers), OAuth connect flow, and daily
-session refresh are all built. The native direct broker paths are not yet
-live-verified against real funded accounts — do not treat them as
-production-live complete yet.
+present in the repo. Native connectability is gated per broker by live evidence:
+Dhan, Upstox, and INDmoney are currently enabled in the app after login/read
+verification against real accounts; Kotak Neo remains catalogued but disabled
+as "coming soon" until its live adapter login/read checks pass. Dhan and Upstox
+use native SDK/API clients, INDmoney is REST-only with a dashboard-generated
+24-hour token, and Kotak Neo has adapter/mapping coverage plus portal evidence
+but no promoted native connect yet. The credential-replay login step, in-app
+credential capture (Settings → Brokers), OAuth connect flow, and daily session
+refresh are built. Closed-market/no-funds verification does not prove funded
+order execution; keep order-placement claims scoped to the evidence collected.
 
 For the OpenAlgo path, whatever broker version OpenAlgo supports is the
 compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)

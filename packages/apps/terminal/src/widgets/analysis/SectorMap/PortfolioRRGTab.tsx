@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RRG_QUADRANT_COLOURS } from "./RRGCanvas";
 import type { RRGResponse, SectorConstituentsResponse } from "@/services/ftApi";
-import { getSectorConstituents } from "@/services/ftApi";
+import { getPortfolioRRGData, getSectorConstituents } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Storage key
@@ -42,16 +42,7 @@ const PORTFOLIO_COLOURS: string[] = [
 // API call
 // ---------------------------------------------------------------------------
 
-async function fetchPortfolioRRG(symbols: string[]): Promise<RRGResponse> {
-  if (symbols.length === 0) {
-    return { benchmark: "", tail_length: 8, is_sample_data: false, sectors: [] };
-  }
-  const res = await fetch(
-    `/ft-api/v1/rrg/portfolio?symbols=${encodeURIComponent(symbols.join(","))}`,
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json() as Promise<RRGResponse>;
-}
+const PORTFOLIO_RRG_TAIL_LENGTH = 8;
 
 // ---------------------------------------------------------------------------
 // Shared canvas drawing helpers
@@ -602,7 +593,7 @@ export const PortfolioRRGTab = memo(function PortfolioRRGTab() {
   // Fetch portfolio RRG data
   const { data, isLoading, isError, refetch } = useQuery<RRGResponse>({
     queryKey: ["portfolioRRG", symbols],
-    queryFn: () => fetchPortfolioRRG(symbols),
+    queryFn: () => getPortfolioRRGData(symbols, PORTFOLIO_RRG_TAIL_LENGTH),
     enabled: symbols.length > 0,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,

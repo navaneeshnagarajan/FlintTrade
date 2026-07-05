@@ -439,14 +439,39 @@ class OpenAlgoClient:
         data = self._unwrap(await self._get("intervals"))
         return data if isinstance(data, list) else []
 
-    async def option_chain(self, symbol: str, exchange: str = "NFO") -> OptionChain:
+    async def option_chain(self, symbol: str, exchange: str = "NFO", expiry: str = "") -> OptionChain:
         """POST /api/v1/optionchain"""
-        payload = self._body({"symbol": symbol, "exchange": exchange})
+        payload_data = {"symbol": symbol, "underlying": symbol, "exchange": exchange}
+        if expiry:
+            payload_data["expiry"] = expiry
+            payload_data["expiry_date"] = expiry.replace("-", "")
+        payload = self._body(payload_data)
         data = self._unwrap(await self._post("optionchain", payload))
         if isinstance(data, dict):
-            strikes = [OptionChainStrike(**s) for s in data.get("strikes", [])]
+            raw_strikes = data.get("strikes", data.get("chain", []))
+            normalised_strikes: list[dict[str, Any]] = []
+            for strike in raw_strikes:
+                if not isinstance(strike, dict):
+                    continue
+                if "ce" in strike or "pe" in strike:
+                    ce = strike.get("ce") if isinstance(strike.get("ce"), dict) else {}
+                    pe = strike.get("pe") if isinstance(strike.get("pe"), dict) else {}
+                    normalised_strikes.append({
+                        "strike_price": strike.get("strike", strike.get("strike_price", 0.0)),
+                        "ce_ltp": ce.get("ltp", ce.get("last_price", 0.0)),
+                        "ce_oi": ce.get("oi", ce.get("open_interest", 0)),
+                        "ce_volume": ce.get("volume", 0),
+                        "ce_iv": ce.get("iv", ce.get("implied_volatility", 0.0)),
+                        "pe_ltp": pe.get("ltp", pe.get("last_price", 0.0)),
+                        "pe_oi": pe.get("oi", pe.get("open_interest", 0)),
+                        "pe_volume": pe.get("volume", 0),
+                        "pe_iv": pe.get("iv", pe.get("implied_volatility", 0.0)),
+                    })
+                else:
+                    normalised_strikes.append(strike)
+            strikes = [OptionChainStrike(**s) for s in normalised_strikes]
             return OptionChain(
-                underlying=data.get("underlying", symbol),
+                underlying=data.get("underlying", data.get("symbol", symbol)),
                 exchange=data.get("exchange", exchange),
                 strikes=strikes,
             )

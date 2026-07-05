@@ -48,7 +48,7 @@ const AGENT = {
 describe("OpenClawWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockStatus.mockResolvedValue({ connected: true });
+    mockStatus.mockResolvedValue({ connected: true, agent_control_supported: true });
     mockAgents.mockResolvedValue({ agents: [] });
     mockDeploy.mockResolvedValue({ status: "success", agent_id: "a-1" });
     mockStop.mockResolvedValue({ status: "success" });
@@ -102,6 +102,21 @@ describe("OpenClawWidget", () => {
     renderWidget();
     // Exact match: the status badge, not the "Gateway offline — no agents." list text.
     expect(await screen.findByText("Gateway offline")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /deploy agent/i })).toBeDisabled();
+  });
+
+  it("shows connected-but-unsupported lifecycle state", async () => {
+    mockStatus.mockResolvedValue({
+      connected: true,
+      agent_control_supported: false,
+      message: "OpenClaw HTTP agent lifecycle controls are unavailable.",
+    });
+
+    renderWidget();
+
+    expect(await screen.findByText("Gateway connected")).toBeInTheDocument();
+    expect(screen.getByText("OpenClaw HTTP agent lifecycle controls are unavailable.")).toBeInTheDocument();
+    expect(screen.getByText("Gateway connected — HTTP agent lifecycle unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /deploy agent/i })).toBeDisabled();
   });
 });

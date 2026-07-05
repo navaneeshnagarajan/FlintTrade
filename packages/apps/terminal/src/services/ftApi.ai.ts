@@ -1,4 +1,7 @@
 import { get, post } from "./ftApi.helpers";
+import { pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
 
 export interface Signal {
   symbol: string;
@@ -96,6 +99,8 @@ export interface TeamConfig {
 
 export interface OpenClawStatusData {
   connected: boolean;
+  agent_control_supported?: boolean;
+  message?: string;
 }
 
 export interface OpenClawAgentData {
@@ -369,12 +374,21 @@ export interface AgentStartParams {
   account_id?: string;
 }
 
+function withAgentBrokerTarget(params: AgentStartParams): AgentStartParams {
+  if (params.broker || params.account_id) return params;
+  const nativeTarget = pickNativeBrokerOrderTarget(
+    useModeStore.getState().mode,
+    useConnectionStore.getState().apiKey,
+  );
+  return nativeTarget ? { ...params, ...nativeTarget } : params;
+}
+
 /** Live agent/session snapshot — honest `{running: false}` shape when idle. */
 export const getAgentStatus = () => get<AgentSnapshot>("ai/agent/status");
 
 /** Start a trading session (202). Backend refusals carry actionable messages. */
 export const startAgent = (params: AgentStartParams) =>
-  post<AgentSnapshot>("ai/agent/start", params);
+  post<AgentSnapshot>("ai/agent/start", withAgentBrokerTarget(params));
 
 /** Request a stop; squares off tracked positions unless squareOff is false. */
 export const stopAgent = (squareOff = true) =>

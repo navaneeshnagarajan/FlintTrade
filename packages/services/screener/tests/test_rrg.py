@@ -427,3 +427,24 @@ class TestRRGEndpoint:
         valid = {"leading", "weakening", "lagging", "improving", "neutral"}
         for sector in parsed["data"]["sectors"]:
             assert sector["current_quadrant"] in valid
+
+    def test_portfolio_rrg_returns_requested_symbols(self, client):
+        import json
+
+        resp = client.get("/api/v1/rrg/portfolio?symbols=RELIANCE,TCS&tail_length=6")
+        assert resp.status_code == 200
+        parsed = json.loads(resp.data)
+        data = parsed["data"]
+        assert data["benchmark"] == "NIFTY 50"
+        assert data["tail_length"] == 6
+        assert data["is_sample_data"] is True
+        assert [row["symbol"] for row in data["sectors"]] == ["RELIANCE", "TCS"]
+        assert all(row["tail"] for row in data["sectors"])
+
+    def test_portfolio_rrg_empty_symbols_returns_empty_payload(self, client):
+        import json
+
+        resp = client.get("/api/v1/rrg/portfolio")
+        assert resp.status_code == 200
+        parsed = json.loads(resp.data)
+        assert parsed["data"]["sectors"] == []

@@ -27,7 +27,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | Native broker adapter contract/routing, founder-broker adapter code (Dhan active pin; Upstox/Kotak Neo placeholder-gated; IndMoney REST-only), credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
+| `gateway` | Python | Native broker adapter contract/routing, founder-broker adapter code (Dhan, Upstox, and INDmoney connectable; Kotak Neo built but coming soon), credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
@@ -256,12 +256,13 @@ Use either as a reference implementation.
 
 ## 8. Adding a broker adapter
 
-FlintTrade talks to brokers natively: each broker is a direct SDK/HTTP
+FlintTrade has two first-class broker paths: the native gateway and the
+optional OpenAlgo-compatible bridge. A native broker is a direct SDK/HTTP
 adapter that implements the `BrokerAdapter` Protocol and is routed through
-the `BrokerRouter`. OpenAlgo is just one optional bridge adapter
-(`brokers/openalgo.py`) alongside the native ones — it is not the primary
-path, so don't model a new broker as an OpenAlgo shim. The `shims/`
-directory holds only OpenAlgo infrastructure shims, not broker adapters.
+the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
+(`brokers/openalgo.py`) alongside the native ones. Do not model a new native
+broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
+infrastructure shims, not broker adapters.
 
 1. Add a native adapter under
    `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`
@@ -277,6 +278,12 @@ directory holds only OpenAlgo infrastructure shims, not broker adapters.
 4. Add tests under `packages/integrations/gateway/tests/` — mock the broker's
    SDK/HTTP responses, assert auth, capability lookup, and error handling.
 5. Update [COMPATIBILITY.md](COMPATIBILITY.md) with the new broker.
+
+Native connectability is a separate release gate from adapter existence.
+Only flip `connectable=True` after the broker has been tried against a real
+account path and the evidence is captured. Built-but-unverified adapters stay
+visible as "coming soon" so their code, mappings, and mock coverage are kept
+without presenting them as live-ready.
 
 ---
 

@@ -38,6 +38,21 @@ _CHAIN = [
 ]
 
 
+class _ConnectedRegistry:
+    def __init__(self) -> None:
+        self.chain_calls: list[tuple[str, dict]] = []
+
+    def is_connected(self) -> bool:
+        return True
+
+    def get_primary_account_id(self) -> str:
+        return "acc-primary"
+
+    def get_option_chain(self, account_id: str, params: dict) -> dict:
+        self.chain_calls.append((account_id, params))
+        return {"spot": 22050.0, "strikes": _CHAIN}
+
+
 @pytest.fixture()
 def app():
     flask_app = Flask(__name__)
@@ -71,6 +86,23 @@ def test_heatmap_sample_data(client):
     """200 with synthetic sample data when chain absent."""
     resp = client.post("/v1/oi/heatmap", json={"symbol": "NIFTY"})
     assert resp.status_code == 200
+
+
+def test_heatmap_uses_connected_registry_option_chain_contract(app, client):
+    registry = _ConnectedRegistry()
+    app.config["REGISTRY"] = registry
+
+    resp = client.post(
+        "/v1/oi/heatmap",
+        json={"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["is_sample_data"] is False
+    assert registry.chain_calls == [
+        ("acc-primary", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
+    ]
 
 
 # ---------------------------------------------------------------------------
