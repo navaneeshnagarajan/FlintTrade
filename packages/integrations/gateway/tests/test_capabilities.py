@@ -1,7 +1,7 @@
 """Tests for the BrokerCapabilities and CapabilityRegistry.
 
 Covers:
-- Default registry contains all 11 seeded brokers
+- Default registry contains bridge/legacy brokers plus adapter-derived natives
 - Field defaults (all booleans False, rate limits positive)
 - Individual broker capability spot-checks
 - register() adds / overwrites entries
@@ -115,7 +115,7 @@ def test_registry_register_overwrites_existing() -> None:
 
 
 def test_default_registry_contains_14_brokers() -> None:
-    """The default REGISTRY contains the 13 seeded brokers plus Groww native."""
+    """The default REGISTRY contains 9 bridge/legacy rows plus 5 native rows."""
     assert len(REGISTRY.all()) == 14
 
 
@@ -192,7 +192,7 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
     checked = 0
     for name, adapter_caps in natives.items():
         reg_caps = REGISTRY.get(name)
-        assert reg_caps is not None, f"{name} missing from the seeded registry"
+        assert reg_caps is not None, f"{name} missing from the capability registry"
         checked += 1
         assert reg_caps.supports_market_orders == bool(adapter_caps.order_types & OrderTypes.MARKET), name
         assert reg_caps.supports_limit_orders == bool(adapter_caps.order_types & OrderTypes.LIMIT), name
@@ -203,7 +203,18 @@ def test_native_registry_flags_match_adapter_capabilities() -> None:
         assert reg_caps.supports_equity == bool(adapter_caps.segments & (Segments.NSE_EQ | Segments.BSE_EQ)), name
         assert reg_caps.supports_multi_quote == adapter_caps.multi_quote_supported, name
         assert reg_caps.supports_multi_option_greeks == adapter_caps.multi_option_greeks_supported, name
-    assert checked == 5  # all natives, including Groww, are seeded; guard the loop ran
+    assert checked == 5  # all natives, including Groww, are adapter-derived; guard the loop ran
+
+
+def test_auto_native_registry_derives_native_rows_without_seeded_duplicates() -> None:
+    """An empty auto-native registry gets native rows from adapter constants."""
+    from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES
+
+    reg = CapabilityRegistry(auto_native=True)
+    names = set(reg.broker_names())
+    assert names == set(NATIVE_ADAPTER_CLASSES)
+    assert reg.get("dhan").supports_bracket_orders is True  # type: ignore[union-attr]
+    assert reg.get("groww").supports_sl_m_orders is True  # type: ignore[union-attr]
 
 
 def test_native_capabilities_follow_adapter_registry() -> None:
