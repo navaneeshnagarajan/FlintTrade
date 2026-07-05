@@ -42,7 +42,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check broker-sdk-sync full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
 
 # ======================================================================
 # Setup
@@ -236,6 +236,9 @@ sync-check: ## Check upstream drift on external test-deps under .local/external/
 	else \
 	  echo -e "$(YELLOW)openclaw: not present at .local/external/openclaw (run scripts/setup-test-deps.sh)$(RESET)"; \
 	fi
+
+broker-sdk-sync: ## Refresh repo-local broker SDK refs and fail on upstream drift
+	@uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift
 
 logs-clear: ## Truncate runtime .log files under .local/dev-logs/
 	@echo -e "$(CYAN)=== Clearing runtime logs ===$(RESET)"

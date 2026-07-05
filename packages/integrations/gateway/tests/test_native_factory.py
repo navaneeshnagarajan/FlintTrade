@@ -118,12 +118,27 @@ def test_skip_reasons_reported():
     assert ("upstox", "sdk-not-attested") in skips
 
 
+def test_coming_soon_natives_never_activate_from_factory():
+    skips: list[tuple[str, str]] = []
+    out = build_native_adapters(
+        ["kotakneo", "groww"],
+        attest_ok=lambda _b: True,
+        has_credentials=lambda _b: True,
+        on_skip=lambda b, why: skips.append((b, why)),
+    )
+
+    assert out == {}
+    assert skips == [
+        ("kotakneo", "coming-soon-not-live-verified"),
+        ("groww", "coming-soon-not-live-verified"),
+    ]
+
+
 @pytest.mark.parametrize(
     "broker_id, kwarg_name, cls",
     [
         ("dhan", "security_resolver", DhanAdapter),
         ("upstox", "instrument_resolver", UpstoxAdapter),
-        ("kotakneo", "symbol_resolver", KotakNeoAdapter),
     ],
 )
 def test_adapter_kwargs_passed_through_per_broker(broker_id, kwarg_name, cls):

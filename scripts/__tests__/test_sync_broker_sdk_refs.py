@@ -126,6 +126,9 @@ def test_sync_records_pypi_drift(tmp_path, monkeypatch) -> None:
 
     assert manifest["sdks"][0]["pypi_latest_version"] == "2.3.0"
     assert manifest["sdks"][0]["pypi_current"] is False
+    assert "uv run python scripts/sync_broker_sdk_refs.py" in (tmp_path / "audit" / "README.md").read_text(
+        encoding="utf-8"
+    )
     assert manifest["drift"] == [
         {"package": "dhanhq", "source": "pypi", "locked": "2.2.0", "upstream": "2.3.0"}
     ]

@@ -4,8 +4,9 @@ The native adapters (Dhan / Upstox / Kotak Neo / INDmoney / Groww) are written,
 gated and mock-tested, but stay dormant until two prerequisites hold for a
 broker:
 
-1. its non-placeholder SDK pin is installed and attested (``broker_sdk_attest``), and
-2. the operator has stored credentials for it (the encrypted vault).
+1. the catalogue marks it ``connectable=True`` after live login/read evidence,
+2. its non-placeholder SDK pin is installed and attested (``broker_sdk_attest``), and
+3. the operator has stored credentials for it (the encrypted vault).
 
 This module owns the decision of *which* natives to construct and register, so
 ``build_broker_router`` can activate them the moment those prerequisites are met
@@ -66,11 +67,12 @@ def build_native_adapters(
     """Construct the native adapters whose prerequisites are met.
 
     For each requested ``broker_id`` that names a native adapter, the adapter is
-    constructed only when BOTH ``attest_ok(broker_id)`` (its SDK is installed and
-    pinned-match) and ``has_credentials(broker_id)`` (the vault holds creds) are
-    true. Non-native ids (e.g. ``openalgo``) and brokers failing either gate are
-    skipped — reported via ``on_skip(broker_id, reason)`` — so the result holds
-    exactly the natives that are safe to register.
+    constructed only when the public catalogue says it is live-verified
+    connectable, ``attest_ok(broker_id)`` says its SDK is installed and
+    pinned-match, and ``has_credentials(broker_id)`` says the vault holds creds.
+    Non-native ids (e.g. ``openalgo``) and brokers failing any gate are skipped
+    — reported via ``on_skip(broker_id, reason)`` — so the result holds exactly
+    the natives that are safe to register.
 
     Args:
         broker_ids: candidate broker ids (e.g. the native selectors in the
@@ -96,6 +98,11 @@ def build_native_adapters(
         cls = NATIVE_ADAPTER_CLASSES.get(broker_id)
         if cls is None:
             continue  # not a native broker (bridge / unknown)
+        info = BROKER_CATALOG.get(broker_id)
+        if info is not None and not info.connectable:
+            if on_skip is not None:
+                on_skip(broker_id, "coming-soon-not-live-verified")
+            continue
         if not attest_ok(broker_id):
             if on_skip is not None:
                 on_skip(broker_id, "sdk-not-attested")
