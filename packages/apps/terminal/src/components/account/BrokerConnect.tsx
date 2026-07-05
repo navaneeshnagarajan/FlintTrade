@@ -401,8 +401,8 @@ export function BrokerConnect() {
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
             {mcpBrokers.map((entry) => {
-              const loginSteps = entry.mcp.login_steps.slice(0, 3);
-              const cautions = entry.mcp.cautions.slice(0, 3);
+              const loginSteps = entry.mcp.login_steps;
+              const cautions = entry.mcp.cautions;
               const clientConfigs = entry.mcp.client_configs.filter((config) => (
                 config.url || mcpCommand(config) || mcpConfigJson(config)
               ));
@@ -519,7 +519,7 @@ export function BrokerConnect() {
                   )}
 
                   <div className="mt-3 flex flex-wrap gap-1">
-                    {entry.mcp.use_cases.slice(0, 4).map((useCase) => (
+                    {entry.mcp.use_cases.map((useCase) => (
                       <Badge
                         key={useCase}
                         variant="secondary"

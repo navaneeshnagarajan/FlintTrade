@@ -302,14 +302,19 @@ const MCP_BROKERS = [
         "Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.",
         "Complete the OAuth authorisation opened by that client.",
         "Repeat authorisation daily before relying on account context.",
+        "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
       ],
       use_cases: [
         "Read-only holdings, orders, positions, mutual funds, funds, and profile lookup",
+        "Account-scoped portfolio composition, performance, risk, and buying-power analysis",
+        "Individual stock research in the context of current holdings",
         "Technical indicator, chart, trend, and market-context analysis",
+        "Activity summaries, margins, P&L overviews, and portfolio correlation studies",
       ],
       cautions: [
         "Upstox MCP cannot place, modify, or cancel orders.",
         "Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.",
+        "Do not treat the hosted MCP as a FlintTrade live order path.",
       ],
       client_configs: [
         {
@@ -360,6 +365,7 @@ const MCP_BROKERS = [
         "F&O position, candle, expiry, and P&L analysis",
         "Smart order management in the external MCP client",
         "Market context and holdings near 52-week highs",
+        "Stocks and F&O today; mutual funds, IPOs, bonds, and fundamental analysis are future broker scope",
       ],
       cautions: [
         "Sell orders through Groww MCP require DDPI authorisation.",
@@ -553,7 +559,14 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
       "Upstox MCP cannot place, modify, or cancel orders.",
     );
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
+      "gated native/OpenAlgo path",
+    );
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
+      "not treat the hosted MCP as a FlintTrade live order path",
+    );
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("verify critical data");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("portfolio correlation studies");
     expect(screen.getByText("Add the Dhan remote MCP URL to a supported MCP client.")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-dhan-claude_code")).toHaveTextContent(
       "claude mcp add --transport http dhan https://mcp.dhan.co/mcp",
@@ -581,6 +594,7 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("future broker scope");
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
     const groww = await screen.findByRole("option", { name: /Groww.*Coming soon/i });
     expect(groww).toHaveAttribute("aria-disabled", "true");
