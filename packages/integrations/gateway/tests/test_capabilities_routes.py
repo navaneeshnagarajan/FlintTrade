@@ -229,6 +229,10 @@ class TestCapabilitiesRoute:
             "url": "https://mcp.upstox.com/mcp",
         }
         assert "Technical indicator" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
+        assert "historical trading information" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
+        assert "Portfolio beta" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
+        assert "Professional investment-model" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
+        assert "corporate-governance" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
         assert "verify critical data" in " ".join(brokers["upstox"]["mcp"]["cautions"])
 
     def test_mcp_catalogue_supports_single_broker_lookup(self, client) -> None:  # type: ignore[no-untyped-def]

@@ -666,8 +666,11 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
             "Read-only holdings, orders, positions, mutual funds, funds, and profile lookup",
             "Account-scoped portfolio composition, performance, risk, and buying-power analysis",
             "Individual stock research in the context of current holdings",
-            "Technical indicator, chart, trend, and market-context analysis",
-            "Activity summaries, margins, P&L overviews, and portfolio correlation studies",
+            "Technical indicator, chart, trend, market-quote, and market-context analysis",
+            "Activity summaries, margins, historical trading information, and P&L overviews",
+            "Portfolio beta and correlation studies against NIFTY over multi-year windows",
+            "Professional investment-model reviews over the operator's current portfolio",
+            "Board-meeting, AGM/EGM, corporate-governance, and hold-or-sell context checks",
         ],
         "cautions": [
             "Upstox MCP cannot place, modify, or cancel orders.",
