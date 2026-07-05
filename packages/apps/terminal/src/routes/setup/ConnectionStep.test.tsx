@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { ConnectionStep } from "./ConnectionStep";
 
@@ -22,15 +22,30 @@ describe("ConnectionStep", () => {
     _nativeAccounts = [];
   });
 
-  it("defaults to FlintTrade's direct broker gateway", () => {
+  it("defaults to the OpenAlgo (primary) connect tab", () => {
+    // Principle 2: OpenAlgo is the recommended, community-tested path, so it is
+    // the default tab; native is the secondary option behind the second tab.
     render(<ConnectionStep onComplete={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: /flinttrade gateway/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /openalgo bridge/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(screen.getByText(/No separate OpenAlgo setup needed/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /flinttrade gateway/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByText(/Recommended/i)).toBeInTheDocument();
+    // The native section is behind the secondary tab, not shown by default.
+    expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
+  });
+
+  it("shows the native connect (with the risk note) after selecting the FlintTrade Gateway tab", () => {
+    render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade gateway/i }));
+
     expect(screen.getByText("Native brokers section")).toBeInTheDocument();
+    expect(screen.getByText(/use at your own risk/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /connect at least one broker/i })).toBeDisabled();
   });
 
@@ -38,6 +53,7 @@ describe("ConnectionStep", () => {
     _nativeAccounts = [{ has_session: true }];
 
     render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade gateway/i }));
 
     expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
   });

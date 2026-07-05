@@ -204,6 +204,19 @@ def test_add_account_unknown_broker(client) -> None:
     assert "not found" in data["message"].lower()
 
 
+def test_add_account_rejects_coming_soon_native(client) -> None:
+    """The legacy gateway account route must honour the native "coming soon"
+    gate too — a native adapter that is built but not yet live-verified
+    (connectable=False, e.g. kotakneo / groww) cannot be connected through this
+    back door (Codex-wave review finding 8; principle 3)."""
+    for broker in ("kotakneo", "groww"):
+        response = client.post(
+            "/v1/accounts", json={"broker": broker, "label": "x", "credentials": {"access_token": "x"}}
+        )
+        assert response.status_code == 400, broker
+        assert "coming soon" in response.get_json()["message"].lower()
+
+
 # ---------------------------------------------------------------------------
 # 5. test_remove_account
 # ---------------------------------------------------------------------------

@@ -1118,6 +1118,22 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("never reads a real native account balance in practice mode", async () => {
+    // Finding #4: an account-scoped native read (funds) must be Live-only. In
+    // Practice the real balance must never surface as sandbox state, so the read
+    // fails closed before any native fetch rather than showing live funds.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "practice";
+    mockBrokerState.accounts = [{ account_id: "D1", broker: "dhan", source: "native" }];
+    mockBrokerState.activeAccountId = "native:dhan:D1";
+
+    await expect(getFunds()).rejects.toThrow();
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/native/accounts"),
+      expect.anything(),
+    );
+  });
+
   it("POST sends extra params merged with apikey", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ status: "success", data: { ltp: 22500 } }),

@@ -283,7 +283,9 @@ interface ConnectionStepProps {
 }
 
 export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
-  const [mode, setMode] = useState<ConnectionMode>("direct");
+  // OpenAlgo is the primary, community-tested connect path (principle 2), so it
+  // is the default tab; native FlintTrade adapters are the secondary option.
+  const [mode, setMode] = useState<ConnectionMode>("openalgo");
 
   return (
     <div className="space-y-5">
@@ -304,11 +306,13 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
       {/* Mode description */}
       {mode === "openalgo" ? (
         <p className="text-xs text-text-muted">
-          Connect to a running OpenAlgo-compatible server if you already use one.
+          <strong className="text-text-secondary">Recommended.</strong> Connect through OpenAlgo — 30+
+          community-tested brokers, the battle-tested path.
         </p>
       ) : (
         <p className="text-xs text-text-muted">
-          Connect directly to your broker using the FlintTrade gateway. No separate OpenAlgo setup needed.
+          Connect a FlintTrade native adapter directly (Dhan, Upstox, INDmoney). Secondary path —
+          native order placement is not fully live-tested; use at your own risk.
         </p>
       )}
 

@@ -111,6 +111,16 @@ const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
 
 const NATIVE_ROUTED_ORDER_ENDPOINTS = new Set(["place", "modify", "cancel"]);
 
+// Account-scoped native reads expose the REAL broker account (balances,
+// positions, order/trade book, margin). They must only surface in LIVE mode —
+// in Practice/Explore orders execute in the SandboxEngine, so showing the live
+// account here would falsely present real money as sandbox state. Market-data
+// kinds (quotes/history/depth/optionchain/greeks/expiry/search/timings/holidays)
+// are broker-agnostic reference data and stay available in every mode.
+const NATIVE_ACCOUNT_SCOPED_KINDS = new Set<NativeReadKind>([
+  "funds", "positions", "holdings", "orders", "orderstatus", "trades", "margin",
+]);
+
 function getBase(): string {
   // In dev mode, Vite proxy handles routing to OpenAlgo — use relative paths
   // In production, use the full host from connectionStore
@@ -915,6 +925,12 @@ function normaliseNativeRead(endpoint: string, value: unknown): unknown {
 async function readPrimaryNative<T>(endpoint: string, extra: object = {}): Promise<T | undefined> {
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
   if (!kind || getApiKey().trim().length > 0 || isExploreModeWithoutKey()) return undefined;
+  // Account-scoped reads (funds/positions/orders/…) surface the live broker
+  // account and must be Live-only — in Practice/Explore the caller falls back to
+  // the sandbox/OpenAlgo path so real balances are never shown as sandbox state.
+  if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
+    return undefined;
+  }
   const account = pickNativeReadAccount(await listNativeAccounts());
   if (!account) return undefined;
   const value = await readNativeAccount<unknown>(

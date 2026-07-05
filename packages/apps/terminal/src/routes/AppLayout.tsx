@@ -9,6 +9,7 @@ import { useDemoFeed } from "@/hooks/useDemoFeed";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
+import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { useNotificationFeed } from "@/components/NotificationCentre/useNotificationFeed";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
@@ -142,6 +143,7 @@ export default function AppLayout() {
   useTickerFallback();   // REST polling fallback when WS is disconnected
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   useTradingStoreSync(); // Mirror funds/positions REST cache → tradingStore scalars (single write point)
+  useBrokerAccounts();   // Poll gateway + native accounts → brokerStore (drives native write-targeting + AccountSwitcher; the connect UI is no longer the only populator)
   useNotificationFeed(); // Feed real connection/mode/order events into the Notification Centre
   const location = useLocation();
   const navigate = useNavigate();

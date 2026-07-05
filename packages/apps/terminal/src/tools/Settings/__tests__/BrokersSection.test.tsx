@@ -243,7 +243,8 @@ describe("BrokersSection", () => {
     renderSection();
     expect(screen.getByRole("heading", { name: "Brokers" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
-    expect(screen.getByText(/login and reads are verified for Dhan, Upstox, and INDmoney/i)).toBeInTheDocument();
+    expect(screen.getByText(/not fully tested — use at your own risk/i)).toBeInTheDocument();
+    expect(screen.getByText(/not been live-verified for any broker/i)).toBeInTheDocument();
   });
 
   it("shows hosted MCP setup without promoting Groww to native connect", async () => {

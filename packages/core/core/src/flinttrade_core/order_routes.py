@@ -1049,8 +1049,30 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return _dispatch_live_cancel(body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "cancel-all" and adapter_id != "openalgo":
         # Native adapters sweep through the gated cancel_all_orders verb
-        # (one-shot SafetyContext + ACL). OpenAlgo bridge cancel-all has no
-        # gated verb yet and is rejected by the fail-closed block below.
+        # (one-shot SafetyContext + ACL), forwarding only tag/segment. A
+        # STRATEGY-scoped cancel-all cannot be honoured — the native verb has no
+        # per-strategy narrowing — so silently forwarding it would ESCALATE a
+        # scoped cancel into a full-account sweep, wiping manual orders and other
+        # strategies' protective resting exits. Fail closed on any strategy scope
+        # (restoring the pre-consolidation behaviour, where such requests hit the
+        # 501 block because they never resolved to a native broker). Explicit
+        # tag/segment narrowing IS still forwarded.
+        if str(body.get("strategy") or "").strip():
+            logger.warning(
+                "Native cancel-all with a strategy scope rejected — the native "
+                "cancel_all_orders verb cannot narrow by strategy, so honouring it "
+                "would cancel the whole account | adapter=%s",
+                adapter_id,
+            )
+            return jsonify({
+                "status": "error",
+                "message": (
+                    "Strategy-scoped cancel-all is not supported for native brokers "
+                    "— it would cancel every open order on the account, including "
+                    "other strategies' orders. Cancel by tag/segment, or cancel "
+                    "orders individually."
+                ),
+            }), 400
         fields = {k: str(body[k]) for k in ("tag", "segment") if body.get(k) is not None}
         return _gated_verb_write(
             "cancel_all_orders", fields, live_payload,

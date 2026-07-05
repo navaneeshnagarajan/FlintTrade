@@ -807,6 +807,25 @@ def test_cancel_all_named_native_broker_routes_gated() -> None:
     assert kw["hint"].adapter_id == "upstox"
 
 
+def test_native_cancel_all_with_strategy_scope_fails_closed() -> None:
+    """A strategy-scoped cancel-all must NOT silently escalate to an account-wide
+    native sweep — the native ``cancel_all_orders`` verb has no per-strategy
+    narrowing (it forwards only tag/segment), so honouring a bare ``strategy``
+    would wipe every open order incl. other strategies' protective exits. It
+    fails closed with 400 and the router is NEVER invoked (Codex-wave review
+    finding 3)."""
+    router = _gated_router(result={"status": "ok"})
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post(
+        "/api/v1/orders/cancel-all",
+        json={"broker": "upstox", "strategy": "FlintScalper"},
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 400
+    assert "strategy-scoped cancel-all is not supported" in resp.get_json()["message"].lower()
+    router.execute_gated.assert_not_called()
+
+
 def test_cancel_all_without_broker_fails_closed_until_gated(monkeypatch: pytest.MonkeyPatch) -> None:
     """No explicit broker must not fall back to the raw OpenAlgo forward."""
     import flinttrade_core.order_routes as orr

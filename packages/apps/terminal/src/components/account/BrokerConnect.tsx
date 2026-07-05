@@ -290,8 +290,12 @@ export function BrokerConnect() {
       <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-secondary">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <p>
-          Native broker login and reads are verified for Dhan, Upstox, and INDmoney. Kotak Neo and
-          Groww stay visible here as catalogued adapters and remain disabled until their live checks pass.
+          <strong className="text-text-primary">Native adapters are not fully tested — use at your own risk.</strong>{" "}
+          Login and account reads are verified for Dhan, Upstox, and INDmoney, but native order
+          placement (place / modify / cancel) has{" "}
+          <strong className="text-text-primary">not been live-verified for any broker</strong> yet —
+          OpenAlgo is the recommended, community-tested path. Kotak Neo and Groww stay visible as
+          catalogued adapters and remain disabled until their live checks pass.
         </p>
       </div>
 

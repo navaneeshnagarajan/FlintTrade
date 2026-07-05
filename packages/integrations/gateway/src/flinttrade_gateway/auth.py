@@ -129,6 +129,25 @@ def list_accounts() -> Any:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
+def _reject_coming_soon_native(broker: str) -> Any | None:
+    """Reject a native broker that is catalogued but not yet connectable.
+
+    The "coming soon" gate (only live-verified native adapters may connect) is
+    enforced on the /api/v1/native/* routes; mirror it on these legacy gateway
+    account/OAuth/OTP routes so a native adapter its own surface refuses cannot
+    be connected through the back door. Bridge-only brokers (native=False) are
+    unaffected — they connect through OpenAlgo regardless. Returns an error
+    response tuple to short-circuit, or None to proceed.
+    """
+    info = BROKER_CATALOG.get(broker)
+    if info is not None and info.native and not info.connectable:
+        return jsonify({
+            "status": "error",
+            "message": f"'{broker}' is not yet available for native connect (coming soon).",
+        }), 400
+    return None
+
+
 @gateway_bp.route("/accounts", methods=["POST"])
 def add_account() -> Any:
     """Add a new broker account.
@@ -152,6 +171,9 @@ def add_account() -> Any:
 
     if not broker:
         return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
+    coming_soon = _reject_coming_soon_native(broker)
+    if coming_soon is not None:
+        return coming_soon
 
     try:
         info = _registry().add_account(account_id, broker, label, credentials)
@@ -268,6 +290,9 @@ def oauth_start() -> Any:
 
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
+    coming_soon = _reject_coming_soon_native(broker)
+    if coming_soon is not None:
+        return coming_soon
 
     broker_info = BROKER_CATALOG[broker]
     if broker_info.auth_flow != AuthFlowType.oauth_redirect:
@@ -376,6 +401,9 @@ def submit_credentials() -> Any:
 
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": f"Broker not found: {broker}"}), 404
+    coming_soon = _reject_coming_soon_native(broker)
+    if coming_soon is not None:
+        return coming_soon
 
     try:
         info = _registry().add_account(account_id, broker, label, credentials)
@@ -416,6 +444,9 @@ def otp_request() -> Any:
 
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
+    coming_soon = _reject_coming_soon_native(broker)
+    if coming_soon is not None:
+        return coming_soon
 
     broker_info = BROKER_CATALOG[broker]
     if broker_info.auth_flow != AuthFlowType.otp_sms:

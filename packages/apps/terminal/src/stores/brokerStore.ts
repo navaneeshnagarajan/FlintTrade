@@ -85,9 +85,12 @@ export const useBrokerStore = create<BrokerState>()(
             broker: a.broker,
             label: a.label,
             is_primary: a.is_primary,
-            // Persist status so the UI can show last-known state on reload;
-            // it will be refreshed from the backend immediately.
-            status: a.status,
+            // Status is deliberately NOT persisted as-is: a removed or expired
+            // account must not survive a reload as a "connected" write target.
+            // It is re-derived from the live poll (useBrokerAccounts, mounted in
+            // AppLayout) within one refresh; until then it reads disconnected so
+            // native write-targeting never trusts stale localStorage state.
+            status: "disconnected" as BrokerAccount["status"],
             connected_at: a.connected_at,
             error_message: a.error_message,
             source: a.source,
