@@ -15,6 +15,8 @@ export interface SymbolRowProps {
   customFormulas?: WatchlistCustomFormula[];
   onSelect:    (item: WatchlistItem) => void;
   onRemove:    (e: React.MouseEvent, item: WatchlistItem) => void;
+  /** Quick Buy/Sell: opens a prefilled (gated) order ticket. */
+  onQuickTrade?: (item: WatchlistItem, side: "BUY" | "SELL") => void;
 }
 
 export function SymbolRow({
@@ -26,6 +28,7 @@ export function SymbolRow({
   customFormulas = [],
   onSelect,
   onRemove,
+  onQuickTrade,
 }: SymbolRowProps) {
   const ltp       = quote?.ltp    ?? quote?.close ?? null;
   const prevClose = quote?.prev_close ?? quote?.close ?? null;
@@ -37,6 +40,7 @@ export function SymbolRow({
   const formulaValue = evaluateFormula(quote, formula, customFormulas);
 
   return (
+    <div className="relative group/wl">
     <button
       type="button"
       aria-label={item.symbol}
@@ -115,5 +119,31 @@ export function SymbolRow({
         </div>
       )}
     </button>
+
+      {/* Row-hover quick Buy/Sell — opens a prefilled (gated) order ticket.
+          Sibling of the row button (not nested) so the markup stays valid. */}
+      {onQuickTrade && (
+        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden gap-1 group-hover/wl:flex focus-within:flex">
+          <button
+            type="button"
+            aria-label={`Buy ${item.symbol}`}
+            title={`Buy ${item.symbol}`}
+            onClick={(e) => { e.stopPropagation(); onQuickTrade(item, "BUY"); }}
+            className="h-5 w-5 rounded bg-profit/90 text-white text-[10px] font-bold flex items-center justify-center hover:bg-profit"
+          >
+            B
+          </button>
+          <button
+            type="button"
+            aria-label={`Sell ${item.symbol}`}
+            title={`Sell ${item.symbol}`}
+            onClick={(e) => { e.stopPropagation(); onQuickTrade(item, "SELL"); }}
+            className="h-5 w-5 rounded bg-loss/90 text-white text-[10px] font-bold flex items-center justify-center hover:bg-loss"
+          >
+            S
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

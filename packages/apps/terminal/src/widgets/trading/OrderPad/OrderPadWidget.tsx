@@ -374,9 +374,24 @@ interface SymbolSuggestion {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-function OrderPadWidget(_props: WidgetProps) {
+/** Prefill params carried by a `flinttrade:addWidget` orderpad request (W2). */
+interface OrderPadPrefill {
+  symbol?: string;
+  exchange?: string;
+  action?: "BUY" | "SELL";
+}
+
+function OrderPadWidget(props: WidgetProps) {
+  // Optional prefill from a launcher (e.g. a watchlist row-hover Buy/Sell).
+  // Only seeds the initial form; the user still reviews and submits, and
+  // submission stays on the existing gated placeOrder path.
+  const prefill = (props.params ?? {}) as OrderPadPrefill;
+  const initialSymbol = prefill.symbol ?? "NIFTY";
+  const initialExchange = prefill.exchange ?? "NSE";
+  const initialAction: "BUY" | "SELL" = prefill.action === "SELL" ? "SELL" : "BUY";
+
   // Symbol search state (outside react-hook-form — ephemeral UI state)
-  const [query, setQuery] = useState("NIFTY");
+  const [query, setQuery] = useState(initialSymbol);
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -407,9 +422,9 @@ function OrderPadWidget(_props: WidgetProps) {
     // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
     resolver: zodResolver(orderSchema) as unknown as Resolver<OrderFormValues>,
     defaultValues: {
-      symbol: "NIFTY",
-      exchange: "NSE",
-      action: "BUY",
+      symbol: initialSymbol,
+      exchange: initialExchange,
+      action: initialAction,
       orderType: "MARKET",
       product: "MIS",
       qty: 1,

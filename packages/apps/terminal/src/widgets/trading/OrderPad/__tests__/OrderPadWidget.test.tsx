@@ -109,6 +109,22 @@ describe("OrderPadWidget", () => {
     expect(submitButton).toBeInTheDocument();
   });
 
+  it("seeds symbol/exchange/action from launcher params (W2 prefill)", () => {
+    // A watchlist quick-Sell opens the ticket prefilled — the side seeds to SELL.
+    render(
+      <OrderPadWidget
+        {...makeDockviewPanelProps({
+          params: { symbol: "RELIANCE", exchange: "NSE", action: "SELL" },
+        })}
+      />,
+    );
+
+    // Action seeded to SELL → submit button reads "Practice Sell".
+    expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
+    // Symbol seeded into the search field.
+    expect(screen.getByDisplayValue("RELIANCE")).toBeInTheDocument();
+  });
+
   it("has order type pills (MARKET, LIMIT, SL, SL-M)", () => {
     render(<OrderPadWidget {...defaultProps} />);
 

@@ -242,6 +242,22 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     setSelectedSymbol({ symbol: item.symbol, exchange: item.exchange });
   }, [setSelectedSymbol]);
 
+  // Row-hover quick Buy/Sell: focus the symbol and open a PREFILLED order ticket.
+  // This never places an order — the ticket's own (gated) submit path is
+  // unchanged; we only launch the OrderPad panel with symbol/exchange/side set.
+  const handleQuickTrade = useCallback((item: WatchlistItem, side: "BUY" | "SELL") => {
+    setSelectedSymbol({ symbol: item.symbol, exchange: item.exchange });
+    window.dispatchEvent(
+      new CustomEvent("flinttrade:addWidget", {
+        detail: {
+          widgetId: "orderpad",
+          title: `Order — ${item.symbol}`,
+          props: { symbol: item.symbol, exchange: item.exchange, action: side },
+        },
+      }),
+    );
+  }, [setSelectedSymbol]);
+
   // Close overflow menu on outside click
   useEffect(() => {
     if (!showMenu) return;
@@ -490,6 +506,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
                 customFormulas={viewSettings.customFormulas}
                 onSelect={handleSelect}
                 onRemove={openSymbolCtxMenu}
+                onQuickTrade={handleQuickTrade}
               />
             );
           })
