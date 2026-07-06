@@ -70,6 +70,36 @@ def test_api_reference_does_not_document_direct_live_order_curl() -> None:
     assert "This example is for a locally issued **Practice-mode** FlintTrade session JWT." in api_doc
 
 
+def test_api_reference_documents_broker_mcp_as_metadata_only() -> None:
+    """The broker MCP catalogue must stay public and non-executable."""
+    api_doc = _read(ROOT / "docs/API.md")
+
+    assert "`broker/mcp` (**GET**)" in api_doc
+    assert "Broker-hosted MCP setup catalogue" in api_doc
+    assert "Metadata only" in api_doc
+    assert "does not proxy MCP tool calls" in api_doc
+    assert "gate_order" in api_doc
+    assert "BrokerRouter" in api_doc
+
+
+def test_api_reference_documents_native_broker_surface_boundaries() -> None:
+    """Native broker routes should document connect, reads, and write-default gates."""
+    api_doc = _read(ROOT / "docs/API.md")
+
+    assert "Native broker connect and reads (`/api/v1/native/*`)" in api_doc
+    assert "`native/brokers` (**GET**)" in api_doc
+    assert "`native/accounts` (**POST**)" in api_doc
+    assert "`native/oauth/start` (**POST**)" in api_doc
+    assert "`native/oauth/callback` (**GET**)" in api_doc
+    assert "`native/postbacks/<adapter_id>` (**POST**)" in api_doc
+    assert "`native/accounts/<adapter>/<account>/<kind>` (**GET**)" in api_doc
+    assert "`native/accounts/<adapter>/<account>/set-primary` (**POST**)" in api_doc
+    assert "connectable=false" in api_doc
+    assert "Account and market-data reads" in api_doc
+    assert "require a live native session" in api_doc
+    assert "connected, non-read-only native session" in api_doc
+
+
 def test_public_site_labels_demo_as_sandbox_not_live() -> None:
     """The hosted demo is sample/sandbox-oriented and should not be labelled live."""
     site_sources = [

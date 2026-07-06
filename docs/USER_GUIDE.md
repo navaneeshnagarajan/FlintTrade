@@ -100,6 +100,13 @@ approving the API-key session in Groww Cloud before FlintTrade can mint a token.
 Localhost postback URLs are for diagnostics unless you expose FlintTrade through
 a broker-reachable tunnel or public URL.
 
+The same Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
+Upstox, and Groww when catalogue metadata is available. These cards copy the
+broker-hosted MCP URLs and client configurations, and label read-only surfaces
+such as Upstox MCP. Broker MCP tools run in the external MCP client; FlintTrade
+automation and live order placement still use the normal guarded OpenAlgo or
+native broker path.
+
 ### Why two layers?
 
 The two-layer design lets existing OpenAlgo users keep their broker setup while

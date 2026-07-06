@@ -165,6 +165,31 @@ POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
 | `broker/auth/callback` | Receive an OAuth callback. |
 | `broker/reconnect` | Re-authenticate an existing session that has expired. |
 
+### Native broker connect and reads (`/api/v1/native/*`)
+
+Source: `packages/core/core/src/flinttrade_core/native_account_routes.py`.
+
+These endpoints are the first-party native broker path used by Setup →
+Brokers and Settings → Brokers. Connect writes store credentials in the
+encrypted gateway vault, register a workspace selector, rebuild the broker
+router, and attempt login transactionally. Brokers that are built but not
+live-verified stay `connectable=false`; their connect/re-login routes return
+"coming soon" rather than creating sessions. Account and market-data reads
+require a live native session but do not create an order safety context.
+
+| Endpoint | Purpose |
+|---|---|
+| `native/brokers` (**GET**) | Native broker catalogue with connectability, login-method schemas, OAuth/postback URLs, and MCP metadata. |
+| `native/accounts` (**GET**) | Vault-backed native account list with live session status, expiry, read-only flag, and `needs_relogin` / retryable login state. |
+| `native/accounts` (**POST**) | Direct native connect: `{adapter_id, account_id, label?, credentials, is_primary?}`. |
+| `native/oauth/start` (**POST**) | Start an OAuth/app-consent login and return the broker authorisation URL, loopback redirect URI, state, and optional postback URI. |
+| `native/oauth/callback` (**GET**) | Loopback OAuth callback that exchanges a broker `code` or Dhan `tokenId` and then runs the native connect transaction. |
+| `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. |
+| `native/accounts/<adapter>/<account>/login` (**POST**) | Re-authenticate a native account, optionally with fresh credentials; stale single-use material surfaces `needs_relogin`. |
+| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Read account or market data from a live native session. Supported kinds include `funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, and `search_scrip`. |
+| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Promote a connected, non-read-only native session to the live write default. |
+| `native/accounts/<adapter>/<account>` (**DELETE**) | Remove a native account, drop its session, delete credentials, deregister the workspace selector, and stop stale refresh state. |
+
 ### Broker capability metadata (`/api/v1/broker/*`, GET)
 
 Source: `packages/integrations/gateway/src/flinttrade_gateway/capabilities_routes.py`.
@@ -172,7 +197,13 @@ Source: `packages/integrations/gateway/src/flinttrade_gateway/capabilities_route
 | Endpoint | Purpose |
 |---|---|
 | `broker/capabilities` (**GET**) | Per-broker capability matrix (order types, segments, depth, rate limits). |
+| `broker/mcp` (**GET**) | Broker-hosted MCP setup catalogue for OpenAlgo, Dhan, Upstox, and Groww. Metadata only: URLs, client configs, read-only/trading flags, login notes, use cases, and cautions. FlintTrade does not proxy MCP tool calls or create an MCP order path around its safety gate. |
 | `broker/recommendations` (**GET**) | Filter broker capability metadata for an operator-selected use case. `?use_case=<id>` for one job (for example `low_cost_execution`, `market_depth`); `?brokers=a,b` restricts the response to connected brokers. |
+
+`broker/mcp?broker=<id>` returns one MCP row. `openalgo` is accepted as the
+primary bridge MCP entry; unsupported broker ids return the current known MCP
+catalogue. Broker-hosted MCP trade tools, where a broker offers them, remain
+external to FlintTrade's in-process `gate_order` / `BrokerRouter` path.
 
 ### AI (`/ft-api/v1/ai/*`, `/ft-api/v1/signals/*`)
 
