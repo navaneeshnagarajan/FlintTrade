@@ -114,6 +114,10 @@ function sdkReadyForConnect(broker: NativeBroker): boolean {
   return status === "ok" || status === "not_required";
 }
 
+function canPromotePrimaryAccount(account: BrokerAccount): boolean {
+  return account.status === "connected" && !account.is_primary && account.read_only !== true;
+}
+
 function McpSetupValue({
   label,
   copyLabel,
@@ -629,7 +633,7 @@ export function BrokerConnect() {
               const connected = a.status === "connected";
               const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
               const retryLater = !!a.login_retryable;
-              const canSetPrimary = connected && !a.is_primary && !a.read_only;
+              const canSetPrimary = canPromotePrimaryAccount(a);
               return (
               <li
                 key={brokerAccountKey(a)}
@@ -731,6 +735,7 @@ export function BrokerConnect() {
                     <div className="text-xs text-text-muted capitalize">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
+                      {a.read_only ? " · read-only" : ""}
                     </div>
                     {a.error_message && (
                       <div className="text-xxs text-warning mt-0.5 truncate" title={a.error_message}>
@@ -741,7 +746,7 @@ export function BrokerConnect() {
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <Badge variant="outline" className="text-xxs capitalize">{a.status}</Badge>
-                  {!a.is_primary && (
+                  {canPromotePrimaryAccount(a) && (
                     <Button
                       variant="ghost"
                       size="sm"

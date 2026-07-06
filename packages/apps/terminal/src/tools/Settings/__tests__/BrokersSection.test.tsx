@@ -541,6 +541,46 @@ describe("BrokersSection", () => {
     );
   });
 
+  it("can set a connected gateway account as primary", async () => {
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeGatewayAccount({ is_primary: false }),
+    ]);
+    (setPrimaryBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    renderSection();
+
+    const promote = await screen.findByRole("button", { name: /set zerodha main as primary/i });
+    fireEvent.click(promote);
+
+    await waitFor(() =>
+      expect(setPrimaryBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "gateway", broker: "zerodha", account_id: "GW1" }),
+      ),
+    );
+  });
+
+  it("does not offer primary selection for stale or read-only gateway accounts", async () => {
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeGatewayAccount({ account_id: "GW1", label: "Read Only Bridge", read_only: true }),
+      makeGatewayAccount({
+        account_id: "GW2",
+        label: "Expired Bridge",
+        status: "token_expired",
+        error_message: "Needs a fresh gateway login",
+      }),
+    ]);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Gateway accounts")).toBeInTheDocument());
+    expect(screen.getByText("Read Only Bridge")).toBeInTheDocument();
+    expect(screen.getByText(/zerodha.*read-only/i)).toBeInTheDocument();
+    expect(screen.getByText("Expired Bridge")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/set read only bridge as primary/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/set expired bridge as primary/i)).not.toBeInTheDocument();
+    expect(setPrimaryBrokerAccount).not.toHaveBeenCalled();
+  });
+
   it("removing a gateway account never evicts a same-id native write target", async () => {
     // Round-3 finding: the same broker-supplied client code can be linked via
     // BOTH the native adapter and the OpenAlgo bridge. Removing the gateway row
