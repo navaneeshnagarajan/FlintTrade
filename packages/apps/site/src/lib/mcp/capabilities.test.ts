@@ -53,6 +53,17 @@ describe('docs index generation', () => {
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`38 ${'analysis'}`);
   });
 
+  it('publishes the current INDstocks reset semantics through generated broker docs', () => {
+    const userGuideDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/USER_GUIDE.md');
+    const compatibilityDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/COMPATIBILITY.md');
+    const brokerDocs = `${userGuideDoc?.content ?? ''}\n${compatibilityDoc?.content ?? ''}`;
+    const staleIndstocksPhrase = 'INDmoney uses a dashboard-generated ' + '24-hour token';
+
+    expect(userGuideDoc?.content).toContain('daily 06:00 IST dashboard cycle');
+    expect(compatibilityDoc?.content).toContain('daily 06:00 IST dashboard cycle');
+    expect(brokerDocs).not.toContain(staleIndstocksPhrase);
+  });
+
   it('keeps homepage facts aligned with the audited gateway and widget state', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 
