@@ -285,6 +285,43 @@ def test_native_adapter_kwargs_thread_local_state_provider() -> None:
 
 
 @pytest.mark.unit
+def test_native_adapter_kwargs_adds_cached_dhan_security_resolver(monkeypatch) -> None:
+    """App-activated Dhan adapters must resolve symbols like the live probe.
+
+    Dhan market-data and order-write calls require a security id. The app
+    factory injects a lazy resolver only for Dhan, so the resolver works for
+    reads/writes without making every native adapter accept Dhan-only kwargs.
+    """
+    from flinttrade_core.app import _native_adapter_kwargs_for
+
+    csv_text = "\n".join(
+        [
+            "SEM_SMST_SECURITY_ID,SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_TRADING_SYMBOL,SEM_CUSTOM_SYMBOL,SM_SYMBOL_NAME",
+            "11536,NSE,E,RELIANCE,RELIANCE,RELIANCE",
+        ]
+    )
+    downloads: list[str] = []
+
+    def _fake_download(url: str) -> str:
+        downloads.append(url)
+        return csv_text
+
+    monkeypatch.setattr("flinttrade_gateway.brokers.dhan._download_text", _fake_download)
+    sentinel_provider = lambda _session: None  # noqa: E731 - shape only; never called
+
+    kwargs_for = _native_adapter_kwargs_for(sentinel_provider)
+    dhan_kwargs = kwargs_for("dhan")
+    upstox_kwargs = kwargs_for("upstox")
+
+    assert dhan_kwargs["local_state_provider"] is sentinel_provider
+    assert upstox_kwargs == {"local_state_provider": sentinel_provider}
+    resolve = dhan_kwargs["security_resolver"]
+    assert resolve("RELIANCE", "NSE") == "11536"
+    assert resolve("RELIANCE", "NSE") == "11536"
+    assert len(downloads) == 1
+
+
+@pytest.mark.unit
 def test_on_native_activated_sink_receives_active_natives_only() -> None:
     """The sink sees exactly the ACTIVE native map — bridge excluded, injected
     natives included — so the reconciliation runner can enumerate them."""

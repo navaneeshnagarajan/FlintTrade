@@ -738,6 +738,52 @@ def _native_activation_checks(
     return attest_ok, has_credentials
 
 
+def _lazy_dhan_security_resolver() -> Callable[[str, str], str]:
+    """Build a Dhan scrip-master resolver on first use.
+
+    Dhan order and market-data calls take numeric security ids. The standalone
+    live probe warms this resolver before market reads; the app-activated native
+    adapter needs the same behaviour so broker routes and gated writes do not
+    fail after a successful connect.
+    """
+    lock = threading.Lock()
+    resolver: Callable[[str, str], str] | None = None
+
+    def _resolve(symbol: str, exchange: str) -> str:
+        nonlocal resolver
+        if resolver is None:
+            with lock:
+                if resolver is None:
+                    import csv  # noqa: PLC0415
+                    import io  # noqa: PLC0415
+
+                    from flinttrade_gateway.brokers.dhan import _download_text  # noqa: PLC0415
+                    from flinttrade_gateway.brokers import dhan_mapping as dhan_map  # noqa: PLC0415
+
+                    text = _download_text(dhan_map.SCRIP_MASTER_URLS["compact"])
+                    rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
+                    resolver = dhan_map.build_security_resolver(rows)
+                    logger.info("Dhan security resolver loaded from compact scrip master rows=%s", len(rows))
+        return resolver(symbol, exchange)
+
+    return _resolve
+
+
+def _native_adapter_kwargs_for(
+    local_state_provider: Callable[[Any], Any],
+) -> Callable[[str], dict[str, Any]]:
+    """Return per-native adapter constructor kwargs for app activation."""
+    dhan_security_resolver = _lazy_dhan_security_resolver()
+
+    def _kwargs(broker_id: str) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"local_state_provider": local_state_provider}
+        if broker_id == "dhan":
+            kwargs["security_resolver"] = dhan_security_resolver
+        return kwargs
+
+    return _kwargs
+
+
 def _build_reconcile_targets_provider(
     registry: BrokerRegistry,
     native_adapters: dict[str, Any],
@@ -1039,7 +1085,7 @@ def configure_broker_router(
             openalgo_client=openalgo_client,
             native_attest_ok=_native_attest_ok,
             native_has_credentials=_native_has_credentials,
-            native_adapter_kwargs=lambda _broker_id: {"local_state_provider": _local_state_provider},
+            native_adapter_kwargs=_native_adapter_kwargs_for(_local_state_provider),
             on_native_activated=_native_adapters.update,
         )
         app.config["RECONCILE_TARGETS"] = _build_reconcile_targets_provider(
