@@ -812,11 +812,11 @@ def test_native_account_reads_include_ohlc(client, monkeypatch):
     """Native account reads can expose broker OHLC snapshots when an adapter supports them."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
-    async def _ohlc(_self, _session, symbols):
+    async def _ohlc_quotes(_self, _session, symbols):
         assert symbols == ["NSE:RELIANCE"]
         return [{"symbol": "RELIANCE", "exchange": "NSE", "open": 10, "high": 12, "low": 9, "close": 11}]
 
-    monkeypatch.setattr(UpstoxAdapter, "ohlc", _ohlc, raising=False)
+    monkeypatch.setattr(UpstoxAdapter, "ohlc_quotes", _ohlc_quotes)
 
     c, _app, _tmp = client
     connected = c.post(

@@ -46,6 +46,7 @@ COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "t
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
+UPSTOX_MARKET_READ_CHOICES = COMMON_MARKET_READ_CHOICES + ("ohlc",)
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
 PROBE_QUOTE_SYMBOL = f"{PROBE_EXCHANGE}:{PROBE_SYMBOL}"
@@ -74,7 +75,7 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES + ("optionchain",),
     "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
     "kotakneo": KOTAK_READ_CHOICES,
-    "upstox": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + (
+    "upstox": COMMON_READ_CHOICES + UPSTOX_MARKET_READ_CHOICES + (
         "optiongreeks",
         "expiry",
         "optionchain",
@@ -89,7 +90,7 @@ DEFAULT_READS: dict[str, tuple[str, ...]] = {
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
     "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
-    "upstox": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("search", "timings", "holidays"),
+    "upstox": COMMON_READ_CHOICES + UPSTOX_MARKET_READ_CHOICES + ("search", "timings", "holidays"),
 }
 DEFAULT_METHOD: dict[str, str] = {
     "dhan": "access_token",
@@ -376,9 +377,10 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             else None
         )
     if name == "ohlc":
+        call = getattr(adapter, "ohlc", None) or getattr(adapter, "ohlc_quotes", None)
         return (
-            (lambda session: adapter.ohlc(session, [PROBE_QUOTE_SYMBOL]))
-            if callable(getattr(adapter, "ohlc", None))
+            (lambda session: call(session, [PROBE_QUOTE_SYMBOL]))
+            if callable(call)
             else None
         )
     if name in {"depth", "market_depth"}:

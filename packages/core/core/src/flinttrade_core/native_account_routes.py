@@ -973,7 +973,7 @@ _READ_METHODS = {
     "trades": ("trade_book",),
     "quotes": ("quotes",),
     "quote_details": ("quote_details",),
-    "ohlc": ("ohlc",),
+    "ohlc": ("ohlc", "ohlc_quotes"),
     "depth": ("market_depth",),
     "margin": ("margin_calculator",),
     "scrip_master": ("scrip_master",),

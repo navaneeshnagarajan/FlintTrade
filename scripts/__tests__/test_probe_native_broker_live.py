@@ -272,6 +272,7 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "expiry" in probe._resolve_reads("groww", ["default"])
     assert "depth" not in probe._resolve_reads("groww", ["all"])
     assert "search" in probe._resolve_reads("upstox", ["default"])
+    assert "ohlc" in probe._resolve_reads("upstox", ["default"])
     assert "optiongreeks" in probe._resolve_reads("upstox", ["all"])
     assert "market_depth" in probe._resolve_reads("kotakneo", ["all"])
     assert "quote_details" in probe._resolve_reads("kotakneo", ["default"])
@@ -290,6 +291,7 @@ def test_upstox_default_probe_exercises_market_and_calendar_reads(monkeypatch, c
     assert fake.credentials == {"access_token": "upstox-test-token", "client_id": "upstox-user"}
     assert ("quotes", ("NSE:RELIANCE",)) in fake.calls
     assert ("market_depth", ("NSE:RELIANCE",)) in fake.calls
+    assert ("ohlc", ("NSE:RELIANCE",)) in fake.calls
     assert ("margin", "RELIANCE", "NSE") in fake.calls
     assert ("history", "RELIANCE", "NSE", "1d") in fake.calls
     assert ("search", "RELIANCE") in fake.calls
@@ -297,6 +299,7 @@ def test_upstox_default_probe_exercises_market_and_calendar_reads(monkeypatch, c
     assert ("holidays", None) in fake.calls
     assert "quotes: ok rows=1" in out
     assert "depth: ok rows=1" in out
+    assert "ohlc: ok rows=1" in out
     assert "history: ok object_keys=1" in out
     assert "upstox-test-token" not in out
     assert "upstox-user" not in out
