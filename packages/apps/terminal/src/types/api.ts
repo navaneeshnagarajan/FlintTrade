@@ -423,6 +423,28 @@ export interface ArbitrageScanResponse {
   scan: ArbitrageScan;
 }
 
+// --- Candlestick pattern detection (W4) ---
+export type PatternDirection = "bullish" | "bearish" | "neutral";
+
+export interface PatternMatch {
+  index: number;
+  time: string;
+  pattern: string;
+  label: string;
+  direction: PatternDirection;
+  strength: number;
+}
+
+export interface PatternScan {
+  bar_count: number;
+  matches: PatternMatch[];
+}
+
+export interface CandlestickPatternResponse {
+  is_sample_data: boolean;
+  scan: PatternScan;
+}
+
 // --- Vol Surface ---
 export interface VolSurfaceData {
   underlying: string;

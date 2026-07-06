@@ -774,3 +774,28 @@ class TestArbitrageScanRoute:
         opp = data["scan"]["cash_future"][0]
         assert opp["underlying"] == "NIFTY"
         assert opp["signal"] == "cash_and_carry"
+
+
+class TestCandlestickPatternsRoute:
+    """W4 — candlestick pattern detection endpoint."""
+
+    def test_sample_scan_when_no_bars(self, client):
+        resp, body = _post(client, "/api/v1/candlestick-patterns", {})
+        assert resp.status_code == 200
+        assert body["status"] == "success"
+        data = body["data"]
+        assert data["is_sample_data"] is True
+        assert len(data["scan"]["matches"]) > 0
+
+    def test_detects_supplied_bars(self, client):
+        resp, body = _post(client, "/api/v1/candlestick-patterns", {
+            "bars": [
+                {"time": "1", "open": 100.5, "high": 101, "low": 99.5, "close": 99.8},
+                {"time": "2", "open": 99.5, "high": 102, "low": 99.4, "close": 101.8},
+            ],
+        })
+        assert resp.status_code == 200
+        data = body["data"]
+        assert data["is_sample_data"] is False
+        patterns = {m["pattern"] for m in data["scan"]["matches"]}
+        assert "bullish_engulfing" in patterns

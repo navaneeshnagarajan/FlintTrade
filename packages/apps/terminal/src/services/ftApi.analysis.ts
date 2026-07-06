@@ -4,6 +4,7 @@ import type {
   GEXData,
   GammaDensityData,
   ArbitrageScanResponse,
+  CandlestickPatternResponse,
   VolSurfaceData,
   IVSmileData,
   StraddlePnLData,
@@ -11,7 +12,7 @@ import type {
   OIProfileData,
 } from "@/types/api";
 
-export type { GEXData, GammaDensityData, ArbitrageScanResponse, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
+export type { GEXData, GammaDensityData, ArbitrageScanResponse, CandlestickPatternResponse, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
 
 
 export interface PineCompileResult {
@@ -225,6 +226,17 @@ export interface ArbitrageScanRequest {
 
 export const getArbitrageScan = (req: ArbitrageScanRequest = {}) =>
   post<ArbitrageScanResponse>("screener/arbitrage", req);
+
+export interface CandlestickPatternBar {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  time?: string;
+}
+
+export const getCandlestickPatterns = (bars: CandlestickPatternBar[]) =>
+  post<CandlestickPatternResponse>("candlestick-patterns", { bars });
 
 export const getVolSurface = (
   symbol: string,

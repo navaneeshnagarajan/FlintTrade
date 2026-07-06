@@ -509,6 +509,41 @@ def arbitrage_scan_endpoint() -> Any:
     })
 
 
+@analysis_bp.route("/candlestick-patterns", methods=["POST"])
+def candlestick_patterns_endpoint() -> Any:
+    """Candlestick pattern detection (W4).
+
+    Scans a supplied OHLCV bar series for the six candlestick patterns
+    FlintTrade backtests (doji, hammer/shooting-star, engulfing, morning/evening
+    star, three soldiers/crows) and returns markers for a chart overlay. With no
+    bars a sample scan is returned.
+
+    Request JSON:
+        bars (list): ordered ``[{open, high, low, close, time?}, ...]``.
+
+    Returns:
+        JSON with the detected pattern markers or a sample scan.
+    """
+    from .candlestick_patterns import (  # noqa: PLC0415
+        detect_patterns,
+        make_sample_pattern_scan,
+    )
+
+    body = request.get_json(silent=True) or {}
+    bars = body.get("bars") or []
+
+    is_sample_data = not bars
+    result = make_sample_pattern_scan() if is_sample_data else detect_patterns(bars)
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "is_sample_data": is_sample_data,
+            "scan": result.to_dict(),
+        },
+    })
+
+
 # ---------------------------------------------------------------------------
 # Vol Surface endpoint
 # ---------------------------------------------------------------------------
