@@ -29,19 +29,42 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 _FORBIDDEN_REQ = re.compile(r"(git\+|file:|https?://[^/]+/.+\.(tar\.gz|whl|zip))")
 
 
-def _allowed_uv_git_sources() -> dict[str, str]:
+def _normalise_git_repo(url: str) -> str:
+    """Canonical ``scheme://host/owner/name`` for comparing git sources.
+
+    Strips a ``?rev=``/query suffix, a trailing ``.git``, and a trailing slash,
+    and lower-cases the result so uv.lock and brokers.lock compare regardless of
+    those cosmetic differences.
+    """
+    base = url.split("?", 1)[0].strip().rstrip("/")
+    if base.endswith(".git"):
+        base = base[: -len(".git")]
+    return base.lower()
+
+
+def _allowed_uv_git_sources() -> dict[str, dict[str, str]]:
+    """Return ``{name: {"commit": ..., "repo": ...}}`` from brokers.lock.
+
+    ``repo`` (from the ``homepage`` field, normalised) lets the uv.lock git URL
+    be validated against the RIGHT repository — not merely checked for the commit
+    as a substring, which a hostile URL embedding the legitimate commit
+    (``https://evil.example/x?rev=<commit>``) would otherwise satisfy.
+    """
     brokers_lock = REPO / "brokers.lock"
     if not brokers_lock.exists():
         return {}
     data = tomllib.loads(brokers_lock.read_text(encoding="utf-8"))
-    allowed: dict[str, str] = {}
+    allowed: dict[str, dict[str, str]] = {}
     for entry in data.get("broker", []):
         if not isinstance(entry, Mapping):
             continue
         name = str(entry.get("name", ""))
         source_commit = str(entry.get("source_commit", ""))
         if name and source_commit:
-            allowed[name] = source_commit
+            allowed[name] = {
+                "commit": source_commit,
+                "repo": _normalise_git_repo(str(entry.get("homepage", ""))),
+            }
     return allowed
 
 
@@ -77,9 +100,20 @@ def check_uv_lock() -> list[str]:
         if not isinstance(git_value, str):
             continue
         name = str(package.get("name", ""))
-        expected_commit = allowed.get(name)
-        if not expected_commit or expected_commit not in git_value:
+        expected = allowed.get(name)
+        if not expected:
             fails.append(f"uv.lock: forbidden git source for {name}: {git_value!r}")
+            continue
+        # The commit must be present AND the URL must point at the expected
+        # repository (host + owner + name), so a hostile URL merely embedding the
+        # legitimate commit as a query/path fragment cannot pass.
+        commit_ok = expected["commit"] in git_value
+        repo_ok = not expected["repo"] or _normalise_git_repo(git_value) == expected["repo"]
+        if not (commit_ok and repo_ok):
+            fails.append(
+                f"uv.lock: git source for {name} does not match the "
+                f"brokers.lock-pinned repo/commit: {git_value!r}"
+            )
     return fails
 
 

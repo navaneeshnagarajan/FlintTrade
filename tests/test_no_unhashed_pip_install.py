@@ -25,6 +25,7 @@ _SCAN_GLOBS = (
     ".github/workflows/*.yml",
     ".github/workflows/*.yaml",
     "Dockerfile",
+    "Makefile",
     "infra/**/*.sh",
     "scripts/**/*.sh",
 )

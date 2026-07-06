@@ -45,6 +45,7 @@ dev = [
 [[manifest.dependency-metadata]]
 name = "neo-api-client"
 version = "2.0.0"
+requires-dist = ["pyjwt>=2.6", "six>=1.16", "websocket-client>=1.6", "numpy>=1.26", "pandas>=2.0", "requests>=2.31"]
 requires-python = ">=3.12"
 
 [[package]]
@@ -2194,6 +2195,14 @@ wheels = [
 name = "neo-api-client"
 version = "2.0.0"
 source = { git = "https://github.com/Kotak-Neo/Kotak-neo-api-v2.git?rev=8cee5bda63bd9334f8501bb23b7f1d2945f93397#8cee5bda63bd9334f8501bb23b7f1d2945f93397" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyjwt" },
+    { name = "requests" },
+    { name = "six" },
+    { name = "websocket-client" },
+]
 
 [[package]]
 name = "nkeys"

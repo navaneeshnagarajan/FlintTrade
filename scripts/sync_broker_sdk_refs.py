@@ -125,7 +125,15 @@ def active_sdk_entries(entries: list[dict[str, Any]]) -> list[dict[str, str]]:
         if name not in SDK_SOURCES:
             continue
         source_commit = str(entry.get("source_commit", "")).strip()
-        out.append({"name": name, "version": version, "source_commit": source_commit})
+        out.append({
+            "name": name,
+            "version": version,
+            "source_commit": source_commit,
+            # Carried so the downloaded audit artifact can be cross-checked
+            # against the brokers.lock pin (not only PyPI's self-advertised
+            # digest) — PyPI may add files to an existing release.
+            "sha256": str(entry.get("sha256", "")).strip(),
+        })
     return out
 
 
@@ -202,8 +210,17 @@ def download_pypi_artifact(
     version: str,
     out_dir: Path,
     opener: UrlOpener = _open_url,
+    pinned_sha: str = "",
 ) -> dict[str, str]:
-    """Download the pinned PyPI artifact and verify its SHA256 digest."""
+    """Download the pinned PyPI artifact and verify its SHA256 digest.
+
+    The download is verified against BOTH PyPI's self-advertised digest AND the
+    ``pinned_sha`` recorded in brokers.lock (when supplied). PyPI permits adding
+    files to an existing release, and this tool prefers wheels over sdists, so a
+    match against PyPI's own digest alone could silently cache an artifact
+    different from the one the repo pinned. A mismatch against the brokers.lock
+    pin is a supply-chain red flag and raises.
+    """
 
     data = pypi_release_json(package, opener)
     releases = data.get("releases", {})
@@ -220,17 +237,32 @@ def download_pypi_artifact(
     actual_sha = hashlib.sha256(body).hexdigest()
     if expected_sha and actual_sha != expected_sha:
         raise RuntimeError(f"sha256 mismatch for {filename}: expected {expected_sha}, got {actual_sha}")
+    pin = pinned_sha.strip().lower()
+    matched_brokers_lock = None
+    if pin and "placeholder" not in pin:
+        # brokers.lock records the artifact sha256 for PyPI brokers (the same
+        # value requirements.lock pins). A mismatch means PyPI is serving a
+        # different artifact for this pinned release than the repo attested.
+        if actual_sha != pin:
+            raise RuntimeError(
+                f"brokers.lock sha256 mismatch for {package}=={version} ({filename}): "
+                f"pinned {pin}, downloaded {actual_sha}"
+            )
+        matched_brokers_lock = True
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / filename
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_bytes(body)
     tmp.replace(target)
-    return {
+    result = {
         "path": _display_path(target),
         "filename": filename,
         "sha256": actual_sha,
         "url": url,
     }
+    if matched_brokers_lock is not None:
+        result["brokers_lock_sha_match"] = "true"
+    return result
 
 
 def registry_status(url: str, opener: UrlOpener = _open_url) -> str:
@@ -341,7 +373,13 @@ def sync(
                         "upstream": latest,
                     }
                 )
-            sdk_record["pypi"] = download_pypi_artifact(source.pypi_name, entry["version"], pypi_dir, opener)
+            sdk_record["pypi"] = download_pypi_artifact(
+                source.pypi_name,
+                entry["version"],
+                pypi_dir,
+                opener,
+                pinned_sha=entry.get("sha256", ""),
+            )
         manifest["sdks"].append(sdk_record)
 
     for sdkless in SDKLESS_BROKERS:

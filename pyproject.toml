@@ -1,10 +1,22 @@
 [tool.uv]
 dependency-metadata = [
-    # The Kotak Neo SDK declares an exact old dependency stack that conflicts
-    # with FlintTrade's supported runtime. The adapter imports the SDK lazily and
-    # only uses its own client surface, so keep the SDK itself pinned while
-    # preventing those stale transitive pins from downgrading the workspace.
-    { name = "neo-api-client", version = "2.0.0", requires-dist = [], requires-python = ">=3.12" },
+    # The Kotak Neo SDK declares an EXACT old dependency stack (requests==2.32.3,
+    # numpy==2.1.0, pandas==2.2.3, plus a py2 ``asyncio`` backport) that would
+    # downgrade / conflict with FlintTrade's supported runtime. Override those
+    # pins with permissive ranges for the deps the SDK actually imports at
+    # runtime (verified against the upstream source: pyjwt, six, websocket-client,
+    # numpy, pandas, requests) so the SDK's imports are satisfied EXPLICITLY —
+    # not merely by coincidence of what the rest of the workspace happens to
+    # pull in — while never forcing a downgrade. The broken py2 ``asyncio``
+    # PyPI package and neo's other stale exact pins are deliberately dropped.
+    { name = "neo-api-client", version = "2.0.0", requires-python = ">=3.12", requires-dist = [
+        "pyjwt>=2.6",
+        "six>=1.16",
+        "websocket-client>=1.6",
+        "numpy>=1.26",
+        "pandas>=2.0",
+        "requests>=2.31",
+    ] },
 ]
 
 [tool.uv.workspace]

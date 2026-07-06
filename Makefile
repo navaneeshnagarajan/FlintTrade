@@ -174,8 +174,12 @@ desktop-dev: ## Run the desktop app in dev mode (builds the sidecar first)
 
 update: ## Update Python dependencies (external test-deps live in .local/external/, update them yourself)
 	@echo "Updating Python dependencies..."
-	@$(PYTHON) -m pip install -r requirements.txt --upgrade --break-system-packages -q 2>/dev/null || \
-	 $(PYTHON) -m pip install -r requirements.txt --upgrade -q
+	@# Regenerate the HASHED uv.lock to newest compatible versions, then install
+	@# it. Stays inside the SC-07 hash-verified path (never an unhashed
+	@# requirements install), which the no-unhashed-install gate now enforces on
+	@# this Makefile too.
+	@uv lock --upgrade
+	@uv sync --frozen --all-packages
 	@echo -e "$(GREEN)✓ Updated$(RESET)"
 	@echo -e "$(YELLOW)Note: external test-deps under .local/external/ are not git submodules anymore.$(RESET)"
 	@echo -e "$(YELLOW)Pull updates manually: cd .local/external/openalgo && git pull (etc.)$(RESET)"
