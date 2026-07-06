@@ -382,6 +382,47 @@ export interface GammaDensityData {
   strikes: GammaDensityStrike[];
 }
 
+// --- Arbitrage scanner (DP3) ---
+export type ArbSignal = "cash_and_carry" | "reverse" | "fair";
+
+export interface CashFutureOpportunity {
+  underlying: string;
+  exchange: string;
+  spot: number;
+  future_price: number;
+  days_to_expiry: number;
+  basis: number;
+  basis_pct: number;
+  fair_basis: number;
+  mispricing: number;
+  annualised_return_pct: number;
+  signal: ArbSignal;
+}
+
+export interface CrossExchangeOpportunity {
+  symbol: string;
+  exchange_a: string;
+  price_a: number;
+  exchange_b: string;
+  price_b: number;
+  spread: number;
+  spread_pct: number;
+  buy_on: string;
+  sell_on: string;
+}
+
+export interface ArbitrageScan {
+  risk_free_rate: number;
+  edge_threshold_pct: number;
+  cash_future: CashFutureOpportunity[];
+  cross_exchange: CrossExchangeOpportunity[];
+}
+
+export interface ArbitrageScanResponse {
+  is_sample_data: boolean;
+  scan: ArbitrageScan;
+}
+
 // --- Vol Surface ---
 export interface VolSurfaceData {
   underlying: string;

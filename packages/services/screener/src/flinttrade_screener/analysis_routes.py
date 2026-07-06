@@ -453,6 +453,62 @@ def gamma_density_endpoint() -> Any:
     })
 
 
+@analysis_bp.route("/screener/arbitrage", methods=["POST"])
+def arbitrage_scan_endpoint() -> Any:
+    """Cash-future / cross-exchange arbitrage scanner (DP3).
+
+    The caller supplies observed prices (from the terminal's live quotes); with
+    no rows the endpoint returns a clearly-flagged sample scan.
+
+    Request JSON:
+        cash_future (list): rows of ``{underlying, spot, future_price,
+            days_to_expiry, exchange?}``.
+        cross_exchange (list): rows of ``{symbol, exchange_a, price_a,
+            exchange_b, price_b}``.
+        risk_free_rate (float): Annualised funding rate as a decimal (0.07).
+        edge_threshold_pct (float): Minimum annualised edge over funding to flag.
+
+    Returns:
+        JSON with the ranked scan, or the sample scan when no rows are supplied.
+    """
+    from .cash_future_arbitrage import (  # noqa: PLC0415
+        make_sample_arbitrage_scan,
+        scan_arbitrage,
+    )
+
+    body = request.get_json(silent=True) or {}
+    cash_future_rows = body.get("cash_future") or []
+    cross_exchange_rows = body.get("cross_exchange") or []
+
+    try:
+        risk_free_rate = float(body.get("risk_free_rate", 0.07))
+    except (TypeError, ValueError):
+        risk_free_rate = 0.07
+    try:
+        edge_threshold_pct = float(body.get("edge_threshold_pct", 1.0))
+    except (TypeError, ValueError):
+        edge_threshold_pct = 1.0
+
+    is_sample_data = not (cash_future_rows or cross_exchange_rows)
+    if is_sample_data:
+        result = make_sample_arbitrage_scan()
+    else:
+        result = scan_arbitrage(
+            cash_future_rows=cash_future_rows,
+            cross_exchange_rows=cross_exchange_rows,
+            risk_free_rate=risk_free_rate,
+            edge_threshold_pct=edge_threshold_pct,
+        )
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "is_sample_data": is_sample_data,
+            "scan": result.to_dict(),
+        },
+    })
+
+
 # ---------------------------------------------------------------------------
 # Vol Surface endpoint
 # ---------------------------------------------------------------------------

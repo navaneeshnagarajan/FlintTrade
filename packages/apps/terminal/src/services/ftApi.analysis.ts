@@ -3,6 +3,7 @@ import { classifySector } from "@/lib/sectors";
 import type {
   GEXData,
   GammaDensityData,
+  ArbitrageScanResponse,
   VolSurfaceData,
   IVSmileData,
   StraddlePnLData,
@@ -10,7 +11,7 @@ import type {
   OIProfileData,
 } from "@/types/api";
 
-export type { GEXData, GammaDensityData, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
+export type { GEXData, GammaDensityData, ArbitrageScanResponse, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
 
 
 export interface PineCompileResult {
@@ -202,6 +203,28 @@ export const getGammaDensityData = (
     exchange,
     ...(expiry ? { expiry } : {}),
   });
+
+export interface ArbitrageScanRequest {
+  cash_future?: Array<{
+    underlying: string;
+    spot: number;
+    future_price: number;
+    days_to_expiry: number;
+    exchange?: string;
+  }>;
+  cross_exchange?: Array<{
+    symbol: string;
+    exchange_a: string;
+    price_a: number;
+    exchange_b: string;
+    price_b: number;
+  }>;
+  risk_free_rate?: number;
+  edge_threshold_pct?: number;
+}
+
+export const getArbitrageScan = (req: ArbitrageScanRequest = {}) =>
+  post<ArbitrageScanResponse>("screener/arbitrage", req);
 
 export const getVolSurface = (
   symbol: string,

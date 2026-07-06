@@ -746,3 +746,31 @@ class TestGammaDensityRoute:
         first = data["strikes"][0]
         assert "density_intraday" in first
         assert "density_expiry" in first
+
+
+class TestArbitrageScanRoute:
+    """DP3 — cash-future / cross-exchange arbitrage scanner endpoint."""
+
+    def test_sample_scan_when_no_rows(self, client):
+        resp, body = _post(client, "/api/v1/screener/arbitrage", {})
+
+        assert resp.status_code == 200
+        assert body["status"] == "success"
+        data = body["data"]
+        assert data["is_sample_data"] is True
+        assert len(data["scan"]["cash_future"]) > 0
+        assert len(data["scan"]["cross_exchange"]) > 0
+
+    def test_scans_supplied_rows(self, client):
+        resp, body = _post(client, "/api/v1/screener/arbitrage", {
+            "cash_future": [
+                {"underlying": "NIFTY", "spot": 24000.0, "future_price": 24120.0, "days_to_expiry": 5},
+            ],
+        })
+
+        assert resp.status_code == 200
+        data = body["data"]
+        assert data["is_sample_data"] is False
+        opp = data["scan"]["cash_future"][0]
+        assert opp["underlying"] == "NIFTY"
+        assert opp["signal"] == "cash_and_carry"
