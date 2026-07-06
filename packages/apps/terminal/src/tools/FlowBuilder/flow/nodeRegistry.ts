@@ -544,7 +544,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
     color: CATEGORY_COLORS.data,
     nodes: [
       { type: "getQuote", label: "Get Quote", description: "LTP, bid/ask, OHLC", configFields: ["symbol", "exchange"] },
-      { type: "getDepth", label: "Get Depth", description: "50-level order book", configFields: ["symbol", "exchange"] },
+      { type: "getDepth", label: "Get Depth", description: "Broker depth snapshot", configFields: ["symbol", "exchange"] },
       { type: "getOrderStatus", label: "Order Status", description: "Check order fill state", configFields: [] },
       { type: "history", label: "History", description: "OHLCV historical bars", configFields: ["symbol", "exchange", "interval"] },
       { type: "openPosition", label: "Open Position", description: "Get current position details", configFields: ["symbol"] },
@@ -569,7 +569,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
     nodes: [
       { type: "subscribeLtp", label: "Subscribe LTP", description: "Real-time last traded price", configFields: ["symbol", "exchange"] },
       { type: "subscribeQuote", label: "Subscribe Quote", description: "Real-time quote stream", configFields: ["symbol", "exchange"] },
-      { type: "subscribeDepth", label: "Subscribe Depth", description: "50-level depth stream", configFields: ["symbol", "exchange"] },
+      { type: "subscribeDepth", label: "Subscribe Depth", description: "Broker depth stream", configFields: ["symbol", "exchange"] },
       { type: "unsubscribe", label: "Unsubscribe", description: "Stop streaming for symbol", configFields: ["symbol", "exchange"] },
     ],
   },

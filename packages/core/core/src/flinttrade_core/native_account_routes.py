@@ -971,6 +971,7 @@ _READ_METHODS = {
     "orderhistory": ("order_history",),
     "ordertrades": ("order_trades",),
     "trades": ("trade_book",),
+    "ltp": ("ltp", "ltp_quotes"),
     "quotes": ("quotes",),
     "quote_details": ("quote_details",),
     "ohlc": ("ohlc", "ohlc_quotes"),
@@ -1191,7 +1192,7 @@ def _native_read_kwargs(kind: str) -> dict[str, Any]:
 def _native_read_args(kind: str) -> tuple[tuple[Any, ...] | None, str | None]:
     if kind == "limits":
         return _native_limits_read_args()
-    if kind == "quotes":
+    if kind in {"ltp", "quotes"}:
         return _native_quote_read_args()
     if kind == "quote_details":
         return _native_quote_details_read_args()

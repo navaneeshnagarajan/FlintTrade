@@ -146,6 +146,19 @@ describe("ftApi.native envelope unwrapping", () => {
     );
   });
 
+  it("readNativeAccount supports native ltp reads with symbol params", async () => {
+    fetchSpy.mockResolvedValueOnce(envelope([{ symbol: "INFY", exchange: "NSE", ltp: 1450.25 }]));
+    const rows = await readNativeAccount<Array<{ symbol: string; ltp: number }>>("upstox", "U1", "ltp", {
+      symbol: "INFY",
+      exchange: "NSE",
+    });
+    expect(rows[0].ltp).toBe(1450.25);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/native/accounts/upstox/U1/ltp?symbol=INFY&exchange=NSE"),
+      expect.anything(),
+    );
+  });
+
   it("setPrimaryNativeAccount posts to the selector-scoped primary route", async () => {
     fetchSpy.mockResolvedValueOnce(envelope({ account: { adapter_id: "upstox", account_id: "U1" } }));
     await setPrimaryNativeAccount("upstox", "U1");

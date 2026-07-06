@@ -686,6 +686,31 @@ def test_native_account_reads_include_quotes_and_history(client, monkeypatch):
     assert history.get_json()["data"]["bars"][0]["close"] == 1.5
 
 
+def test_native_account_reads_include_ltp(client, monkeypatch):
+    """LTP reads go through the unified native route when a broker exposes only
+    a broker-SDK-shaped ltp_quotes method."""
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _ltp_quotes(_self, _session, symbols):
+        assert symbols == ["NSE:INFY"]
+        return [{"symbol": "INFY", "exchange": "NSE", "ltp": 1450.25}]
+
+    monkeypatch.setattr(UpstoxAdapter, "ltp_quotes", _ltp_quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXLTP", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    ltp = c.get("/api/v1/native/accounts/upstox/UPXLTP/ltp?symbol=INFY&exchange=NSE")
+
+    assert ltp.status_code == 200, ltp.get_json()
+    assert ltp.get_json()["data"][0]["ltp"] == 1450.25
+
+
 def test_native_account_reads_include_market_depth(client, monkeypatch):
     """Depth/DOM widgets can use native market-depth reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter

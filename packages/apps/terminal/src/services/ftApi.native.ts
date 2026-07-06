@@ -139,6 +139,7 @@ export type NativeReadKind =
   | "orderhistory"
   | "ordertrades"
   | "trades"
+  | "ltp"
   | "quotes"
   | "quote_details"
   | "ohlc"
