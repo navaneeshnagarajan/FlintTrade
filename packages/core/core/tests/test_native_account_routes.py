@@ -1562,6 +1562,102 @@ def test_connect_dead_token_surfaces_needs_relogin_not_false_success(client, mon
     assert "dead" not in public_body
 
 
+def test_connect_rejects_unattested_sdk_before_storing(client, monkeypatch):
+    """A missing required SDK must fail before vault/workspace mutation."""
+    c, app, tmp_path = client
+    from flinttrade_core import native_account_routes as native_routes
+
+    monkeypatch.setattr(
+        native_routes,
+        "_sdk_attestations_by_pin",
+        lambda: {
+            "upstox-python-sdk": {
+                "pin": "upstox-python-sdk",
+                "pinned_version": "2.28.0",
+                "installed_version": None,
+                "status": "missing",
+            }
+        },
+    )
+
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "SDKMISS", "credentials": {"access_token": "tok"}},
+    )
+
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body["data"]["connected"] is False
+    assert body["data"]["login"] == "sdk-not-ready"
+    assert "Upstox native SDK is not ready" in body["message"]
+    assert all(row["account_id"] != "SDKMISS" for row in app.config["CREDENTIAL_STORE"].list_accounts())
+    assert _workspace_brokers(tmp_path) == {}
+
+
+def test_oauth_start_rejects_unattested_sdk_before_pending_state(client, monkeypatch):
+    """Do not send the operator to a broker OAuth page when callback cannot activate."""
+    c, _app, _tmp = client
+    from flinttrade_core import native_account_routes as native_routes
+
+    monkeypatch.setattr(
+        native_routes,
+        "_sdk_attestations_by_pin",
+        lambda: {
+            "upstox-python-sdk": {
+                "pin": "upstox-python-sdk",
+                "pinned_version": "2.28.0",
+                "installed_version": "2.27.0",
+                "status": "mismatch",
+            }
+        },
+    )
+
+    resp = c.post(
+        "/api/v1/native/oauth/start",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXOAUTH", "api_key": "K", "api_secret": "S"},
+    )
+
+    assert resp.status_code == 503
+    assert "Upstox native SDK is not ready" in resp.get_json()["message"]
+    assert native_routes._OAUTH_PENDING == {}
+
+
+def test_relogin_rejects_unattested_sdk_before_fresh_credential_update(client, monkeypatch):
+    """A fresh re-login payload must not overwrite the vault if SDK attestation fails."""
+    c, app, _tmp = client
+    c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "SDKREL", "credentials": {"access_token": "good"}},
+    )
+    from flinttrade_core import native_account_routes as native_routes
+
+    monkeypatch.setattr(
+        native_routes,
+        "_sdk_attestations_by_pin",
+        lambda: {
+            "upstox-python-sdk": {
+                "pin": "upstox-python-sdk",
+                "pinned_version": "2.28.0",
+                "installed_version": None,
+                "status": "missing",
+            }
+        },
+    )
+
+    resp = c.post(
+        "/api/v1/native/accounts/upstox/SDKREL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "fresh"}},
+    )
+
+    assert resp.status_code == 503
+    assert "Upstox native SDK is not ready" in resp.get_json()["message"]
+    assert app.config["CREDENTIAL_STORE"].retrieve_for("upstox", "SDKREL")["access_token"] == "good"
+
+
 def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
     """The interactive Re-authenticate path probes too — a dead replayed token
     drops the session and records login-failed (needs_relogin), not a false ok."""

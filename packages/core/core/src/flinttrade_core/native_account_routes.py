@@ -103,6 +103,42 @@ def _native_sdk_fields(info: Any) -> dict[str, Any]:
     return sdk_attestation_fields(info.sdk_pin, attestations=_sdk_attestations_by_pin())
 
 
+def _native_sdk_not_ready_body(adapter_id: str) -> dict[str, Any] | None:
+    """Return a fixed public error body when a native broker SDK is not attested."""
+    info = BROKER_CATALOG.get(adapter_id)
+    if info is None or not info.native:
+        return None
+
+    from .broker_sdk_attest import STATUS_NOT_REQUIRED, STATUS_OK, sdk_attestation_fields  # noqa: PLC0415
+
+    fields = sdk_attestation_fields(info.sdk_pin, attestations=_sdk_attestations_by_pin())
+    attestation = fields.get("sdk_attestation") or {}
+    status = str(attestation.get("status") or "unknown")
+    if status in {STATUS_OK, STATUS_NOT_REQUIRED}:
+        return None
+
+    pin = str(attestation.get("pin") or info.sdk_pin or "broker SDK")
+    pinned = str(attestation.get("pinned_version") or "").strip()
+    installed = str(attestation.get("installed_version") or "").strip()
+    bits = [f"{pin}: {status}"]
+    if pinned:
+        bits.append(f"pinned {pinned}")
+    if installed:
+        bits.append(f"installed {installed}")
+    return {
+        "status": "error",
+        "data": {
+            "connected": False,
+            "login": "sdk-not-ready",
+            "sdk_attestation": attestation,
+        },
+        "message": (
+            f"{info.display_name} native SDK is not ready ({', '.join(bits)}). "
+            "Run `make setup` or `uv sync --frozen --all-packages`, then retry."
+        ),
+    }
+
+
 @native_accounts_bp.before_request
 def _guard_account_writes() -> Any | None:
     """Require a valid session JWT on every account-management write (G9).
@@ -497,6 +533,9 @@ def _do_connect(
     registry = current_app.config.get("REGISTRY")
     if store is None or registry is None:
         return {"status": "error", "message": "Credential store or registry unavailable."}, 503
+    sdk_not_ready = _native_sdk_not_ready_body(adapter_id)
+    if sdk_not_ready is not None:
+        return sdk_not_ready, 503
 
     # --- Snapshot everything the connect will mutate, for a transactional
     # rollback on failure. new-vs-existing is decided by PRESENCE via
@@ -668,6 +707,8 @@ def connect_native_account() -> Any:
     _body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
     if code == 200:
         return jsonify(_public_connect_success_body()), 200
+    if code == 503 and _body_out.get("data", {}).get("login") == "sdk-not-ready":
+        return jsonify(_body_out), 503
     return jsonify(_public_connect_failure_body()), 502
 
 
@@ -768,6 +809,9 @@ def native_oauth_start() -> Any:
             "status": "error",
             "message": "account_id, api_key and api_secret are required.",
         }), 400
+    sdk_not_ready = _native_sdk_not_ready_body(adapter_id)
+    if sdk_not_ready is not None:
+        return jsonify(sdk_not_ready), 503
 
     native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
     # The adapter class exposes build_login_url even when dormant — resolve from
@@ -932,6 +976,9 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     registry = current_app.config.get("REGISTRY")
     if store is None or registry is None:
         return jsonify({"status": "error", "message": "Credential store or registry unavailable."}), 503
+    sdk_not_ready = _native_sdk_not_ready_body(adapter_id)
+    if sdk_not_ready is not None:
+        return jsonify(sdk_not_ready), 503
 
     body: dict[str, Any] = request.get_json(silent=True) or {}
     fresh = body.get("credentials")

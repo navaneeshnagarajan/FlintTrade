@@ -108,6 +108,12 @@ function sdkStatusTone(status?: BrokerSdkAttestation["status"] | null): string {
   return "border-warning/40 text-warning";
 }
 
+function sdkReadyForConnect(broker: NativeBroker): boolean {
+  const status = broker.sdk_attestation?.status;
+  if (!status) return true;
+  return status === "ok" || status === "not_required";
+}
+
 function McpSetupValue({
   label,
   copyLabel,
@@ -186,6 +192,7 @@ export function BrokerConnect() {
   const broker = brokers.find((b) => b.adapter_id === selectedBroker);
   const method: NativeAuthMethod | undefined = broker?.auth_methods.find((m) => m.id === selectedMethodId);
   const brokerConnectable = broker?.connectable ?? false;
+  const brokerSdkReady = broker ? sdkReadyForConnect(broker) : false;
   const oauthRedirectUri = broker?.oauth_redirect_uri ?? "http://127.0.0.1:5100/api/v1/native/oauth/callback";
   const brokerPostbackUri = broker?.postback_uri ?? (
     selectedBroker ? `http://127.0.0.1:5100/api/v1/native/postbacks/${selectedBroker}` : ""
@@ -234,6 +241,9 @@ export function BrokerConnect() {
     mutationFn: async () => {
       if (!broker || !method) throw new Error("Pick a broker and a login method.");
       if (!broker.connectable) throw new Error(`${broker.display_name} native connect is coming soon.`);
+      if (!sdkReadyForConnect(broker)) {
+        throw new Error(`${broker.display_name} native SDK is not ready (${sdkStatusLabel(broker)}).`);
+      }
       if (!accountId.trim()) throw new Error("Enter an account ID / client code.");
       for (const f of method.fields) {
         if (f.required && !fields[f.name]?.trim()) throw new Error(`${f.label} is required.`);
@@ -824,6 +834,9 @@ export function BrokerConnect() {
             >
               {sdkStatusLabel(broker)}
             </Badge>
+            {!brokerSdkReady && (
+              <span className="text-loss">Run setup or sync dependencies before connecting.</span>
+            )}
           </div>
         )}
 
@@ -896,7 +909,7 @@ export function BrokerConnect() {
 
             <Button
               onClick={() => connectMutation.mutate()}
-              disabled={connectMutation.isPending || !brokerConnectable}
+              disabled={connectMutation.isPending || !brokerConnectable || !brokerSdkReady}
               className="w-full sm:w-auto"
             >
               {connectMutation.isPending && <Loader2 className="size-4 mr-2 animate-spin" aria-hidden="true" />}

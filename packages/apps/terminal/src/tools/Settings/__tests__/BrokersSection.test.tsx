@@ -501,6 +501,29 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("native-broker-sdk-status")).toHaveTextContent("dhanhq 2.2.0 OK");
   });
 
+  it("blocks native connect when the selected broker SDK is not attested", async () => {
+    (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        ...BROKERS[0],
+        sdk_attestation: {
+          pin: "dhanhq",
+          pinned_version: "2.2.0",
+          installed_version: null,
+          status: "missing" as const,
+        },
+      },
+    ]);
+    renderSection();
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+
+    expect(screen.getByTestId("native-broker-sdk-status")).toHaveTextContent("dhanhq 2.2.0 missing");
+    expect(screen.getByText(/sync dependencies before connecting/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /log in with dhan/i })).toBeDisabled();
+  });
+
   it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {
     (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([makeGatewayAccount()]);
     (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
