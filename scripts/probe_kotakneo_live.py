@@ -13,7 +13,7 @@ root_path = str(ROOT)
 if root_path not in sys.path:
     sys.path.insert(0, root_path)
 
-from scripts.probe_native_broker_live import run_probe  # noqa: E402
+from scripts.probe_native_broker_live import broker_read_help, run_probe  # noqa: E402
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -30,10 +30,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--reads",
         nargs="+",
         default=["default"],
-        help=(
-            "Read-only calls: default, all, or any of funds limits positions holdings orders trades "
-            "scrip_master search_scrip quotes quote_details market_depth."
-        ),
+        help=f"Read-only calls: default, all, or any of {broker_read_help('kotakneo')}.",
     )
     parser.add_argument(
         "--logout",

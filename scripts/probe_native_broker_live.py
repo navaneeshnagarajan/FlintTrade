@@ -235,6 +235,30 @@ class InconclusiveRead(Exception):
     """Raised when a read is supported but needs live state the account lacks."""
 
 
+def broker_read_help(broker: str) -> str:
+    """Return the exact read names accepted by the shared probe for one broker."""
+    choices = READ_CHOICES_BY_BROKER[broker]
+    return " ".join(choices)
+
+
+def broker_method_help() -> str:
+    """Return the exact credential methods accepted by the shared probe."""
+    lines = []
+    for broker in sorted(CREDENTIAL_FIELDS):
+        methods = ", ".join(sorted(CREDENTIAL_FIELDS[broker]))
+        default = DEFAULT_METHOD[broker]
+        lines.append(f"{broker}: {methods} (default: {default})")
+    return "\n".join(lines)
+
+
+def broker_reads_help() -> str:
+    """Return the exact read choices accepted by the shared probe."""
+    lines = []
+    for broker in sorted(READ_CHOICES_BY_BROKER):
+        lines.append(f"{broker}: {broker_read_help(broker)}")
+    return "\n".join(lines)
+
+
 def redact(text: object) -> str:
     """Return a bounded string with broker/account identifiers removed."""
     value = str(text)
@@ -588,6 +612,13 @@ async def run_probe(
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Read-only native broker adapter probe with redacted output.",
+        epilog=(
+            "Credential methods by broker:\n"
+            f"{broker_method_help()}\n\n"
+            "Read choices by broker:\n"
+            f"{broker_reads_help()}"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("broker", choices=sorted(ADAPTER_FACTORIES))
     parser.add_argument(

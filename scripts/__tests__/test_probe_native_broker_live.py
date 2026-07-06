@@ -541,8 +541,11 @@ def test_kotak_wrapper_help_is_kotak_specific(capsys) -> None:
         raise AssertionError("--help should exit")
 
     out = capsys.readouterr().out
+    compact = " ".join(out.split())
     assert "Read-only Kotak Neo native adapter probe" in out
-    assert "market_depth" in out
+    assert "funds limits positions holdings orders trades orderhistory ordertrades margin" in compact
+    assert "scrip_master search_scrip quotes quote_details market_depth" in compact
+    assert "market_depth" in compact
     assert "{dhan,indmoney,kotakneo,upstox}" not in out
 
 
@@ -559,6 +562,25 @@ def test_shared_probe_help_lists_current_method_defaults(capsys) -> None:
     assert "groww api_key_secret" in out
     assert "kotakneo totp_mpin" in out
     assert "groww/indmoney/upstox access_token" not in out
+    assert "Credential methods by broker:" in out
+    assert "dhan: access_token, oauth_token_id, pin_totp (default: access_token)" in out
+    assert "groww: access_token, api_key_secret, api_key_totp (default: api_key_secret)" in out
+    assert "kotakneo: totp_mpin (default: totp_mpin)" in out
+    assert "Read choices by broker:" in out
+    assert "kotakneo: funds limits positions holdings orders trades orderhistory ordertrades margin" in out
+    assert "groww: profile funds positions holdings orders trades orderstatus ordertrades quotes ltp" in out
+
+
+def test_kotak_wrapper_help_comes_from_shared_read_choices(capsys) -> None:
+    try:
+        kotak_wrapper.parse_args(["--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:  # pragma: no cover - argparse always exits on --help
+        raise AssertionError("--help should exit")
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert probe.broker_read_help("kotakneo") in out
 
 
 def test_kotak_wrapper_dispatches_to_shared_probe(monkeypatch) -> None:
