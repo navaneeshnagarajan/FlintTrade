@@ -4,7 +4,7 @@
   "schedule": ["before 9am on Monday"],
   "packageRules": [
     {
-      "matchPackageNames": ["dhanhq", "upstox-python-sdk", "neo-api-client"],
+      "matchPackageNames": ["dhanhq", "upstox-python-sdk", "neo-api-client", "growwapi"],
       "groupName": "python brokers (manual review only)",
       "automerge": false,
       "labels": ["needs-founder-review", "needs-sandbox-smoke-test"]

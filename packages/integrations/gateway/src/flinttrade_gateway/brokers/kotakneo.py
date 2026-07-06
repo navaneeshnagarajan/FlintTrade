@@ -387,13 +387,17 @@ class KotakNeoAdapter(BrokerAdapter):
             raise BrokerError("Kotak Neo client not initialised — call login() first")
         return client
 
-    def _resolve_symbol(self, symbol: str, exchange: str) -> str:
+    async def _resolve_trading_symbol(self, session: Session, symbol: str, exchange: str) -> str:
+        """Resolve a FlintTrade symbol to NEO's trading symbol (``pTrdSymbol``)."""
         if self._symbol_resolver is not None:
             return str(self._symbol_resolver(symbol, exchange))
-        raise BrokerError(
-            f"Cannot resolve Kotak Neo trading_symbol for {symbol}/{exchange} — "
-            "configure a symbol resolver"
-        )
+        scrips = await self.search_scrip(session, symbol, exchange)
+        if not scrips or not scrips[0].get("trading_symbol"):
+            raise BrokerError(
+                f"Cannot resolve Kotak Neo trading_symbol for {symbol}/{exchange} — "
+                "configure a symbol resolver or check the symbol"
+            )
+        return str(scrips[0]["trading_symbol"])
 
     async def _resolve_token(self, session: Session, name: str, exchange: str) -> str:
         """Resolve a scrip ``name`` to its numeric NEO instrument token (``pSymbol``).
@@ -496,7 +500,7 @@ class KotakNeoAdapter(BrokerAdapter):
         only ``disclosed_quantity``.
         """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        trading_symbol = self._resolve_symbol(order.symbol, order.exchange)
+        trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         tag = session.algo_id or None
         params = M.to_place_order_params(order, trading_symbol, tag=tag)
         resp = await self._call(self._client(session).place_order, params)
@@ -682,7 +686,7 @@ class KotakNeoAdapter(BrokerAdapter):
         rides its own ``trading_symbol`` field. If the numeric token is not
         resolvable the trading symbol is used as a best-effort fallback.
         """
-        trading_symbol = self._resolve_symbol(order.symbol, order.exchange)
+        trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         try:
             instrument_token: str | None = await self._resolve_token(session, order.symbol, order.exchange)
         except BrokerError:

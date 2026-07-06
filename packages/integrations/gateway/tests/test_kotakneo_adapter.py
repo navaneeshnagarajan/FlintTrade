@@ -79,6 +79,12 @@ class MockNeo:
         ]
 
 
+class _NoScripNeo(MockNeo):
+    def search_scrip(self, exchange_segment, symbol):
+        self.calls.append(("search", (exchange_segment, symbol)))
+        return []
+
+
 def _adapter(mock):
     return KotakNeoAdapter(client_factory=lambda _s: mock, symbol_resolver=lambda s, e: "IDEA-EQ")
 
@@ -168,11 +174,25 @@ async def test_reads_map_correctly():
 
 @pytest.mark.asyncio
 async def test_unresolvable_symbol_raises():
-    adapter = KotakNeoAdapter(client_factory=lambda _s: MockNeo())  # no resolver
+    adapter = KotakNeoAdapter(client_factory=lambda _s: _NoScripNeo())  # no resolver, no broker-side hit
     session = await _session(adapter)
     order = Order(symbol="OBSCURE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
     with pytest.raises(BrokerError, match="trading_symbol"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.asyncio
+async def test_place_order_resolves_trading_symbol_via_search_scrip():
+    mock = MockNeo()
+    adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
+    session = await _session(adapter)
+    order = Order(symbol="YESBANK", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="9.4")
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "250122000612876"
+    assert ("search", ("nse_cm", "YESBANK")) in mock.calls
+    _, params = [c for c in mock.calls if c[0] == "place"][0]
+    assert params["trading_symbol"] == "YESBANK-EQ"
 
 
 @pytest.mark.asyncio

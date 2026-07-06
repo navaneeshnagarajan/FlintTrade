@@ -309,6 +309,54 @@ async def test_amo_place_sets_flag_through_gate():
 
 
 @pytest.mark.asyncio
+async def test_place_order_resolves_trading_symbol_via_search_scrip_when_no_resolver():
+    mock = MockNeoFull()
+    adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="10", price="9.4")
+    await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert ("search", ("nse_cm", "IDEA", None, None, None)) in mock.calls
+    _, params = [c for c in mock.calls if c[0] == "place"][0]
+    assert params["trading_symbol"] == "IDEA-EQ"
+
+
+@pytest.mark.asyncio
+async def test_place_order_raises_when_search_scrip_has_no_match():
+    class NoScripNeo(MockNeoFull):
+        def search_scrip(self, exchange_segment, symbol, expiry=None, option_type=None,
+                         strike_price=None, ignore_50multiple=True):
+            self.calls.append(("search", (exchange_segment, symbol, expiry, option_type, strike_price)))
+            return []
+
+    mock = NoScripNeo()
+    adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
+    session = await _session(adapter)
+    order = Order(symbol="UNKNOWN", action="BUY", exchange="NSE", pricetype="MARKET",
+                  product="MIS", quantity="1")
+    with pytest.raises(BrokerError, match="trading_symbol"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert [c for c in mock.calls if c[0] == "place"] == []
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_resolves_trading_symbol_via_search_scrip_when_no_resolver():
+    mock = MockNeoFull()
+    adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="9.4")
+    await adapter.margin_calculator(session, order)
+    assert [c for c in mock.calls if c[0] == "search"] == [
+        ("search", ("nse_cm", "IDEA", None, None, None)),
+        ("search", ("nse_cm", "IDEA", None, None, None)),
+    ]
+    _, params = [c for c in mock.calls if c[0] == "margin"][0]
+    assert params["trading_symbol"] == "IDEA-EQ"
+    assert params["instrument_token"] == "14366"
+
+
+@pytest.mark.asyncio
 async def test_cancel_cover_leg_is_gated_and_dispatches():
     mock = MockNeoFull()
     adapter = _adapter(mock)
