@@ -94,9 +94,10 @@ currently verified first-party adapters.
 
 For native connect, use Setup → Brokers or Settings → Brokers. Dhan and Upstox
 offer OAuth-style flows, Upstox Developer Apps analytics tokens connect as
-read-only sessions, INDmoney uses a dashboard-generated 24-hour token, and Kotak
-Neo plus Groww stay disabled until their live checks pass. Groww may also require
-approving the API-key session in Groww Cloud before FlintTrade can mint a token.
+read-only sessions, INDmoney uses a dashboard-generated token that resets at the
+daily 06:00 IST dashboard cycle, and Kotak Neo plus Groww stay disabled until
+their live checks pass. Groww may also require approving the API-key session in
+Groww Cloud before FlintTrade can mint a token.
 Localhost postback URLs are for diagnostics unless you expose FlintTrade through
 a broker-reachable tunnel or public URL.
 

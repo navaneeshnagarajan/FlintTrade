@@ -1104,9 +1104,9 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         name="indmoney",
         display_name="INDmoney",
         # ``api_key_direct`` is shorthand for the INDstocks dashboard access
-        # token; unlike a persistent API key it expires daily (24 h), so the
-        # native adapter (brokers/indmoney.py) treats it as a renewable
-        # session credential.
+        # token; unlike a persistent API key it resets at the daily 06:00 IST
+        # dashboard cycle, so the native adapter (brokers/indmoney.py) treats
+        # it as a renewable session credential.
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
         native=True,

@@ -104,7 +104,7 @@ async def test_login_returns_session_and_requires_token(monkeypatch: pytest.Monk
 async def test_refresh_and_logout_are_benign() -> None:
     adapter = _adapter(FakeTransport())
     session = await _session(adapter)
-    assert await adapter.refresh(session) is session  # manual 24 h token cycle
+    assert await adapter.refresh(session) is session  # manual dashboard-reset token cycle
     await adapter.logout(session)
     await adapter.logout(session)  # idempotent
     assert "transport" not in session.extra

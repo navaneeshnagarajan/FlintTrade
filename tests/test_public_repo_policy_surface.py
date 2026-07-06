@@ -100,6 +100,15 @@ def test_api_reference_documents_native_broker_surface_boundaries() -> None:
     assert "connected, non-read-only native session" in api_doc
 
 
+def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
+    """Public broker docs should match the INDstocks dashboard reset semantics."""
+    guide = _read(ROOT / "docs/USER_GUIDE.md")
+    stale_indstocks_phrase = "INDmoney uses a dashboard-generated " + "24-hour token"
+
+    assert "daily 06:00 IST dashboard cycle" in guide
+    assert stale_indstocks_phrase not in guide
+
+
 def test_public_site_labels_demo_as_sandbox_not_live() -> None:
     """The hosted demo is sample/sandbox-oriented and should not be labelled live."""
     site_sources = [
