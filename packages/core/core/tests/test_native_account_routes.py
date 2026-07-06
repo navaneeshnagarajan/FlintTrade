@@ -636,6 +636,88 @@ def test_list_native_account_surfaces_read_only_sessions(client):
     assert relogin.get_json()["data"]["session"]["read_only"] is True
 
 
+def test_connect_read_only_session_cannot_become_execution_default(client):
+    c, app, tmp_path = client
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXREADONLYPRIMARY",
+            "credentials": {
+                "access_token": "tok-read-only-primary",
+                "read_only": "true",
+                "token_scope": "analytics",
+            },
+            "is_primary": True,
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    brokers = _workspace_brokers(tmp_path)
+    assert "upstox:UPXREADONLYPRIMARY" in brokers["registered"]
+    assert brokers["execution"]["default"] == "openalgo:default"
+
+    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
+    entry = next(a for a in listing if a["account_id"] == "UPXREADONLYPRIMARY")
+    assert entry["has_session"] is True
+    assert entry["read_only"] is True
+    assert entry["is_primary"] is False
+
+    row = next(
+        r for r in app.config["CREDENTIAL_STORE"].list_accounts()
+        if r["account_id"] == "UPXREADONLYPRIMARY"
+    )
+    assert row["is_primary"] is False
+    assert app.config["BROKER_ROUTER"] is not None
+
+
+def test_relogin_read_only_session_cannot_remain_execution_default(client):
+    c, app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXREADONLYREFRESH",
+            "label": "Upstox primary refresh",
+            "credentials": {"access_token": "tok-write-capable"},
+            "is_primary": True,
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:UPXREADONLYREFRESH"
+
+    relogin = c.post(
+        "/api/v1/native/accounts/upstox/UPXREADONLYREFRESH/login",
+        headers=_h(),
+        json={
+            "credentials": {
+                "access_token": "tok-read-only-refresh",
+                "read_only": "true",
+                "token_scope": "analytics",
+            },
+        },
+    )
+    assert relogin.status_code == 200, relogin.get_json()
+    assert relogin.get_json()["data"]["session"]["read_only"] is True
+
+    brokers = _workspace_brokers(tmp_path)
+    assert "upstox:UPXREADONLYREFRESH" in brokers["registered"]
+    assert brokers["execution"]["default"] == "openalgo:default"
+
+    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
+    entry = next(a for a in listing if a["account_id"] == "UPXREADONLYREFRESH")
+    assert entry["read_only"] is True
+    assert entry["is_primary"] is False
+
+    row = next(
+        r for r in app.config["CREDENTIAL_STORE"].list_accounts()
+        if r["account_id"] == "UPXREADONLYREFRESH"
+    )
+    assert row["is_primary"] is False
+
+
 # ---------------------------------------------------------------------------
 # G9 — account-management write guard
 # ---------------------------------------------------------------------------

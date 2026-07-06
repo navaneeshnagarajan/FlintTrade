@@ -357,6 +357,51 @@ def _register_selector_in_workspace(
     tmp.replace(path)
 
 
+def _demote_selector_as_execution_default(
+    adapter_id: str,
+    account_id: str,
+    *,
+    prior_workspace_snapshot: str | None = None,
+) -> bool:
+    """Keep a selector registered, but remove it from the write default."""
+    selector = f"{adapter_id}:{account_id}"
+    path = workspace_dir() / "workspace.json"
+    if not path.exists():
+        return False
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    brokers = data.setdefault("brokers", {})
+    execution = brokers.setdefault("execution", {})
+    if execution.get("default") != selector:
+        return False
+
+    registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
+    prior_default = ""
+    if prior_workspace_snapshot is not None:
+        try:
+            prior = json.loads(prior_workspace_snapshot)
+            prior_default = str(
+                ((prior.get("brokers") or {}).get("execution") or {}).get("default") or ""
+            )
+        except (TypeError, ValueError, AttributeError):
+            prior_default = ""
+
+    if prior_default and prior_default != selector and prior_default in registered:
+        replacement = prior_default
+    elif "openalgo:default" in registered:
+        replacement = "openalgo:default"
+    else:
+        replacement = next((entry for entry in registered if entry != selector), "")
+    execution["default"] = replacement
+
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    tmp.replace(path)
+    return True
+
+
 def _snapshot_workspace() -> str | None:
     """Return the raw workspace.json text (or None if it does not exist yet).
 
@@ -513,6 +558,62 @@ def _restore_vault_after_failed_store(
             logger.warning("Could not restore prior native broker vault row")
 
 
+def _demote_read_only_vault_primary(
+    store: Any,
+    *,
+    account_id: str,
+    adapter_id: str,
+    fallback_label: str,
+) -> None:
+    """Clear the primary flag after a connected session proves read-only."""
+    try:
+        credentials = store.retrieve_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not retrieve read-only native broker credentials for primary demotion")
+        return
+
+    try:
+        row = _stored_native_account(store, adapter_id, account_id) or {}
+        store.store(
+            account_id,
+            adapter_id,
+            str(row.get("label") or fallback_label),
+            credentials,
+            is_primary=False,
+            adapter_id=adapter_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not demote read-only native broker vault primary flag")
+
+
+def _demote_read_only_connected_account(
+    store: Any,
+    registry: Any,
+    *,
+    adapter_id: str,
+    account_id: str,
+    fallback_label: str,
+    prior_workspace_snapshot: str | None = None,
+) -> None:
+    """Remove a connected read-only selector from write-default metadata."""
+    _demote_selector_as_execution_default(
+        adapter_id,
+        account_id,
+        prior_workspace_snapshot=prior_workspace_snapshot,
+    )
+    _demote_read_only_vault_primary(
+        store,
+        account_id=account_id,
+        adapter_id=adapter_id,
+        fallback_label=fallback_label,
+    )
+
+    from .app import configure_broker_router  # noqa: PLC0415
+
+    app = current_app._get_current_object()  # type: ignore[attr-defined]
+    configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+
+
 @_serialized
 def _do_connect(
     adapter_id: str,
@@ -594,6 +695,15 @@ def _do_connect(
     session_status = _session_status(registry, adapter_id, account_id)
     connected = session_status["has_session"]
     if connected:
+        if bool(session_status.get("read_only")):
+            _demote_read_only_connected_account(
+                store,
+                registry,
+                account_id=account_id,
+                adapter_id=adapter_id,
+                fallback_label=label,
+                prior_workspace_snapshot=ws_snapshot,
+            )
         # G5: give the freshly connected broker a daily 08:05 IST refresh job on
         # the already-running rotator (configure_session_rotation only scheduled
         # brokers present at boot). Idempotent (replace_existing).
@@ -996,6 +1106,18 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     selector = f"{adapter_id}:{account_id}"
     session_status = _session_status(registry, adapter_id, account_id)
     connected = session_status["has_session"]
+    if connected and bool(session_status.get("read_only")):
+        try:
+            row = _stored_native_account(store, adapter_id, account_id) or {}
+        except Exception:  # noqa: BLE001
+            row = {}
+        _demote_read_only_connected_account(
+            store,
+            registry,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            fallback_label=str(row.get("label") or adapter_id),
+        )
     return jsonify({
         "status": "success" if connected else "error",
         "data": {"login": login_results.get(selector, "not-activated"), "session": session_status},
