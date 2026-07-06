@@ -8,6 +8,7 @@ from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
     extract_order_id,
+    from_kotak_depth,
     from_kotak_funds,
     from_kotak_holding,
     from_kotak_margin,
@@ -284,3 +285,43 @@ def test_from_kotak_quote_terse_feed_keys():
     q = from_kotak_quote({"ts": "NIFTY", "e": "nse_fo", "ltp": 24050.5, "h": 24100, "lo": 24000, "v": 500, "oi": 12345})
     assert q["symbol"] == "NIFTY" and q["exchange"] == "NFO"
     assert q["ltp"] == 24050.5 and q["high"] == 24100.0 and q["oi"] == 12345
+
+
+def test_from_kotak_quote_public_docs_shape():
+    # Current public quote docs return display_symbol/exchange plus nested OHLC
+    # and depth, not the SDK's older trading_symbol/exchange_segment fields.
+    q = from_kotak_quote({
+        "exchange_token": "SENSEX",
+        "display_symbol": "SENSEX-IN",
+        "exchange": "bse_cm",
+        "ltp": "81809.3400",
+        "last_volume": "123",
+        "ohlc": {"open": "81925.5100", "high": "81998.5100", "low": "81779.8200", "close": "81904.7000"},
+        "depth": {
+            "buy": [{"price": "81800.50", "quantity": "25", "orders": "2"}],
+            "sell": [{"price": "81810.75", "quantity": "30", "orders": "3"}],
+        },
+    })
+    assert q["symbol"] == "SENSEX-IN" and q["exchange"] == "BSE"
+    assert q["ltp"] == 81809.34 and q["volume"] == 123
+    assert q["open"] == 81925.51 and q["high"] == 81998.51 and q["low"] == 81779.82
+    assert q["close"] == 81904.7 and q["prev_close"] == 81904.7
+    assert q["bid"] == 81800.5 and q["ask"] == 81810.75
+
+
+def test_from_kotak_depth_public_docs_shape():
+    depth = from_kotak_depth({
+        "exchange_token": "SENSEX",
+        "display_symbol": "SENSEX-IN",
+        "exchange": "bse_cm",
+        "depth": {
+            "buy": [
+                {"price": "81800.50", "quantity": "25", "orders": "2"},
+                {"price": "81799.75", "quantity": "10", "orders": "1"},
+            ],
+            "sell": [{"price": "81810.75", "quantity": "30", "orders": "3"}],
+        },
+    })
+    assert depth["symbol"] == "SENSEX-IN" and depth["exchange"] == "BSE" and depth["token"] == "SENSEX"
+    assert depth["bids"][0] == {"price": 81800.5, "quantity": 25, "orders": 2}
+    assert depth["asks"][0] == {"price": 81810.75, "quantity": 30, "orders": 3}

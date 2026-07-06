@@ -723,8 +723,11 @@ def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
 
     NEO quotes share their key vocabulary with the streaming feed
     (``settings.stock_key_mapping``); the REST surface may return either the long
-    names (``last_traded_price``) or the terse feed keys (``ltp``), so each field
-    falls back across both. Bid/ask come from ``buy_price``/``sell_price``.
+    names (``last_traded_price``), the terse feed keys (``ltp``), or the current
+    public-docs shape (``display_symbol`` / ``exchange`` / nested ``ohlc`` /
+    nested ``depth``), so each field falls back across all documented variants.
+    Bid/ask prices come from ``buy_price``/``sell_price`` or the first depth
+    levels; ``total_buy``/``total_sell`` are quantities, not prices.
     """
     def g(*keys: str) -> Any:
         for k in keys:
@@ -732,19 +735,34 @@ def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
                 return rec[k]
         return 0
 
-    seg = str(g("exchange_segment", "e") or "")
+    def nested(container: str, key: str) -> Any:
+        value = rec.get(container)
+        if isinstance(value, dict) and value.get(key) not in (None, ""):
+            return value[key]
+        return 0
+
+    def depth_price(side: str) -> Any:
+        depth = rec.get("depth")
+        if not isinstance(depth, dict):
+            return 0
+        rows = depth.get(side)
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return rows[0].get("price", 0)
+        return 0
+
+    seg = str(g("exchange_segment", "exchange", "e") or "")
     return {
-        "symbol": g("trading_symbol", "ts") or "",
+        "symbol": g("trading_symbol", "display_symbol", "exchange_token", "ts", "tk") or "",
         "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
         "ltp": _num(g("last_traded_price", "ltp")),
-        "open": _num(g("open", "op")),
-        "high": _num(g("high", "h")),
-        "low": _num(g("low", "lo")),
-        "close": _num(g("close", "c")),
-        "volume": int(_num(g("volume", "v"))),
-        "bid": _num(g("buy_price", "bp")),
-        "ask": _num(g("sell_price", "sp")),
-        "prev_close": _num(g("close", "c")),
+        "open": _num(g("open", "op") or nested("ohlc", "open")),
+        "high": _num(g("high", "h") or nested("ohlc", "high")),
+        "low": _num(g("low", "lo") or nested("ohlc", "low")),
+        "close": _num(g("close", "c") or nested("ohlc", "close")),
+        "volume": int(_num(g("volume", "last_volume", "v"))),
+        "bid": _num(g("buy_price", "bp") or depth_price("buy")),
+        "ask": _num(g("sell_price", "sp") or depth_price("sell")),
+        "prev_close": _num(g("close", "c") or nested("ohlc", "close")),
         "oi": int(_num(g("open_interest", "oi"))),
     }
 
@@ -777,24 +795,42 @@ def _depth_levels(rec: dict[str, Any], price_keys: list[str], qty_keys: list[str
     ]
 
 
+def _normalise_depth_levels(rows: Any) -> list[dict]:
+    """Return depth levels with FlintTrade's numeric price/quantity/orders keys."""
+    if not isinstance(rows, list):
+        return []
+    levels: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        levels.append({
+            "price": _num(row.get("price", 0)),
+            "quantity": int(_num(row.get("quantity", 0))),
+            "orders": int(_num(row.get("orders", 0))),
+        })
+    return levels
+
+
 def from_kotak_depth(rec: dict[str, Any]) -> dict[str, Any]:
     """Normalise one NEO market-depth record into FlintTrade ``Depth`` fields.
 
     Handles BOTH shapes: the SDK's pre-shaped ``{"depth": {"buy": [...],
-    "sell": [...]}}`` (``NeoWebSocket.depth_resp_mapping``) and the raw terse
-    frame (``bp..bp4`` / ``sp..sp4`` / ``bq..bq4`` / ``bs..bs4`` /
+    "sell": [...]}}`` / current public-docs quote-depth response and the raw
+    terse frame (``bp..bp4`` / ``sp..sp4`` / ``bq..bq4`` / ``bs..bs4`` /
     ``bno1..5`` / ``sno1..5`` — ``webSocket.md`` "For Depth").
     """
-    seg = str(rec.get("exchange_segment", rec.get("e", "")) or "")
+    seg = str(rec.get("exchange_segment", rec.get("exchange", rec.get("e", ""))) or "")
     out: dict[str, Any] = {
-        "symbol": str(rec.get("trading_symbol", rec.get("ts", "")) or ""),
+        "symbol": str(
+            rec.get("trading_symbol", rec.get("display_symbol", rec.get("exchange_token", rec.get("ts", "")))) or ""
+        ),
         "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
-        "token": str(rec.get("instrument_token", rec.get("tk", "")) or ""),
+        "token": str(rec.get("instrument_token", rec.get("exchange_token", rec.get("tk", ""))) or ""),
     }
     depth = rec.get("depth")
     if isinstance(depth, dict):
-        out["bids"] = [b for b in depth.get("buy", []) if isinstance(b, dict)]
-        out["asks"] = [a for a in depth.get("sell", []) if isinstance(a, dict)]
+        out["bids"] = _normalise_depth_levels(depth.get("buy", []))
+        out["asks"] = _normalise_depth_levels(depth.get("sell", []))
         return out
     out["bids"] = _depth_levels(
         rec,
