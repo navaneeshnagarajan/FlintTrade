@@ -655,58 +655,13 @@ class OpenAlgoClient:
         """
         return await self._post("analyzer/toggle", self._body())
 
-    # ==================================================================
-    # v2.0.0.1 APIs
-    # ==================================================================
-
-    async def health(self) -> dict[str, Any]:
-        """GET /api/v1/health — System Health Monitor (CPU, memory, process metrics)."""
-        return await self._get("health")
-
-    async def gex(self, symbol: str, expiry: str) -> dict[str, Any]:
-        """POST /api/v1/data/gex — Gamma Exposure Dashboard data."""
-        payload = self._body({"symbol": symbol, "expiry": expiry})
-        return await self._post("data/gex", payload)
-
-    async def iv_smile(self, symbol: str, expiry: str) -> dict[str, Any]:
-        """POST /api/v1/data/ivsmile — IV Smile chart data."""
-        payload = self._body({"symbol": symbol, "expiry": expiry})
-        return await self._post("data/ivsmile", payload)
-
-    async def max_pain(self, symbol: str, expiry: str) -> dict[str, Any]:
-        """POST /api/v1/data/maxpain — Max Pain calculation."""
-        payload = self._body({"symbol": symbol, "expiry": expiry})
-        return await self._post("data/maxpain", payload)
-
-    async def oi_profile(self, symbol: str, expiry: str) -> dict[str, Any]:
-        """POST /api/v1/data/oiprofile — OI Profile data."""
-        payload = self._body({"symbol": symbol, "expiry": expiry})
-        return await self._post("data/oiprofile", payload)
-
-    # ── New OpenAlgo endpoints (adapted 2026-03-30) ──────────────────────
-
-    async def broker_capabilities(self) -> dict[str, Any]:
-        """GET /api/broker/capabilities — broker exchange/feature metadata.
-
-        Returns supported exchanges, broker type, and features for the
-        currently connected broker. Added in OpenAlgo 2.0.0.2.
-        """
-        return await self._get("broker/capabilities")
-
-    async def pnl_symbols(self) -> dict[str, Any]:
-        """GET /api/v1/data/pnlsymbols — P&L symbol tracking.
-
-        Returns symbols with realized and unrealized P&L data.
-        """
-        return await self._get("data/pnlsymbols")
-
-    async def leverage_settings(self) -> dict[str, Any]:
-        """GET /api/broker/leverage — leverage settings (crypto brokers only).
-
-        Returns current leverage configuration. Only applicable for crypto
-        brokers like Delta Exchange.
-        """
-        return await self._get("broker/leverage")
+    # NOTE (HG1, removed 2026-07-06): eight wrappers formerly here (health, gex,
+    # iv_smile, max_pain, oi_profile, broker_capabilities, pnl_symbols,
+    # leverage_settings) called OpenAlgo routes that do not exist upstream
+    # (verified against the pinned clone's restx_api) — guaranteed 404s with
+    # zero callers. The analytics capabilities live natively in
+    # flinttrade_screener (OIAnalysis, IV smile, GEX, max pain, OI profile) and
+    # broker capability metadata is served by the unified catalogue routes.
 
     # ==================================================================
     # GTT (Good Till Triggered) — added in OpenAlgo v2.0.0.9

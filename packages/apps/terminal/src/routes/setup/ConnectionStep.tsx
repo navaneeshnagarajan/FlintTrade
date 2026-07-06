@@ -5,13 +5,17 @@
  *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server (primary)
  *   - "FlintTrade Native"  — use the catalogue-driven native broker surface
  *
- * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
+ * Exports: ConnectionStep (schema/helpers live in connectionForm.ts for Fast Refresh)
  */
 
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import {
+  connectionSchema,
+  deriveWsUrl,
+  type ConnectionFormValues,
+} from "./connectionForm";
 import {
   CheckCircle,
   XCircle,
@@ -33,27 +37,11 @@ import { BrokerConnect } from "@/components/account/BrokerConnect";
 // Schema
 // ---------------------------------------------------------------------------
 
-export const connectionSchema = z.object({
-  host: z.string().min(1, "Host is required").url("Must be a valid URL (include http://)"),
-  apiKey: z.string().min(8, "API key must be at least 8 characters"),
-  wsPort: z.string().min(1, "WebSocket port is required"),
-});
-
-export type ConnectionFormValues = z.infer<typeof connectionSchema>;
 
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
 
-export function deriveWsUrl(host: string, wsPort: string): string {
-  try {
-    const url = new URL(host);
-    const proto = url.protocol === "https:" ? "wss" : "ws";
-    return `${proto}://${url.hostname}:${wsPort}`;
-  } catch {
-    return `ws://localhost:${wsPort}`;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Tab toggle

@@ -2,7 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close every remaining gap between `.local/specs/flinttrade-design/` and the current `codex/flinttrade-v0.6.0-restructure` workspace.
+> **Historical note (2026-07-06):** `.local/specs/flinttrade-design/` was a gitignored
+> working spec set that no longer exists. Its durable outputs live in the tracked
+> `flinttrade-design/baselines/` bundle and the repo-shape tests this plan created;
+> this document is kept as the historical record of that work.
+
+**Goal:** Close every remaining gap between `.local/specs/flinttrade-design/` (historical — see note above) and the current `codex/flinttrade-v0.6.0-restructure` workspace.
 
 **Architecture:** Treat the `.local` restructure specs as the source of truth, then encode the most brittle repo-shape requirements as tests so future edits cannot silently drift back to pre-restructure paths. Keep fixes scoped to CI wiring, repository metadata, licence layout, and local verification gates.
 

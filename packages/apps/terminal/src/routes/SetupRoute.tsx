@@ -19,7 +19,7 @@ import { ModeSelection } from "./setup/ModeSelection";
 import type { SetupMode } from "./setup/ModeSelection";
 import { StepIndicator } from "./setup/StepIndicator";
 import { ConnectionStep } from "./setup/ConnectionStep";
-import type { ConnectionFormValues } from "./setup/ConnectionStep";
+import type { ConnectionFormValues } from "./setup/connectionForm";
 import { PersonaPicker, ExperiencePicker, InterestPicker, NameInput } from "./setup/PersonaStep";
 import type { Persona, ExperienceLevel } from "./setup/PersonaStep";
 import { TradingStep } from "./setup/TradingStep";

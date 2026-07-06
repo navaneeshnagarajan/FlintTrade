@@ -5,7 +5,7 @@ import { useSkillStore } from "@/stores/skillStore";
 import { persistOpenAlgoConfigPatch } from "@/services/ftApi.openalgo";
 import type { Domain, SkillLevel } from "@/types/skill";
 
-import { deriveWsUrl, type ConnectionFormValues } from "./ConnectionStep";
+import { deriveWsUrl, type ConnectionFormValues } from "./connectionForm";
 import type { Persona, ExperienceLevel } from "./PersonaStep";
 import { getPresetName, mapWizardPreset } from "./ReviewStep";
 import type { RiskFormValues } from "./RiskStep";

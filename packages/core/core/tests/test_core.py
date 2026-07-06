@@ -381,14 +381,11 @@ class TestClientInit:
             "instruments",
             "analyzer_status",
             "analyzer_toggle",
-            # v2.0.0.1 endpoints
-            "health",
-            "gex",
-            "iv_smile",
-            "max_pain",
-            "oi_profile",
-            # v2.0.0.2 endpoints
-            "broker_capabilities",
+            # HG1 (2026-07-06): the former v2.0.0.1/v2.0.0.2 wrappers (health,
+            # gex, iv_smile, max_pain, oi_profile, broker_capabilities,
+            # pnl_symbols, leverage_settings) were removed — they called routes
+            # that do not exist upstream (guaranteed 404s, zero callers); the
+            # analytics live natively in flinttrade_screener.
             # v2.0.0.9 / v2.0.1.1 endpoints
             "place_gtt",
             "modify_gtt",
