@@ -69,6 +69,20 @@ export interface BrokerMcpCatalogueEntry {
   mcp: BrokerMcpInfo;
 }
 
+export interface BrokerRecommendation {
+  broker_id: string;
+  display_name?: string;
+  connectable?: boolean;
+  score: number;
+  raw_score: number;
+  rationale: string;
+}
+
+export interface BrokerRecommendationsResponse {
+  status: string;
+  use_cases: Record<string, BrokerRecommendation[]>;
+}
+
 export interface NativeAccount {
   adapter_id: string;
   account_id: string;
@@ -99,6 +113,14 @@ export async function listNativeBrokers(): Promise<NativeBroker[]> {
 export async function listBrokerMcpCatalogue(): Promise<BrokerMcpCatalogueEntry[]> {
   const r = await get<{ brokers: BrokerMcpCatalogueEntry[] }>("broker/mcp");
   return r?.brokers ?? [];
+}
+
+export async function listBrokerRecommendations(): Promise<BrokerRecommendationsResponse> {
+  const r = await get<BrokerRecommendationsResponse>("broker/recommendations");
+  return {
+    status: r?.status ?? "success",
+    use_cases: r?.use_cases ?? {},
+  };
 }
 
 export async function listNativeAccounts(): Promise<NativeAccount[]> {

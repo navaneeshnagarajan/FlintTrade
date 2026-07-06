@@ -45,6 +45,10 @@ vi.mock("@/services/gatewayApi", () => ({
   },
 }));
 
+vi.mock("@/services/ftApi.native", () => ({
+  listBrokerRecommendations: vi.fn(),
+}));
+
 import DittoRoute from "../DittoRoute";
 import {
   addDittoAccount,
@@ -55,6 +59,7 @@ import {
   removeDittoAccount,
   setDittoAccountEnabled,
 } from "@/services/ftApi";
+import { listBrokerRecommendations } from "@/services/ftApi.native";
 
 const mockGet = get as unknown as ReturnType<typeof vi.fn>;
 const mockGetAccounts = getDittoAccounts as ReturnType<typeof vi.fn>;
@@ -63,6 +68,7 @@ const mockRemoveAccount = removeDittoAccount as ReturnType<typeof vi.fn>;
 const mockSetAccountEnabled = setDittoAccountEnabled as ReturnType<typeof vi.fn>;
 const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
+const mockListBrokerRecommendations = listBrokerRecommendations as unknown as ReturnType<typeof vi.fn>;
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const dittoRouteSource = () =>
@@ -168,11 +174,9 @@ beforeEach(() => {
         summary: { total: 1, connected: 1, authenticated: 1, needs_reauth: 0 },
       });
     }
-    if (path === "broker/recommendations") {
-      return Promise.resolve({ status: "success", use_cases: {} });
-    }
     return Promise.resolve({});
   });
+  mockListBrokerRecommendations.mockResolvedValue({ status: "success", use_cases: {} });
   mockGetAccounts.mockResolvedValue(sampleAccounts);
   mockAddAccount.mockResolvedValue(sampleAccounts.accounts[0]);
   mockRemoveAccount.mockResolvedValue({ id: "acc_2", removed: true });

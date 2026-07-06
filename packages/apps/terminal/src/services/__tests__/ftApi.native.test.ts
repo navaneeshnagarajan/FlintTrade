@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import {
   listNativeBrokers,
   listBrokerMcpCatalogue,
+  listBrokerRecommendations,
   listNativeAccounts,
   connectNativeAccount,
   oauthStartNativeAccount,
@@ -68,6 +69,43 @@ describe("ftApi.native envelope unwrapping", () => {
     expect(brokers[0].mcp.read_only).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/broker/mcp"),
+      expect.anything(),
+    );
+  });
+
+  it("listBrokerRecommendations returns all backend use-case rankings", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      envelope({
+        status: "success",
+        use_cases: {
+          market_depth: [
+            {
+              broker_id: "upstox",
+              display_name: "Upstox",
+              connectable: true,
+              score: 1,
+              raw_score: 5,
+              rationale: "5-level market depth.",
+            },
+          ],
+          streaming: [
+            {
+              broker_id: "dhan",
+              display_name: "Dhan",
+              connectable: true,
+              score: 0,
+              raw_score: 0,
+              rationale: "Broker feed documented, but FlintTrade live-stream wiring is not enabled yet.",
+            },
+          ],
+        },
+      }),
+    );
+    const recommendations = await listBrokerRecommendations();
+    expect(Object.keys(recommendations.use_cases)).toEqual(["market_depth", "streaming"]);
+    expect(recommendations.use_cases.streaming[0].raw_score).toBe(0);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/broker/recommendations"),
       expect.anything(),
     );
   });

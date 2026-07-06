@@ -13,21 +13,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Lightbulb } from "lucide-react";
-import { get } from "@/services/ftApi";
-
-interface BrokerRec {
-  broker_id: string;
-  display_name?: string;
-  connectable?: boolean;
-  score: number;
-  raw_score: number;
-  rationale: string;
-}
-
-interface RecommendationsResponse {
-  status: string;
-  use_cases: Record<string, BrokerRec[]>;
-}
+import {
+  listBrokerRecommendations,
+  type BrokerRecommendation,
+} from "@/services/ftApi.native";
 
 const USE_CASE_LABELS: Record<string, string> = {
   low_cost_execution: "Lowest cost",
@@ -40,24 +29,38 @@ const USE_CASE_LABELS: Record<string, string> = {
   advanced_orders: "Advanced orders",
 };
 
-function brokerName(rec: BrokerRec): string {
+function brokerName(rec: BrokerRecommendation): string {
   return rec.display_name ?? rec.broker_id.charAt(0).toUpperCase() + rec.broker_id.slice(1);
+}
+
+interface UseCaseRow {
+  useCase: string;
+  rec: BrokerRecommendation | null;
+  unavailableReason: string;
+}
+
+function useCaseRows(useCases: Record<string, BrokerRecommendation[]>): UseCaseRow[] {
+  return Object.entries(useCases).map(([useCase, recs]) => {
+    const connectable = recs.filter((rec) => rec.connectable !== false);
+    const winner = connectable.find((rec) => rec.raw_score > 0) ?? null;
+    return {
+      useCase,
+      rec: winner,
+      unavailableReason: winner
+        ? ""
+        : connectable[0]?.rationale ?? "No verified native broker is ready for this use case.",
+    };
+  });
 }
 
 export function BrokerRecommendations() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["broker", "recommendations"],
-    queryFn: () => get<RecommendationsResponse>("broker/recommendations"),
+    queryFn: listBrokerRecommendations,
     staleTime: 5 * 60_000,
   });
 
-  // Pick the top positive-scoring, connectable broker per use-case.
-  const top = Object.entries(data?.use_cases ?? {})
-    .map(([useCase, recs]) => ({
-      useCase,
-      rec: recs.find((rec) => rec.connectable !== false && rec.raw_score > 0),
-    }))
-    .filter((r): r is { useCase: string; rec: BrokerRec } => Boolean(r.rec));
+  const rows = useCaseRows(data?.use_cases ?? {});
 
   return (
     <section
@@ -81,15 +84,15 @@ export function BrokerRecommendations() {
         </p>
       )}
 
-      {!isLoading && !isError && top.length === 0 && (
+      {!isLoading && !isError && rows.length === 0 && (
         <p className="text-xs text-text-muted">
           No native brokers available to rank yet.
         </p>
       )}
 
-      {top.length > 0 && (
+      {rows.length > 0 && (
         <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {top.map(({ useCase, rec }) => (
+          {rows.map(({ useCase, rec, unavailableReason }) => (
             <li
               key={useCase}
               className="rounded border border-border-default bg-surface-base px-3 py-2"
@@ -98,19 +101,25 @@ export function BrokerRecommendations() {
                 <span className="text-xxs uppercase tracking-wider text-text-muted">
                   {USE_CASE_LABELS[useCase] ?? useCase}
                 </span>
-                <span className="text-xs font-semibold text-accent">
-                  {brokerName(rec)}
+                <span
+                  className={
+                    rec
+                      ? "text-xs font-semibold text-accent"
+                      : "text-xs font-semibold text-text-muted"
+                  }
+                >
+                  {rec ? brokerName(rec) : "Not ready"}
                 </span>
               </div>
               <p className="mt-0.5 text-xxs text-text-secondary leading-snug">
-                {rec.rationale}
+                {rec ? rec.rationale : unavailableReason}
               </p>
             </li>
           ))}
         </ul>
       )}
 
-      {top.length > 0 && (
+      {rows.length > 0 && (
         // Honest scope note: these rankings are derived from each broker's
         // advertised API capabilities and default to connectable native brokers.
         // Built-but-disabled adapters such as Kotak Neo stay out until their

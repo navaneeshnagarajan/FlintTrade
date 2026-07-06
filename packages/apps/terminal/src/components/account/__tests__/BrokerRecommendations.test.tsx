@@ -8,10 +8,10 @@ import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrokerRecommendations } from "../BrokerRecommendations";
 
-vi.mock("@/services/ftApi", () => ({ get: vi.fn() }));
-import { get } from "@/services/ftApi";
+vi.mock("@/services/ftApi.native", () => ({ listBrokerRecommendations: vi.fn() }));
+import { listBrokerRecommendations } from "@/services/ftApi.native";
 
-const mockGet = get as unknown as ReturnType<typeof vi.fn>;
+const mockListBrokerRecommendations = listBrokerRecommendations as unknown as ReturnType<typeof vi.fn>;
 
 function renderPanel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -25,8 +25,8 @@ function renderPanel() {
 describe("BrokerRecommendations", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("renders the top broker + rationale per use-case", async () => {
-    mockGet.mockResolvedValue({
+  it("renders every backend use-case with ready or unavailable state", async () => {
+    mockListBrokerRecommendations.mockResolvedValue({
       status: "success",
       use_cases: {
         low_cost_execution: [
@@ -87,8 +87,9 @@ describe("BrokerRecommendations", () => {
     expect(screen.queryByText("IndMoney")).not.toBeInTheDocument();
     expect(screen.getByText("Lowest cost")).toBeInTheDocument();
     expect(screen.getByText("Free API access.")).toBeInTheDocument();
-    expect(screen.queryByText("Live streaming")).not.toBeInTheDocument();
-    expect(screen.queryByText("Feed not wired yet.")).not.toBeInTheDocument();
+    expect(screen.getByText("Live streaming")).toBeInTheDocument();
+    expect(screen.getByText("Not ready")).toBeInTheDocument();
+    expect(screen.getByText("Feed not wired yet.")).toBeInTheDocument();
     // Honest scope note: the rankings are capability-derived and default to
     // login/read-verified connectable native brokers.
     expect(screen.getByText(/capability-based suggestions/i)).toBeInTheDocument();
@@ -96,13 +97,13 @@ describe("BrokerRecommendations", () => {
   });
 
   it("shows an unavailable message on error", async () => {
-    mockGet.mockRejectedValue(new Error("boom"));
+    mockListBrokerRecommendations.mockRejectedValue(new Error("boom"));
     renderPanel();
     expect(await screen.findByText(/unavailable right now/i)).toBeInTheDocument();
   });
 
   it("shows an empty message when no brokers rank", async () => {
-    mockGet.mockResolvedValue({ status: "success", use_cases: {} });
+    mockListBrokerRecommendations.mockResolvedValue({ status: "success", use_cases: {} });
     renderPanel();
     expect(await screen.findByText(/no native brokers available/i)).toBeInTheDocument();
   });
