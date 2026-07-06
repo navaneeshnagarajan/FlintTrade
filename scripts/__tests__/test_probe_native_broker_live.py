@@ -130,6 +130,26 @@ class _FakeLtpQuotesOnlyAdapter(_FakeAdapter):
         return [{"symbol": symbols[0], "ltp": 123.45}]
 
 
+class _FakeDhanResolverAdapter(_FakeAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self._security_resolver = None
+        self.fetch_security_list_calls: list[str] = []
+
+    async def fetch_security_list(self, mode: str = "compact") -> list[dict[str, str]]:
+        self.fetch_security_list_calls.append(mode)
+        return [
+            {
+                "SEM_SMST_SECURITY_ID": "2885",
+                "SEM_EXM_EXCH_ID": "NSE",
+                "SEM_SEGMENT": "E",
+                "SEM_TRADING_SYMBOL": "RELIANCE",
+                "SEM_CUSTOM_SYMBOL": "RELIANCE",
+                "SM_SYMBOL_NAME": "RELIANCE",
+            }
+        ]
+
+
 def test_redact_removes_secret_and_account_like_values() -> None:
     raw = (
         "consumer_key=abcdef1234567890TOKEN mobile_number=9876543210 "
@@ -207,6 +227,40 @@ def test_run_probe_dispatches_dhan_profile_and_common_reads(monkeypatch, capsys)
     assert "funds: ok object_keys=1" in out
     assert "logout: skipped" in out
     assert "TOKEN1" not in out
+
+
+def test_dhan_market_probe_bootstraps_security_resolver(monkeypatch, capsys) -> None:
+    fake = _FakeDhanResolverAdapter()
+    values = iter(["CLIENT1", "TOKEN1"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "dhan", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("dhan", "access_token", ["quotes", "margin", "history"]))
+
+    out = capsys.readouterr().out
+    resolver = getattr(fake, "_security_resolver")
+    assert code == 0
+    assert fake.fetch_security_list_calls == ["compact"]
+    assert callable(resolver)
+    assert resolver("RELIANCE", "NSE") == "2885"
+    assert "resolver: ok dhan scrip_master rows=1" in out
+    assert "TOKEN1" not in out
+
+
+def test_dhan_account_only_probe_skips_security_resolver(monkeypatch, capsys) -> None:
+    fake = _FakeDhanResolverAdapter()
+    values = iter(["CLIENT1", "TOKEN1"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "dhan", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("dhan", "access_token", ["profile", "funds"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.fetch_security_list_calls == []
+    assert "resolver:" not in out
+    assert "profile: ok object_keys=1" in out
+    assert "funds: ok object_keys=1" in out
 
 
 def test_run_probe_dispatches_dhan_oauth_token_id(monkeypatch, capsys) -> None:

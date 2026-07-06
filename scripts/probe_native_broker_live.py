@@ -46,6 +46,7 @@ COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "t
 ORDER_DETAIL_READ_CHOICES = ("orderstatus", "orderhistory", "ordertrades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
+DHAN_SECURITY_RESOLVER_READ_CHOICES = frozenset(DHAN_MARKET_READ_CHOICES)
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
 INDMONEY_MARKET_READ_CHOICES = ("quotes", "ltp", "depth", "margin", "history")
 UPSTOX_MARKET_READ_CHOICES = COMMON_MARKET_READ_CHOICES + ("ltp", "ohlc")
@@ -359,6 +360,30 @@ def _resolve_reads(broker: str, requested: list[str] | None) -> list[str]:
     return deduped
 
 
+def _dhan_reads_need_security_resolver(reads: list[str]) -> bool:
+    return any(read in DHAN_SECURITY_RESOLVER_READ_CHOICES for read in reads)
+
+
+async def _prepare_adapter_for_probe(broker: str, adapter: Any, reads: list[str]) -> None:
+    if broker != "dhan" or not _dhan_reads_need_security_resolver(reads):
+        return
+    if getattr(adapter, "_security_resolver", None) is not None:
+        return
+    fetch_security_list = getattr(adapter, "fetch_security_list", None)
+    if not callable(fetch_security_list):
+        return
+
+    try:
+        from flinttrade_gateway.brokers.dhan_mapping import build_security_resolver  # noqa: PLC0415
+
+        rows = await fetch_security_list("compact")
+    except Exception as exc:  # noqa: BLE001 - market reads will report the actual resolver miss
+        print(f"resolver: failed {type(exc).__name__}: {redact(exc)}")
+        return
+    setattr(adapter, "_security_resolver", build_security_resolver(rows))
+    print(f"resolver: ok dhan scrip_master rows={len(rows)}")
+
+
 def _today_ist() -> datetime:
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
@@ -574,6 +599,7 @@ async def run_probe(
         return 2
 
     adapter = ADAPTER_FACTORIES[broker]()
+    await _prepare_adapter_for_probe(broker, adapter, reads)
     session = None
     try:
         session = await adapter.login(collect_credentials(broker, selected_method, environment))
