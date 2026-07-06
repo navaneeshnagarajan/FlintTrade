@@ -45,7 +45,7 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
-GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "margin", "history")
+GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
 PROBE_QUOTE_SYMBOL = f"{PROBE_EXCHANGE}:{PROBE_SYMBOL}"
@@ -373,6 +373,12 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
         return (
             (lambda session: adapter.ltp(session, [PROBE_QUOTE_SYMBOL]))
             if callable(getattr(adapter, "ltp", None))
+            else None
+        )
+    if name == "ohlc":
+        return (
+            (lambda session: adapter.ohlc(session, [PROBE_QUOTE_SYMBOL]))
+            if callable(getattr(adapter, "ohlc", None))
             else None
         )
     if name in {"depth", "market_depth"}:

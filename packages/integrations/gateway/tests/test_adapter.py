@@ -199,6 +199,7 @@ class TestBrokerCatalog:
         assert entry.connectable is False
         assert entry.mcp is not None
         assert entry.mcp.remote_url == "https://mcp.groww.in/mcp"
+        assert "MCX" in entry.exchanges
         assert {m.id for m in entry.auth_methods} == {"api_key_totp", "api_key_secret", "access_token"}
 
     def test_kotakneo_catalogue_matches_native_segment_map_but_stays_disabled(self):

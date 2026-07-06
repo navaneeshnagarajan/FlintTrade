@@ -60,6 +60,10 @@ class _FakeAdapter:
         self.calls.append(("ltp", tuple(symbols)))
         return {symbols[0]: 123.45}
 
+    async def ohlc(self, _session: object, symbols: list[str]) -> list:
+        self.calls.append(("ohlc", tuple(symbols)))
+        return [{"symbol": symbols[0], "open": 1, "high": 2, "low": 1, "close": 2}]
+
     async def quote_details(self, _session: object, symbols: list[str], quote_type: str = "all") -> list:
         self.calls.append(("quote_details", tuple(symbols), quote_type))
         return [{"symbol": symbols[0], "type": quote_type}]
@@ -264,6 +268,8 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "depth" not in probe._resolve_reads("dhan", ["default"])
     assert "quotes" in probe._resolve_reads("groww", ["default"])
     assert "ltp" in probe._resolve_reads("groww", ["default"])
+    assert "ohlc" in probe._resolve_reads("groww", ["default"])
+    assert "expiry" in probe._resolve_reads("groww", ["default"])
     assert "depth" not in probe._resolve_reads("groww", ["all"])
     assert "search" in probe._resolve_reads("upstox", ["default"])
     assert "optiongreeks" in probe._resolve_reads("upstox", ["all"])
@@ -340,10 +346,14 @@ def test_groww_default_probe_exercises_rest_ready_reads(monkeypatch, capsys) -> 
     assert fake.credentials == {"access_token": "groww-test-token", "user_id": "groww-user"}
     assert ("quotes", ("NSE:RELIANCE",)) in fake.calls
     assert ("ltp", ("NSE:RELIANCE",)) in fake.calls
+    assert ("ohlc", ("NSE:RELIANCE",)) in fake.calls
     assert ("margin", "RELIANCE", "NSE") in fake.calls
     assert ("history", "RELIANCE", "NSE", "1d") in fake.calls
+    assert ("expiry", "NIFTY", "NSE_INDEX") in fake.calls
     assert ("market_depth", ("NSE:RELIANCE",)) not in fake.calls
     assert "ltp: ok object_keys=1" in out
+    assert "ohlc: ok rows=1" in out
+    assert "expiry: ok rows=1" in out
     assert "depth:" not in out
     assert "groww-test-token" not in out
     assert "groww-user" not in out

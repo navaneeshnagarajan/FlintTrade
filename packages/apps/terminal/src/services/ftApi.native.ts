@@ -119,6 +119,7 @@ export type NativeReadKind =
   | "trades"
   | "quotes"
   | "quote_details"
+  | "ohlc"
   | "depth"
   | "margin"
   | "scrip_master"

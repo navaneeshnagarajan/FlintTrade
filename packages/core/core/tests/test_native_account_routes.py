@@ -256,6 +256,7 @@ def test_list_native_brokers_catalogue(client):
     assert brokers["kotakneo"]["connectable"] is False
     assert {"BCD", "MCX"} <= set(brokers["kotakneo"]["exchanges"])
     assert brokers["groww"]["connectable"] is False
+    assert "MCX" in brokers["groww"]["exchanges"]
     assert brokers["dhan"]["mcp"]["remote_url"] == "https://mcp.dhan.co/mcp"
     assert brokers["dhan"]["mcp"]["trading_supported"] is True
     dhan_mcp_configs = {c["id"]: c for c in brokers["dhan"]["mcp"]["client_configs"]}
@@ -805,6 +806,30 @@ def test_native_account_reads_include_option_greeks(client, monkeypatch):
     assert resp.status_code == 200, resp.get_json()
     assert resp.get_json()["data"][0]["delta"] == 0.55
     assert resp.get_json()["data"][1]["iv"] == 14.2
+
+
+def test_native_account_reads_include_ohlc(client, monkeypatch):
+    """Native account reads can expose broker OHLC snapshots when an adapter supports them."""
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _ohlc(_self, _session, symbols):
+        assert symbols == ["NSE:RELIANCE"]
+        return [{"symbol": "RELIANCE", "exchange": "NSE", "open": 10, "high": 12, "low": 9, "close": 11}]
+
+    monkeypatch.setattr(UpstoxAdapter, "ohlc", _ohlc, raising=False)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXOHLC", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    resp = c.get("/api/v1/native/accounts/upstox/UPXOHLC/ohlc?symbol=RELIANCE&exchange=NSE")
+
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["data"][0]["close"] == 11
 
 
 def test_native_account_reads_include_order_status(client, monkeypatch):

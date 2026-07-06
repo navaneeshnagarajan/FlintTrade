@@ -131,10 +131,18 @@ class MockGrowwTransport:
         if path == "/v1/live-data/ltp":
             keys = [k for k in str((params or {}).get("exchange_symbols", "")).split(",") if k]
             return 200, {"status": "SUCCESS", "payload": {key: 2905.5 for key in keys}}
+        if path == "/v1/live-data/ohlc":
+            keys = [k for k in str((params or {}).get("exchange_symbols", "")).split(",") if k]
+            return 200, {"status": "SUCCESS", "payload": {
+                key: {"open": 2890, "high": 2910, "low": 2880, "close": 2905.5, "volume": 12345}
+                for key in keys
+            }}
         if path == "/v1/historical/candle/range":
             return 200, {"status": "SUCCESS", "payload": {"candles": [
                 ["2026-07-01 09:15:00", 100, 105, 99, 104, 1000],
             ]}}
+        if path == "/v1/historical/expiries":
+            return 200, {"status": "SUCCESS", "payload": {"expiry_dates": ["2026-07-30"]}}
         if url == "https://growwapi-assets.groww.in/instruments/instrument.csv":
             return 200, "trading_symbol,exchange,segment\nRELIANCE,NSE,CASH\n"
         raise AssertionError(f"unexpected Groww request: {method} {url}")
@@ -307,6 +315,7 @@ async def test_reads_map_groww_envelopes() -> None:
     profile = await adapter.profile(session)
     quotes = await adapter.quotes(session, ["NSE:RELIANCE"])
     ltps = await adapter.ltp(session, ["NSE:RELIANCE"])
+    ohlc = await adapter.ohlc(session, ["NSE:RELIANCE"])
     candles = await adapter.historical(session, {
         "symbol": "RELIANCE",
         "exchange": "NSE",
@@ -314,6 +323,7 @@ async def test_reads_map_groww_envelopes() -> None:
         "from_date": "2026-07-01 09:15:00",
         "to_date": "2026-07-01 09:16:00",
     })
+    expiries = await adapter.expiry_list(session, "NIFTY", "NSE_INDEX")
     instruments = await adapter.instruments(session)
 
     assert orders[0]["orderid"] == "GROWWOID1"
@@ -323,7 +333,19 @@ async def test_reads_map_groww_envelopes() -> None:
     assert profile["user_id"] == "G1"
     assert quotes[0].ltp == 2905.5
     assert ltps == {"NSE:RELIANCE": 2905.5}
+    assert ohlc == [{
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "open": 2890.0,
+        "high": 2910.0,
+        "low": 2880.0,
+        "close": 2905.5,
+        "volume": 12345,
+        "timestamp": "",
+        "raw": {"open": 2890, "high": 2910, "low": 2880, "close": 2905.5, "volume": 12345},
+    }]
     assert candles.bars[0].close == 104.0
+    assert expiries == ["2026-07-30"]
     assert instruments == [{"trading_symbol": "RELIANCE", "exchange": "NSE", "segment": "CASH"}]
     instrument_call = next(call for call in transport.calls if call["url"] == "https://growwapi-assets.groww.in/instruments/instrument.csv")
     assert instrument_call["headers"] == {"Accept": "text/csv"}
@@ -347,6 +369,7 @@ async def test_mcx_commodity_surface_uses_groww_commodity_segment() -> None:
     await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     await adapter.quotes(session, ["MCX:CRUDEOIL25JANFUT"])
     ltp = await adapter.ltp(session, ["MCX:CRUDEOIL25JANFUT"])
+    ohlc = await adapter.ohlc(session, ["MCX:CRUDEOIL25JANFUT"])
     await adapter.historical(session, {
         "symbol": "CRUDEOIL25JANFUT",
         "exchange": "MCX",
@@ -368,6 +391,10 @@ async def test_mcx_commodity_surface_uses_groww_commodity_segment() -> None:
     ltp_call = next(call for call in transport.calls if call["path"] == "/v1/live-data/ltp")
     assert ltp_call["params"] == {"segment": "COMMODITY", "exchange_symbols": "MCX_CRUDEOIL25JANFUT"}
     assert ltp == {"MCX:CRUDEOIL25JANFUT": 2905.5}
+    ohlc_call = next(call for call in transport.calls if call["path"] == "/v1/live-data/ohlc")
+    assert ohlc_call["params"] == {"segment": "COMMODITY", "exchange_symbols": "MCX_CRUDEOIL25JANFUT"}
+    assert ohlc[0]["exchange"] == "MCX"
+    assert ohlc[0]["close"] == 2905.5
     history_call = next(call for call in transport.calls if call["path"] == "/v1/historical/candle/range")
     assert history_call["params"]["exchange"] == "MCX"
     assert history_call["params"]["segment"] == "COMMODITY"

@@ -973,6 +973,7 @@ _READ_METHODS = {
     "trades": ("trade_book",),
     "quotes": ("quotes",),
     "quote_details": ("quote_details",),
+    "ohlc": ("ohlc",),
     "depth": ("market_depth",),
     "margin": ("margin_calculator",),
     "scrip_master": ("scrip_master",),
@@ -1194,6 +1195,8 @@ def _native_read_args(kind: str) -> tuple[tuple[Any, ...] | None, str | None]:
         return _native_quote_read_args()
     if kind == "quote_details":
         return _native_quote_details_read_args()
+    if kind == "ohlc":
+        return _native_quote_read_args()
     if kind == "depth":
         return _native_depth_read_args()
     if kind == "margin":

@@ -472,6 +472,29 @@ class GrowwAdapter(BrokerAdapter):
                     out[key] = float(payload.get(M.groww_exchange_symbol(exchange, symbol), 0) or 0)
         return out
 
+    async def ohlc(self, session: Session, symbols: list[str]) -> list[dict[str, Any]]:
+        resolved = [M.split_symbol(raw) for raw in symbols]
+        by_segment: dict[str, list[tuple[str, str]]] = {}
+        for exchange, symbol in resolved:
+            _groww_exchange, segment = M.exchange_segment(exchange)
+            by_segment.setdefault(segment, []).append((exchange, symbol))
+        out: list[dict[str, Any]] = []
+        for segment, rows in by_segment.items():
+            symbols_param = ",".join(M.groww_exchange_symbol(exchange, symbol) for exchange, symbol in rows)
+            payload = await self._request(
+                session,
+                "GET",
+                "/v1/live-data/ohlc",
+                params={"segment": segment, "exchange_symbols": symbols_param},
+            )
+            if not isinstance(payload, dict):
+                continue
+            for exchange, symbol in rows:
+                groww_key = M.groww_exchange_symbol(exchange, symbol)
+                row = payload.get(groww_key) or payload.get(f"{exchange}:{symbol}") or {}
+                out.append(M.from_ohlc(symbol, exchange, row if isinstance(row, dict) else {}))
+        return out
+
     async def historical(self, session: Session, req: dict) -> Candles:
         from flinttrade_core.models import Candles, OHLCV  # noqa: PLC0415
 
@@ -502,6 +525,16 @@ class GrowwAdapter(BrokerAdapter):
             interval=interval,
             bars=[OHLCV(**M.from_candle_row(r)) for r in rows],
         )
+
+    async def expiry_list(self, session: Session, symbol: str, exchange: str = "NSE_INDEX") -> list[str]:
+        groww_exchange, _segment = M.exchange_segment(exchange)
+        payload = await self._request(
+            session,
+            "GET",
+            "/v1/historical/expiries",
+            params={"exchange": groww_exchange, "underlying_symbol": symbol},
+        )
+        return M.expiry_values(payload)
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
         exchange = str(req.get("exchange") or "NSE")

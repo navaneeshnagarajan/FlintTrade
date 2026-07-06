@@ -344,6 +344,33 @@ def from_quote(symbol: str, exchange: str, row: dict[str, Any]) -> dict[str, Any
     }
 
 
+def from_ohlc(symbol: str, exchange: str, row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "exchange": exchange,
+        "open": _float(row.get("open")),
+        "high": _float(row.get("high")),
+        "low": _float(row.get("low")),
+        "close": _float(row.get("close")),
+        "volume": _int(row.get("volume")),
+        "timestamp": _text(row.get("timestamp") or row.get("time")),
+        "raw": row,
+    }
+
+
+def expiry_values(payload: Any) -> list[str]:
+    data = unwrap(payload)
+    if isinstance(data, list):
+        return [_text(item) for item in data if _text(item)]
+    if not isinstance(data, dict):
+        return []
+    for key in ("expiry_dates", "expiries", "expiry", "data"):
+        values = data.get(key)
+        if isinstance(values, list):
+            return [_text(item) for item in values if _text(item)]
+    return []
+
+
 def candle_rows(payload: Any) -> list[list[Any]]:
     data = unwrap(payload)
     if isinstance(data, dict):
