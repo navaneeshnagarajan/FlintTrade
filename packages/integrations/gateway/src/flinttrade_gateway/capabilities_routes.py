@@ -23,8 +23,9 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from .adapter import BROKER_CATALOG
+from .adapter import BROKER_CATALOG, OPENALGO_PLATFORM_MCP
 from .capabilities import REGISTRY, BrokerCapabilities
+from .models import BrokerMCPInfo
 from .recommendations import (
     NATIVE_BROKER_CAPABILITIES,
     BrokerUseCase,
@@ -199,6 +200,24 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
     }
 
 
+def _openalgo_mcp_entry() -> dict[str, Any]:
+    """Serialise the OpenAlgo platform MCP row.
+
+    OpenAlgo is the bridge platform, not a BROKER_CATALOG broker, but its
+    self-hosted MCP is the first-preference MCP surface (one server covering
+    every bridged broker), so the catalogue route serves it ahead of the
+    broker-hosted entries. Validated through the same BrokerMCPInfo model so
+    the row cannot drift from the schema the UI renders.
+    """
+    return {
+        "adapter_id": "openalgo",
+        "display_name": "OpenAlgo (bridge)",
+        "native": False,
+        "connectable": True,
+        "mcp": BrokerMCPInfo(**OPENALGO_PLATFORM_MCP).model_dump(),
+    }
+
+
 @capabilities_bp.route("/broker/mcp", methods=["GET"])
 def get_broker_mcp_catalogue() -> tuple[Any, int]:
     """Return broker-hosted MCP setup/capability metadata.
@@ -209,9 +228,13 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
     """
     broker_param = request.args.get("broker", "").strip().lower()
     if broker_param:
+        if broker_param == "openalgo":
+            return jsonify({"status": "success", "broker": _openalgo_mcp_entry()}), 200
         info = BROKER_CATALOG.get(broker_param)
         if info is None:
-            known = sorted(name for name, row in BROKER_CATALOG.items() if row.mcp is not None)
+            known = ["openalgo"] + sorted(
+                name for name, row in BROKER_CATALOG.items() if row.mcp is not None
+            )
             return (
                 jsonify({
                     "status": "error",
@@ -221,7 +244,9 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
                 404,
             )
         if info.mcp is None:
-            known = sorted(name for name, row in BROKER_CATALOG.items() if row.mcp is not None)
+            known = ["openalgo"] + sorted(
+                name for name, row in BROKER_CATALOG.items() if row.mcp is not None
+            )
             return (
                 jsonify({
                     "status": "error",
@@ -232,7 +257,11 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
             )
         return jsonify({"status": "success", "broker": _mcp_entry(info)}), 200
 
-    brokers = [_mcp_entry(info) for info in BROKER_CATALOG.values() if info.mcp is not None]
+    # OpenAlgo (the primary, community-tested path) leads the list; the
+    # broker-hosted entries follow in catalogue order.
+    brokers = [_openalgo_mcp_entry()] + [
+        _mcp_entry(info) for info in BROKER_CATALOG.values() if info.mcp is not None
+    ]
     return jsonify({"status": "success", "count": len(brokers), "brokers": brokers}), 200
 
 

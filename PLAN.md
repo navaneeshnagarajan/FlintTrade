@@ -29,6 +29,31 @@
 
 A phase closes only after: full multi-agent audit → fix everything → clean re-audit, evidence recorded here.
 
+## Architecture north star (maintainer, 2026-07-06)
+
+One unbranching pipeline — every feature builds on the same layers, never around them:
+
+```
+broker  →  OpenAlgo bridge  OR  FlintTrade native adapter  →  FlintTrade core backend  →  terminal UI/UX
+                                                              (unified functions for ALL brokers,
+                                                               databases, and everything else)
+```
+
+- **OpenAlgo is the FIRST preferred way** — an active community keeps it battle-tested across
+  30+ brokers. Native adapters are the secondary path, promoted per-broker only on live
+  verification evidence. This ordering applies to every surface: connect UI, recommendations,
+  MCP catalogue (OpenAlgo's self-hosted MCP — https://openalgo.in/mcp — leads the
+  `/api/v1/broker/mcp` list; stdio + opt-in remote OAuth 2.1 transports catalogued 2026-07-06).
+- **The core backend is the only place broker differences are absorbed.** No feature talks to
+  a broker or the bridge directly; everything flows through the unified core functions
+  (catalogue, router, gate, reads facade, storage). A feature with its own broker path is a
+  consolidation bug (G40).
+- **Pattern source:** the local OpenAlgo clone (`~/Documents/GitHub/openalgo`) is both the
+  bridge target and the reference implementation for building our adapters — its 34 broker
+  plugins, REST `/api/v1` surface, sandbox engine, and MCP server are mapped in
+  `reference-map.md` §5; port patterns, adapt to our package layout, never blind-copy. The
+  official Python SDK (`openalgo` on PyPI) is the client-side quality bar.
+
 ---
 
 ## Phase 0 — Ground-truth audit *(closing)*

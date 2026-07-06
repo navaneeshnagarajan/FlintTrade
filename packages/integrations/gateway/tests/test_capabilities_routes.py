@@ -166,9 +166,18 @@ class TestCapabilitiesRoute:
         response = client.get("/api/v1/broker/mcp")
         assert response.status_code == 200
         data = response.get_json()
-        assert data["count"] == 3
+        assert data["count"] == 4
         brokers = {b["adapter_id"]: b for b in data["brokers"]}
-        assert set(brokers) == {"dhan", "upstox", "groww"}
+        assert set(brokers) == {"openalgo", "dhan", "upstox", "groww"}
+        # OpenAlgo is the primary, community-tested path — it leads the list.
+        assert data["brokers"][0]["adapter_id"] == "openalgo"
+        assert brokers["openalgo"]["native"] is False
+        assert brokers["openalgo"]["mcp"]["trading_supported"] is True
+        assert "30+" in " ".join(brokers["openalgo"]["mcp"]["use_cases"])
+        assert "safety gate" in " ".join(brokers["openalgo"]["mcp"]["cautions"])
+        openalgo_configs = {c["id"]: c for c in brokers["openalgo"]["mcp"]["client_configs"]}
+        assert openalgo_configs["stdio_local"]["command"] == "python"
+        assert "mcp.mcpserver" in openalgo_configs["stdio_local"]["args"]
         assert brokers["dhan"]["native"] is True
         assert brokers["dhan"]["connectable"] is True
         assert brokers["dhan"]["mcp"]["trading_supported"] is True
