@@ -29,6 +29,8 @@ import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
+import { maskValue, VALUE_MASK } from "@/lib/formatters";
+import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 import type { Holding } from "@/types/api";
 
 // ─── Demo data ────────────────────────────────────────────────────────────────
@@ -93,6 +95,11 @@ export function DashboardTab() {
   const totalPnlPercent = isDemo ? DEMO_PNL_PCT : liveSummary.totalPnlPercent;
   const availableCash = isDemo ? DEMO_CASH : liveSummary.availableCash;
   const netWorth = isDemo ? DEMO_NET_WORTH : currentValue + availableCash;
+
+  const valuesHidden = useValueVisibilityStore((s) => s.hidden);
+  // Wrap the compact-INR formatter so masked mode hides the figure everywhere it
+  // is passed to a counter/list without changing each call site's shape.
+  const money = (v: number) => maskValue(formatINRCompact(v), valuesHidden);
 
   const equityValue = useMemo(
     () =>
@@ -185,7 +192,7 @@ export function DashboardTab() {
               <span className="text-4xl font-mono font-bold tabular-nums text-text-primary">
                 <AnimatedCounter
                   value={netWorth}
-                  formatter={formatINRCompact}
+                  formatter={money}
                   duration={1.2}
                 />
               </span>
@@ -199,7 +206,7 @@ export function DashboardTab() {
               </span>
             </div>
             <p className="text-xs text-text-muted">
-              {holdings.length} holdings &middot; {formatINRCompact(totalInvested)} invested
+              {holdings.length} holdings &middot; {money(totalInvested)} invested
               {portfolioXirr !== null && (
                 <>
                   {" "}&middot;{" "}
@@ -230,7 +237,7 @@ export function DashboardTab() {
               ) : (
                 <ArrowDownRight className="size-4" />
               )}
-              {formatINRCompact(Math.abs(totalPnl))}
+              {money(Math.abs(totalPnl))}
             </div>
           </div>
         </div>
@@ -247,7 +254,7 @@ export function DashboardTab() {
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-          <AnimatedCounter value={availableCash} formatter={formatINRCompact} duration={1.0} />
+          <AnimatedCounter value={availableCash} formatter={money} duration={1.0} />
         </div>
         <p className="text-xs text-text-muted">Withdrawable cash</p>
       </GlassCard>
@@ -262,7 +269,7 @@ export function DashboardTab() {
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-          <AnimatedCounter value={totalInvested} formatter={formatINRCompact} duration={1.0} />
+          <AnimatedCounter value={totalInvested} formatter={money} duration={1.0} />
         </div>
         <p className="text-xs text-text-muted">Total cost basis of holdings</p>
       </GlassCard>
@@ -293,7 +300,7 @@ export function DashboardTab() {
         >
           <AnimatedCounter
             value={Math.abs(totalPnl)}
-            formatter={(v) => (totalPnl >= 0 ? "+" : "-") + formatINRCompact(v)}
+            formatter={(v) => (valuesHidden ? VALUE_MASK : (totalPnl >= 0 ? "+" : "-") + formatINRCompact(v))}
             duration={1.0}
           />
         </div>

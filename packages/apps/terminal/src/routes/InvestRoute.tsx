@@ -41,8 +41,11 @@ import {
   Crosshair,
   Grid2X2,
   PieChart,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { cn } from "@/lib/utils";
@@ -187,6 +190,8 @@ function InvestShell() {
   const level = useSkillLevel("invest");
   const { holdings, isLoading } = useInvest();
   const tablistRef = useRef<HTMLDivElement>(null);
+  const valuesHidden = useValueVisibilityStore((s) => s.hidden);
+  const toggleValues = useValueVisibilityStore((s) => s.toggle);
 
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
@@ -252,6 +257,16 @@ function InvestShell() {
                   {holdings.length} holdings
                 </Badge>
               )}
+              <button
+                type="button"
+                onClick={toggleValues}
+                aria-pressed={valuesHidden}
+                aria-label={valuesHidden ? "Show values" : "Hide values"}
+                title={valuesHidden ? "Show values" : "Hide values"}
+                className="flex items-center justify-center size-6 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
+              >
+                {valuesHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+              </button>
             </div>
           </div>
 

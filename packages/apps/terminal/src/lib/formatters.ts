@@ -192,3 +192,14 @@ export function formatIndianNumber(
 export function formatINR(value: number): string {
   return INR_FULL.format(value);
 }
+
+/** Placeholder shown in place of a monetary figure when values are hidden. */
+export const VALUE_MASK = "••••••";
+
+/**
+ * Return `formatted` unless `hidden` is true, in which case return the privacy
+ * mask. Use to gate any monetary display behind the value-visibility toggle.
+ */
+export function maskValue(formatted: string, hidden: boolean): string {
+  return hidden ? VALUE_MASK : formatted;
+}

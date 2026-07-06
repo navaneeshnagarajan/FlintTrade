@@ -15,6 +15,8 @@ import {
   formatPnl,
   formatPercent,
   formatINR,
+  maskValue,
+  VALUE_MASK,
 } from "../formatters";
 
 // ---------------------------------------------------------------------------
@@ -250,5 +252,16 @@ describe("formatINR", () => {
   it("formats a negative value with the minus sign", () => {
     expect(formatINR(-5000)).toMatch(/-/);
     expect(formatINR(-5000)).toMatch(/5,000/);
+  });
+});
+
+describe("maskValue", () => {
+  it("returns the formatted value when not hidden", () => {
+    expect(maskValue("₹1,00,000", false)).toBe("₹1,00,000");
+  });
+
+  it("returns the mask when hidden", () => {
+    expect(maskValue("₹1,00,000", true)).toBe(VALUE_MASK);
+    expect(VALUE_MASK).not.toMatch(/\d/);
   });
 });

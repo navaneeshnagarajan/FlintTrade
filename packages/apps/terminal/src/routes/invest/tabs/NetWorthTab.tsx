@@ -26,6 +26,8 @@ import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
 import { formatINRCompact, formatPercent } from "../formatters";
+import { maskValue } from "@/lib/formatters";
+import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 
 // ─── Asset category definition ────────────────────────────────────────────────
 
@@ -61,6 +63,7 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 export function NetWorthTab() {
   const { summary, isLoading } = useInvest();
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
+  const valuesHidden = useValueVisibilityStore((s) => s.hidden);
 
   const knownTotal = currentValue + availableCash;
   const comparison = useMemo(
@@ -154,7 +157,7 @@ export function NetWorthTab() {
               isLoading ? "text-text-muted" : "text-text-primary",
             )}
           >
-            {isLoading ? "—" : formatINRCompact(knownTotal)}
+            {isLoading ? "—" : maskValue(formatINRCompact(knownTotal), valuesHidden)}
           </div>
           {!isLoading && (
             <div
@@ -163,7 +166,7 @@ export function NetWorthTab() {
                 totalPnl >= 0 ? "text-profit" : "text-loss",
               )}
             >
-              {formatINRCompact(totalPnl)}{" "}
+              {maskValue(formatINRCompact(totalPnl), valuesHidden)}{" "}
               <span className="text-xs opacity-75">
                 ({formatPercent(totalPnlPercent)} unrealised)
               </span>
@@ -183,7 +186,7 @@ export function NetWorthTab() {
                   value: entry.value,
                   color: ["#60a5fa", "#34d399", totalPnl >= 0 ? "#34d399" : "#f87171"][index],
                 }))}
-                valueFormatter={(v: number) => formatINRCompact(v)}
+                valueFormatter={(v: number) => maskValue(formatINRCompact(v), valuesHidden)}
                 className="text-xs"
               />
             </div>
@@ -210,7 +213,7 @@ export function NetWorthTab() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xxs text-text-muted">tracked</span>
                   <span className="font-mono text-xs font-bold text-text-primary tabular-nums">
-                    {isLoading ? "—" : formatINRCompact(knownTotal)}
+                    {isLoading ? "—" : maskValue(formatINRCompact(knownTotal), valuesHidden)}
                   </span>
                 </div>
               </div>
@@ -265,7 +268,7 @@ export function NetWorthTab() {
                 <div className="flex items-center gap-2 shrink-0">
                   {cat.value !== null ? (
                     <span className="font-mono tabular-nums text-xs text-text-primary">
-                      {formatINRCompact(cat.value)}
+                      {maskValue(formatINRCompact(cat.value), valuesHidden)}
                     </span>
                   ) : (
                     <Badge
