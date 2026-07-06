@@ -52,11 +52,6 @@ export interface BrokerAccount {
   login_retryable?: boolean;
 }
 
-export interface OAuthStartResponse {
-  redirect_url: string;
-  state: string;
-}
-
 export interface TOTPAuthFields {
   client_id?: boolean;
   password?: boolean;

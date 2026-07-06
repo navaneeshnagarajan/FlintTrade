@@ -1,7 +1,9 @@
 /**
  * FlintTrade Gateway REST API client.
  * Targets /ft-api/v1, proxied via /ft-api in dev (see vite.config.ts).
- * Handles broker account management, OAuth flows, OTP authentication.
+ * Handles legacy gateway account management and rate-limit settings only.
+ * Broker connection flows live on the native /api/v1/native/accounts surface
+ * or inside OpenAlgo; do not re-add direct /v1/auth/* connect calls here.
  *
  * All requests go through the shared bare-/v1 FT helpers so gateway management
  * calls use the same auth headers and response/error parsing as the rest of the
@@ -9,7 +11,7 @@
  */
 
 import { delV1, getV1, postV1, putV1 } from "@/services/ftApi.helpers";
-import type { BrokerInfo, BrokerAccount, OAuthStartResponse } from "@/types/broker";
+import type { BrokerInfo, BrokerAccount } from "@/types/broker";
 
 async function gateway<T>(request: Promise<T>): Promise<T> {
   try {
@@ -42,17 +44,6 @@ export const gatewayApi = {
   listAccounts: () =>
     gateway(getV1<{ accounts: BrokerAccount[] }>("accounts")).then((r) => r.accounts),
 
-  addAccount: (
-    broker: string,
-    label: string,
-    credentials: Record<string, string>,
-  ) =>
-    gateway(postV1<{ account: BrokerAccount }>("auth/credentials", {
-      broker,
-      label,
-      credentials,
-    })).then((r) => r.account),
-
   removeAccount: (accountId: string) =>
     gateway(delV1<{ status: string }>(`accounts/${encodeURIComponent(accountId)}`)),
 
@@ -61,23 +52,4 @@ export const gatewayApi = {
 
   setPrimary: (accountId: string) =>
     gateway(postV1<{ account: BrokerAccount }>(`accounts/${encodeURIComponent(accountId)}/set-primary`)),
-
-  startOAuth: (broker: string, label: string) =>
-    gateway(postV1<OAuthStartResponse>("auth/oauth/start", { broker, label })),
-
-  requestOtp: (broker: string, accountId: string, clientId: string) =>
-    gateway(postV1<{ status: string }>("auth/otp/request", {
-      broker,
-      account_id: accountId,
-      client_id: clientId,
-    })),
-
-  verifyOtp: (broker: string, accountId: string, otp: string) =>
-    gateway(postV1<{ account: BrokerAccount }>("auth/otp/verify", {
-      // The route requires broker (400s without it) — thread it from the same
-      // broker passed to requestOtp.
-      broker,
-      account_id: accountId,
-      otp,
-    })),
 };

@@ -3,10 +3,9 @@
  *
  * Verifies that:
  *   1. listBrokers makes a GET request and returns broker array
- *   2. addAccount makes a POST with correct body
- *   3. removeAccount makes a DELETE with encoded account ID
- *   4. Error responses throw with the server error message
- *   5. The operator session JWT is attached when present (backend G9 guard
+ *   2. removeAccount makes a DELETE with encoded account ID
+ *   3. Error responses throw with the server error message
+ *   4. The operator session JWT is attached when present (backend G9 guard
  *      rejects gateway management writes without it)
  */
 
@@ -62,27 +61,6 @@ describe("gatewayApi", () => {
     expect(result).toEqual(brokers);
   });
 
-  it("addAccount sends POST with broker, label, credentials", async () => {
-    const account = { id: "acc-1", broker: "zerodha", label: "Main", status: "connected" };
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ account }));
-
-    const result = await gatewayApi.addAccount("zerodha", "Main", {
-      api_key: "key123",
-      secret: "sec456",
-    });
-
-    expect(fetchSpy).toHaveBeenCalledWith("/ft-api/v1/auth/credentials", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        broker: "zerodha",
-        label: "Main",
-        credentials: { api_key: "key123", secret: "sec456" },
-      }),
-    });
-    expect(result).toEqual(account);
-  });
-
   it("removeAccount sends DELETE with URL-encoded account ID", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "deleted" }));
 
@@ -96,8 +74,8 @@ describe("gatewayApi", () => {
   it("attaches the session JWT on writes (backend G9 write guard)", async () => {
     useAuthStore.setState({ token: "jwt-abc" });
     try {
-      fetchSpy.mockResolvedValueOnce(jsonResponse({ account: {} }));
-      await gatewayApi.addAccount("zerodha", "Main", { api_key: "k" });
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ limits: { zerodha: { order: 5, data: 10 } } }));
+      await gatewayApi.setRateLimit("zerodha", 5, 10);
       const init = fetchSpy.mock.calls[0][1] as RequestInit;
       expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer jwt-abc");
     } finally {
