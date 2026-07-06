@@ -81,6 +81,10 @@ function joinBrokerNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 
+function blockerLabel(blockers: string[]): string {
+  return joinBrokerNames(blockers);
+}
+
 function sdkStatusLabel(broker: NativeBroker): string {
   const attestation: BrokerSdkAttestation | null | undefined = broker.sdk_attestation;
   if (!attestation) return "SDK status unknown";
@@ -186,6 +190,8 @@ export function BrokerConnect() {
     .map((b) => b.display_name);
   const unavailableNativeLabel = joinBrokerNames(unavailableNativeNames);
   const unavailableNativeVerb = unavailableNativeNames.length === 1 ? "stays" : "stay";
+  const unavailableNativeBlockers = brokers
+    .filter((b) => !b.connectable && b.native_connect_blockers.length > 0);
   const [selectedBroker, setSelectedBroker] = useState<string>("");
   const [selectedMethodId, setSelectedMethodId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
@@ -450,17 +456,29 @@ export function BrokerConnect() {
 
       <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text-secondary">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
-        <p>
-          <strong className="text-text-primary">Native adapters are not fully tested — use at your own risk.</strong>{" "}
-          Login and account reads are verified for{" "}
-          {connectableNativeLabel || "the currently selectable native brokers"}, but native order
-          placement (place / modify / cancel) has{" "}
-          <strong className="text-text-primary">not been live-verified for any broker</strong> yet —
-          OpenAlgo is the recommended, community-tested path.{" "}
-          {unavailableNativeLabel
-            ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their live checks pass.`
-            : "Unavailable adapters stay disabled until their live checks pass."}
-        </p>
+        <div className="space-y-2">
+          <p>
+            <strong className="text-text-primary">Native adapters are not fully tested — use at your own risk.</strong>{" "}
+            Login and account reads are verified for{" "}
+            {connectableNativeLabel || "the currently selectable native brokers"}, but native order
+            placement (place / modify / cancel) has{" "}
+            <strong className="text-text-primary">not been live-verified for any broker</strong> yet —
+            OpenAlgo is the recommended, community-tested path.{" "}
+            {unavailableNativeLabel
+              ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their live checks pass.`
+              : "Unavailable adapters stay disabled until their live checks pass."}
+          </p>
+          {unavailableNativeBlockers.length > 0 && (
+            <ul className="space-y-1 text-xs text-text-muted" data-testid="native-connect-blockers">
+              {unavailableNativeBlockers.map((b) => (
+                <li key={b.adapter_id}>
+                  <span className="font-medium text-text-secondary">{b.display_name}:</span>{" "}
+                  {blockerLabel(b.native_connect_blockers)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {mcpBrokers.length > 0 && (
@@ -512,6 +530,11 @@ export function BrokerConnect() {
 
                   <p className="mt-2 text-xs text-text-muted">{entry.mcp.auth_mode}</p>
                   <p className="mt-1 text-xxs text-text-muted">{entry.mcp.reauth}</p>
+                  {!entry.connectable && entry.native_connect_blockers.length > 0 && (
+                    <p className="mt-2 text-xxs text-warning">
+                      Native blockers: {blockerLabel(entry.native_connect_blockers)}
+                    </p>
+                  )}
 
                   {loginSteps.length > 0 && (
                     <div className="mt-3 space-y-1">

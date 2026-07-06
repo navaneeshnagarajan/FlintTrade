@@ -82,6 +82,17 @@ _ACCOUNT_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW
 native_accounts_bp = Blueprint("native_accounts", __name__, url_prefix="/api/v1/native")
 
 
+def _native_connect_unavailable_body(adapter_id: str) -> dict[str, Any]:
+    """Return a public, non-secret explanation for a disabled native broker."""
+    info = BROKER_CATALOG.get(adapter_id)
+    blockers = list(info.native_connect_blockers) if info is not None else []
+    return {
+        "status": "error",
+        "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
+        "data": {"native_connect_blockers": blockers},
+    }
+
+
 def _sdk_attestations_by_pin() -> dict[str, dict[str, Any]]:
     """Return installed SDK attestation rows keyed by brokers.lock pin name."""
     try:
@@ -776,6 +787,7 @@ def list_native_brokers() -> Any:
             "display_name": info.display_name,
             "connectable": info.connectable,
             "requires_static_ip": info.requires_static_ip,
+            "native_connect_blockers": list(info.native_connect_blockers),
             "exchanges": list(info.exchanges),
             "auth_methods": [m.model_dump() for m in info.auth_methods],
             "mcp": info.mcp.model_dump() if info.mcp is not None else None,
@@ -806,10 +818,7 @@ def connect_native_account() -> Any:
             "message": "adapter_id is not a native broker.",
         }), 400
     if adapter_id not in _CONNECTABLE_BROKER_IDS:
-        return jsonify({
-            "status": "error",
-            "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
-        }), 400
+        return jsonify(_native_connect_unavailable_body(adapter_id)), 400
     if not _is_safe_account_id(account_id):
         return jsonify({"status": "error", "message": "account_id must use letters, numbers, dot, underscore, @ or hyphen."}), 400
     if not isinstance(credentials, dict) or not credentials:
@@ -909,10 +918,7 @@ def native_oauth_start() -> Any:
     if adapter_id not in _NATIVE_BROKER_IDS:
         return jsonify({"status": "error", "message": "adapter_id is not a native broker."}), 400
     if adapter_id not in _CONNECTABLE_BROKER_IDS:
-        return jsonify({
-            "status": "error",
-            "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
-        }), 400
+        return jsonify(_native_connect_unavailable_body(adapter_id)), 400
     if not _is_safe_account_id(account_id):
         return jsonify({"status": "error", "message": "account_id must use letters, numbers, dot, underscore, @ or hyphen."}), 400
     if not (api_key and api_secret):
@@ -1078,10 +1084,7 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     if adapter_id not in _NATIVE_BROKER_IDS:
         return jsonify({"status": "error", "message": f"'{adapter_id}' is not a native broker."}), 400
     if adapter_id not in _CONNECTABLE_BROKER_IDS:
-        return jsonify({
-            "status": "error",
-            "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
-        }), 400
+        return jsonify(_native_connect_unavailable_body(adapter_id)), 400
 
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")
@@ -1599,7 +1602,7 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
     if adapter_id not in _NATIVE_BROKER_IDS:
         return jsonify({"status": "error", "message": "Broker is not a native broker."}), 404
     if adapter_id not in _CONNECTABLE_BROKER_IDS:
-        return jsonify({"status": "error", "message": "Native broker connect is coming soon."}), 400
+        return jsonify(_native_connect_unavailable_body(adapter_id)), 400
 
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")

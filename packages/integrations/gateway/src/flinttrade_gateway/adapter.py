@@ -1019,6 +1019,9 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=False,
         requires_static_ip=True,
+        native_connect_blockers=[
+            "Maintainer live login/read verification with current TOTP and MPIN",
+        ],
         auth_methods=_NATIVE_AUTH["kotakneo"],
         sdk_pin="neo-api-client",
     ),
@@ -1067,6 +1070,10 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         native=True,
         connectable=False,
         requires_static_ip=True,
+        native_connect_blockers=[
+            "Broker-side market-data/API permission",
+            "Live order-safety proof",
+        ],
         auth_methods=_NATIVE_AUTH["groww"],
         sdk_pin="growwapi",
         mcp=_BROKER_MCP["groww"],

@@ -72,6 +72,7 @@ export interface NativeBroker {
    * it, and the backend rejects a connect for it. */
   connectable: boolean;
   requires_static_ip: boolean;
+  native_connect_blockers: string[];
   auth_methods: NativeAuthMethod[];
   sdk_pin?: string | null;
   sdk_attestation?: BrokerSdkAttestation | null;
@@ -86,6 +87,7 @@ export interface BrokerMcpCatalogueEntry {
   native: boolean;
   connectable: boolean;
   requires_static_ip: boolean;
+  native_connect_blockers: string[];
   sdk_pin?: string | null;
   sdk_attestation?: BrokerSdkAttestation | null;
   mcp: BrokerMcpInfo;
@@ -96,6 +98,7 @@ export interface BrokerRecommendation {
   display_name?: string;
   connectable?: boolean;
   requires_static_ip?: boolean;
+  native_connect_blockers?: string[];
   score: number;
   raw_score: number;
   rationale: string;

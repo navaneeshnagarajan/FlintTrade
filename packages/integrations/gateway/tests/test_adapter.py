@@ -201,6 +201,10 @@ class TestBrokerCatalog:
         entry = BROKER_CATALOG["groww"]
         assert entry.native is True
         assert entry.connectable is False
+        assert entry.native_connect_blockers == [
+            "Broker-side market-data/API permission",
+            "Live order-safety proof",
+        ]
         assert entry.mcp is not None
         assert entry.mcp.remote_url == "https://mcp.groww.in/mcp"
         assert "MCX" in entry.exchanges
@@ -208,6 +212,14 @@ class TestBrokerCatalog:
         secret = next(m for m in entry.auth_methods if m.id == "api_key_secret")
         assert "passed with an approved key" in secret.description
         assert "session approval is required" in next(f for f in secret.fields if f.name == "api_secret").help
+
+    def test_kotakneo_native_metadata_names_live_verification_blocker(self):
+        entry = BROKER_CATALOG["kotakneo"]
+        assert entry.native is True
+        assert entry.connectable is False
+        assert entry.native_connect_blockers == [
+            "Maintainer live login/read verification with current TOTP and MPIN",
+        ]
 
     def test_upstox_analytics_access_token_is_catalogued_as_read_only(self):
         entry = BROKER_CATALOG["upstox"]

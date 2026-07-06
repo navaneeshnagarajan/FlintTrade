@@ -291,10 +291,17 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
     assert brokers["indmoney"]["sdk_pin"] is None
     assert brokers["indmoney"]["sdk_attestation"]["status"] == "not_required"
     assert brokers["kotakneo"]["connectable"] is False
+    assert brokers["kotakneo"]["native_connect_blockers"] == [
+        "Maintainer live login/read verification with current TOTP and MPIN",
+    ]
     assert brokers["kotakneo"]["sdk_pin"] == "neo-api-client"
     assert brokers["kotakneo"]["sdk_attestation"]["status"] == "ok"
     assert {"BCD", "MCX"} <= set(brokers["kotakneo"]["exchanges"])
     assert brokers["groww"]["connectable"] is False
+    assert brokers["groww"]["native_connect_blockers"] == [
+        "Broker-side market-data/API permission",
+        "Live order-safety proof",
+    ]
     assert "MCX" in brokers["groww"]["exchanges"]
     assert brokers["dhan"]["mcp"]["remote_url"] == "https://mcp.dhan.co/mcp"
     assert brokers["dhan"]["mcp"]["trading_supported"] is True
@@ -2022,7 +2029,9 @@ def test_connect_rejects_coming_soon_native(client, adapter_id):
         json={"adapter_id": adapter_id, "account_id": "CS1", "credentials": {"access_token": "x"}},
     )
     assert resp.status_code == 400
-    assert "coming soon" in resp.get_json()["message"].lower()
+    payload = resp.get_json()
+    assert "coming soon" in payload["message"].lower()
+    assert payload["data"]["native_connect_blockers"]
 
 
 @pytest.mark.parametrize("adapter_id", ["kotakneo", "groww"])
@@ -2037,4 +2046,6 @@ def test_relogin_rejects_coming_soon_native_even_if_vault_row_exists(client, ada
     )
     resp = c.post(f"/api/v1/native/accounts/{adapter_id}/CSRELOGIN/login", headers=_h())
     assert resp.status_code == 400
-    assert "coming soon" in resp.get_json()["message"].lower()
+    payload = resp.get_json()
+    assert "coming soon" in payload["message"].lower()
+    assert payload["data"]["native_connect_blockers"]

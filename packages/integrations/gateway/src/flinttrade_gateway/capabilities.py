@@ -53,6 +53,8 @@ class BrokerCapabilities:
         supports_multi_option_greeks: Broker provides batch option greeks.
         requires_static_ip: Broker requires a fixed/approved outbound IP before
             live API order placement.
+        native_connect_blockers: Evidence gates that still block native connect
+            promotion. Empty for connectable or bridge-only brokers.
         order_rate_limit_per_sec: Maximum order requests per second.
         quote_rate_limit_per_sec: Maximum quote requests per second.
     """
@@ -77,6 +79,7 @@ class BrokerCapabilities:
     supports_multi_quote: bool = False
     supports_multi_option_greeks: bool = False
     requires_static_ip: bool = False
+    native_connect_blockers: list[str] = field(default_factory=list)
     order_rate_limit_per_sec: int = 10
     quote_rate_limit_per_sec: int = 50
 

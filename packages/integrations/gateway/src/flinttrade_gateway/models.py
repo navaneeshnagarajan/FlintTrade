@@ -173,6 +173,9 @@ class BrokerInfo(BaseModel):
         requires_static_ip: The broker requires a fixed/approved outbound IP
             before live API order placement. This is setup guidance only; reads
             and MCP metadata may still work under different broker rules.
+        native_connect_blockers: Human-readable evidence gates that still block
+            native connect promotion. Empty means either the broker is already
+            connectable or this is not a native broker.
         auth_methods: The native login methods (empty for bridge-only brokers).
         sdk_pin: The repo-local SDK lock/package name that gates native
             activation. ``None`` means either bridge-only or native REST-only
@@ -194,6 +197,7 @@ class BrokerInfo(BaseModel):
     native: bool = False
     connectable: bool = False
     requires_static_ip: bool = False
+    native_connect_blockers: list[str] = []
     auth_methods: list[AuthMethod] = []
     sdk_pin: str | None = None
     mcp: BrokerMCPInfo | None = None

@@ -43,6 +43,7 @@ const BROKERS = [
     display_name: "Dhan",
     connectable: true,
     requires_static_ip: true,
+    native_connect_blockers: [],
     sdk_pin: "dhanhq",
     sdk_attestation: {
       pin: "dhanhq",
@@ -94,6 +95,7 @@ const BROKERS = [
     display_name: "Upstox",
     connectable: true,
     requires_static_ip: true,
+    native_connect_blockers: [],
     oauth_redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
     postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
     auth_methods: [
@@ -129,6 +131,7 @@ const BROKERS = [
     display_name: "Kotak Neo",
     connectable: false,
     requires_static_ip: true,
+    native_connect_blockers: ["Maintainer live login/read verification with current TOTP and MPIN"],
     auth_methods: [
       {
         id: "totp_mpin",
@@ -156,6 +159,7 @@ const BROKERS = [
     display_name: "INDmoney",
     connectable: true,
     requires_static_ip: true,
+    native_connect_blockers: [],
     auth_methods: [
       {
         id: "access_token",
@@ -184,6 +188,7 @@ const BROKERS = [
     display_name: "Groww",
     connectable: false,
     requires_static_ip: true,
+    native_connect_blockers: ["Broker-side market-data/API permission", "Live order-safety proof"],
     auth_methods: [
       {
         id: "api_key_totp",
@@ -220,6 +225,7 @@ const MCP_BROKERS = [
     native: true,
     connectable: true,
     requires_static_ip: true,
+    native_connect_blockers: [],
     mcp: {
       remote_url: "https://mcp.dhan.co/mcp",
       docs_url: "https://docs.dhanhq.co/mcp/",
@@ -313,6 +319,7 @@ const MCP_BROKERS = [
     native: true,
     connectable: true,
     requires_static_ip: true,
+    native_connect_blockers: [],
     mcp: {
       remote_url: "https://mcp.upstox.com/mcp",
       docs_url: "https://upstox.com/developer/api-documentation/mcp-integration/",
@@ -377,6 +384,7 @@ const MCP_BROKERS = [
     native: true,
     connectable: false,
     requires_static_ip: true,
+    native_connect_blockers: ["Broker-side market-data/API permission", "Live order-safety proof"],
     mcp: {
       remote_url: "https://mcp.groww.in/mcp",
       docs_url: "https://groww.in/updates/groww-mcp",
@@ -659,6 +667,12 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(listBrokerMcpCatalogue).toHaveBeenCalled());
 
     expect(await screen.findByText("Broker MCP assistants")).toBeInTheDocument();
+    expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
+      "Kotak Neo: Maintainer live login/read verification with current TOTP and MPIN",
+    );
+    expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
+      "Groww: Broker-side market-data/API permission and Live order-safety proof",
+    );
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Read-only");
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Static IP for live API orders");
     expect(screen.getByText(/active, non-dormant Upstox account/)).toBeInTheDocument();
@@ -706,6 +720,9 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("growwmcp");
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("Windsurf");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent(
+      "Native blockers: Broker-side market-data/API permission and Live order-safety proof",
+    );
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Static IP for live API orders");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no background syncing");

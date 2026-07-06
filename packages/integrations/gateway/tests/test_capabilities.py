@@ -66,6 +66,7 @@ def test_capabilities_rate_limit_defaults_positive() -> None:
     caps = BrokerCapabilities(broker_name="test_broker")
     assert caps.order_rate_limit_per_sec > 0
     assert caps.quote_rate_limit_per_sec > 0
+    assert caps.native_connect_blockers == []
 
 
 def test_capabilities_broker_name_stored() -> None:

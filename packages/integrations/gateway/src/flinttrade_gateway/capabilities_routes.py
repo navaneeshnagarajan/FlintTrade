@@ -74,7 +74,14 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
     info = BROKER_CATALOG.get(broker_name)
     native = NATIVE_BROKER_CAPABILITIES.get(broker_name)
     if native is None:
-        data = {"requires_static_ip": info.requires_static_ip} if info is not None else {}
+        data = (
+            {
+                "requires_static_ip": info.requires_static_ip,
+                "native_connect_blockers": list(info.native_connect_blockers),
+            }
+            if info is not None
+            else {}
+        )
         data.update(_catalog_mcp_fields(broker_name))
         data.update(_catalog_sdk_fields(broker_name))
         return data
@@ -84,6 +91,7 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
     data = {
         "connectable": info.connectable if info else False,
         "requires_static_ip": info.requires_static_ip if info else False,
+        "native_connect_blockers": list(info.native_connect_blockers) if info else [],
         "historical_intervals": intervals,
         "historical_intraday_intervals_minutes": intraday,
         "historical_calendar_intervals": list(native.historical_calendar_intervals),
@@ -217,6 +225,7 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
         data["connectable"] = info.connectable
         data["display_name"] = info.display_name
         data["requires_static_ip"] = info.requires_static_ip
+        data["native_connect_blockers"] = list(info.native_connect_blockers)
     return data
 
 
@@ -228,6 +237,7 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
         "native": info.native,
         "connectable": info.connectable,
         "requires_static_ip": info.requires_static_ip,
+        "native_connect_blockers": list(info.native_connect_blockers),
         "mcp": info.mcp.model_dump(),
     }
     data.update(_catalog_sdk_fields(info.name))
@@ -249,6 +259,7 @@ def _openalgo_mcp_entry() -> dict[str, Any]:
         "native": False,
         "connectable": True,
         "requires_static_ip": False,
+        "native_connect_blockers": [],
         "mcp": BrokerMCPInfo(**OPENALGO_PLATFORM_MCP).model_dump(),
     }
 
