@@ -896,12 +896,12 @@ def _dispatch_live_cancel(
     switch — a halted account must still be able to cancel a working order. It is
     gated by the one-shot SafetyContext + per-account ACL.
 
-    Optional ``variety`` / ``amo`` body fields (Kotak Neo bracket/cover leg
-    exits) and Groww-only ``segment`` (regular order cancel) are forwarded as
-    adapter-level cancel extras. They are written into the canonical cancel
-    fingerprint BEFORE the gate is minted, so the router's field-by-field
-    extras check passes only because the gate signed them — an unhashed extra
-    can never reach the broker.
+    Optional ``variety`` / ``amo`` / ``trading_symbol`` body fields (Kotak Neo
+    bracket/cover/AMO exits) and Groww-only ``segment`` (regular order cancel)
+    are forwarded as adapter-level cancel extras. They are written into the
+    canonical cancel fingerprint BEFORE the gate is minted, so the router's
+    field-by-field extras check passes only because the gate signed them — an
+    unhashed extra can never reach the broker.
     """
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
@@ -915,6 +915,8 @@ def _dispatch_live_cancel(
         extras["variety"] = str(body["variety"])
     if body.get("amo") is not None:
         extras["amo"] = bool(body["amo"])
+    if body.get("trading_symbol") is not None:
+        extras["trading_symbol"] = str(body["trading_symbol"])
     if adapter_id == "groww" and body.get("segment") is not None:
         extras["segment"] = str(body["segment"])
 

@@ -612,6 +612,59 @@ class TestLiveModeForwarding:
         mock_http.post.assert_not_called()
         assert resp.status_code == 403
 
+    def test_kotak_cancel_signs_trading_symbol_extra(self, flask_app, monkeypatch):
+        """Kotak AMO cancel ``trading_symbol`` must be covered by the signed fingerprint."""
+        from flinttrade_core import order_routes as routes
+
+        captured: dict[str, object] = {}
+
+        class CapturingRouter:
+            async def cancel_order(self, request_ctx, *, order, order_id, safety_ctx, hint, extras):
+                captured["request_ctx"] = request_ctx
+                captured["order"] = order
+                captured["order_id"] = order_id
+                captured["hint"] = hint
+                captured["extras"] = extras
+                captured["safety_ctx"] = safety_ctx
+
+        def gate(order, request_ctx, *, adapter_id, account_id):
+            captured["gated_order"] = dict(order)
+            captured["gated_adapter"] = adapter_id
+            captured["gated_account"] = account_id
+            return object()
+
+        monkeypatch.setattr("flinttrade_engine.safety.gate_order", gate)
+        monkeypatch.setitem(flask_app.config, "BROKER_ROUTER", CapturingRouter())
+
+        with flask_app.app_context():
+            response, status = routes._dispatch_live_cancel(
+                {
+                    "orderid": "OID-1",
+                    "variety": "amo",
+                    "amo": True,
+                    "trading_symbol": "IDEA-EQ",
+                },
+                {"jti": "jti-1", "sub": "operator"},
+                adapter_id="kotakneo",
+                account_id="KOTAK1",
+            )
+
+        assert status == 200
+        assert response.get_json()["status"] == "success"
+        expected = {
+            "_op": "cancel",
+            "order_id": "OID-1",
+            "variety": "amo",
+            "amo": True,
+            "trading_symbol": "IDEA-EQ",
+        }
+        assert captured["gated_order"] == expected
+        assert captured["order"] == expected
+        assert captured["extras"] == {"variety": "amo", "amo": True, "trading_symbol": "IDEA-EQ"}
+        assert captured["order_id"] == "OID-1"
+        assert captured["gated_adapter"] == "kotakneo"
+        assert captured["gated_account"] == "KOTAK1"
+
     @pytest.mark.parametrize(
         "endpoint",
         [

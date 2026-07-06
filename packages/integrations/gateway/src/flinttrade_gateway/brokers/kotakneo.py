@@ -246,13 +246,108 @@ class KotakNeoClient:
     def modify_order(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._neo.modify_order(**params)
 
-    def cancel_order(self, order_id: str, amo: str = "NO", is_verify: bool = False) -> dict[str, Any]:
+    def _cancel_order_rest(
+        self,
+        order_id: str,
+        *,
+        route_key: str,
+        amo: str = "NO",
+        is_verify: bool = False,
+        trading_symbol: str | None = None,
+    ) -> dict[str, Any]:
+        """Call the SDK's cancel REST route with documented fields it omits.
+
+        The current SDK wrapper posts only ``on`` and ``am``. Kotak's public v2
+        docs also require ``ts`` for AMO cancellation, so use the SDK
+        ``api_client`` directly only when that extra documented field is needed.
+        """
+        from neo_api_client import OrderReportAPI, req_data_validation  # noqa: PLC0415
+
+        if not self._neo.configuration.edit_token or not self._neo.configuration.edit_sid:
+            return {"Error Message": "Complete the 2fa process before accessing this application"}
+        try:
+            req_data_validation.cancel_order_validation(order_id, amo)
+            api_client = self._neo.api_client
+            if is_verify:
+                order_book_resp = OrderReportAPI(api_client).ordered_books()
+                if "data" in order_book_resp:
+                    for item in order_book_resp["data"]:
+                        if item["nOrdNo"] == order_id.strip() and item["ordSt"] in (
+                            "rejected",
+                            "cancelled",
+                            "complete",
+                            "traded",
+                        ):
+                            status = "Traded" if item["ordSt"] == "complete" else item["ordSt"]
+                            return {"Error": "The Given Order Status is " + str(status), "Reason": item["rejRsn"]}
+
+            body_params = {"on": order_id, "am": amo}
+            if trading_symbol:
+                body_params["ts"] = trading_symbol
+            cancel_resp = api_client.rest_client.request(
+                url=api_client.configuration.get_url_details(route_key),
+                method="POST",
+                query_params={"sId": api_client.configuration.serverId},
+                headers={
+                    "Sid": api_client.configuration.edit_sid,
+                    "Auth": api_client.configuration.edit_token,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body=body_params,
+            )
+            return cancel_resp.json()
+        except Exception as exc:  # match the SDK wrapper's response contract
+            return {"Error": exc}
+
+    def cancel_order(
+        self,
+        order_id: str,
+        amo: str = "NO",
+        is_verify: bool = False,
+        trading_symbol: str | None = None,
+    ) -> dict[str, Any]:
+        if trading_symbol:
+            return self._cancel_order_rest(
+                order_id,
+                route_key="cancel_order",
+                amo=amo,
+                is_verify=is_verify,
+                trading_symbol=trading_symbol,
+            )
         return self._neo.cancel_order(order_id, amo=amo, isVerify=is_verify)
 
-    def cancel_cover_order(self, order_id: str, amo: str = "NO", is_verify: bool = False) -> dict[str, Any]:
+    def cancel_cover_order(
+        self,
+        order_id: str,
+        amo: str = "NO",
+        is_verify: bool = False,
+        trading_symbol: str | None = None,
+    ) -> dict[str, Any]:
+        if trading_symbol:
+            return self._cancel_order_rest(
+                order_id,
+                route_key="cancel_cover_order",
+                amo=amo,
+                is_verify=is_verify,
+                trading_symbol=trading_symbol,
+            )
         return self._neo.cancel_cover_order(order_id, amo=amo, isVerify=is_verify)
 
-    def cancel_bracket_order(self, order_id: str, amo: str = "NO", is_verify: bool = False) -> dict[str, Any]:
+    def cancel_bracket_order(
+        self,
+        order_id: str,
+        amo: str = "NO",
+        is_verify: bool = False,
+        trading_symbol: str | None = None,
+    ) -> dict[str, Any]:
+        if trading_symbol:
+            return self._cancel_order_rest(
+                order_id,
+                route_key="cancel_bracket_order",
+                amo=amo,
+                is_verify=is_verify,
+                trading_symbol=trading_symbol,
+            )
         return self._neo.cancel_bracket_order(order_id, amo=amo, isVerify=is_verify)
 
     # -- reads ---------------------------------------------------------------
@@ -525,6 +620,7 @@ class KotakNeoAdapter(BrokerAdapter):
         *,
         variety: str = "regular",
         amo: bool = False,
+        trading_symbol: str | None = None,
         _router_token: object | None = None,
     ) -> None:
         """Cancel an order (gated) — variety dispatch within the gated method.
@@ -532,25 +628,44 @@ class KotakNeoAdapter(BrokerAdapter):
         ``regular``/``amo`` use the plain cancel endpoint; ``cover`` exits via
         ``quick/order/co/exit`` and ``bracket`` via ``quick/order/bo/exit`` (the
         dedicated leg-cancel endpoints — ``Cancel_Cover_Order.md`` /
-        ``Cancel_Bracket_Order.md``). ``amo=True`` flags an after-market order.
+        ``Cancel_Bracket_Order.md``). ``amo=True`` flags an after-market order;
+        Kotak's docs require ``trading_symbol``/``ts`` for AMO cancellation.
         The default call shape (``cancel_order(session, order_id,
         _router_token=…)``) is exactly what ``BrokerRouter`` dispatches today;
-        the variety/amo keywords are adapter-level extras for variety-aware
-        callers.
+        the variety/amo/trading_symbol keywords are adapter-level extras for
+        variety-aware callers and are signed by the cancel route before the
+        router forwards them.
         """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         client = self._client(session)
         v = str(variety).lower()
         amo_flag = "YES" if (amo or v == "amo") else "NO"
+        if amo_flag == "YES" and not trading_symbol:
+            raise BrokerError("Kotak Neo AMO cancellation requires trading_symbol")
         if v in ("regular", "", "amo"):
-            if amo_flag == "YES":
-                resp = await self._call(client.cancel_order, str(order_id), amo_flag)
+            if amo_flag == "YES" or trading_symbol:
+                resp = await self._call(
+                    client.cancel_order,
+                    str(order_id),
+                    amo_flag,
+                    trading_symbol=trading_symbol,
+                )
             else:
                 resp = await self._call(client.cancel_order, str(order_id))
         elif v == "cover":
-            resp = await self._call(client.cancel_cover_order, str(order_id), amo_flag)
+            resp = await self._call(
+                client.cancel_cover_order,
+                str(order_id),
+                amo_flag,
+                trading_symbol=trading_symbol,
+            )
         elif v == "bracket":
-            resp = await self._call(client.cancel_bracket_order, str(order_id), amo_flag)
+            resp = await self._call(
+                client.cancel_bracket_order,
+                str(order_id),
+                amo_flag,
+                trading_symbol=trading_symbol,
+            )
         else:
             raise BrokerError(f"Kotak Neo cannot cancel order variety {variety!r}")
         M.ensure_ok(resp)

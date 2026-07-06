@@ -46,16 +46,16 @@ class MockNeoFull:
         self.calls.append(("modify", params))
         return {"stat": "Ok", "nOrdNo": params["order_id"], "stCode": 200}
 
-    def cancel_order(self, order_id, amo="NO", is_verify=False):
-        self.calls.append(("cancel", (order_id, amo, is_verify)))
+    def cancel_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
+        self.calls.append(("cancel", (order_id, amo, is_verify, trading_symbol)))
         return {"stat": "Ok", "nOrdNo": order_id, "stCode": 200}
 
-    def cancel_cover_order(self, order_id, amo="NO", is_verify=False):
-        self.calls.append(("cancel_co", (order_id, amo, is_verify)))
+    def cancel_cover_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
+        self.calls.append(("cancel_co", (order_id, amo, is_verify, trading_symbol)))
         return {"stat": "Ok", "nOrdNo": order_id, "stCode": 200}
 
-    def cancel_bracket_order(self, order_id, amo="NO", is_verify=False):
-        self.calls.append(("cancel_bo", (order_id, amo, is_verify)))
+    def cancel_bracket_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
+        self.calls.append(("cancel_bo", (order_id, amo, is_verify, trading_symbol)))
         return {"stat": "Ok", "nOrdNo": order_id, "stCode": 200}
 
     # -- reads ---------------------------------------------------------------
@@ -279,6 +279,56 @@ def test_sdk_rest_wrapper_adds_fin_key_to_login_and_session_calls_only():
     assert rest.headers[5]["neo-fin-key"] == "custom"
 
 
+def test_cancel_rest_branch_forwards_documented_amo_trading_symbol():
+    class FakeResponse:
+        def json(self):
+            return {"stat": "Ok", "nOrdNo": "OID-AMO", "stCode": 200}
+
+    class FakeRest:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def request(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeResponse()
+
+    class FakeConfig:
+        edit_sid = "sid"
+        edit_token = "token"
+        serverId = "server"
+
+        def get_url_details(self, route_key):
+            return f"https://neo.example/{route_key}"
+
+    rest = FakeRest()
+    client = KotakNeoClient.__new__(KotakNeoClient)
+    client._neo = type(
+        "Neo",
+        (),
+        {
+            "configuration": FakeConfig(),
+            "api_client": type("ApiClient", (), {"configuration": FakeConfig(), "rest_client": rest})(),
+        },
+    )()
+
+    response = client.cancel_order("OID-AMO", amo="YES", trading_symbol="IDEA-EQ")
+
+    assert response["stat"] == "Ok"
+    assert rest.calls == [
+        {
+            "url": "https://neo.example/cancel_order",
+            "method": "POST",
+            "query_params": {"sId": "server"},
+            "headers": {
+                "Sid": "sid",
+                "Auth": "token",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            "body": {"on": "OID-AMO", "am": "YES", "ts": "IDEA-EQ"},
+        }
+    ]
+
+
 def test_capabilities_record_current_public_websocket_limits_without_runtime_promotion() -> None:
     """Captured Kotak docs advertise 16 channels and 200 subscribed scrips."""
     assert KOTAKNEO_CAPABILITIES.streaming_supported is True
@@ -365,7 +415,7 @@ async def test_cancel_cover_leg_is_gated_and_dispatches():
         await adapter.cancel_order(session, "OID1", variety="cover")
     assert mock.calls == []
     await adapter.cancel_order(session, "OID1", variety="cover", _router_token=_ROUTER_TOKEN)
-    assert mock.calls == [("cancel_co", ("OID1", "NO", False))]
+    assert mock.calls == [("cancel_co", ("OID1", "NO", False, None))]
 
 
 @pytest.mark.asyncio
@@ -376,8 +426,15 @@ async def test_cancel_bracket_leg_is_gated_and_dispatches():
     with pytest.raises(SafetyBypassError):
         await adapter.cancel_order(session, "OID2", variety="bracket", amo=True)
     assert mock.calls == []
-    await adapter.cancel_order(session, "OID2", variety="bracket", amo=True, _router_token=_ROUTER_TOKEN)
-    assert mock.calls == [("cancel_bo", ("OID2", "YES", False))]
+    await adapter.cancel_order(
+        session,
+        "OID2",
+        variety="bracket",
+        amo=True,
+        trading_symbol="IDEA-EQ",
+        _router_token=_ROUTER_TOKEN,
+    )
+    assert mock.calls == [("cancel_bo", ("OID2", "YES", False, "IDEA-EQ"))]
 
 
 @pytest.mark.asyncio
@@ -386,12 +443,20 @@ async def test_cancel_regular_and_amo_routes():
     adapter = _adapter(mock)
     session = await _session(adapter)
     await adapter.cancel_order(session, "OID3", _router_token=_ROUTER_TOKEN)
-    await adapter.cancel_order(session, "OID4", amo=True, _router_token=_ROUTER_TOKEN)
-    await adapter.cancel_order(session, "OID5", variety="amo", _router_token=_ROUTER_TOKEN)
+    with pytest.raises(BrokerError, match="trading_symbol"):
+        await adapter.cancel_order(session, "OID4", amo=True, _router_token=_ROUTER_TOKEN)
+    await adapter.cancel_order(session, "OID4", amo=True, trading_symbol="IDEA-EQ", _router_token=_ROUTER_TOKEN)
+    await adapter.cancel_order(
+        session,
+        "OID5",
+        variety="amo",
+        trading_symbol="IDEA-EQ",
+        _router_token=_ROUTER_TOKEN,
+    )
     assert mock.calls == [
-        ("cancel", ("OID3", "NO", False)),
-        ("cancel", ("OID4", "YES", False)),
-        ("cancel", ("OID5", "YES", False)),
+        ("cancel", ("OID3", "NO", False, None)),
+        ("cancel", ("OID4", "YES", False, "IDEA-EQ")),
+        ("cancel", ("OID5", "YES", False, "IDEA-EQ")),
     ]
 
 
@@ -439,7 +504,7 @@ class _RejectingNeo(MockNeoFull):
     def modify_order(self, params):
         return {"stat": "Not_Ok", "errMsg": "Order is not open"}
 
-    def cancel_order(self, order_id, amo="NO", is_verify=False):
+    def cancel_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
         return {"Error Message": "Complete the 2fa process before accessing this application"}
 
 
