@@ -303,6 +303,22 @@ class TestCapabilitiesRoute:
         assert "no background syncing" in " ".join(broker["mcp"]["cautions"])
         assert "no AI-server data storage" in " ".join(broker["mcp"]["cautions"])
 
+    def test_mcp_catalogue_rejects_unknown_broker_lookup(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/mcp?broker=upstx")
+        assert response.status_code == 404
+        payload = response.get_json()
+        assert payload["status"] == "error"
+        assert "not found" in payload["message"]
+        assert set(payload["known_brokers"]) == {"openalgo", "dhan", "groww", "upstox"}
+
+    def test_mcp_catalogue_rejects_broker_without_catalogued_mcp(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/mcp?broker=zerodha")
+        assert response.status_code == 404
+        payload = response.get_json()
+        assert payload["status"] == "error"
+        assert "no FlintTrade-catalogued MCP endpoint" in payload["message"]
+        assert set(payload["known_brokers"]) == {"openalgo", "dhan", "groww", "upstox"}
+
     def test_all_brokers_have_broker_name(self, client) -> None:  # type: ignore[no-untyped-def]
         """Every broker entry in the full list contains broker_name."""
         response = client.get("/api/v1/broker/capabilities")

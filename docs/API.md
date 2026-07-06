@@ -201,9 +201,11 @@ Source: `packages/integrations/gateway/src/flinttrade_gateway/capabilities_route
 | `broker/recommendations` (**GET**) | Filter broker capability metadata for an operator-selected use case. `?use_case=<id>` for one job (for example `low_cost_execution`, `market_depth`); `?brokers=a,b` restricts the response to connected brokers. |
 
 `broker/mcp?broker=<id>` returns one MCP row. `openalgo` is accepted as the
-primary bridge MCP entry; unsupported broker ids return the current known MCP
-catalogue. Broker-hosted MCP trade tools, where a broker offers them, remain
-external to FlintTrade's in-process `gate_order` / `BrokerRouter` path.
+primary bridge MCP entry. Unknown broker ids and catalogued brokers without
+FlintTrade MCP metadata return `404` with `known_brokers`, so client typos do
+not silently fall back to the full catalogue. Broker-hosted MCP trade tools,
+where a broker offers them, remain external to FlintTrade's in-process
+`gate_order` / `BrokerRouter` path.
 
 ### AI (`/ft-api/v1/ai/*`, `/ft-api/v1/signals/*`)
 
