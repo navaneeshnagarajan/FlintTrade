@@ -67,6 +67,7 @@ GROWW_CAPABILITIES = Capabilities(
     brokerage_note="Groww Trade API is free; execution brokerage follows the operator's Groww plan.",
     historical_max_lookback_days_intraday=1080,
     historical_intraday_intervals_minutes=[1, 5, 10, 60, 240],
+    historical_calendar_intervals=["1D", "1W"],
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     streaming_supported=True,

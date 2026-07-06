@@ -92,6 +92,7 @@ class TestCapabilitiesRoute:
         assert caps["rate_limit_data_per_sec"] == 50
         assert caps["rate_limit_quote_per_sec"] == 50
         assert caps["historical_intraday_intervals_minutes"] == [1, 3, 5, 15, 30]
+        assert caps["historical_calendar_intervals"] == ["1D", "1W", "1M"]
         assert caps["historical_intervals"] == ["1m", "3m", "5m", "15m", "30m", "1D", "1W", "1M"]
         assert caps["connectable"] is True
         assert caps["gtt_native"] is True
@@ -133,6 +134,7 @@ class TestCapabilitiesRoute:
         assert caps["supports_options"] is True
         assert caps["supports_commodities"] is True
         assert caps["historical_intraday_intervals_minutes"] == [1, 5, 10, 60, 240]
+        assert caps["historical_calendar_intervals"] == ["1D", "1W"]
         assert caps["market_depth_runtime_ready"] is False
         assert caps["gtt_native"] is True
         assert caps["option_chain_supported"] is True

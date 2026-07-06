@@ -804,6 +804,29 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
+  it("combines native intraday and calendar interval metadata when the backend omits the prebuilt list", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        broker: "upstox",
+        capabilities: {
+          broker_name: "upstox",
+          historical_intraday_intervals_minutes: [1, 3, 5, 15, 30],
+          historical_calendar_intervals: ["1D", "1W", "1M"],
+        },
+      }),
+    );
+
+    const result = await getIntervals();
+
+    expect(result).toEqual(["1m", "3m", "5m", "15m", "30m", "1D", "1W", "1M"]);
+  });
+
   it("uses FlintTrade leverage margin snapshot instead of the stale broker leverage path", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy.mockResolvedValueOnce(

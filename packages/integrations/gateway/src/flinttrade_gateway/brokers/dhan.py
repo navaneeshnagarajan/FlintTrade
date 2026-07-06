@@ -93,6 +93,7 @@ DHAN_CAPABILITIES = Capabilities(
     historical_max_lookback_days_daily=None,
     historical_max_candles_per_request=0,
     historical_intraday_intervals_minutes=[1, 5, 15, 25, 60],
+    historical_calendar_intervals=["1D"],
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     option_chain_rate_limit_seconds=3,

@@ -101,6 +101,7 @@ INDMONEY_CAPABILITIES = Capabilities(
     # broad interval menu, not over-credited for intraday depth it does not
     # document.
     historical_intraday_intervals_minutes=[1, 2, 3, 4, 5, 10, 15, 30, 60, 120, 180, 240],
+    historical_calendar_intervals=["1D", "1W", "1M"],
     option_chain_supported=False,  # utility family is "Coming Soon" broker-side
     option_chain_greeks_supported=False,
     streaming_supported=True,

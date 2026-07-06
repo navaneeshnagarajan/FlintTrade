@@ -163,6 +163,9 @@ class Capabilities:
     historical_max_lookback_days_daily: int | None = None
     historical_max_candles_per_request: int = 0
     historical_intraday_intervals_minutes: list[int] = field(default_factory=list)
+    # Day-or-larger candle interval labels (e.g. 1D/1W/1M). Intraday intervals
+    # stay numeric so the UI can format them consistently.
+    historical_calendar_intervals: list[str] = field(default_factory=list)
     option_chain_supported: bool = False
     option_chain_greeks_supported: bool = False
     option_chain_rate_limit_seconds: int | None = None

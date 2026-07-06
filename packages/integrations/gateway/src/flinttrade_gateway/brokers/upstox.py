@@ -99,6 +99,7 @@ UPSTOX_CAPABILITIES = Capabilities(
     # Upstox does not document a per-request candle cap, so it is left at 0.
     historical_max_lookback_days_intraday=31,
     historical_max_candles_per_request=0,
+    historical_calendar_intervals=["1D", "1W", "1M"],
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     streaming_supported=True,

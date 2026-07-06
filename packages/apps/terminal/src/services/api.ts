@@ -654,6 +654,7 @@ type BackendBrokerCapabilityRow = {
   broker_type?: BrokerCapabilities["broker_type"];
   historical_intervals?: string[];
   historical_intraday_intervals_minutes?: number[];
+  historical_calendar_intervals?: string[];
   supported_exchanges?: string[];
   supports_bracket_orders?: boolean;
   supports_cover_orders?: boolean;
@@ -908,13 +909,17 @@ function intervalsFromCapability(value: BackendBrokerCapabilitiesData): string[]
     if (Array.isArray(row.historical_intervals) && row.historical_intervals.length > 0) {
       return row.historical_intervals.map(String);
     }
+    const calendar = Array.isArray(row.historical_calendar_intervals)
+      ? row.historical_calendar_intervals.map(String)
+      : [];
     if (Array.isArray(row.historical_intraday_intervals_minutes)) {
-      return row.historical_intraday_intervals_minutes
+      const intraday = row.historical_intraday_intervals_minutes
         .map((minutes) => Number(minutes))
         .filter((minutes) => Number.isFinite(minutes) && minutes > 0)
         .map(minuteIntervalLabel);
+      return [...intraday, ...calendar];
     }
-    return [];
+    return calendar;
   });
   return Array.from(new Set(intervals));
 }

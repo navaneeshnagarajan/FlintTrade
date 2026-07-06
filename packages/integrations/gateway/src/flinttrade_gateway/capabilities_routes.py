@@ -37,14 +37,6 @@ logger = logging.getLogger("flinttrade.gateway.capabilities_routes")
 capabilities_bp = Blueprint("capabilities", __name__, url_prefix="/api/v1")
 
 
-_NATIVE_HISTORY_DAY_INTERVALS: dict[str, list[str]] = {
-    "dhan": ["1D"],
-    "upstox": ["1D", "1W", "1M"],
-    "indmoney": ["1D", "1W", "1M"],
-    "groww": ["1D", "1W"],
-}
-
-
 def _minute_interval_label(minutes: int) -> str:
     """Return the terminal's canonical label for an intraday interval."""
     if minutes > 0 and minutes % 60 == 0:
@@ -59,11 +51,12 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         return _catalog_mcp_fields(broker_name)
     intraday = list(native.historical_intraday_intervals_minutes)
     intervals = [_minute_interval_label(minutes) for minutes in intraday]
-    intervals.extend(_NATIVE_HISTORY_DAY_INTERVALS.get(broker_name, []))
+    intervals.extend(native.historical_calendar_intervals)
     data = {
         "connectable": BROKER_CATALOG.get(broker_name).connectable if BROKER_CATALOG.get(broker_name) else False,
         "historical_intervals": intervals,
         "historical_intraday_intervals_minutes": intraday,
+        "historical_calendar_intervals": list(native.historical_calendar_intervals),
         "historical_max_lookback_days_intraday": native.historical_max_lookback_days_intraday,
         "historical_max_lookback_days_daily": native.historical_max_lookback_days_daily,
         "historical_max_candles_per_request": native.historical_max_candles_per_request,
