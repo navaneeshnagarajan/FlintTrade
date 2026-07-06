@@ -191,7 +191,7 @@ jobs:
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/__tests__/useGlobalKeys.test.ts src/hooks/__tests__/useFeatureGate.test.ts src/hooks/__tests__/useSkillContent.test.ts src/hooks/__tests__/useTradingStoreSync.test.ts
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/layout/ src/hooks/__tests__/useGlobalKeys.test.ts src/hooks/__tests__/useFeatureGate.test.ts src/hooks/__tests__/useSkillContent.test.ts src/hooks/__tests__/useTradingStoreSync.test.ts
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check

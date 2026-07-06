@@ -5,6 +5,7 @@
 import { FieldRow, TextInput, SectionTitle } from "./shared";
 import { HistoricalDownloadPanel } from "./HistoricalDownloadPanel";
 import { WatchlistManagerPanel } from "./WatchlistManagerPanel";
+import { LocalDataPanel } from "./LocalDataPanel";
 
 interface DataPathSettings {
   fastStoragePath: string;
@@ -55,6 +56,8 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
       <WatchlistManagerPanel />
 
       <HistoricalDownloadPanel />
+
+      <LocalDataPanel />
     </div>
   );
 }
