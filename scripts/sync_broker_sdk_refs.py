@@ -125,15 +125,18 @@ def active_sdk_entries(entries: list[dict[str, Any]]) -> list[dict[str, str]]:
         if name not in SDK_SOURCES:
             continue
         source_commit = str(entry.get("source_commit", "")).strip()
-        out.append({
+        row = {
             "name": name,
             "version": version,
             "source_commit": source_commit,
+        }
+        sha256 = str(entry.get("sha256", "")).strip()
+        if sha256:
             # Carried so the downloaded audit artifact can be cross-checked
             # against the brokers.lock pin (not only PyPI's self-advertised
             # digest) — PyPI may add files to an existing release.
-            "sha256": str(entry.get("sha256", "")).strip(),
-        })
+            row["sha256"] = sha256
+        out.append(row)
     return out
 
 
