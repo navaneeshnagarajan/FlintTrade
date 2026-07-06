@@ -185,6 +185,7 @@ export function BrokerConnect() {
   const [selectedBroker, setSelectedBroker] = useState<string>("");
   const [selectedMethodId, setSelectedMethodId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
+  const [accountLabel, setAccountLabel] = useState<string>("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
@@ -201,6 +202,7 @@ export function BrokerConnect() {
   function resetForm() {
     setFields({});
     setAccountId("");
+    setAccountLabel("");
     setError("");
     setNotice("");
   }
@@ -248,13 +250,16 @@ export function BrokerConnect() {
       for (const f of method.fields) {
         if (f.required && !fields[f.name]?.trim()) throw new Error(`${f.label} is required.`);
       }
+      const label = accountLabel.trim();
       if (method.kind === "oauth") {
-        const started = await oauthStartNativeAccount({
+        const payload = {
           adapter_id: broker.adapter_id,
           account_id: accountId.trim(),
           api_key: fields.api_key ?? "",
           api_secret: fields.api_secret ?? "",
-        });
+          ...(label ? { label } : {}),
+        };
+        const started = await oauthStartNativeAccount(payload);
         window.open(started.auth_url, "_blank", "noopener");
         const postback = started.postback_uri ?? brokerPostbackUri;
         return {
@@ -268,6 +273,7 @@ export function BrokerConnect() {
       const result = await connectNativeAccount({
         adapter_id: broker.adapter_id,
         account_id: accountId.trim(),
+        ...(label ? { label } : {}),
         credentials: {
           ...(method.credential_defaults ?? {}),
           ...Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
@@ -283,6 +289,7 @@ export function BrokerConnect() {
       if (!r.oauth) {
         setFields({});
         setAccountId("");
+        setAccountLabel("");
       }
       setNotice(r.message);
       // OAuth completes out-of-band in the callback tab; refresh accounts shortly after.
@@ -365,6 +372,7 @@ export function BrokerConnect() {
       setSelectedMethodId(first);
       setFields({});
       setAccountId(sel.account);
+      setAccountLabel("");
       setNotice("");
       setError(
         e instanceof Error
@@ -888,6 +896,18 @@ export function BrokerConnect() {
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
                 placeholder="e.g. your client code"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="account-label" className="text-xs text-text-secondary mb-1.5 block">
+                Account label <span className="text-text-muted">(optional)</span>
+              </Label>
+              <Input
+                id="account-label"
+                value={accountLabel}
+                onChange={(e) => setAccountLabel(e.target.value)}
+                placeholder={broker ? `${broker.display_name} main` : "e.g. primary trading account"}
               />
             </div>
 

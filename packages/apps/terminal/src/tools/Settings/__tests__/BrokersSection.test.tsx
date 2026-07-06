@@ -742,6 +742,7 @@ describe("BrokersSection", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Access token" }));
 
     fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "1234567890" } });
+    fireEvent.change(screen.getByLabelText(/account label/i), { target: { value: "Dhan swing" } });
     fireEvent.change(screen.getByLabelText("Dhan client ID"), { target: { value: "1234567890" } });
     fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "TOK" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
@@ -751,6 +752,7 @@ describe("BrokersSection", () => {
         expect.objectContaining({
           adapter_id: "dhan",
           account_id: "1234567890",
+          label: "Dhan swing",
           credentials: { client_id: "1234567890", access_token: "TOK" },
         }),
       ),
@@ -776,6 +778,7 @@ describe("BrokersSection", () => {
     expect(screen.getByText(/Dhan redirects back with a tokenId/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHANCLIENT1" } });
+    fireEvent.change(screen.getByLabelText(/account label/i), { target: { value: "Dhan OAuth" } });
     fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
     fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
     fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
@@ -785,6 +788,7 @@ describe("BrokersSection", () => {
         expect.objectContaining({
           adapter_id: "dhan",
           account_id: "DHANCLIENT1",
+          label: "Dhan OAuth",
           api_key: "APPID",
           api_secret: "SECRET",
         }),
