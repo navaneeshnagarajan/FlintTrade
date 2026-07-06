@@ -30,10 +30,10 @@ Blueprint prefix: ``/v1/orders``
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -163,10 +163,11 @@ def _is_live_mode_unlocked() -> bool:
 
 
 def _openalgo_base_url() -> str:
-    """Resolve the OpenAlgo base URL from app config or environment.
+    """Resolve the OpenAlgo base URL from app config or workspace/env fallback.
 
     Checks ``app.config["CLIENT"]`` first (has ``settings.openalgo_host``),
-    then falls back to the ``OPENALGO_HOST`` / ``OPENALGO_PORT`` env vars.
+    then falls back to Settings.from_env() so UI-owned ``workspace.json`` config
+    is honoured even in minimal Flask apps.
 
     Returns:
         Base URL string, e.g. ``"http://127.0.0.1:5000"``, trailing slash stripped.
@@ -178,9 +179,15 @@ def _openalgo_base_url() -> str:
         except AttributeError:
             pass
 
-    host = os.environ.get("OPENALGO_HOST", "http://127.0.0.1").rstrip("/")
-    port = os.environ.get("OPENALGO_PORT", "5000")
-    return f"{host}:{port}"
+    from .config import Settings  # noqa: PLC0415
+
+    settings = Settings.from_env()
+    host = settings.openalgo_host.rstrip("/")
+    try:
+        has_port = urlsplit(host).port is not None
+    except ValueError:
+        has_port = True
+    return host if has_port else f"{host}:{settings.openalgo_port}"
 
 
 def _openalgo_api_key() -> str:
@@ -195,7 +202,9 @@ def _openalgo_api_key() -> str:
             return str(client.settings.openalgo_api_key)
         except AttributeError:
             pass
-    return os.environ.get("OPENALGO_API_KEY", "")
+    from .config import Settings  # noqa: PLC0415
+
+    return Settings.from_env().openalgo_api_key
 
 
 def _forward_to_openalgo(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]:

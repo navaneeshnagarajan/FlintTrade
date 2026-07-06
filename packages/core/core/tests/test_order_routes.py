@@ -789,6 +789,49 @@ class TestLiveModeErrors:
         data = resp.get_json()
         assert "API key" in data["message"]
 
+    def test_openalgo_settings_helpers_prefer_app_client(self):
+        """Raw-forward fallback helpers first use the app-owned OpenAlgo client."""
+        from flask import Flask
+        from flinttrade_core.order_routes import _openalgo_api_key, _openalgo_base_url
+
+        settings = MagicMock()
+        settings.openalgo_host = "http://192.0.2.10:5010"
+        settings.openalgo_api_key = "app-client-key"
+        configured_client = MagicMock()
+        configured_client.settings = settings
+
+        app = Flask(__name__)
+        app.config["CLIENT"] = configured_client
+        with app.app_context():
+            assert _openalgo_base_url() == "http://192.0.2.10:5010"
+            assert _openalgo_api_key() == "app-client-key"
+
+    def test_openalgo_settings_helpers_fallback_to_workspace(self, monkeypatch, tmp_path):
+        """Minimal Flask apps without CLIENT still honour workspace OpenAlgo config."""
+        from flask import Flask
+        from flinttrade_core.order_routes import _openalgo_api_key, _openalgo_base_url
+        from flinttrade_core.workspace import Workspace
+
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+        monkeypatch.delenv("OPENALGO_HOST", raising=False)
+        monkeypatch.delenv("OPENALGO_PORT", raising=False)
+
+        workspace = Workspace()
+        workspace.initialise()
+        config = workspace.as_dict()
+        config["openalgo"] = {
+            "api_key": "workspace-order-key",
+            "host": "http://127.0.0.1:5002",
+            "ws_port": 8767,
+        }
+        workspace.save(config)
+
+        app = Flask(__name__)
+        with app.app_context():
+            assert _openalgo_base_url() == "http://127.0.0.1:5002"
+            assert _openalgo_api_key() == "workspace-order-key"
+
     @patch("flinttrade_core.order_routes._openalgo_api_key", return_value=_TEST_API_KEY)
     @patch("flinttrade_core.order_routes.httpx.Client")
     def test_openalgo_non_json_response(self, mock_client_cls, _mock_key):
