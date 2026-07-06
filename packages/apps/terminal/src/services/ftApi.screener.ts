@@ -113,6 +113,38 @@ export const getFiiLongShortData = (refresh?: boolean) => {
   return get<FiiLongShortResponse>("screener/fii-long-short" + qs);
 };
 
+// W7 — Index contribution decomposition (served by the /v1 breadth blueprint).
+export interface IndexConstituent {
+  symbol: string;
+  weight: number;
+  ltp: number;
+  prev_close: number;
+  change_pct: number;
+  contribution_pct: number;
+  contribution_points: number;
+}
+
+export interface IndexContribution {
+  index_name: string;
+  index_level: number;
+  index_change_pct: number;
+  index_change_points: number;
+  weights_as_of: string;
+  advancers: number;
+  decliners: number;
+  constituents: IndexConstituent[];
+}
+
+export interface IndexContributionResponse {
+  is_sample_data: boolean;
+  contribution: IndexContribution;
+}
+
+export const getIndexContribution = (index: string) =>
+  getV1<IndexContributionResponse>(
+    "index-contribution?index=" + encodeURIComponent(index),
+  );
+
 export const getRRGData = (tailLength?: number): Promise<RRGResponse> => {
   const params = new URLSearchParams();
   if (tailLength !== undefined) params.set("tail_length", String(tailLength));

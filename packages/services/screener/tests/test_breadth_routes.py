@@ -125,6 +125,70 @@ def test_breadth_current_refuses_thin_sweep_as_live(app):
 
 
 # ---------------------------------------------------------------------------
+# GET /ft-api/v1/index-contribution (W7)
+# ---------------------------------------------------------------------------
+
+
+def test_index_contribution_sample_when_disconnected(client):
+    """200 with the sample decomposition and its demo flag when disconnected."""
+    resp = client.get("/v1/index-contribution?index=NIFTY")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "success"
+    assert body["data"]["is_sample_data"] is True
+    contribution = body["data"]["contribution"]
+    assert contribution["index_name"] == "NIFTY"
+    assert len(contribution["constituents"]) > 0
+    # Ranked by absolute contribution.
+    contribs = [abs(c["contribution_pct"]) for c in contribution["constituents"]]
+    assert contribs == sorted(contribs, reverse=True)
+
+
+class _SymbolQuote:
+    def __init__(self, symbol: str, ltp: float, prev_close: float) -> None:
+        self.symbol = symbol
+        self.ltp = ltp
+        self.prev_close = prev_close
+
+
+def test_index_contribution_live_from_quote_sweep(app):
+    """A connected broker yields a computed (non-sample) decomposition."""
+    from flinttrade_screener.index_contribution import index_weights
+
+    symbols = list(index_weights("NIFTY"))
+
+    class _IdxClient:
+        async def multi_quotes(self, payload):
+            # Alternate up/down so advancers and decliners are both non-zero.
+            return [
+                _SymbolQuote(s, ltp=101.0 if i % 2 == 0 else 99.0, prev_close=100.0)
+                for i, s in enumerate(symbols)
+            ]
+
+    app.config["REGISTRY"] = _ConnectedRegistry()
+    app.config["OPENALGO_CLIENT"] = _IdxClient()
+    with app.test_client() as c:
+        resp = c.get("/v1/index-contribution?index=NIFTY")
+    body = resp.get_json()
+    assert body["data"]["is_sample_data"] is False
+    contribution = body["data"]["contribution"]
+    assert contribution["advancers"] > 0
+    assert contribution["decliners"] > 0
+
+
+def test_index_contribution_thin_sweep_falls_back_to_sample(app):
+    class _ThinIdxClient:
+        async def multi_quotes(self, payload):
+            return [_SymbolQuote("HDFCBANK", 101.0, 100.0)]
+
+    app.config["REGISTRY"] = _ConnectedRegistry()
+    app.config["OPENALGO_CLIENT"] = _ThinIdxClient()
+    with app.test_client() as c:
+        resp = c.get("/v1/index-contribution?index=NIFTY")
+    assert resp.get_json()["data"]["is_sample_data"] is True
+
+
+# ---------------------------------------------------------------------------
 # GET /ft-api/v1/breadth/history
 # ---------------------------------------------------------------------------
 

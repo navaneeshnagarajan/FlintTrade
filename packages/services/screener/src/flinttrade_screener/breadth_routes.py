@@ -120,6 +120,57 @@ def _live_breadth_from_quotes(client: Any) -> dict[str, int] | None:
     return {"advances": advances, "declines": declines, "unchanged": unchanged}
 
 
+def _live_index_contribution(client: Any, index_name: str) -> dict[str, Any] | None:
+    """Compute a live index-contribution decomposition from bridge quotes.
+
+    One multi-quote call over the index constituents (weights from
+    :mod:`index_contribution`), classifying each against its previous close and
+    weighting the return by the constituent's free-float weight.
+
+    Args:
+        client: The async OpenAlgo bridge client.
+        index_name: Index code (``NIFTY``, ``BANKNIFTY``).
+
+    Returns:
+        The serialised :class:`IndexContributionResult` dict, or ``None`` when
+        no usable live quotes are available (caller falls back to sample).
+    """
+    if client is None:
+        return None
+    import asyncio  # noqa: PLC0415
+
+    from .index_contribution import compute_index_contribution, index_weights  # noqa: PLC0415
+
+    weights = index_weights(index_name)
+    if not weights:
+        return None
+
+    payload = [{"symbol": s, "exchange": "NSE"} for s in weights]
+    try:
+        quotes = asyncio.run(client.multi_quotes(payload))
+    except Exception as exc:
+        logger.warning("Live index-contribution quote sweep failed: %s", exc)
+        return None
+
+    quotes_by_symbol: dict[str, dict[str, float]] = {}
+    for quote in quotes or []:
+        symbol = str(getattr(quote, "symbol", "") or "").upper()
+        if not symbol:
+            continue
+        quotes_by_symbol[symbol] = {
+            "ltp": float(getattr(quote, "ltp", 0) or 0),
+            "prev_close": float(getattr(quote, "prev_close", 0) or 0),
+        }
+
+    usable = sum(1 for q in quotes_by_symbol.values() if q["ltp"] > 0 and q["prev_close"] > 0)
+    if usable < 10:
+        logger.warning("Live index-contribution: only %d usable quotes — sample fallback", usable)
+        return None
+
+    result = compute_index_contribution(index_name, quotes_by_symbol, index_level=0.0)
+    return result.to_dict()
+
+
 def _breadth_to_dict(d: BreadthData) -> dict[str, Any]:
     """Serialise a BreadthData model to a JSON-safe dict.
 
@@ -217,6 +268,45 @@ def breadth_current() -> Any:
         "status": "success",
         "is_sample_data": True,
         "data": _breadth_to_dict(history[-1]),
+    })
+
+
+@breadth_bp.route("/index-contribution", methods=["GET"])
+def index_contribution_endpoint() -> Any:
+    """Index-contribution decomposition (W7).
+
+    Ranks an index's constituents by their contribution to the day's move
+    (free-float weight × return). Live via one multi-quote sweep over the
+    constituents when connected; otherwise a clearly-flagged sample.
+
+    Query params:
+        index (str): Index code (default ``NIFTY``; also ``BANKNIFTY``).
+
+    Returns:
+        JSON::
+
+            {"status": "success", "is_sample_data": bool,
+             "data": { ...IndexContributionResult fields... }}
+    """
+    from .index_contribution import make_sample_index_contribution  # noqa: PLC0415
+
+    index_name = str(request.args.get("index", "NIFTY")).upper()
+    registry = current_app.config.get("REGISTRY")
+
+    if registry and getattr(registry, "is_connected", lambda: False)():
+        live = _live_index_contribution(current_app.config.get("OPENALGO_CLIENT"), index_name)
+        if live is not None:
+            # ``is_sample_data`` is nested INSIDE ``data`` so it survives the
+            # frontend response-unwrap (which returns ``json.data``).
+            return jsonify({
+                "status": "success",
+                "data": {"is_sample_data": False, "contribution": live},
+            })
+
+    sample = make_sample_index_contribution(index_name)
+    return jsonify({
+        "status": "success",
+        "data": {"is_sample_data": True, "contribution": sample.to_dict()},
     })
 
 

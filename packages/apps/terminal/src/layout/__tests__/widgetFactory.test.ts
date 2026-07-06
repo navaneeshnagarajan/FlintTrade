@@ -18,9 +18,9 @@ describe("widgetFactory catalogue wiring", () => {
       return acc;
     }, {});
 
-    expect(widgetCatalog).toHaveLength(98);
+    expect(widgetCatalog).toHaveLength(99);
     expect(counts).toEqual({
-      Analysis: 46,
+      Analysis: 47,
       Trading: 26,
       Utility: 26,
     });
