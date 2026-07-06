@@ -1,3 +1,5 @@
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
+
 export interface AccountSetupInput {
   username: string;
   email: string;
@@ -57,9 +59,9 @@ export async function setupFlintTradeAccount(input: AccountSetupInput): Promise<
   let response: Response;
 
   try {
-    response = await fetch("/ft-api/v1/auth/setup", {
+    response = await fetch(`${getBase()}/v1/auth/setup`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(true),
       body: JSON.stringify({
         username: input.username,
         email: input.email,

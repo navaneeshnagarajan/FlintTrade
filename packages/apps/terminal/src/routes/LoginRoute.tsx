@@ -21,6 +21,7 @@ import { KeyRound, ShieldCheck, AlertTriangle, RotateCcw, Download } from "lucid
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { downgradeMode } from "@/lib/modeAuth";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
   onSuccess: () => void;
@@ -45,9 +46,9 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
     setIsLoading(true);
     setError("");
     try {
-      const resp = await fetch("/ft-api/v1/auth/login", {
+      const resp = await fetch(`${getBase()}/v1/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(true),
         body: JSON.stringify({ password, totp_code: totpCode }),
       });
       const data = await resp.json();
@@ -95,11 +96,11 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
       // session JWT alongside the PIN. With no (or an expired) token the 401's
       // message tells the operator to do the full password+TOTP login — which
       // is exactly the daily re-auth requirement.
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers = buildHeaders(true);
       const authState = useAuthStore.getState();
       const sessionToken = authState.token ?? authState.reauthToken;
       if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-      const resp = await fetch("/ft-api/v1/auth/pin", {
+      const resp = await fetch(`${getBase()}/v1/auth/pin`, {
         method: "POST",
         headers,
         body: JSON.stringify({ pin }),
@@ -277,9 +278,9 @@ function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
       // Password-only reset (no session) — the backend guards this route with
       // the account password and a 3/hour rate limit, so a shoulder-surfer can
       // neither trigger it nor learn the new secret without the password.
-      const resp = await fetch("/ft-api/v1/auth/setup/regenerate-2fa", {
+      const resp = await fetch(`${getBase()}/v1/auth/setup/regenerate-2fa`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(true),
         body: JSON.stringify({ password }),
       });
       const data = await resp.json();

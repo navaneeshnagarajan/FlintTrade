@@ -24,6 +24,7 @@
 
 import { useState, useEffect } from "react";
 import { safeParse } from "@/lib/safeParse";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -528,12 +529,12 @@ function TotpDisplay({
     setEscapeError("");
     const endpoint =
       escapeAction === "reset-2fa"
-        ? "/ft-api/v1/auth/setup/regenerate-2fa"
-        : "/ft-api/v1/auth/setup/reset";
+        ? `${getBase()}/v1/auth/setup/regenerate-2fa`
+        : `${getBase()}/v1/auth/setup/reset`;
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(true),
         body: JSON.stringify({ password: escapePassword }),
       });
       const data = await resp.json();

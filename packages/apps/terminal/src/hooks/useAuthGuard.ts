@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { isDemoSessionActive } from "@/lib/demoSession";
 import { useAuthStore } from "@/stores/authStore";
 import { AuthStatusSchema } from "@/lib/schemas/ftApi";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean } {
   const navigate = useNavigate();
@@ -25,7 +26,7 @@ export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean }
       }
 
       // Check backend for setup status
-      fetch("/ft-api/v1/auth/status")
+      fetch(`${getBase()}/v1/auth/status`, { headers: buildHeaders(false) })
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();

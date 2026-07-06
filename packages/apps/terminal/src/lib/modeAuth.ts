@@ -22,8 +22,7 @@
 
 import { useAuthStore } from "@/stores/authStore";
 import type { AppMode } from "@/stores/modeStore";
-
-const FT_API = "/ft-api/v1";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface ModeTokenResponse {
   data?: { token?: string; mode?: string; live_mode_unlocked?: boolean };
@@ -50,10 +49,10 @@ export async function downgradeMode(
   target: DowngradeMode,
   token: string | null,
 ): Promise<string> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers = buildHeaders(true);
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${FT_API}/auth/mode`, {
+  const res = await fetch(`${getBase()}/v1/auth/mode`, {
     method: "POST",
     headers,
     body: JSON.stringify({ mode: target }),
@@ -76,16 +75,16 @@ export async function unlockWithPin(
   pin: string,
   mode: AppMode = "live",
 ): Promise<UnlockResult> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
   // Session-bound PIN unlock (policy D6): the backend 401s without a valid
   // session JWT, so a PIN alone can never arm Live. During an idle/manual lock
   // the active token is nulled but the still-valid session is kept in
   // `reauthToken` for exactly this re-auth.
   const auth = useAuthStore.getState();
   const sessionToken = auth.token ?? auth.reauthToken;
+  const headers = buildHeaders(true);
   if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
 
-  const res = await fetch(`${FT_API}/auth/pin`, {
+  const res = await fetch(`${getBase()}/v1/auth/pin`, {
     method: "POST",
     headers,
     body: JSON.stringify({ pin, mode }),

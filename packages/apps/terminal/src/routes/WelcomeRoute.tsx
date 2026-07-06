@@ -20,6 +20,7 @@ import type { ColorMode } from "@/lib/cinematicThemes";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import LoginRoute from "@/routes/LoginRoute";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useThemeStore } from "@/stores/themeStore";
 
@@ -279,7 +280,7 @@ export default function WelcomeRoute() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
 
-    fetch("/ft-api/v1/auth/status", { signal: controller.signal })
+    fetch(`${getBase()}/v1/auth/status`, { headers: buildHeaders(false), signal: controller.signal })
       .then((response) => (response.ok ? response.json() : Promise.reject(response)))
       .then((data) => {
         if (!data.data?.is_setup) {
