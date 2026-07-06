@@ -22,7 +22,7 @@
 | 0 | Ground-truth audit, docs corrected, PLAN rewritten | **CLOSED 2026-07-03** (see Phase 0 exit evidence) |
 | 1 | Auth end-to-end (app + broker), SEBI-correct | in progress — core shipped; Kotak live check + next-day/restart exit evidence remain |
 | 2 | Stabilise everything that exists | in progress — broker-connect consolidation and safety/honesty fixes underway |
-| 3 | Build the unmapped reference backlog | in progress — build wave 1 (10 items) shipped 2026-07-06; Groww live promotion + Zerodha community wave + RD1–RD4 deferrals recorded |
+| 3 | Build the unmapped reference backlog | **exit criterion met 2026-07-06** — waves 1–2 shipped (16 items); W5/W6/B3 deferred (RD5–RD7); phase closes after the standing audit + re-audit; Groww/Zerodha stay evidence/contribution-gated |
 | 4 | Autonomous loop proven in Practice | not started |
 | 5 | Distribution + public surfaces | in progress — desktop background runtime shipped 2026-07-06; updater, bug reporting, site truth pass, desktop-build verification remain |
 | 6 | Release + continuous loop | not started |
@@ -157,12 +157,18 @@ Known-committed items ahead of the map:
 - [ ] Zerodha community wave (kiteconnect 5.2.0, official MIT SDK) — ships on contribution; keep deferred.
 - [ ] Spec-first rule: every mapped feature gets `.local/specs/<area>/` + `DESIGN_LOG.md` before build; port patterns, never blind-copy.
 
+**Deferred entries (RD5–RD8, recorded 2026-07-06 — closes the last open §3 build rows):**
+- **RD5 — W5 Floating/pop-out panels incl. Floating Scalper** (0702 C36/C2): DEFERRED. Large effort (Dockview floating groups or Tauri multi-window) for low value per the 2026-07-06 drift sweep; the docked Scalper widget covers the workflow. Revisit if desktop users ask for pop-outs; natural host is the Tauri shell.
+- **RD6 — W6 Connecting Dots analysis view** (0702 A2): DEFERRED pending spec. The reference map mandates spec-first against the OIPulse capture (`.local/reference-research/2026-07-02/oipulse`); no `.local/specs/connecting-dots/` exists yet. Build only after a DESIGN_LOG defines what the view actually computes — do not build unspecced.
+- **RD7 — B3 Trading MCP server** (openalgo E6; hermes H14; flintsuite FS6): DEFERRED — deliberate safety decision, maintainer-owned. The G12 grep guard pins broker MCP support as GET-only setup metadata, NOT a local order-tool proxy; an order-capable MCP surface would be a new externally-drivable order path and needs the maintainer's explicit design call (spec in `.local/specs/mcp-broker-support/` when taken up). A read-only market-data MCP variant is acceptable to build later without that call, but stays behind the same catalogue metadata posture.
+- **RD8 — Data long tail** (2026-07-06 audit): DEFERRED with wiring notes — bulk full-universe OHLCV download mode (instruments master can stream the universe; add a `universe` option to the historify download core), fundamentals/corporate-actions/FII-DII archival collectors, promoting the dormant ProviderRegistry fallback chain (OpenAlgo→OpenChart→yfinance) into the wired download path, and feeding the Rust `ticks` backtest engine from the recorded tick store (G29 wire-vs-trim decision). Each is an additive collector/flag on the now-complete local-data plumbing.
+
 **Deferred entries (RD1–RD4, recorded 2026-07-06 — satisfies the Phase 3 exit for these rows):**
 - **RD1 — OpenAlgo `/whatsapp` endpoint** (openalgo A38): DEFERRED. FlintTrade's own WhatsApp notify bridge already lives in the webhooks/automation packages; a second inbound WhatsApp surface would be a parallel path (one-core rule).
 - **RD2 — Local AI inference stack (mistral.rs / llama-cpp)** (flintsuite FS4): DEFERRED. The shipped design is the cloud multi-provider LLM client; local inference is flintsuite-successor scope, not FlintTrade v1.
 - **RD3 — tantivy full-text search engine** (flintsuite FS12): DEFERRED. The FTS direction is SQLite FTS5 (G31 journal search, AI2 session search); adding a second engine would duplicate the search core.
 - **RD4 — Life-OS breadth modules (MF/gold/tax/credit/goals beyond current Invest tabs)** (flintsuite FS16): DEFERRED. FlintTrade stays trading-scoped (NSE/BSE F&O + equity); flintsuite is the designated future home for life-OS breadth.
-- [ ] **Exit:** every reference-map row with status `unmapped` or `deferred-candidate` is either implemented or carries an explicit `deferred` entry here with a reason. (`partial` rows are Phase 2 feature-matrix territory, not this exit.)
+- [x] **Exit (met 2026-07-06):** every reference-map row with status `unmapped` or `deferred-candidate` is either implemented or carries an explicit `deferred` entry here with a reason. Disposition: W1–W4/W7 + B2 + DP1–DP3 + P6/P7/P12 built (waves 1–2); W5/W6/B3 deferred (RD5–RD7); AI1–AI3 re-homed to Phase 4; RD1–RD4 + RD8 recorded. (`partial` rows are Phase 2 feature-matrix territory, not this exit. Groww live promotion and the Zerodha community wave remain tracked above under their own evidence/contribution gates — they were never `unmapped` rows.)
 
 ## Phase 4 — Autonomous loop proven (Practice)
 
