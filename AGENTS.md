@@ -31,12 +31,30 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 
 ## Agentic Workflow
 
-- **Review pipeline:** claude (ultracode multi-agent panels) → maintainer. Codex is retired from the loop. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
+- **Pipeline:** build agents (Codex or claude) → claude ultracode multi-agent review panels → maintainer. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
 - **Full arsenal:** for substantial work use the ultracode `Workflow` tool (fan-out → adversarial verify → synthesise), relevant skills, specialised agents, and MCP (a library-docs MCP for APIs, the browser-preview toolset for UI). Don't fall back to bare read/edit when a specialised tool fits.
 - **Gated execution is load-bearing:** any new order path must mint a `SafetyContext` through `gate_order` → `BrokerRouter`. Never add a path that reaches a broker adapter or `OpenAlgoClient.place_order` ungated.
 - **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `PLAN.md` is the living roadmap; `changelog.md` is for **shipped** code only (no in-flight design entries).
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
 - **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + OpenAlgo-parity observability apply.
+
+## Current handoff (2026-07-06)
+
+State at handoff: Phase 3 ("build the unmapped") exit criterion is met — waves 1–2 shipped 16 features (six analysis widgets, watchlist formula builder + gated quick Buy/Sell, hide-values toggle, GoCharting webhook, tick-capture API/config/UI, bhavcopy + local-store browse, EOD auto-sync cron); CI is green on `main` (Test, Supply Chain, Site, CodeQL); every doc count matches code (101 widgets, 35 brokers, 18 packages). `PLAN.md` is the roadmap of record — resume from its phase tracker, never restart planning.
+
+**Next-work queue (in order):**
+1. **Phase 2 stabilisation** — `PLAN.md` Phase 2 open items; the consolidation backlog of record is `.local/specs/consolidation/BACKLOG.md` (21 units, U1/U2 safety fixes landed). Biggest units: G40 broker-connect merge, honesty passes (G25 remainder), journal FTS5 migration (G31), CI shard generation (G32).
+2. **Phase 4 learning loop** — AI1–AI3 (skill creation write path, FTS5 session search, read-only tool scripting) + the full-day Practice run; spec first in `.local/specs/`.
+3. **Phase 5 distribution** — desktop updater (Tauri updater, not git-pull), in-app bug reporting, `make desktop-build` end-to-end verification.
+4. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
+
+**Non-negotiables (verify before claiming done):**
+- Every reachable live order mints a `SafetyContext` via `gate_order`/`gate_broker_write` → `BrokerRouter`; `gateway/tests/test_no_legacy_order_path.py` is the guard — run it after touching anything order-adjacent.
+- MERGE the union of capabilities — never delete a duplicate blind; a pure-dead-path exception must be stated in the commit message.
+- Frontend live-order entrypoints stay fail-closed (`assertNativeWriteTargetReadyOrThrow`); broker store selectors use composite `source:broker:account_id` keys.
+- Widget/broker/package count pins move in lockstep: `widgetFactory.test.ts` (catalogue), `test_adapter.py` (BROKER_CATALOG), `capabilities.test.ts` (site), `test_project_structure.py` (packages).
+- Lockfile changes require `python scripts/generate-notice.py` + commit, or the Supply Chain workflow fails on NOTICE drift.
+- Full local gate before any push (and push only with explicit maintainer permission): whole pytest tree, ruff, `tsc --noEmit`, full terminal vitest (CI shards under-cover; run everything), terminal build, site vitest, secrets scan.
 
 ## Security & Configuration
 
