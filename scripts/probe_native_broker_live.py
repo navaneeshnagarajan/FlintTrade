@@ -43,6 +43,7 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 }
 
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
+ORDER_DETAIL_READ_CHOICES = ("orderstatus", "orderhistory", "ordertrades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
@@ -64,6 +65,8 @@ KOTAK_READ_CHOICES = (
     "holdings",
     "orders",
     "trades",
+    "orderhistory",
+    "ordertrades",
     "margin",
     "scrip_master",
     "search_scrip",
@@ -73,10 +76,11 @@ KOTAK_READ_CHOICES = (
 )
 READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
     "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES + ("expiry", "optionchain"),
-    "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES + ("optionchain",),
-    "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
+    "groww": COMMON_READ_CHOICES + ("orderstatus", "ordertrades") + GROWW_MARKET_READ_CHOICES + ("optionchain",),
+    "indmoney": COMMON_READ_CHOICES + ("orderstatus", "ordertrades") + INDMONEY_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
     "upstox": COMMON_READ_CHOICES + UPSTOX_MARKET_READ_CHOICES + (
+        *ORDER_DETAIL_READ_CHOICES,
         "optiongreeks",
         "expiry",
         "optionchain",
@@ -227,6 +231,10 @@ class PromptAborted(Exception):
     """Raised when the operator cancels a hidden-input prompt."""
 
 
+class InconclusiveRead(Exception):
+    """Raised when a read is supported but needs live state the account lacks."""
+
+
 def redact(text: object) -> str:
     """Return a bounded string with broker/account identifiers removed."""
     value = str(text)
@@ -360,6 +368,56 @@ def _option_chain_request() -> dict[str, Any]:
     }
 
 
+def _payload_rows(payload: Any) -> list[Any]:
+    """Return likely table rows from a broker read payload."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, tuple):
+        return list(payload)
+    if hasattr(payload, "model_dump"):
+        return [payload.model_dump()]
+    if isinstance(payload, dict):
+        for key in ("data", "orders", "order_list", "items", "rows"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+        return [payload]
+    return []
+
+
+def _read_field(row: Any, *names: str) -> str:
+    if hasattr(row, "model_dump"):
+        row = row.model_dump()
+    if not isinstance(row, dict):
+        return ""
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+async def _sample_order_id(adapter: Any, session: Any) -> str:
+    """Find a broker order id from order_book for per-order read probes."""
+    order_book = getattr(adapter, "order_book", None)
+    if not callable(order_book):
+        raise InconclusiveRead("adapter has no order book to sample an order id")
+    rows = _payload_rows(await order_book(session))
+    for row in rows:
+        order_id = _read_field(
+            row,
+            "orderid",
+            "order_id",
+            "groww_order_id",
+            "nOrdNo",
+            "orderId",
+            "id",
+        )
+        if order_id:
+            return order_id
+    raise InconclusiveRead("no sample order id available from order book")
+
+
 def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
     if name == "profile":
         if broker == "dhan":
@@ -369,6 +427,24 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
         return adapter.order_book
     if name == "trades":
         return adapter.trade_book
+    if name in {"orderstatus", "orderhistory", "ordertrades"}:
+        method_by_name = {
+            "orderstatus": "order_details",
+            "orderhistory": "order_history",
+            "ordertrades": "order_trades",
+        }
+        method = getattr(adapter, method_by_name[name], None)
+        if not callable(method):
+            if name == "ordertrades" and broker == "upstox":
+                method = getattr(adapter, "trades_by_order", None)
+            if not callable(method):
+                return None
+
+        async def _call_order_read(session: Any) -> Any:
+            order_id = await _sample_order_id(adapter, session)
+            return await method(session, order_id)
+
+        return _call_order_read
     if name == "quotes":
         return lambda session: adapter.quotes(session, [PROBE_QUOTE_SYMBOL])
     if name == "ltp":
@@ -484,6 +560,9 @@ async def run_probe(
             continue
         try:
             payload = await call(session)
+        except InconclusiveRead as exc:
+            print(f"{name}: inconclusive {redact(exc)}")
+            continue
         except Exception as exc:  # noqa: BLE001 - continue to collect all read statuses
             if should_keep_session_after_probe_error(exc):
                 print(f"{name}: inconclusive {type(exc).__name__}: {redact(exc)}")

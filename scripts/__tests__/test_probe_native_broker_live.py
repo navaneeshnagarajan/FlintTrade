@@ -11,6 +11,7 @@ class _FakeAdapter:
         self.credentials: dict[str, str] | None = None
         self.logged_out = False
         self.calls: list[tuple] = []
+        self.order_rows: list[dict[str, str]] = []
 
     async def login(self, credentials: dict[str, str]) -> object:
         self.credentials = credentials
@@ -39,7 +40,23 @@ class _FakeAdapter:
         return [{"symbol": "SECRET"}]
 
     async def order_book(self, _session: object) -> list:
-        return []
+        return self.order_rows
+
+    async def order_details(self, _session: object, order_id: str) -> dict:
+        self.calls.append(("order_details", order_id))
+        return {"orderid": order_id, "status": "OPEN"}
+
+    async def order_history(self, _session: object, order_id: str, tag: str | None = None) -> list:
+        self.calls.append(("order_history", order_id, tag))
+        return [{"orderid": order_id, "status": "OPEN"}]
+
+    async def order_trades(self, _session: object, order_id: str) -> list:
+        self.calls.append(("order_trades", order_id))
+        return [{"orderid": order_id, "trade_id": "T1"}]
+
+    async def trades_by_order(self, _session: object, order_id: str) -> list:
+        self.calls.append(("trades_by_order", order_id))
+        return [{"orderid": order_id, "trade_id": "T1"}]
 
     async def trade_book(self, _session: object) -> list:
         return []
@@ -286,8 +303,56 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "ltp" in probe._resolve_reads("upstox", ["default"])
     assert "ohlc" in probe._resolve_reads("upstox", ["default"])
     assert "optiongreeks" in probe._resolve_reads("upstox", ["all"])
+    assert "orderstatus" in probe._resolve_reads("upstox", ["all"])
+    assert "orderhistory" in probe._resolve_reads("upstox", ["all"])
+    assert "ordertrades" in probe._resolve_reads("upstox", ["all"])
+    assert "orderstatus" not in probe._resolve_reads("upstox", ["default"])
+    assert "orderhistory" not in probe._resolve_reads("upstox", ["default"])
+    assert "ordertrades" not in probe._resolve_reads("upstox", ["default"])
+    assert "orderstatus" in probe._resolve_reads("groww", ["all"])
+    assert "ordertrades" in probe._resolve_reads("groww", ["all"])
+    assert "orderstatus" in probe._resolve_reads("indmoney", ["all"])
+    assert "ordertrades" in probe._resolve_reads("indmoney", ["all"])
     assert "market_depth" in probe._resolve_reads("kotakneo", ["all"])
     assert "quote_details" in probe._resolve_reads("kotakneo", ["default"])
+    assert "orderstatus" not in probe._resolve_reads("kotakneo", ["all"])
+    assert "orderhistory" in probe._resolve_reads("kotakneo", ["default"])
+    assert "ordertrades" in probe._resolve_reads("kotakneo", ["default"])
+
+
+def test_probe_per_order_reads_dispatch_when_order_book_has_sample(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    fake.order_rows = [{"orderid": "ORDER-1"}]
+    values = iter(["upstox-test-token", "upstox-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "upstox", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("upstox", "access_token", ["orderstatus", "orderhistory", "ordertrades"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert ("order_details", "ORDER-1") in fake.calls
+    assert ("order_history", "ORDER-1", None) in fake.calls
+    assert ("order_trades", "ORDER-1") in fake.calls
+    assert "orderstatus: ok object_keys=2" in out
+    assert "orderhistory: ok rows=1" in out
+    assert "ordertrades: ok rows=1" in out
+    assert "ORDER-1" not in out
+
+
+def test_probe_per_order_reads_are_inconclusive_without_order_sample(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["groww-test-token", "groww-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "groww", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("groww", "access_token", ["orderstatus", "ordertrades"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "orderstatus: inconclusive no sample order id available from order book" in out
+    assert "ordertrades: inconclusive no sample order id available from order book" in out
+    assert not any(call[0] in {"order_details", "order_trades"} for call in fake.calls)
 
 
 def test_upstox_default_probe_exercises_market_and_calendar_reads(monkeypatch, capsys) -> None:
