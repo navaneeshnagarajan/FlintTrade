@@ -1,6 +1,10 @@
 # Gateway
 
-> FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, per-broker adapters for 35 brokers, an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter, not the primary path.
+> FlintTrade's broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter,
+> the OpenAlgo-compatible primary bridge, evidence-gated native adapters, an encrypted
+> credential vault, and the WebSocket bridge. OpenAlgo stays the preferred
+> community-tested path; native adapters are promoted per broker only after live
+> verification.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -11,7 +15,7 @@
 - `src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG`
 - `src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification`
 - `src/flinttrade_gateway/registry.py — BrokerRegistry over the 35-broker catalogue`
-- `src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, OpenAlgo bridge, …) against the BrokerAdapter ABC`
+- `src/flinttrade_gateway/brokers/ — the OpenAlgo bridge plus native per-broker adapters (Dhan, Upstox, INDmoney, Kotak Neo, Groww, …) against the BrokerAdapter ABC`
 - `src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault`
 - `src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients`
 

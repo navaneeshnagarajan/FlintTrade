@@ -32,7 +32,7 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
 
       <FieldRow
         label="Gateway URL"
-        hint="Base URL for the live broker bridge. Use FlintTrade's built-in gateway by default, or point this at an OpenAlgo-compatible server."
+        hint="Base URL for the OpenAlgo-compatible bridge. Native broker connections are managed from Brokers."
       >
         <TextInput
           value={settings.host}

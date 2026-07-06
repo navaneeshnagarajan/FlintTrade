@@ -1,8 +1,8 @@
 """Adapter tests for the full Upstox parity surface (mock facade; no SDK).
 
 The original v2 surface (login, gated trio happy path, portfolio reads, quotes,
-history, option chain, margin) is covered by the root-level
-``tests/test_upstox_adapter.py``; this file exercises everything added in the
+history, option chain, margin) is covered by
+``tests/brokers/test_upstox_adapter_base.py``; this file exercises everything added in the
 parity wave: OAuth code login, broker-side logout, variety dispatch (AMO /
 sliced / GTT) through the gated trio, the batch writes (multi-order,
 cancel-all, exit-all, convert-position) and their router gating, the new reads

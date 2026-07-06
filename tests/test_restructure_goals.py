@@ -168,7 +168,8 @@ def test_runtime_entrypoints_treat_openalgo_as_optional() -> None:
     assert "OpenAlgo integration not responding" in health
     assert "OpenAlgo integration (optional)" in status
     assert "built\non top of" not in docs_readme
-    assert re.search(r"optional\s+OpenAlgo-compatible bridge", docs_readme)
+    assert "recommended OpenAlgo-compatible bridge" in docs_readme
+    assert re.search(r"evidence-gated\s+native\s+broker contracts", docs_readme)
     assert "Ping FlintTrade backend health" in cron_readme
 
 

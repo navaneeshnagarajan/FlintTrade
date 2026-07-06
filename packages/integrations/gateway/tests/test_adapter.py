@@ -206,8 +206,15 @@ class TestBrokerCatalog:
         assert "MCX" in entry.exchanges
         assert {m.id for m in entry.auth_methods} == {"api_key_totp", "api_key_secret", "access_token"}
         secret = next(m for m in entry.auth_methods if m.id == "api_key_secret")
-        assert "session is approved in Groww Cloud" in secret.description
+        assert "passed with an approved key" in secret.description
         assert "session approval is required" in next(f for f in secret.fields if f.name == "api_secret").help
+
+    def test_upstox_analytics_access_token_is_catalogued_as_read_only(self):
+        entry = BROKER_CATALOG["upstox"]
+        analytics = next(m for m in entry.auth_methods if m.id == "analytics_access_token")
+        assert analytics.kind == "direct"
+        assert analytics.credential_defaults == {"read_only": "true", "token_scope": "analytics"}
+        assert "read-only" in analytics.description
 
     def test_kotakneo_catalogue_matches_native_segment_map_but_stays_disabled(self):
         """Kotak Neo metadata must expose every segment the native mapper supports."""

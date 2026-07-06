@@ -15,6 +15,7 @@ export interface NativeBrokerTargetAccount {
   broker: string;
   source?: "gateway" | "native";
   status?: string;
+  read_only?: boolean;
 }
 
 /**
@@ -22,7 +23,8 @@ export interface NativeBrokerTargetAccount {
  *
  * OpenAlgo remains primary: when an OpenAlgo-compatible API key is configured,
  * callers should keep using the bridge path. Native writes are selected only in
- * live mode, with no bridge key, and with a connected active native account.
+ * live mode, with no bridge key, and with a connected, trading-capable active
+ * native account.
  */
 export function pickNativeWriteTargetFromState(
   mode: string,
@@ -33,7 +35,9 @@ export function pickNativeWriteTargetFromState(
   if (mode !== "live" || apiKey.trim().length > 0) return undefined;
 
   const active = findBrokerAccountMatch(accounts, activeAccountId);
-  if (active?.source !== "native" || active.status !== "connected") return undefined;
+  if (active?.source !== "native" || active.status !== "connected" || active.read_only === true) {
+    return undefined;
+  }
   return { broker: active.broker, accountId: active.account_id };
 }
 
@@ -52,10 +56,11 @@ export function pickNativeBrokerOrderTargetFromState(
  * True when native writes are in force (live mode, no bridge key) and the
  * operator's *selected* active account is native but not confirmed connected —
  * e.g. right after a reload, before the first account poll re-derives its live
- * status from the session. Callers on the live-order path must fail closed
- * rather than fall through to the bare path, which the backend would resolve to
- * `brokers.execution.default` — silently routing the order to a different target
- * than the operator chose.
+ * status from the session, or when the selected native session is explicitly
+ * read-only (Upstox Analytics tokens). Callers on the live-order path must fail
+ * closed rather than fall through to the bare path, which the backend would
+ * resolve to `brokers.execution.default` — silently routing the order to a
+ * different target than the operator chose.
  */
 export function hasUnconfirmedNativeActiveWriteTarget(
   mode: string,
@@ -65,7 +70,7 @@ export function hasUnconfirmedNativeActiveWriteTarget(
 ): boolean {
   if (mode !== "live" || apiKey.trim().length > 0) return false;
   const active = findBrokerAccountMatch(accounts, activeAccountId);
-  return active?.source === "native" && active.status !== "connected";
+  return active?.source === "native" && (active.status !== "connected" || active.read_only === true);
 }
 
 export function pickNativeWriteTarget(mode: string, apiKey: string): NativeWriteTarget | undefined {
@@ -83,9 +88,9 @@ export function nativeActiveWriteTargetIsUnconfirmed(mode: string, apiKey: strin
 
 /** Standard fail-closed message shown when a native write target isn't ready. */
 export const NATIVE_TARGET_NOT_READY_MESSAGE =
-  "Your selected native broker isn't connected yet — its session is still being "
-  + "established (this can happen right after a reload). Wait a moment and retry, or "
-  + "reconnect it in Settings → Brokers.";
+  "Your selected native broker is not available for live writes — its session may still "
+  + "be establishing, may need re-authentication, or may be read-only. Wait a moment, "
+  + "reconnect it, or choose a trading-capable broker session in Settings → Brokers.";
 
 /**
  * Fail closed on EVERY live-order entrypoint: throw if the operator's selected

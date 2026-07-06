@@ -388,10 +388,11 @@ def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str
     try:
         session = registry.get_session_for(adapter_id, account_id)
     except Exception:  # noqa: BLE001 - no session registered
-        return {"has_session": False, "expires_at": None}
+        return {"has_session": False, "expires_at": None, "read_only": False}
     return {
         "has_session": True,
         "expires_at": getattr(session, "expires_at", None),
+        "read_only": bool(getattr(session, "is_read_only", False)),
     }
 
 
@@ -1420,11 +1421,16 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
         return jsonify({"status": "error", "message": "Native broker account not found."}), 404
 
     try:
-        registry.get_session_for(adapter_id, account_id)
+        session = registry.get_session_for(adapter_id, account_id)
     except Exception:  # noqa: BLE001
         return jsonify({
             "status": "error",
             "message": "Broker account has no live session; re-authenticate first.",
+        }), 409
+    if bool(getattr(session, "is_read_only", False)):
+        return jsonify({
+            "status": "error",
+            "message": "Broker account is read-only and cannot be used as the live write default.",
         }), 409
 
     snapshot = _snapshot_workspace()

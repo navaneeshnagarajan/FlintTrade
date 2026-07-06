@@ -34,6 +34,7 @@ export function nativeToBrokerAccount(account: NativeAccount): BrokerAccount {
     is_primary: !!account.is_primary,
     source: "native",
     expires_at: account.expires_at ?? null,
+    read_only: !!account.read_only,
     needs_relogin: !!account.needs_relogin,
     login_retryable: !!account.login_retryable,
   };

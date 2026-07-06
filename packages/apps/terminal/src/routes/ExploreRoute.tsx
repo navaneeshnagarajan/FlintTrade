@@ -543,7 +543,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: "[aria-label='Explore navigation']",
     title: "Navigation & Setup",
     description:
-      "Use the setup wizard to connect FlintTrade's broker gateway or an OpenAlgo-compatible server. Settings keeps those connections editable later.",
+      "Use the setup wizard to connect the recommended OpenAlgo bridge or a verified native broker. Settings keeps those connections editable later.",
     placement: "bottom",
   },
   {
@@ -564,7 +564,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: ".rounded-lg.border.border-border-default.bg-surface-card",
     title: "Ready to Go Live?",
     description:
-      "Set up FlintTrade's broker gateway, or connect an existing OpenAlgo-compatible server. Takes about 2 minutes.",
+      "Set up the recommended OpenAlgo bridge or a verified native broker. Takes about 2 minutes.",
     placement: "top",
   },
 ];
@@ -611,7 +611,7 @@ export default function ExploreRoute() {
         mainLabel="Explore mode"
         eyebrow="Sample workspace"
         title="Explore FlintTrade"
-        subtitle="Open every module with simulated data, then connect FlintTrade's broker gateway when you are ready for live data."
+        subtitle="Open every module with simulated data, then connect OpenAlgo or a verified native broker when you are ready for live data."
         actions={
           <nav aria-label="Explore navigation" className="flex items-center gap-2">
             <Button
@@ -732,7 +732,7 @@ export default function ExploreRoute() {
                       Ready to start?
                     </h2>
                     <p className="mt-1 text-sm text-text-muted">
-                      Set up your workspace in 2 minutes, then connect FlintTrade's broker gateway or an OpenAlgo-compatible server.
+                      Set up your workspace in 2 minutes, then connect the recommended OpenAlgo bridge or a verified native broker.
                     </p>
                   </div>
                 </div>

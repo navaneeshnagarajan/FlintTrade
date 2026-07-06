@@ -185,7 +185,7 @@ describe("startSmartRoute", () => {
       activeAccountId: "native:upstox:U1",
     };
 
-    await expect(startSmartRoute(BASE_PARAMS)).rejects.toThrow(/isn't connected yet/i);
+    await expect(startSmartRoute(BASE_PARAMS)).rejects.toThrow(/not available for live writes/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

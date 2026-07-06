@@ -167,7 +167,7 @@ describe("startAgent", () => {
       activeAccountId: "native:upstox:U1",
     };
 
-    expect(() => startAgent(BASE_PARAMS)).toThrow(/isn't connected yet/i);
+    expect(() => startAgent(BASE_PARAMS)).toThrow(/not available for live writes/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

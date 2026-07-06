@@ -45,4 +45,13 @@ describe("brokerTargets", () => {
       accountId: "SHARED",
     });
   });
+
+  it("fails closed for a selected read-only native account", () => {
+    const readOnlyUpstox = { ...nativeUpstox, read_only: true };
+    const active = brokerAccountKey(readOnlyUpstox);
+
+    expect(pickNativeWriteTargetFromState("live", "", [readOnlyUpstox], active)).toBeUndefined();
+    expect(pickNativeBrokerOrderTargetFromState("live", "", [readOnlyUpstox], active)).toBeUndefined();
+    expect(hasUnconfirmedNativeActiveWriteTarget("live", "", [readOnlyUpstox], active)).toBe(true);
+  });
 });

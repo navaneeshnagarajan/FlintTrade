@@ -105,6 +105,21 @@ async def _session(adapter):
 async def test_login_returns_session():
     session = await _session(_adapter(MockUpstox()))
     assert session.adapter_id == "upstox" and session.access_token == "TOK"
+    assert session.is_read_only is False
+
+
+@pytest.mark.asyncio
+async def test_login_marks_analytics_tokens_read_only():
+    adapter = _adapter(MockUpstox())
+    session = await adapter.login({
+        "client_id": "C1",
+        "access_token": "TOK",
+        "read_only": "true",
+        "token_scope": "analytics",
+    })
+    assert session.is_read_only is True
+    assert session.read_only_until_at == session.expires_at
+    assert session.extra["token_scope"] == "analytics"
 
 
 @pytest.mark.asyncio

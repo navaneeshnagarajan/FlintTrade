@@ -37,19 +37,21 @@ is not tracked or pulled.
 
 ## Brokers
 
-FlintTrade supports two broker paths: the native FlintTrade gateway and an
-optional OpenAlgo-compatible bridge. The native path is beta: the gateway
-contract, routing, credentials, capabilities, and founder-broker adapter code are
-present in the repo. Native connectability is gated per broker by live evidence:
-Dhan, Upstox, and INDmoney are currently enabled in the app after login/read
-verification against real accounts; Kotak Neo and Groww remain catalogued but
-disabled as "coming soon" until their broker-specific blockers clear. Dhan and
-Upstox use native SDK/API clients, Groww has the official `growwapi` SDK pinned
-for attestation/reference parity while production calls use FlintTrade's tested
-REST transport, and its key-secret token mint now requires broker-side API-key
-session approval before FlintTrade can log in. INDmoney is REST-only with a
-dashboard-generated 24-hour token. INDstocks' FAQ advertises an `indstocks-sdk`,
-but no matching PyPI or npm
+FlintTrade supports two broker paths: the recommended OpenAlgo-compatible bridge
+and the native FlintTrade gateway. OpenAlgo is the primary/community-tested
+broker path; the native path is beta and connectability is gated per broker by
+live evidence. Dhan, Upstox, and INDmoney are currently enabled in the app after
+login/read verification against real accounts; Kotak Neo and Groww remain
+catalogued but disabled as "coming soon" until their broker-specific blockers
+clear. Dhan and Upstox use native SDK/API clients, Groww has the official
+`growwapi` SDK pinned for attestation/reference parity while production calls use
+FlintTrade's tested REST transport, and its approved-key probe now proves native
+login/account reads while market-data/API permission, static IP, and order-safety
+evidence remain pending. INDmoney is REST-only with a dashboard-generated
+24-hour token. Upstox Developer Apps
+Analytics Access Tokens are treated as read-only native sessions; trading still
+needs the OAuth/trading-capable token path. INDstocks' FAQ advertises an
+`indstocks-sdk`, but no matching PyPI or npm
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus portal evidence but no promoted native connect
 yet. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK

@@ -36,7 +36,7 @@ const SLOGAN = [
 ] as const;
 
 const WELCOME_FEATURES = [
-  "Native broker gateway plus optional OpenAlgo bridge",
+  "OpenAlgo bridge plus verified native brokers",
   "Explore, Practice, and Live safety modes",
   "Option chain, Greeks, order flow, and depth",
   "Strategy lab, SIP tracking, and AI context",

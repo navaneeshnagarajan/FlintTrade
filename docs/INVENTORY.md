@@ -13,7 +13,8 @@ after live login/read verification; Kotak Neo and Groww are built and catalogued
 but stay `connectable=false` until their remaining live blockers clear. Groww's
 official `growwapi` SDK is pinned for attestation/reference parity while the
 adapter keeps using FlintTrade's tested REST transport; the latest key-secret
-probe is blocked by broker-side API-key session approval before token minting.
+probe proves login/account reads but still lacks broker-side market-data/API
+permission, static IP, and order-safety evidence.
 INDmoney is the only REST-only native with no SDK pin. INDstocks' own FAQ advertises
 `indstocks-sdk`, but PyPI and npm currently have no matching package, so the
 adapter stays REST-native until a real SDK distribution can be pinned.
@@ -127,7 +128,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); stale coming-soon selectors such as Kotak Neo do not schedule false refresh work. |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated; Kotak Neo and Groww remain not connectable. Groww also needs broker-side API-key session approval before token minting. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated; Kotak Neo and Groww remain not connectable. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
 | n8n bridge (health / workflows / webhook trigger) | ✅ | Automate → "n8n Bridge" section (advanced skill tier) wires all five clients (health badge, activate/deactivate with surfaced failures, manual webhook trigger); honest offline + missing-API-key states; `N8N_HOST` is read by the bridge and documented with `N8N_API_KEY` in `.env.example` |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 

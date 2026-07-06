@@ -146,8 +146,8 @@ export function NoConnectionOverlay() {
             id="no-connection-desc"
             className="text-sm text-text-secondary leading-relaxed"
           >
-            Cannot reach the configured broker gateway. Check FlintTrade's
-            direct broker settings or your optional OpenAlgo bridge, then retry.
+            Cannot reach the configured broker gateway. Check your OpenAlgo
+            bridge or verified native broker settings, then retry.
           </p>
         </div>
 

@@ -55,6 +55,12 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _PENDING = "Upstox {0} — streaming wave pending live SDK verification"
 
 
+def _credential_truthy(value: Any) -> bool:
+    """Return True for common truthy credential flag spellings."""
+
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "read_only"}
+
+
 def _split_symbol(raw: str) -> tuple[str, str]:
     """Split a ``"NSE:RELIANCE"`` quote symbol into ``(exchange, name)``.
 
@@ -107,7 +113,7 @@ UPSTOX_CAPABILITIES = Capabilities(
     # good. GTT (v3 /order/gtt/*) and sliced orders (v3 place with slice=true,
     # our iceberg equivalent) ARE wired through the gated place/modify/cancel
     # dispatch below, so both are advertised. The capability-honesty test in
-    # tests/test_upstox_mapping.py pins cover to False and these two to True.
+    # tests/brokers/test_upstox_mapping_base.py pins cover to False and these two to True.
     cover_order_native=False,
     basket_order_native=True,
     multi_quote_supported=True,
@@ -579,12 +585,19 @@ class UpstoxAdapter(BrokerAdapter):
         if not access_token:
             raise BrokerError("Upstox login requires an access_token (or an OAuth code + api_key/api_secret)")
         client = None if self._client_factory is not None else UpstoxClient(access_token)
+        expires_at = datetime.now(tz=timezone.utc).timestamp() + 24 * 3600
+        read_only = _credential_truthy(credentials.get("read_only")) or str(credentials.get("token_scope") or "").lower() in {
+            "analytics",
+            "read_only",
+            "readonly",
+        }
         return Session(
             access_token=access_token,
-            expires_at=datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
+            expires_at=expires_at,
             account_id=str(credentials.get("client_id", "")),
             adapter_id="upstox",
-            extra={"client": client},
+            extra={"client": client, "token_scope": str(credentials.get("token_scope") or "")},
+            read_only_until_at=expires_at if read_only else None,
         )
 
     def replay_credentials(self, credentials: dict, session: Session) -> dict:

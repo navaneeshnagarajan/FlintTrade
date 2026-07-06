@@ -1503,7 +1503,7 @@ describe("OpenAlgo API client (api.ts)", () => {
         product: "MIS",
         orderType: "MARKET",
       } as unknown as Parameters<typeof placeOrder>[0]),
-    ).rejects.toThrow(/isn't connected yet/i);
+    ).rejects.toThrow(/not available for live writes/i);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

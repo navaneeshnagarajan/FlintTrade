@@ -465,8 +465,21 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
         },
         {
             "id": "access_token", "label": "Access token", "kind": "direct",
-            "description": "Paste a token you already generated (e.g. via a prior OAuth login or a sandbox app).",
+            "description": (
+                "Paste a trading-capable token you already generated, such as a prior OAuth login or sandbox app token. "
+                "Use the Analytics token method below for Upstox Developer → Apps analytics tokens."
+            ),
             "fields": [_f("client_id", "Client ID", required=False), _f("access_token", "Access token", secret=True)],
+        },
+        {
+            "id": "analytics_access_token", "label": "Analytics access token (read-only)", "kind": "direct",
+            "description": (
+                "Paste the one-year Analytics Access Token from Upstox Developer → Apps. Upstox documents this token "
+                "as read-only: market data/streaming, plus portfolio/account/funds reads only when static IP is configured. "
+                "FlintTrade will block place/modify/cancel through this session."
+            ),
+            "fields": [_f("client_id", "Client ID", required=False), _f("access_token", "Analytics access token", secret=True)],
+            "credential_defaults": {"read_only": "true", "token_scope": "analytics"},
         },
     ],
     "kotakneo": [
@@ -527,8 +540,8 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
             "id": "api_key_secret", "label": "API key + secret", "kind": "direct",
             "description": (
                 "Enter the Groww Trade API key and secret from Groww Cloud/API Keys. FlintTrade mints the "
-                "daily access token locally after the session is approved in Groww Cloud before creating the "
-                "broker session. Live order placement still requires static outbound IP setup."
+                "daily access token locally before creating the broker session. Live account reads have "
+                "passed with an approved key; live order placement still requires static outbound IP setup."
             ),
             "fields": [
                 _f("user_id", "User ID", required=False),
@@ -747,7 +760,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
             "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
             "Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.",
             "Groww native token minting may require approving the API-key session in Groww Cloud before FlintTrade can log in.",
-            "Groww native account reads and margin checks have live proof, but native connect stays disabled until session approval, market-data/API permissions, static IP setup, and order-safety verification pass.",
+            "Groww native account reads and margin checks have passed with an approved key, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
         ],
         "client_configs": [
             {

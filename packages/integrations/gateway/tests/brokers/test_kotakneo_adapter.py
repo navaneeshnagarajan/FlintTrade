@@ -1,7 +1,7 @@
 """Tests for the Kotak Neo adapter's full-parity surface (mock facade; no SDK).
 
 The base surface (login, gated regular/bracket/cover place, reads, quotes,
-margin, scrip search) is covered in ``tests/test_kotakneo_adapter.py``; this
+margin, scrip search) is covered in ``tests/brokers/test_kotakneo_adapter_base.py``; this
 file exercises the parity wave: AMO, the bracket/cover leg-cancel endpoints,
 full-surface modify, per-order history + fills, filtered limits, scrip master,
 typed quotes + market depth, the HSM subscribe/unsubscribe surface and the

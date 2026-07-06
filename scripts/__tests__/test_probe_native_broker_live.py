@@ -279,6 +279,9 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "ohlc" in probe._resolve_reads("groww", ["default"])
     assert "expiry" in probe._resolve_reads("groww", ["default"])
     assert "depth" not in probe._resolve_reads("groww", ["all"])
+    assert "ltp" in probe._resolve_reads("indmoney", ["default"])
+    assert "ltp" in probe._resolve_reads("indmoney", ["all"])
+    assert "optionchain" not in probe._resolve_reads("indmoney", ["all"])
     assert "search" in probe._resolve_reads("upstox", ["default"])
     assert "ltp" in probe._resolve_reads("upstox", ["default"])
     assert "ohlc" in probe._resolve_reads("upstox", ["default"])
@@ -330,6 +333,44 @@ def test_upstox_probe_uses_ltp_quotes_when_ltp_method_is_absent(monkeypatch, cap
     assert "ltp: ok rows=1" in out
     assert "upstox-test-token" not in out
     assert "upstox-user" not in out
+
+
+def test_indmoney_default_probe_exercises_ltp_and_market_reads(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["indmoney-test-token", "indmoney-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "indmoney", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("indmoney", "access_token", ["default"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.credentials == {"access_token": "indmoney-test-token", "user_id": "indmoney-user"}
+    assert ("quotes", ("NSE:RELIANCE",)) in fake.calls
+    assert ("ltp", ("NSE:RELIANCE",)) in fake.calls
+    assert ("market_depth", ("NSE:RELIANCE",)) in fake.calls
+    assert ("margin", "RELIANCE", "NSE") in fake.calls
+    assert ("history", "RELIANCE", "NSE", "1d") in fake.calls
+    assert "ltp: ok object_keys=1" in out
+    assert "depth: ok rows=1" in out
+    assert "history: ok object_keys=1" in out
+    assert "indmoney-test-token" not in out
+    assert "indmoney-user" not in out
+
+
+def test_indmoney_all_probe_excludes_broker_side_coming_soon_reads(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["indmoney-test-token", "indmoney-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "indmoney", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("indmoney", "access_token", ["all"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert not any(call[0] == "optionchain" for call in fake.calls)
+    assert "optionchain:" not in out
+    assert "Coming Soon" not in out
 
 
 def test_kotak_default_probe_exercises_extended_reads(monkeypatch, capsys) -> None:

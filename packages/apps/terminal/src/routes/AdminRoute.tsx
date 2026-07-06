@@ -222,7 +222,7 @@ gateway
   +-- core (config, models)
   +-- native adapter contract + routing
   +-- Dhan direct scaffold (SDK calls gated)
-  +-- optional OpenAlgo-compatible shims
+  +-- OpenAlgo-compatible bridge shims
 
 engine
   +-- core (OpenAlgo client, models)

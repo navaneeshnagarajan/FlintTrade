@@ -248,6 +248,7 @@ describe("useBrokerAccounts — successful response", () => {
         expires_at: 9_999,
         needs_relogin: false,
         login_retryable: false,
+        read_only: false,
       },
       {
         account_id: "DHAN-1",
@@ -261,6 +262,7 @@ describe("useBrokerAccounts — successful response", () => {
         expires_at: null,
         needs_relogin: true,
         login_retryable: false,
+        read_only: false,
       },
       {
         account_id: "IND-1",
@@ -274,6 +276,7 @@ describe("useBrokerAccounts — successful response", () => {
         expires_at: null,
         needs_relogin: false,
         login_retryable: true,
+        read_only: false,
       },
     ]);
   });
@@ -303,6 +306,7 @@ describe("useBrokerAccounts — successful response", () => {
         expires_at: null,
         needs_relogin: false,
         login_retryable: false,
+        read_only: false,
       },
     ]);
   });

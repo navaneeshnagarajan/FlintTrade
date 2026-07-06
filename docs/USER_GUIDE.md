@@ -66,17 +66,17 @@ For step-by-step instructions tailored to each operating system, see:
 
 ## 2. First broker connection
 
-FlintTrade supports two broker paths: the native FlintTrade gateway for
-first-party adapters, and an OpenAlgo-compatible server for users who already
-run OpenAlgo.
+FlintTrade supports two broker paths: the recommended OpenAlgo-compatible bridge
+for users who already run OpenAlgo, and the native FlintTrade gateway for
+currently verified first-party adapters.
 
 ### Steps
 
-1. **Choose a path.** Use the FlintTrade gateway for currently verified native
-   brokers (Dhan, Upstox, and INDmoney today), or install OpenAlgo separately
-   if you want the OpenAlgo integration path. Brokers shown as "coming soon"
-   are catalogued but not yet enabled for native connect.
-2. **Optional: configure your broker in OpenAlgo.** Open `http://localhost:5000`,
+1. **Choose a path.** Use OpenAlgo for the recommended community-tested broker
+   path, or use the native gateway only for currently verified native brokers
+   (Dhan, Upstox, and INDmoney today). Brokers shown as "coming soon" are
+   catalogued but not yet enabled for native connect.
+2. **Configure your broker in OpenAlgo when using the bridge.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
    broker). OpenAlgo persists the session. Skip this step for Explore mode,
@@ -93,17 +93,18 @@ run OpenAlgo.
    in-app setup window.
 
 For native connect, use Setup → Brokers or Settings → Brokers. Dhan and Upstox
-offer OAuth-style flows, INDmoney uses a dashboard-generated 24-hour token, and
-Kotak Neo plus Groww stay disabled until their live checks pass. Groww may also
-require approving the API-key session in Groww Cloud before FlintTrade can mint
-a token. Localhost postback URLs are for diagnostics unless you expose
-FlintTrade through a broker-reachable tunnel or public URL.
+offer OAuth-style flows, Upstox Developer Apps analytics tokens connect as
+read-only sessions, INDmoney uses a dashboard-generated 24-hour token, and Kotak
+Neo plus Groww stay disabled until their live checks pass. Groww may also require
+approving the API-key session in Groww Cloud before FlintTrade can mint a token.
+Localhost postback URLs are for diagnostics unless you expose FlintTrade through
+a broker-reachable tunnel or public URL.
 
 ### Why two layers?
 
-The two-layer option lets existing OpenAlgo users keep their broker setup
-while FlintTrade keeps its own backend, native sandbox, analytics, automation,
-and first-party broker gateway.
+The two-layer design lets existing OpenAlgo users keep their broker setup while
+FlintTrade keeps its own backend, native sandbox, analytics, automation, and
+first-party broker gateway for verified native adapters.
 
 ---
 

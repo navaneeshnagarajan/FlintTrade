@@ -115,7 +115,7 @@ describe("ftApi.native envelope unwrapping", () => {
       envelope({
         accounts: [
           { adapter_id: "dhan", account_id: "A1", needs_relogin: true },
-          { adapter_id: "upstox", account_id: "U1", login_retryable: true },
+          { adapter_id: "upstox", account_id: "U1", login_retryable: true, read_only: true },
         ],
       }),
     );
@@ -123,6 +123,7 @@ describe("ftApi.native envelope unwrapping", () => {
     expect(accounts).toHaveLength(2);
     expect(accounts[0].needs_relogin).toBe(true);
     expect(accounts[1].login_retryable).toBe(true);
+    expect(accounts[1].read_only).toBe(true);
   });
 
   it("connectNativeAccount reads connected/login from the unwrapped data", async () => {
@@ -188,9 +189,10 @@ describe("ftApi.native envelope unwrapping", () => {
   });
 
   it("reloginNativeAccount resolves a live session from {data:{session}}", async () => {
-    fetchSpy.mockResolvedValueOnce(envelope({ login: "ok", session: { has_session: true, expires_at: 1 } }));
+    fetchSpy.mockResolvedValueOnce(envelope({ login: "ok", session: { has_session: true, expires_at: 1, read_only: true } }));
     const s = await reloginNativeAccount("dhan", "A1");
     expect(s.has_session).toBe(true);
+    expect(s.read_only).toBe(true);
   });
 
   it("reloginNativeAccount throws when the session did not establish", async () => {

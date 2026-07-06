@@ -229,7 +229,10 @@ export function BrokerConnect() {
       const result = await connectNativeAccount({
         adapter_id: broker.adapter_id,
         account_id: accountId.trim(),
-        credentials: Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
+        credentials: {
+          ...(method.credential_defaults ?? {}),
+          ...Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
+        },
       });
       // A failed connect is a non-2xx that already threw the backend message
       // inside connectNativeAccount; a 2xx always carries connected:true.
@@ -579,6 +582,7 @@ export function BrokerConnect() {
               const connected = a.status === "connected";
               const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
               const retryLater = !!a.login_retryable;
+              const canSetPrimary = connected && !a.is_primary && !a.read_only;
               return (
               <li
                 key={brokerAccountKey(a)}
@@ -599,6 +603,7 @@ export function BrokerConnect() {
                     <div className="text-xs text-text-muted">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
+                      {a.read_only ? " · read-only" : ""}
                       {connected
                         ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
                         : needsFreshLogin
@@ -613,7 +618,7 @@ export function BrokerConnect() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  {connected && !a.is_primary && (
+                  {canSetPrimary && (
                     <Button
                       variant="ghost"
                       size="sm"

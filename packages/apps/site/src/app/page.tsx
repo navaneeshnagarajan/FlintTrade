@@ -13,7 +13,7 @@ const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted workflow workspace',
-    copy: 'React, Dockview, Python services, Rust tick processing, a native broker gateway contract, and optional OpenAlgo integration in one inspectable workspace.',
+    copy: 'React, Dockview, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace.',
   },
   {
     icon: ShieldCheck,
@@ -29,10 +29,10 @@ const featureCards = [
 
 const docsCards = [
   { href: '/docs/desktop', label: 'Desktop App', copy: 'Install FlintTrade on macOS, Windows, or Linux, then configure everything in the app.' },
-  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect optional integrations, explore Practice mode, and learn the workspace.' },
+  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect OpenAlgo or verified native brokers, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
-  { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and optional OpenAlgo passthrough.' },
+  { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and OpenAlgo bridge routes.' },
 ];
 
 const wordmarkChars = 'FlintTrade'.split('');
@@ -44,7 +44,7 @@ const sloganWords = ['Inspect', 'Build', 'Test', 'Automate', 'Analyse', 'Evolve'
 
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
-  'Native broker gateway plus optional OpenAlgo bridge',
+  'OpenAlgo bridge plus verified native brokers',
   'Explore, Practice, and Live safety modes',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',

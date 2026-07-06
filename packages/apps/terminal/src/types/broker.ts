@@ -20,6 +20,7 @@ export interface AuthMethod {
   kind: "direct" | "oauth" | string;
   description: string;
   fields: AuthMethodField[];
+  credential_defaults?: Record<string, string>;
 }
 
 export interface BrokerInfo {
@@ -48,6 +49,7 @@ export interface BrokerAccount {
   is_primary: boolean;
   source?: "gateway" | "native";
   expires_at?: number | null;
+  read_only?: boolean;
   needs_relogin?: boolean;
   login_retryable?: boolean;
 }

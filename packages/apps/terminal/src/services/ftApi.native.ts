@@ -23,6 +23,7 @@ export interface NativeAuthMethod {
   kind: "direct" | "oauth";
   description: string;
   fields: NativeAuthField[];
+  credential_defaults?: Record<string, string>;
 }
 
 export interface McpClientConfig {
@@ -98,6 +99,7 @@ export interface NativeAccount {
   is_primary?: boolean;
   has_session?: boolean;
   expires_at?: number | null;
+  read_only?: boolean;
   /** Set when the last credential replay failed — the stored material is
    * stale/single-use and the operator must re-authenticate (G7). */
   needs_relogin?: boolean;
@@ -241,6 +243,7 @@ export async function setPrimaryNativeAccount(adapterId: string, accountId: stri
 export interface ReloginResult {
   has_session: boolean;
   expires_at?: number | null;
+  read_only?: boolean;
   login?: string;
 }
 

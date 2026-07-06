@@ -23,10 +23,34 @@ import re
 import sys
 import tomllib
 from collections.abc import Iterator, Mapping
+from urllib.parse import ParseResult, urlparse
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 _FORBIDDEN_REQ = re.compile(r"(git\+|file:|https?://[^/]+/.+\.(tar\.gz|whl|zip))")
+_ALLOWED_GIT_SCHEMES = {"https"}
+_ALLOWED_GIT_HOSTS = {"github.com"}
+
+
+def _parse_git_url(url: str) -> ParseResult:
+    """Parse a git URL after dropping pip's optional ``git+`` prefix."""
+
+    return urlparse(url.removeprefix("git+").strip())
+
+
+def _git_source_policy_failure(url: str) -> str | None:
+    """Return a failure reason when a permitted git exception uses an unsafe origin."""
+
+    parsed = _parse_git_url(url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if scheme not in _ALLOWED_GIT_SCHEMES:
+        return f"scheme {scheme or '<none>'!r} is not allowed"
+    if host not in _ALLOWED_GIT_HOSTS:
+        return f"host {host or '<none>'!r} is not allowed"
+    if not parsed.path.strip("/"):
+        return "missing repository path"
+    return None
 
 
 def _normalise_git_repo(url: str) -> str:
@@ -36,10 +60,13 @@ def _normalise_git_repo(url: str) -> str:
     and lower-cases the result so uv.lock and brokers.lock compare regardless of
     those cosmetic differences.
     """
-    base = url.split("?", 1)[0].strip().rstrip("/")
-    if base.endswith(".git"):
-        base = base[: -len(".git")]
-    return base.lower()
+    parsed = _parse_git_url(url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    return f"{scheme}://{host}{path}".lower()
 
 
 def _allowed_uv_git_sources() -> dict[str, dict[str, str]]:
@@ -103,6 +130,10 @@ def check_uv_lock() -> list[str]:
         expected = allowed.get(name)
         if not expected:
             fails.append(f"uv.lock: forbidden git source for {name}: {git_value!r}")
+            continue
+        policy_failure = _git_source_policy_failure(git_value)
+        if policy_failure:
+            fails.append(f"uv.lock: unapproved git source for {name}: {git_value!r} ({policy_failure})")
             continue
         # The commit must be present AND the URL must point at the expected
         # repository (host + owner + name), so a hostile URL merely embedding the

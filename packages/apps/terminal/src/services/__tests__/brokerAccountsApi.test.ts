@@ -64,6 +64,7 @@ describe("brokerAccountsApi", () => {
         account_id: "UPX1",
         label: "Upstox Native",
         has_session: true,
+        read_only: true,
         is_primary: false,
       },
       {
@@ -86,6 +87,7 @@ describe("brokerAccountsApi", () => {
         is_primary: false,
         source: "native",
         expires_at: null,
+        read_only: true,
         needs_relogin: false,
         login_retryable: false,
       },
@@ -99,6 +101,7 @@ describe("brokerAccountsApi", () => {
         is_primary: false,
         source: "native",
         expires_at: null,
+        read_only: false,
         needs_relogin: true,
         login_retryable: false,
       },

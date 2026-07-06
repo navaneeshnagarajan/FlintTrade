@@ -21,7 +21,8 @@ connecting a broker or enabling Live mode.
 - **Backend services** — Python 3.12 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
 - **Gateway integration** — adapter contracts, capability metadata, encrypted
-  credential storage, WebSocket bridges, and optional OpenAlgo-compatible paths.
+  credential storage, WebSocket bridges, the OpenAlgo-compatible primary bridge,
+  and evidence-gated native adapter paths.
 - **Safety model** — Explore, Practice, and Live modes with server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
@@ -31,18 +32,19 @@ connecting a broker or enabling Live mode.
 
 ## Supported brokers
 
-FlintTrade's native broker gateway contract and routing are in beta. Broker
-adapters are implemented as software integrations that require local credentials
-and user-side validation before any live use. Optional OpenAlgo-compatible
-integrations remain available for users who already run OpenAlgo separately;
-see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
+FlintTrade supports the recommended OpenAlgo-compatible bridge plus a beta
+native broker gateway. Native adapters are implemented as software integrations
+that require local credentials and live-read evidence before they are exposed as
+connectable. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current
+matrix.
 
 ## Quickstart (native desktop)
 
 For normal use, install FlintTrade like any other desktop app. The installer
 bundles the backend sidecar and terminal UI, creates the OS workspace on first
-launch, and lets you configure native brokers or an optional OpenAlgo bridge
-from Setup and Settings — no `.env` file or browser dev server required.
+launch, and lets you configure the recommended OpenAlgo bridge or verified
+native brokers from Setup and Settings — no `.env` file or browser dev server
+required.
 
 | OS | Packages | Architectures |
 |---|---|---|

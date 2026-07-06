@@ -7,7 +7,7 @@ Exit All), EDIS, the auth/token/static-IP surface, the scrip-master helper, the
 expired-options history, the order-update stream and the 20/200-level depth
 streams. The gated-write invariant (§8) is asserted for every trade-affecting
 method. The base place/modify/cancel + portfolio surface is covered by
-``tests/test_dhan_adapter.py``.
+``tests/brokers/test_dhan_adapter_base.py``.
 """
 
 from __future__ import annotations

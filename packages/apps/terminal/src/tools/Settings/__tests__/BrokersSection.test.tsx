@@ -101,6 +101,18 @@ const BROKERS = [
           { name: "api_secret", label: "API secret", secret: true, required: true, help: "" },
         ],
       },
+      {
+        id: "analytics_access_token",
+        label: "Analytics access token (read-only)",
+        kind: "direct" as const,
+        description:
+          "Paste the one-year Analytics Access Token from Upstox Developer → Apps. FlintTrade blocks writes.",
+        fields: [
+          { name: "client_id", label: "Client ID", secret: false, required: false, help: "" },
+          { name: "access_token", label: "Analytics access token", secret: true, required: true, help: "" },
+        ],
+        credential_defaults: { read_only: "true", token_scope: "analytics" },
+      },
     ],
   },
   {
@@ -374,7 +386,7 @@ const MCP_BROKERS = [
         "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
         "Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.",
         "Groww native token minting may require approving the API-key session in Groww Cloud before FlintTrade can log in.",
-        "Groww native account reads and margin checks have live proof, but native connect stays disabled until session approval, market-data/API permissions, static IP setup, and order-safety verification pass.",
+        "Groww native account reads and margin checks have passed with an approved key, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
       ],
       client_configs: [
         {
@@ -607,7 +619,6 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no background syncing");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no AI-server data storage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("API-key session in Groww Cloud");
-    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("session approval");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("future broker scope");
@@ -661,6 +672,21 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(screen.getByText(/upstox.*retry later/i)).toBeInTheDocument());
     expect(screen.getByText(/temporarily unavailable/i)).toBeInTheDocument();
     expect(screen.queryByText(/needs fresh login/i)).not.toBeInTheDocument();
+  });
+
+  it("labels connected read-only native sessions", async () => {
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeNativeAccount({
+        account_id: "UPXRO",
+        broker: "upstox",
+        label: "Upstox Analytics",
+        read_only: true,
+      }),
+    ]);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText(/upstox.*read-only.*connected/i)).toBeInTheDocument());
   });
 
   it("connects a direct-credential account (Dhan access token)", async () => {
@@ -758,6 +784,38 @@ describe("BrokersSection", () => {
     );
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("api.upstox.com"), "_blank", "noopener");
     expect(screen.getByText(/Postback .* is optional/i)).toBeInTheDocument();
+  });
+
+  it("connects Upstox analytics tokens as read-only native sessions", async () => {
+    (connectNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: true, login: "ok" });
+    renderSection();
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Analytics access token (read-only)" }));
+
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPX1" } });
+    fireEvent.change(screen.getByLabelText(/^Client ID/i), { target: { value: "UPX1" } });
+    fireEvent.change(screen.getByLabelText("Analytics access token"), { target: { value: "ANALYTICS-TOK" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() =>
+      expect(connectNativeAccount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          adapter_id: "upstox",
+          account_id: "UPX1",
+          credentials: {
+            read_only: "true",
+            token_scope: "analytics",
+            client_id: "UPX1",
+            access_token: "ANALYTICS-TOK",
+          },
+        }),
+      ),
+    );
+    expect(await screen.findByText(/Upstox account UPX1 connected/i)).toBeInTheDocument();
   });
 
   it("shows coming-soon native brokers but disables them", async () => {
@@ -871,6 +929,18 @@ describe("BrokersSection — primary account selection", () => {
       ),
     );
     await waitFor(() => expect(screen.getByText(/set as primary/i)).toBeInTheDocument());
+  });
+
+  it("does not offer primary selection for read-only native sessions", async () => {
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { ...CONNECTED_NON_PRIMARY, read_only: true },
+    ]);
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText(/upstox.*read-only.*connected/i)).toBeInTheDocument());
+
+    expect(screen.queryByLabelText(/set upstox UPX1 as primary/i)).not.toBeInTheDocument();
+    expect(setPrimaryBrokerAccount).not.toHaveBeenCalled();
   });
 });
 

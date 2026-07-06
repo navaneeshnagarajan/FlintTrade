@@ -27,7 +27,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | Native broker adapter contract/routing, founder-broker adapter code (Dhan, Upstox, and INDmoney connectable; Kotak Neo and Groww built but coming soon), credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
+| `gateway` | Python | OpenAlgo-compatible bridge support, native broker adapter contract/routing, founder-broker adapter code (Dhan, Upstox, and INDmoney connectable; Kotak Neo and Groww built but coming soon), credential store, and WebSocket bridge | `packages/integrations/gateway/tests/` |
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
@@ -269,10 +269,10 @@ Use either as a reference implementation.
 
 ## 8. Adding a broker adapter
 
-FlintTrade has two first-class broker paths: the native gateway and the
-optional OpenAlgo-compatible bridge. A native broker is a direct SDK/HTTP
-adapter that implements the `BrokerAdapter` Protocol and is routed through
-the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
+FlintTrade has two first-class broker paths: the recommended
+OpenAlgo-compatible bridge and the native gateway. A native broker is a direct
+SDK/HTTP adapter that implements the `BrokerAdapter` Protocol and is routed
+through the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
 (`brokers/openalgo.py`) alongside the native ones. Do not model a new native
 broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
 infrastructure shims, not broker adapters.

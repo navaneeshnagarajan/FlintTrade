@@ -3,8 +3,8 @@
 Covers every mapping function added in the parity wave: OAuth helpers, the v3
 place/multi-order/GTT builders, convert-position, brokerage, v3 quote parsing,
 reports, market information, feed-authorisation and decoded-feed-tick parsing.
-The original v2 order/read mappings are covered by the root-level
-``tests/test_upstox_mapping.py``; the request-building assertions here are
+The original v2 order/read mappings are covered by
+``tests/brokers/test_upstox_mapping_base.py``; the request-building assertions here are
 verified against the staged SDK models in
 ``.local/reference/broker-sdks/upstox-python/docs/``.
 """

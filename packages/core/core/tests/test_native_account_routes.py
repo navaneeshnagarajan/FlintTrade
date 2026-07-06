@@ -159,6 +159,7 @@ def test_list_and_remove_native_account(client):
     entry = next(a for a in listing if a["account_id"] == "UPXTEST02")
     assert entry["adapter_id"] == "upstox"
     assert entry["has_session"] is True
+    assert entry["read_only"] is False
 
     removed = c.delete("/api/v1/native/accounts/upstox/UPXTEST02", headers=_h())
     assert removed.status_code == 200
@@ -302,7 +303,7 @@ def test_list_native_brokers_catalogue(client):
     ]
     groww_cautions = " ".join(brokers["groww"]["mcp"]["cautions"])
     assert "approving the API-key session in Groww Cloud" in groww_cautions
-    assert "session approval, market-data/API permissions" in groww_cautions
+    assert "market-data/API permissions, static IP setup" in groww_cautions
     indmoney = next(m for m in brokers["indmoney"]["auth_methods"] if m["id"] == "access_token")
     assert "INDstocks API dashboard" in indmoney["description"]
     assert "static outbound IP" in indmoney["description"]
@@ -317,7 +318,7 @@ def test_list_native_brokers_catalogue(client):
     assert groww_fields["access_token"]["secret"] is True
     assert "06:00 IST expiry" in groww_fields["access_token"]["help"]
     groww_secret = next(m for m in brokers["groww"]["auth_methods"] if m["id"] == "api_key_secret")
-    assert "session is approved in Groww Cloud" in groww_secret["description"]
+    assert "passed with an approved key" in groww_secret["description"]
     groww_secret_fields = {f["name"]: f for f in groww_secret["fields"]}
     assert "session approval is required" in groww_secret_fields["api_secret"]["help"]
     # Secret fields are flagged for masking.
@@ -574,6 +575,34 @@ def test_relogin_replays_stored_credentials(client):
     resp = c.post("/api/v1/native/accounts/upstox/UPXTEST03/login", headers=_h())
     assert resp.status_code == 200
     assert resp.get_json()["data"]["session"]["has_session"] is True
+    assert resp.get_json()["data"]["session"]["read_only"] is False
+
+
+def test_list_native_account_surfaces_read_only_sessions(client):
+    c, _app, _tmp = client
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXREADONLY",
+            "credentials": {
+                "access_token": "tok-read-only",
+                "read_only": "true",
+                "token_scope": "analytics",
+            },
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
+    entry = next(a for a in listing if a["account_id"] == "UPXREADONLY")
+    assert entry["has_session"] is True
+    assert entry["read_only"] is True
+
+    relogin = c.post("/api/v1/native/accounts/upstox/UPXREADONLY/login", headers=_h())
+    assert relogin.status_code == 200
+    assert relogin.get_json()["data"]["session"]["read_only"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1368,6 +1397,30 @@ def test_set_primary_native_account_requires_live_session(client):
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
     entry = next(a for a in listing if a["account_id"] == "UPXPRIMARYDEAD")
     assert entry["is_primary"] is False
+
+
+def test_set_primary_native_account_rejects_read_only_session(client):
+    c, _app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXPRIMARYRO",
+            "credentials": {
+                "access_token": "tok-read-only",
+                "read_only": "true",
+                "token_scope": "analytics",
+            },
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    resp = c.post("/api/v1/native/accounts/upstox/UPXPRIMARYRO/set-primary", headers=_h())
+
+    assert resp.status_code == 409
+    assert "read-only" in resp.get_json()["message"]
+    assert _workspace_brokers(tmp_path)["execution"]["default"] != "upstox:UPXPRIMARYRO"
 
 
 def test_connect_schedules_a_daily_refresh_job(client):

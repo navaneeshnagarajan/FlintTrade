@@ -46,6 +46,7 @@ COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "t
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
+INDMONEY_MARKET_READ_CHOICES = ("quotes", "ltp", "depth", "margin", "history")
 UPSTOX_MARKET_READ_CHOICES = COMMON_MARKET_READ_CHOICES + ("ltp", "ohlc")
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
@@ -73,7 +74,7 @@ KOTAK_READ_CHOICES = (
 READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
     "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES + ("expiry", "optionchain"),
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES + ("optionchain",),
-    "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES + ("optionchain",),
+    "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
     "upstox": COMMON_READ_CHOICES + UPSTOX_MARKET_READ_CHOICES + (
         "optiongreeks",
@@ -88,7 +89,7 @@ READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.va
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
     "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES,
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
-    "indmoney": COMMON_READ_CHOICES + COMMON_MARKET_READ_CHOICES,
+    "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
     "upstox": COMMON_READ_CHOICES + UPSTOX_MARKET_READ_CHOICES + ("search", "timings", "holidays"),
 }

@@ -2,7 +2,8 @@
 
 Welcome to the FlintTrade documentation. FlintTrade is a beta-stage,
 open-source, self-hosted trading workstation with its own backend, native
-sandbox, broker-gateway contracts, and an optional OpenAlgo-compatible bridge.
+sandbox, recommended OpenAlgo-compatible bridge, and evidence-gated native
+broker contracts.
 It supports local manual trading workflows, algorithmic strategy development,
 automation, AI-assisted analysis, and sandbox practice. The repository is a
 Python, React, TypeScript, and Rust monorepo for local software development,

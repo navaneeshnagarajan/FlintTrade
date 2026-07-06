@@ -41,12 +41,12 @@ This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo 
 
 ## 3. Configure Broker Access
 
-For the native FlintTrade gateway, use the app setup flow. Dhan, Upstox, and
-INDmoney are the current verified native connect options; catalogued brokers
-marked "coming soon" stay disabled until their live checks pass. For the
-optional OpenAlgo path, configure the OpenAlgo server in OpenAlgo itself, then
-paste the OpenAlgo URL/API key in FlintTrade Setup → OpenAlgo Bridge or
-Settings → Broker Gateway. For the local-dev OpenAlgo clone, broker credentials stay in
+For the recommended OpenAlgo bridge, configure the OpenAlgo server in OpenAlgo
+itself, then paste the OpenAlgo URL/API key in FlintTrade Setup → OpenAlgo
+Bridge or Settings → Broker Gateway. For the native FlintTrade gateway, use the
+app setup flow only for currently verified native options (Dhan, Upstox, and
+INDmoney); catalogued brokers marked "coming soon" stay disabled until their
+live checks pass. For the local-dev OpenAlgo clone, broker credentials stay in
 `.local/external/openalgo/.env` (copy from `.sample.env` if needed):
 - Set broker name (e.g., your broker or its sandbox variant for testing)
 - Set broker credentials (client ID, API key/secret)

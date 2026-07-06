@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -89,13 +89,17 @@ class AuthMethod(BaseModel):
         kind: ``"direct"`` or ``"oauth"``.
         description: One-line operator guidance for the method.
         fields: The credential fields the method needs.
+        credential_defaults: Extra credential keys added by the UI for this
+            method, for example marking a broker-issued analytics token as
+            read-only without exposing an internal flag as a text input.
     """
 
     id: str
     label: str
     kind: str
     description: str = ""
-    fields: list[AuthMethodField] = []
+    fields: list[AuthMethodField] = Field(default_factory=list)
+    credential_defaults: dict[str, str] = Field(default_factory=dict)
 
 
 class MCPClientConfig(BaseModel):
