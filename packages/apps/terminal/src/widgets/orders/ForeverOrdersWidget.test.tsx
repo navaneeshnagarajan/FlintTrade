@@ -49,18 +49,14 @@ vi.mock("@/stores/connectionStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  findBrokerAccountMatch: (
+    accounts: Array<{ account_id: string; broker: string; source?: string }>,
+    selector: string | null,
+  ) => accounts.find((account) => mockBrokerAccountMatch(account, selector)),
   isBrokerAccountMatch: (
     account: { account_id: string; broker: string; source?: string },
     selector: string | null,
-  ) => {
-    if (!selector) return false;
-    const key = [
-      account.source ?? "gateway",
-      account.broker,
-      account.account_id,
-    ].map(encodeURIComponent).join(":");
-    return key === selector || account.account_id === selector;
-  },
+  ) => mockBrokerAccountMatch(account, selector),
   useBrokerStore: Object.assign(
     (selector?: (s: typeof mockBrokerState) => unknown) =>
       typeof selector === "function" ? selector(mockBrokerState) : mockBrokerState,
@@ -69,6 +65,19 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import ForeverOrdersWidget from "./ForeverOrdersWidget";
+
+function mockBrokerAccountMatch(
+  account: { account_id: string; broker: string; source?: string },
+  selector: string | null,
+) {
+  if (!selector) return false;
+  const key = [
+    account.source ?? "gateway",
+    account.broker,
+    account.account_id,
+  ].map(encodeURIComponent).join(":");
+  return key === selector || account.account_id === selector;
+}
 
 const LIST_ROW = {
   order_id: "GTT-1",

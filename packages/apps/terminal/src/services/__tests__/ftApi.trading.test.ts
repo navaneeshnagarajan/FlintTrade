@@ -34,22 +34,31 @@ vi.mock("@/stores/authStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  findBrokerAccountMatch: (
+    accounts: Array<{ account_id: string; broker: string; source?: "gateway" | "native" }>,
+    selector: string | null,
+  ) => accounts.find((account) => mockBrokerAccountMatch(account, selector)),
   isBrokerAccountMatch: (
     account: { account_id: string; broker: string; source?: "gateway" | "native" },
     selector: string | null,
-  ) => {
-    if (!selector) return false;
-    const key = [account.source ?? "gateway", account.broker, account.account_id]
-      .map(encodeURIComponent)
-      .join(":");
-    return selector === key || selector === account.account_id;
-  },
+  ) => mockBrokerAccountMatch(account, selector),
   useBrokerStore: {
     getState: () => storeState.brokerState,
   },
 }));
 
 import { startSmartRoute, type SmartRouteJob, type SmartRouteParams } from "../ftApi.trading";
+
+function mockBrokerAccountMatch(
+  account: { account_id: string; broker: string; source?: "gateway" | "native" },
+  selector: string | null,
+) {
+  if (!selector) return false;
+  const key = [account.source ?? "gateway", account.broker, account.account_id]
+    .map(encodeURIComponent)
+    .join(":");
+  return selector === key || selector === account.account_id;
+}
 
 const BASE_PARAMS: SmartRouteParams = {
   symbol: "RELIANCE",
