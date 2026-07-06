@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from datetime import datetime, timezone
 from importlib.metadata import version
 from typing import Any
 from uuid import UUID
@@ -14,9 +15,24 @@ from flinttrade_core.exceptions import BrokerError, DataError, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers._base import Session
+from flinttrade_gateway.brokers._session_expiry import next_6am_ist_timestamp
 from flinttrade_gateway.brokers.groww import GrowwAdapter, _ROUTER_TOKEN
 
 pytestmark = pytest.mark.unit
+
+
+def test_next_6am_ist_timestamp_rolls_at_dashboard_reset() -> None:
+    before_reset_utc = datetime(2026, 7, 6, 0, 0, tzinfo=timezone.utc)
+    at_reset_utc = datetime(2026, 7, 6, 0, 30, tzinfo=timezone.utc)
+    after_reset_utc = datetime(2026, 7, 6, 1, 0, tzinfo=timezone.utc)
+
+    assert datetime.fromtimestamp(next_6am_ist_timestamp(before_reset_utc), tz=timezone.utc) == at_reset_utc
+    assert datetime.fromtimestamp(next_6am_ist_timestamp(at_reset_utc), tz=timezone.utc) == datetime(
+        2026, 7, 7, 0, 30, tzinfo=timezone.utc
+    )
+    assert datetime.fromtimestamp(next_6am_ist_timestamp(after_reset_utc), tz=timezone.utc) == datetime(
+        2026, 7, 7, 0, 30, tzinfo=timezone.utc
+    )
 
 
 class MockGrowwTransport:

@@ -7,9 +7,10 @@ the documented JSON WebSocket feeds through injected feed factories. All
 request/response translation lives in ``indmoney_mapping`` and is unit-tested;
 the methods here are thin orchestration over the transport.
 
-Auth: a dashboard-generated access token (24 h expiry, manual regeneration —
-there is no login or refresh endpoint). ``login`` therefore only builds the
-Session; ``profile()`` doubles as a token-validity probe.
+Auth: a dashboard-generated access token that resets at the broker's daily
+06:00 IST dashboard cycle (max 24 h; manual regeneration — there is no login or
+refresh endpoint). ``login`` therefore only builds the Session; ``profile()``
+doubles as a token-validity probe.
 
 Coverage: the full BrokerAdapter ABC plus every extra documented INDstocks
 feature as capability-style extension methods — order details, per-order trades,
@@ -45,6 +46,7 @@ from flinttrade_gateway.capabilities import (
 
 from . import indmoney_mapping as M
 from ._base import BrokerAdapter, Session
+from ._session_expiry import next_6am_ist_timestamp
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -74,7 +76,7 @@ INDMONEY_CAPABILITIES = Capabilities(
     ),
     depth_levels=DepthLevels.L5,
     tick_protocol=TickProtocol.GENERIC_JSON,  # both WS feeds stream plain JSON
-    # Dashboard-generated access token, 24 h expiry, manual regeneration (FAQ).
+    # Dashboard-generated access token, daily 06:00 IST reset, manual regeneration.
     auth_model=AuthModel.OAUTH_RENEWABLE_24H,
     session_lifetime_hours=24.0,
     sandbox=False,  # no sandbox documented — every call is live
@@ -405,8 +407,8 @@ class IndMoneyAdapter(BrokerAdapter):
         transport = None if self._http_factory is not None else _build_httpx_transport()
         return Session(
             access_token=access_token,
-            # Dashboard tokens expire after 24 hours (FAQ) — no refresh endpoint.
-            expires_at=datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
+            # Dashboard tokens reset at the broker's daily 06:00 IST cycle — no refresh endpoint.
+            expires_at=next_6am_ist_timestamp(),
             account_id=str(credentials.get("user_id") or ""),
             adapter_id="indmoney",
             extra={"transport": transport},

@@ -89,11 +89,13 @@ def test_identity_and_capabilities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_returns_session_and_requires_token() -> None:
+async def test_login_returns_session_and_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _adapter(FakeTransport())
+    monkeypatch.setattr("flinttrade_gateway.brokers.indmoney.next_6am_ist_timestamp", lambda: 1_788_307_200.0)
     session = await _session(adapter)
     assert session.adapter_id == "indmoney"
     assert session.access_token == "TOK" and session.account_id == "U1"
+    assert session.expires_at == 1_788_307_200.0
     with pytest.raises(BrokerError, match="access_token"):
         await adapter.login({})
 

@@ -15,9 +15,10 @@ official `growwapi` SDK is pinned for attestation/reference parity while the
 adapter keeps using FlintTrade's tested REST transport; the latest key-secret
 probe proves login/account reads but still lacks broker-side market-data/API
 permission, static IP, and order-safety evidence.
-INDmoney is the only REST-only native with no SDK pin. INDstocks' own FAQ advertises
-`indstocks-sdk`, but PyPI and npm currently have no matching package, so the
-adapter stays REST-native until a real SDK distribution can be pinned.
+INDmoney is the only REST-only native with no SDK pin; its dashboard token resets
+at the daily 06:00 IST cycle. INDstocks' own FAQ advertises `indstocks-sdk`, but
+PyPI and npm currently have no matching package, so the adapter stays REST-native
+until a real SDK distribution can be pinned.
 Broker SDK source/artifact mirrors can be refreshed into the gitignored
 `.local/sdk-audit/` cache with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
 tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.

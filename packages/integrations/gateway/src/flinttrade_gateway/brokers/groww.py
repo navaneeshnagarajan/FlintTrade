@@ -17,10 +17,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from importlib import metadata
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
-from zoneinfo import ZoneInfo
 
 from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_gateway.capabilities import (
@@ -34,6 +33,7 @@ from flinttrade_gateway.capabilities import (
 
 from . import groww_mapping as M
 from ._base import BrokerAdapter, Session
+from ._session_expiry import next_6am_ist_timestamp
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -130,20 +130,10 @@ def _build_httpx_transport(timeout: float = 10.0) -> Transport:
     return _request
 
 
-def _next_6am_ist() -> float:
-    """Groww API tokens shown in the console expire at 06:00 IST."""
-    ist = ZoneInfo("Asia/Kolkata")
-    now = datetime.now(tz=ist)
-    expiry = now.replace(hour=6, minute=0, second=0, microsecond=0)
-    if expiry <= now:
-        expiry += timedelta(days=1)
-    return expiry.astimezone(timezone.utc).timestamp()
-
-
 def _expiry_from_token_payload(payload: Any) -> float:
     """Best-effort expiry parser for Groww token responses."""
     if not isinstance(payload, dict):
-        return _next_6am_ist()
+        return next_6am_ist_timestamp()
     now = datetime.now(tz=timezone.utc).timestamp()
     for key in ("expires_at", "expiry", "expiresAt", "expiryTime", "expiry_time"):
         value = payload.get(key)
@@ -170,7 +160,7 @@ def _expiry_from_token_payload(payload: Any) -> float:
             return now + float(expires_in)
     except (TypeError, ValueError):
         pass
-    return _next_6am_ist()
+    return next_6am_ist_timestamp()
 
 
 class GrowwAdapter(BrokerAdapter):
@@ -273,7 +263,7 @@ class GrowwAdapter(BrokerAdapter):
 
     async def login(self, credentials: dict) -> Session:
         access_token = str(credentials.get("access_token") or "").strip()
-        expires_at = _next_6am_ist()
+        expires_at = next_6am_ist_timestamp()
         auth_method = "access_token"
         if not access_token:
             api_key = str(credentials.get("api_key") or "").strip()

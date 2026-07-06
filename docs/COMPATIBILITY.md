@@ -47,8 +47,8 @@ clear. Dhan and Upstox use native SDK/API clients, Groww has the official
 `growwapi` SDK pinned for attestation/reference parity while production calls use
 FlintTrade's tested REST transport, and its approved-key probe now proves native
 login/account reads while market-data/API permission, static IP, and order-safety
-evidence remain pending. INDmoney is REST-only with a dashboard-generated
-24-hour token. Upstox Developer Apps
+evidence remain pending. INDmoney is REST-only with a dashboard-generated token
+that resets at the daily 06:00 IST dashboard cycle. Upstox Developer Apps
 Analytics Access Tokens are treated as read-only native sessions; trading still
 needs the OAuth/trading-capable token path. INDstocks' FAQ advertises an
 `indstocks-sdk`, but no matching PyPI or npm
