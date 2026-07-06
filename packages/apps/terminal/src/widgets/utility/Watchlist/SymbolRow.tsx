@@ -4,14 +4,15 @@
 
 import { Sparkline } from "./Sparkline";
 import { evaluateFormula, fmtCompact, fmtPrice, fmtPct, formulaLabel } from "./types";
-import type { PartialQuote, WatchlistColumnId, WatchlistFormulaId, WatchlistItem } from "./types";
+import type { PartialQuote, WatchlistColumnId, WatchlistCustomFormula, WatchlistItem } from "./types";
 
 export interface SymbolRowProps {
   item:        WatchlistItem;
   quote:       PartialQuote | null;
   sparkPrices: number[];
   visibleColumns: WatchlistColumnId[];
-  formula: WatchlistFormulaId;
+  formula: string;
+  customFormulas?: WatchlistCustomFormula[];
   onSelect:    (item: WatchlistItem) => void;
   onRemove:    (e: React.MouseEvent, item: WatchlistItem) => void;
 }
@@ -22,6 +23,7 @@ export function SymbolRow({
   sparkPrices,
   visibleColumns,
   formula,
+  customFormulas = [],
   onSelect,
   onRemove,
 }: SymbolRowProps) {
@@ -32,7 +34,7 @@ export function SymbolRow({
   const isUp      = chgAbs == null ? null : chgAbs >= 0;
   const changeColor = isUp === true ? "text-profit" : isUp === false ? "text-loss" : "text-text-muted";
   const visible = new Set(visibleColumns);
-  const formulaValue = evaluateFormula(quote, formula);
+  const formulaValue = evaluateFormula(quote, formula, customFormulas);
 
   return (
     <button
@@ -91,7 +93,7 @@ export function SymbolRow({
 
       {visible.has("formula") && (
         <div className="hidden min-w-16 shrink-0 flex-col items-end lg:flex">
-          <span className="text-xxs text-text-muted leading-tight">{formulaLabel(formula)}</span>
+          <span className="text-xxs text-text-muted leading-tight">{formulaLabel(formula, customFormulas)}</span>
           <span className="text-xxs font-mono tabular-nums text-text-secondary leading-tight">
             {formulaValue != null ? fmtPct(formulaValue) : "—"}
           </span>

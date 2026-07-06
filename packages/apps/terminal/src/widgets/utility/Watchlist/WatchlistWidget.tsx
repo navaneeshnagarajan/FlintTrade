@@ -42,7 +42,6 @@ import {
 } from "./types";
 import type {
   WatchlistColumnId,
-  WatchlistFormulaId,
   WatchlistItem,
   WatchlistTab,
   SymbolContextMenuState,
@@ -50,6 +49,7 @@ import type {
 } from "./types";
 import { useWatchlistPolling } from "./useWatchlistPolling";
 import { SearchDialog } from "./SearchDialog";
+import { FormulaBuilder } from "./FormulaBuilder";
 import { SymbolContextMenu, TabContextMenu, RenameInput } from "./ContextMenus";
 import { SymbolRow } from "./SymbolRow";
 
@@ -197,11 +197,30 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     });
   }, []);
 
-  const setFormula = useCallback((formula: WatchlistFormulaId) => {
+  const setFormula = useCallback((formula: string) => {
     setViewSettings((prev) => ({
       ...prev,
       formula,
       visibleColumns: Array.from(new Set([...prev.visibleColumns, "symbol", "formula"])),
+    }));
+  }, []);
+
+  const addCustomFormula = useCallback((name: string, expression: string) => {
+    const id = `custom:${generateId()}`;
+    setViewSettings((prev) => ({
+      ...prev,
+      customFormulas: [...prev.customFormulas, { id, name, expression }],
+      formula: id,
+      visibleColumns: Array.from(new Set([...prev.visibleColumns, "symbol", "formula"])),
+    }));
+  }, []);
+
+  const removeCustomFormula = useCallback((id: string) => {
+    setViewSettings((prev) => ({
+      ...prev,
+      customFormulas: prev.customFormulas.filter((f) => f.id !== id),
+      // Fall back to a built-in if the removed formula was selected.
+      formula: prev.formula === id ? "rangePct" : prev.formula,
     }));
   }, []);
 
@@ -371,13 +390,25 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
           <select
             id="watchlist-formula"
             value={viewSettings.formula}
-            onChange={(e) => setFormula(e.target.value as WatchlistFormulaId)}
+            onChange={(e) => setFormula(e.target.value)}
             className="mt-1 w-full rounded border border-border-default bg-surface-elevated px-2 py-1 text-xs text-text-primary"
           >
             {WATCHLIST_FORMULAS.map((formula) => (
               <option key={formula.id} value={formula.id}>{formula.label}</option>
             ))}
+            {viewSettings.customFormulas.length > 0 && (
+              <optgroup label="Custom">
+                {viewSettings.customFormulas.map((formula) => (
+                  <option key={formula.id} value={formula.id}>{formula.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
+          <FormulaBuilder
+            customFormulas={viewSettings.customFormulas}
+            onAdd={addCustomFormula}
+            onRemove={removeCustomFormula}
+          />
         </div>
       )}
 
@@ -456,6 +487,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
                 sparkPrices={sparkHistory[key] ?? []}
                 visibleColumns={viewSettings.visibleColumns}
                 formula={viewSettings.formula}
+                customFormulas={viewSettings.customFormulas}
                 onSelect={handleSelect}
                 onRemove={openSymbolCtxMenu}
               />

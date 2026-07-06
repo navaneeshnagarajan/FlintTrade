@@ -5,6 +5,7 @@
 import type { Quote } from "@/types/api";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
+import { compileFormula, type CompiledFormula } from "./formulaEngine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,9 +71,19 @@ export interface WatchlistFormulaDef {
   label: string;
 }
 
+/** A user-defined formula: a name plus an arithmetic expression over quote fields. */
+export interface WatchlistCustomFormula {
+  id: string;        // "custom:<generated>"
+  name: string;
+  expression: string;
+}
+
 export interface WatchlistViewSettings {
   visibleColumns: WatchlistColumnId[];
-  formula: WatchlistFormulaId;
+  /** Built-in formula id ("rangePct"/"openGapPct") or a custom formula id. */
+  formula: string;
+  /** User-defined formulas available for the formula column. */
+  customFormulas: WatchlistCustomFormula[];
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +125,7 @@ export const WATCHLIST_FORMULAS: WatchlistFormulaDef[] = [
 export const DEFAULT_VIEW_SETTINGS: WatchlistViewSettings = {
   visibleColumns: ["symbol", "sparkline", "price", "changePct"],
   formula: "rangePct",
+  customFormulas: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -145,11 +157,33 @@ export function fmtCompact(v: number | null | undefined): string {
   return String(Math.round(n));
 }
 
-export function formulaLabel(id: WatchlistFormulaId): string {
-  return WATCHLIST_FORMULAS.find((formula) => formula.id === id)?.label ?? "Formula";
+export function formulaLabel(
+  id: string,
+  customFormulas: WatchlistCustomFormula[] = [],
+): string {
+  const builtin = WATCHLIST_FORMULAS.find((formula) => formula.id === id);
+  if (builtin) return builtin.label;
+  const custom = customFormulas.find((formula) => formula.id === id);
+  return custom?.name ?? "Formula";
 }
 
-export function evaluateFormula(quote: PartialQuote | null, formula: WatchlistFormulaId): number | null {
+// Compile cache keyed by expression so each custom formula parses once, not per
+// row render. ``null`` marks an expression that failed to compile.
+const _formulaCache = new Map<string, CompiledFormula | null>();
+
+function compileCached(expression: string): CompiledFormula | null {
+  if (_formulaCache.has(expression)) return _formulaCache.get(expression) ?? null;
+  const result = compileFormula(expression);
+  const compiled = result.ok ? result.formula : null;
+  _formulaCache.set(expression, compiled);
+  return compiled;
+}
+
+export function evaluateFormula(
+  quote: PartialQuote | null,
+  formula: string,
+  customFormulas: WatchlistCustomFormula[] = [],
+): number | null {
   if (!quote) return null;
   const ltp = quote.ltp ?? quote.close ?? null;
   if (formula === "rangePct") {
@@ -160,6 +194,11 @@ export function evaluateFormula(quote: PartialQuote | null, formula: WatchlistFo
     const prevClose = quote.prev_close ?? quote.close ?? null;
     if (quote.open == null || !prevClose) return null;
     return ((Number(quote.open) - Number(prevClose)) / Number(prevClose)) * 100;
+  }
+  // Custom user-defined formula, evaluated via the safe arithmetic engine.
+  const custom = customFormulas.find((f) => f.id === formula);
+  if (custom) {
+    return compileCached(custom.expression)?.evaluate(quote) ?? null;
   }
   return null;
 }
@@ -193,10 +232,18 @@ const watchlistColumnIdSchema = z.enum([
   "formula",
 ]);
 
+const watchlistCustomFormulaSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  expression: z.string(),
+}) satisfies z.ZodType<WatchlistCustomFormula>;
+
 const watchlistViewSchema = z.object({
   visibleColumns: z.array(watchlistColumnIdSchema),
-  formula: z.enum(["rangePct", "openGapPct"]),
-}) satisfies z.ZodType<WatchlistViewSettings>;
+  formula: z.string(),
+  // Older persisted settings predate custom formulas; default to none.
+  customFormulas: z.array(watchlistCustomFormulaSchema).optional(),
+});
 
 /** Load all watchlist tabs from localStorage. Migrates legacy single-list format. */
 export function loadTabs(): WatchlistTab[] {
@@ -231,6 +278,7 @@ export function loadViewSettings(): WatchlistViewSettings {
   return {
     visibleColumns: Array.from(new Set(columns)),
     formula: parsed.formula,
+    customFormulas: parsed.customFormulas ?? [],
   };
 }
 
