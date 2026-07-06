@@ -84,4 +84,24 @@ describe("ConnectedAccounts", () => {
     await waitFor(() => expect(mocks.setPrimaryBroker).toHaveBeenCalledWith(mocks.accounts[0]));
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
   });
+
+  it("does not promote a read-only native account to primary", () => {
+    mocks.accounts = [{
+      account_id: "UPX-1",
+      broker: "upstox",
+      label: "Upstox analytics",
+      status: "connected",
+      connected_at: null,
+      error_message: null,
+      is_primary: false,
+      source: "native",
+      read_only: true,
+    }];
+
+    render(<ConnectedAccounts />);
+
+    expect(screen.getByText(/upstox .* read-only/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Set Upstox analytics as primary account/i)).not.toBeInTheDocument();
+    expect(mocks.setPrimaryBroker).not.toHaveBeenCalled();
+  });
 });

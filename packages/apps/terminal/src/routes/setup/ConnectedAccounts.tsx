@@ -108,66 +108,72 @@ export function ConnectedAccounts() {
           {error}
         </p>
       )}
-      {accounts.map((acct: BrokerAccount) => (
-        <div
-          key={brokerAccountKey(acct)}
-          className="flex items-center justify-between p-3 rounded-lg border border-border-default bg-surface-card"
-        >
-          <div className="flex items-center gap-3">
-            {acct.is_primary && (
-              <Star
-                className="w-4 h-4 text-accent fill-accent shrink-0"
-                aria-label="Primary account"
-              />
-            )}
-            <div className="min-w-0">
-              <p className="font-medium text-sm text-text-primary truncate">{acct.label}</p>
-              <p className="text-xs text-text-secondary capitalize">{acct.broker}</p>
-              {acct.error_message && (
-                <p className="text-xs text-red-400 mt-0.5 truncate" title={acct.error_message}>
-                  {acct.error_message}
-                </p>
+      {accounts.map((acct: BrokerAccount) => {
+        const canSetPrimary = !acct.is_primary
+          && (acct.source !== "native" || (acct.status === "connected" && !acct.read_only));
+        return (
+          <div
+            key={brokerAccountKey(acct)}
+            className="flex items-center justify-between p-3 rounded-lg border border-border-default bg-surface-card"
+          >
+            <div className="flex items-center gap-3">
+              {acct.is_primary && (
+                <Star
+                  className="w-4 h-4 text-accent fill-accent shrink-0"
+                  aria-label="Primary account"
+                />
               )}
+              <div className="min-w-0">
+                <p className="font-medium text-sm text-text-primary truncate">{acct.label}</p>
+                <p className="text-xs text-text-secondary capitalize">
+                  {acct.broker}{acct.read_only ? " · read-only" : ""}
+                </p>
+                {acct.error_message && (
+                  <p className="text-xs text-red-400 mt-0.5 truncate" title={acct.error_message}>
+                    {acct.error_message}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2 shrink-0 ml-3">
-            <Badge className={statusColor(acct.status)}>{statusLabel(acct.status)}</Badge>
+            <div className="flex items-center gap-2 shrink-0 ml-3">
+              <Badge className={statusColor(acct.status)}>{statusLabel(acct.status)}</Badge>
 
-            {!acct.is_primary && (acct.source !== "native" || acct.status === "connected") && (
+              {canSetPrimary && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void handleSetPrimary(acct)}
+                  aria-label={`Set ${acct.label} as primary account`}
+                  title="Set as primary"
+                >
+                  <Star className="w-3.5 h-3.5" />
+                </Button>
+              )}
+
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => void handleSetPrimary(acct)}
-                aria-label={`Set ${acct.label} as primary account`}
-                title="Set as primary"
+                onClick={() => void handleReconnect(acct)}
+                aria-label={`Reconnect ${acct.label}`}
+                title="Reconnect"
               >
-                <Star className="w-3.5 h-3.5" />
+                <RefreshCw className="w-3.5 h-3.5" />
               </Button>
-            )}
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void handleReconnect(acct)}
-              aria-label={`Reconnect ${acct.label}`}
-              title="Reconnect"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void handleRemove(acct)}
-              aria-label={`Remove ${acct.label}`}
-              title="Remove account"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleRemove(acct)}
+                aria-label={`Remove ${acct.label}`}
+                title="Remove account"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              </Button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
