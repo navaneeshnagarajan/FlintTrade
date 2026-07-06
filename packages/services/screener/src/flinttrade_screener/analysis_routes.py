@@ -391,6 +391,68 @@ def gex_endpoint() -> Any:
     })
 
 
+@analysis_bp.route("/gammadensity", methods=["POST"])
+def gamma_density_endpoint() -> Any:
+    """Gamma Density surface (DP2).
+
+    Per-strike Γ×OI density at two horizons (intraday, to-expiry) plus the
+    convexity-zone expected-move bands. Reuses the same option-chain snapshot
+    the GEX endpoint builds — no extra broker fetch.
+
+    Request JSON:
+        symbol (str): Underlying symbol (e.g. 'NIFTY').
+        exchange (str): Exchange code (e.g. 'NFO').
+        expiry (str): Expiry label (ISO ``YYYY-MM-DD`` or ``DDMMMYY``).
+        interest_rate (float): Optional annualised risk-free rate, percent.
+
+    Returns:
+        JSON with the gamma density payload or sample fallback.
+    """
+    from .gamma_density import calculate_gamma_density  # noqa: PLC0415
+
+    body = request.get_json(silent=True) or {}
+    symbol = body.get("symbol", "NIFTY")
+    exchange = body.get("exchange", "NFO")
+    expiry = _body_expiry(body, "")
+    interest_rate_pct = body.get("interest_rate")
+
+    spot = 24000.0
+    snapshot: OptionChainSnapshot | None = None
+
+    chain_data = _live_option_chain(symbol, exchange)
+    if chain_data:
+        spot = float(chain_data.get("spot", spot))
+        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
+
+    used_sample = snapshot is None
+    if snapshot is None:
+        snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
+        logger.info("Gamma density: using sample data for %s %s", symbol, exchange)
+
+    # A live chain that lacks an explicit expiry still needs a sane horizon; the
+    # sample snapshot has no real expiry, so fall back to a weekly-ish 7 days.
+    dte_days = float(_days_to_expiry(expiry)) if expiry else 0.0
+    if dte_days <= 0:
+        dte_days = 7.0
+
+    try:
+        rate = float(interest_rate_pct) / 100.0 if interest_rate_pct is not None else 0.0
+    except (TypeError, ValueError):
+        rate = 0.0
+
+    result = calculate_gamma_density(snapshot, spot=spot, dte_days=dte_days, risk_free_rate=rate)
+
+    return jsonify({
+        "status": "success",
+        "symbol": symbol,
+        "exchange": exchange,
+        "expiry": expiry,
+        "spot": spot,
+        "data": result.to_dict(),
+        "is_sample_data": used_sample,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Vol Surface endpoint
 # ---------------------------------------------------------------------------

@@ -350,6 +350,38 @@ export interface GEXData {
   net_gex: number;
 }
 
+// --- Gamma Density (DP2) ---
+export interface GammaDensityStrike {
+  strike: number;
+  ce_oi: number;
+  pe_oi: number;
+  iv: number;
+  density_intraday: number;
+  density_expiry: number;
+}
+
+export interface GammaExpectedMoveBand {
+  sigma_move: number;
+  one_sigma_low: number;
+  one_sigma_high: number;
+  two_sigma_low: number;
+  two_sigma_high: number;
+}
+
+export interface GammaDensityData {
+  underlying: string;
+  exchange: string;
+  spot_price: number;
+  atm_strike: number;
+  atm_iv: number;
+  dte_days: number;
+  peak_intraday_strike: number | null;
+  peak_expiry_strike: number | null;
+  intraday_band: GammaExpectedMoveBand;
+  expiry_band: GammaExpectedMoveBand;
+  strikes: GammaDensityStrike[];
+}
+
 // --- Vol Surface ---
 export interface VolSurfaceData {
   underlying: string;

@@ -49,6 +49,7 @@ const lazyWidgets = {
   // New analysis widgets
   sectormap: lazy(() => import("@/widgets/analysis/SectorMap/SectorMapWidget")),
   fiilongshort: lazy(() => import("@/widgets/analysis/FiiLongShort/FiiLongShortWidget")),
+  gammadensity: lazy(() => import("@/widgets/analysis/GammaDensity/GammaDensityWidget")),
   gex: lazy(() => import("@/widgets/analysis/GEX/GEXWidget")),
   volsurface: lazy(() => import("@/widgets/analysis/VolSurface/VolSurfaceWidget")),
   ivsmile: lazy(() => import("@/widgets/analysis/IVSmile/IVSmileWidget")),
@@ -202,6 +203,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis", description: "Colour-coded sector tree map showing intraday performance by industry" },
   { id: "gex", name: "GEX Dashboard", icon: "BarChart2", category: "Analysis", description: "Gamma Exposure (GEX) by strike to identify key support and resistance levels" },
   { id: "fiilongshort", name: "FII Long/Short", icon: "TrendingUp", category: "Analysis", description: "FII long/short positioning across F&O segments with an aggregate futures directional bias, derived from NSE participant OI" },
+  { id: "gammadensity", name: "Gamma Density", icon: "BarChart2", category: "Analysis", description: "Dealer gamma density (Γ×OI) by strike at intraday and to-expiry horizons, with the ±1σ/±2σ convexity-zone expected-move band" },
   { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis", description: "3-D implied volatility surface across strikes and expiries" },
   { id: "ivsmile", name: "IV Smile", icon: "TrendingUp", category: "Analysis", description: "Implied volatility smile curve for a selected expiry date" },
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis", description: "Payoff diagram for straddle positions with breakeven markers" },

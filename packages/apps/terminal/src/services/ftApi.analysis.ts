@@ -2,6 +2,7 @@ import { get, post, postV1 } from "./ftApi.helpers";
 import { classifySector } from "@/lib/sectors";
 import type {
   GEXData,
+  GammaDensityData,
   VolSurfaceData,
   IVSmileData,
   StraddlePnLData,
@@ -9,7 +10,7 @@ import type {
   OIProfileData,
 } from "@/types/api";
 
-export type { GEXData, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
+export type { GEXData, GammaDensityData, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
 
 
 export interface PineCompileResult {
@@ -189,6 +190,17 @@ export const getGEXData = (
     symbol,
     exchange,
     ...(expiry_date ? { expiry_date } : {}),
+  });
+
+export const getGammaDensityData = (
+  symbol: string,
+  exchange: string,
+  expiry?: string,
+) =>
+  post<GammaDensityData>("gammadensity", {
+    symbol,
+    exchange,
+    ...(expiry ? { expiry } : {}),
   });
 
 export const getVolSurface = (

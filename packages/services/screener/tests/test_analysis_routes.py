@@ -724,3 +724,25 @@ class TestFiiLongShortRoute:
         data = resp.get_json()["data"]
         assert data["is_sample_data"] is False
         assert data["ratio"]["bias_label"] in self._BIAS_LABELS
+
+
+class TestGammaDensityRoute:
+    """DP2 — gamma density surface endpoint."""
+
+    def test_returns_density_surface_sample(self, client):
+        resp, body = _post(
+            client, "/api/v1/gammadensity", {"symbol": "NIFTY", "exchange": "NFO"}
+        )
+
+        assert resp.status_code == 200
+        assert body["status"] == "success"
+        assert body["is_sample_data"] is True
+        data = body["data"]
+        assert data["underlying"] == "NIFTY"
+        assert len(data["strikes"]) > 0
+        # Both convexity-zone bands present; to-expiry wider than intraday.
+        assert data["expiry_band"]["sigma_move"] >= data["intraday_band"]["sigma_move"]
+        # Every strike carries both horizon densities.
+        first = data["strikes"][0]
+        assert "density_intraday" in first
+        assert "density_expiry" in first
