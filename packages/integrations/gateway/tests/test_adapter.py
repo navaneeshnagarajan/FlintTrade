@@ -61,8 +61,11 @@ class TestBrokerCatalog:
         A future addition on either side trips this assertion.
         """
         live = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
-        assert len(live) == 32, (
-            f"Expected 32 live brokers, got {len(live)}: "
+        # 34 live = 31 pinned-clone upstream + 2 post-pin upstream additions
+        # (arrow, tradesmart — P12, added upstream after v2.0.1.1) + 1
+        # FlintTrade-native-only kotakneo.
+        assert len(live) == 34, (
+            f"Expected 34 live brokers, got {len(live)}: "
             f"{sorted(info.name for info in live)}"
         )
         # The one native-only (non-upstream) live entry.
@@ -93,11 +96,12 @@ class TestBrokerCatalog:
             )
 
     def test_catalog_total_size(self):
-        """Total catalog entries must be exactly 33 (32 live + 1 sandbox).
+        """Total catalog entries must be exactly 35 (34 live + 1 sandbox).
 
-        32 live = 31 OpenAlgo-upstream + 1 FlintTrade-native ``kotakneo``.
+        34 live = 31 pinned-clone OpenAlgo-upstream + 2 post-pin upstream
+        additions (arrow, tradesmart — P12) + 1 FlintTrade-native ``kotakneo``.
         """
-        assert len(BROKER_CATALOG) == 33
+        assert len(BROKER_CATALOG) == 35
 
     def test_zerodha_supports_new_exchanges(self):
         """Zerodha gained NCO, MCX_INDEX, GLOBAL_INDEX in OpenAlgo v2.0.0.7+."""
@@ -433,12 +437,25 @@ _OPENALGO_DIR_ALIASES = {
     "kotakneo": "kotak",
 }
 
+# Brokers OpenAlgo added upstream AFTER the pinned test clone (v2.0.1.1,
+# docs/COMPATIBILITY.md). Catalogued here already (P12) because a user's
+# current OpenAlgo install supports them; the existence check skips them until
+# the test-dep pin is bumped past their addition.
+_POST_PIN_BROKERS = {"arrow", "tradesmart"}
+
 
 @pytest.mark.parametrize("broker_name", _all_broker_names())
 def test_broker_directory_exists(broker_name: str):
     """Each catalog entry must have a corresponding directory in OpenAlgo."""
     if not _OPENALGO_AVAILABLE:
         pytest.skip(".local/external/openalgo not present (run scripts/setup-test-deps.sh)")
+    if broker_name in _POST_PIN_BROKERS:
+        broker_dir = _OPENALGO_BROKER_DIR / broker_name
+        if not broker_dir.is_dir():
+            pytest.skip(
+                f"'{broker_name}' was added upstream after the pinned OpenAlgo clone; "
+                "bump the setup-test-deps pin to assert its directory"
+            )
 
     openalgo_dir_name = _OPENALGO_DIR_ALIASES.get(broker_name, broker_name)
     broker_dir = _OPENALGO_BROKER_DIR / openalgo_dir_name

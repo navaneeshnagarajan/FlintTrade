@@ -870,6 +870,22 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         auth_flow=AuthFlowType.oauth_redirect,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
+    # P12 (2026-07-06): the two bridge brokers OpenAlgo added after our pinned
+    # clone — metadata from upstream broker/<name>/plugin.json + auth_api.py.
+    "arrow": BrokerInfo(
+        name="arrow",
+        display_name="Arrow",
+        # Kite-style request-token exchange (api_key + request_token + api_secret).
+        auth_flow=AuthFlowType.oauth_redirect,
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    ),
+    "tradesmart": BrokerInfo(
+        name="tradesmart",
+        display_name="TradeSmart",
+        # Noren v2 family (flattrade/shoonya): code + password + TOTP exchange.
+        auth_flow=AuthFlowType.oauth_redirect,
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    ),
     "pocketful": BrokerInfo(
         name="pocketful",
         display_name="Pocketful",
