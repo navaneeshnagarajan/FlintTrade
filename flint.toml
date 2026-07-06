@@ -29,12 +29,13 @@ gateway = { path = "packages/integrations/gateway", lang = "python", description
 webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "TradingView, ChartInk, custom webhooks, and flow builder" }
 terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — manual orders, automation, option-chain views, OI analysis, DOM, charts" }
 site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
+desktop = { path = "packages/apps/desktop", lang = "rust", description = "Tauri 2 native shell — backend sidecar + terminal in one cross-OS installer, close-to-tray background runtime" }
 
 [groups]
 core = ["core", "data", "historical", "indicators", "ticks", "design-system"]
 services = ["engine", "screener", "backtest", "ai", "ditto", "automation", "journal"]
 integrations = ["gateway", "webhooks"]
-apps = ["terminal", "site"]
+apps = ["terminal", "site", "desktop"]
 
 # [infra] — external test-only dependencies, not bundled with FlintTrade.
 # OpenAlgo and OpenClaw used to be git submodules under infra/. They are

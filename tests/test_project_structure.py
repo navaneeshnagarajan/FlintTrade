@@ -13,6 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # All post-restructure packages tracked under packages/{core,services,integrations,apps}/.
 # Keep this list aligned with templates/package-purposes.yml and flint.toml.
 PACKAGES = [
+    "apps/desktop",
     "apps/site",
     "apps/terminal",
     "core/core",

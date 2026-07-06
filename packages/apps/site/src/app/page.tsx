@@ -172,8 +172,8 @@ export default function HomePage() {
             <span>Native broker contract and routing are safety-gated; adapters stay behind credential, ACL, and SDK checks.</span>
           </div>
           <div>
-            <strong>17</strong>
-            <span>Package surfaces across Python, React, shared UI, and Rust/PyO3.</span>
+            <strong>18</strong>
+            <span>Package surfaces across Python, React, shared UI, Rust/PyO3, and the Tauri desktop shell.</span>
           </div>
           <div>
             <strong>101</strong>

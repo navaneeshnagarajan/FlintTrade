@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Check that required files were touched by a restructure commit."""
+"""Check that required files were touched by a restructure commit.
+
+Disposition (P23, 2026-07-06): this is a ONE-SHOT verifier written for the
+v0.6.0 restructure commits (see docs/superpowers/plans/
+2026-05-24-restructure-goal-completion.md). It deliberately has no ongoing CI
+caller — the restructure it verifies is complete, and general doc/code drift
+is guarded by live tests instead (tests/test_restructure_goals.py,
+tests/test_project_structure.py, the widget-catalogue count pins, and the site
+capabilities test). Kept for historical reproducibility; do not wire into CI.
+"""
 
 from __future__ import annotations
 

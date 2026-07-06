@@ -1,5 +1,12 @@
 # One-line purpose + key entry points per FlintTrade package.
 # Drives generation of packages/<pkg>/README.md via scripts/generate-package-readmes.py.
+apps/desktop:
+  language: Rust (Tauri 2) + TypeScript
+  purpose: "Tauri 2 native shell — bundles the PyInstaller-frozen backend sidecar with the built terminal into one cross-OS installer, with a close-to-tray background runtime."
+  entry_points:
+    - "src-tauri/src/lib.rs — sidecar spawn, tray, hotkey, native notifications"
+    - "src-tauri/tauri.conf.json — window, bundle, and plugin configuration"
+    - "splash/ — boot splash while the backend sidecar starts"
 apps/site:
   language: TypeScript + React 19
   purpose: "Next.js + Fumadocs public website, generated documentation, contribution pages, llms files, and read-only docs MCP."
