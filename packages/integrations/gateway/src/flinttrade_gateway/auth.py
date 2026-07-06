@@ -145,7 +145,13 @@ def _reject_legacy_native_connect(broker: str) -> Any | None:
         message = f"'{broker}' is not yet available for native connect (coming soon)."
     else:
         message = f"'{broker}' uses FlintTrade native connect; use /api/v1/native/accounts."
-    return jsonify({"status": "error", "message": message}), 400
+    return jsonify({
+        "status": "error",
+        "message": message,
+        "data": {
+            "native_connect_blockers": list(info.native_connect_blockers),
+        },
+    }), 400
 
 
 def _reject_legacy_native_account_operation(account_id: str) -> Any | None:

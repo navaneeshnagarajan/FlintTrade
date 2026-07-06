@@ -222,10 +222,13 @@ def test_native_connect_routes_reject_coming_soon_native(client, route, extra_bo
     back door (Codex-wave review findings 8 + otp_verify; principle 3).
 
     All five connect-completing routes are covered so a future edit that drops
-    the guard from any one of them fails a test, not just add_account."""
+    the guard from any one of them fails a test, not just add_account. The
+    rejection also carries the same public blocker metadata as the native route."""
     response = client.post(route, json={"broker": broker, **extra_body})
     assert response.status_code == 400, (route, broker)
-    assert "coming soon" in response.get_json()["message"].lower(), (route, broker)
+    payload = response.get_json()
+    assert "coming soon" in payload["message"].lower(), (route, broker)
+    assert payload["data"]["native_connect_blockers"], (route, broker)
 
 
 @pytest.mark.parametrize(
@@ -244,9 +247,11 @@ def test_native_connect_routes_reject_connectable_native_on_legacy_gateway(clien
     account surface, not the legacy OpenAlgo gateway registry."""
     response = client.post(route, json={"broker": broker, **extra_body})
     assert response.status_code == 400, (route, broker)
-    message = response.get_json()["message"].lower()
+    payload = response.get_json()
+    message = payload["message"].lower()
     assert "native connect" in message, (route, broker)
     assert "/api/v1/native/accounts" in message, (route, broker)
+    assert payload["data"]["native_connect_blockers"] == [], (route, broker)
 
 
 @pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
@@ -261,7 +266,9 @@ def test_legacy_account_id_routes_reject_existing_coming_soon_native(app, client
     response = client.post(f"/v1/accounts/{account_id}/{route_suffix}")
 
     assert response.status_code == 400
-    assert "coming soon" in response.get_json()["message"].lower()
+    payload = response.get_json()
+    assert "coming soon" in payload["message"].lower()
+    assert payload["data"]["native_connect_blockers"]
 
 
 @pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
@@ -276,9 +283,11 @@ def test_legacy_account_id_routes_reject_existing_connectable_native(app, client
     response = client.post(f"/v1/accounts/{account_id}/{route_suffix}")
 
     assert response.status_code == 400
-    message = response.get_json()["message"].lower()
+    payload = response.get_json()
+    message = payload["message"].lower()
     assert "native connect" in message
     assert "/api/v1/native/accounts" in message
+    assert payload["data"]["native_connect_blockers"] == []
 
 
 def test_oauth_callback_rejects_legacy_native_state(app, client) -> None:

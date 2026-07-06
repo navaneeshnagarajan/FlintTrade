@@ -176,6 +176,9 @@ router, and attempt login transactionally. Brokers that are built but not
 live-verified stay `connectable=false`; their connect/re-login routes return
 "coming soon" rather than creating sessions. Account and market-data reads
 require a live native session but do not create an order safety context.
+Legacy gateway `/v1` account/auth routes reject native broker ids and include
+the same `data.native_connect_blockers` payload when a catalogued native broker
+is still evidence-gated.
 
 | Endpoint | Purpose |
 |---|---|
