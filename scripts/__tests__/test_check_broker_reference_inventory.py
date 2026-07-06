@@ -21,6 +21,8 @@ def _write(path: Path, text: str = "ok") -> None:
 def _write_valid_capture(root: Path) -> tuple[Path, Path]:
     mcp = root / "broker-mcp-current-20260706T000000Z"
     kotak = root / "kotak-neo-api-v2-current-latest"
+    groww = root / "groww-trade-api-docs"
+    indstocks = root / "indstocks-api-docs"
     _write(
         mcp / "sources.txt",
         "\n".join(
@@ -86,6 +88,89 @@ def _write_valid_capture(root: Path) -> tuple[Path, Path]:
     _write(kotak / "raw/content/instruments.md", "pTrdSymbol 'ts' field Authorization")
     _write(kotak / "raw/content/quotes.md", "plain token Authorization nse_cm")
     _write(kotak / "raw/content/websocket/websocket.md", "Connect to Order feed Session Token sid Data Center")
+
+    for rel in [
+        "inventories/00-docs.json",
+        "inventories/02-api-keys.json",
+        "inventories/03-python-sdk.json",
+        "inventories/04-curl-docs.json",
+        "public-docs-extract/curl-historical-data.json",
+        "public-docs-extract/curl-instruments.json",
+        "public-docs-extract/curl-live-data.json",
+        "public-docs-extract/curl-margin.json",
+        "public-docs-extract/curl-orders.json",
+        "public-docs-extract/curl-portfolio.json",
+        "public-docs-extract/curl-smart-orders.json",
+        "public-docs-extract/curl-user.json",
+    ]:
+        _write(groww / rel)
+    _write(groww / "public-docs-extract/api-keys.json", "Groww Cloud | API Keys static-ip-api-trading-setup")
+    _write(groww / "public-docs-extract/python-sdk-intro.json", "pip install growwapi GrowwAPI.get_access_token api_key secret pyotp")
+    _write(
+        groww / "public-docs-extract/python-sdk-orders.json",
+        "place_order modify_order cancel_order get_order_status_by_reference get_order_detail",
+    )
+    _write(groww / "public-docs-extract/python-sdk-live-data.json", "get_quote market_depth open_interest")
+    _write(
+        groww / "public-docs-extract/python-sdk-historical-data.json",
+        "get_historical_candle_data interval_in_minutes candles",
+    )
+    _write(groww / "public-docs-extract/python-sdk-instruments.json", "instruments.csv exchange_token trading_symbol")
+    _write(
+        groww / "public-docs-extract/python-sdk-portfolio.json",
+        "get_holdings_for_user get_positions_for_user trading_symbol",
+    )
+    _write(
+        groww / "public-docs-extract/python-sdk-margin.json",
+        "get_available_margin_details get_order_margin_details fno_margin_details",
+    )
+    _write(
+        groww / "public-docs-extract/python-sdk-smart-orders.json",
+        "create_smart_order cancel_smart_order SMART_ORDER_TYPE_GTT SMART_ORDER_TYPE_OCO",
+    )
+    _write(groww / "public-docs-extract/python-sdk-feed.json", "GrowwFeed subscribe_ltp subscribe_market_depth feed.consume")
+    _write(groww / "public-docs-extract/python-sdk-user.json", "get_user_profile vendor_user_id active_segments")
+
+    for rel in [
+        "inventories/04-api-overview.json",
+        "inventories/06-users-auth.json",
+        "inventories/07-instruments-master.json",
+        "inventories/08-market-quote.json",
+        "inventories/09-historical-data.json",
+        "inventories/10-websockets.json",
+        "inventories/11-normal-orders.json",
+        "inventories/12-smart-orders-gtt.json",
+        "inventories/13-margin-calculation.json",
+        "inventories/14-portfolio-funds.json",
+        "inventories/15-utility.json",
+        "inventories/17-faq.json",
+        "public-docs-extract/api-overview.json",
+    ]:
+        _write(indstocks / rel)
+    _write(indstocks / "public-docs-extract/faq.json", "pip install indstocks-sdk npm install indstocks-sdk")
+    _write(indstocks / "public-docs-extract/users-auth.json", "GET /user/profile GET /funds Authorization: YOUR_ACCESS_TOKEN")
+    _write(indstocks / "public-docs-extract/instruments-master.json", "GET /market/instruments security_id instruments.csv")
+    _write(
+        indstocks / "public-docs-extract/market-quote.json",
+        "GET /market/quotes/full GET /market/quotes/ltp live_price market_depth",
+    )
+    _write(indstocks / "public-docs-extract/historical-data.json", "GET /market/historical/{interval} 1minute candles")
+    _write(
+        indstocks / "public-docs-extract/websockets.json",
+        "wss://ws-prices.indstocks.com/api/v1/ws/prices "
+        "wss://ws-order-updates.indstocks.com/api/v1/ws/trades order_updates",
+    )
+    _write(indstocks / "public-docs-extract/normal-orders.json", "POST /order POST /order/modify POST /order/cancel algo_id")
+    _write(
+        indstocks / "public-docs-extract/smart-orders-gtt.json",
+        "POST /smart/order POST /smart/order/cancel sl_trigger_price tgt_trigger_price",
+    )
+    _write(indstocks / "public-docs-extract/margin-calculation.json", "GET /margin total_margin brokerage")
+    _write(
+        indstocks / "public-docs-extract/portfolio-funds.json",
+        "GET /portfolio/holdings GET /portfolio/positions pnl_absolute",
+    )
+    _write(indstocks / "public-docs-extract/utility.json", "GET /option-chain GET /option-chain-symbols")
     return mcp, kotak
 
 
@@ -135,4 +220,21 @@ def test_validate_inventory_uses_latest_timestamped_mcp_capture(tmp_path: Path) 
         "raw/groww.html: missing marker 'no background syncing', "
         "raw/groww.html: missing marker 'no data storage on ai servers', "
         "raw/groww.html: missing marker 'stocks and f&o'"
+    ]
+
+
+def test_validate_inventory_reports_missing_api_doc_markers(tmp_path: Path) -> None:
+    _write_valid_capture(tmp_path)
+    (tmp_path / "indstocks-api-docs/public-docs-extract/websockets.json").write_text(
+        "wss://ws-prices.indstocks.com/api/v1/ws/prices",
+        encoding="utf-8",
+    )
+
+    results = checker.validate_inventory(tmp_path)
+
+    failures = [result.message for result in results if not result.ok]
+    assert failures == [
+        "INDstocks API page markers: public-docs-extract/websockets.json: missing marker "
+        "'wss://ws-order-updates.indstocks.com/api/v1/ws/trades', "
+        "public-docs-extract/websockets.json: missing marker 'order_updates'"
     ]

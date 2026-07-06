@@ -240,7 +240,7 @@ sync-check: ## Check upstream drift on external test-deps under .local/external/
 broker-sdk-sync: ## Refresh repo-local broker SDK refs and fail on upstream drift
 	@uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift
 
-broker-reference-check: ## Validate local broker MCP/Kotak reference captures under .local
+broker-reference-check: ## Validate local broker MCP/API reference captures under .local
 	@uv run python scripts/check_broker_reference_inventory.py
 
 logs-clear: ## Truncate runtime .log files under .local/dev-logs/
