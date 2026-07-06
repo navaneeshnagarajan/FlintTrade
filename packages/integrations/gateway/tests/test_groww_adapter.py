@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import time
+from importlib.metadata import version
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -152,6 +154,16 @@ def _adapter(transport: MockGrowwTransport) -> GrowwAdapter:
     return GrowwAdapter(http_factory=lambda: transport)
 
 
+def _assert_groww_sdk_headers(headers: dict[str, str], bearer: str) -> None:
+    assert headers["Authorization"] == f"Bearer {bearer}"
+    assert headers["Content-Type"] == "application/json"
+    assert headers["x-client-id"] == "growwapi"
+    assert headers["x-client-platform"] == "growwapi-python-client"
+    assert headers["x-client-platform-version"] == version("growwapi")
+    assert headers["x-api-version"] == "1.0"
+    UUID(headers["x-request-id"])
+
+
 async def _session(adapter: GrowwAdapter):
     return await adapter.login({"user_id": "G1", "access_token": "TOK"})
 
@@ -200,7 +212,7 @@ async def test_api_key_secret_login_mints_access_token() -> None:
     call = transport.calls[0]
     assert call["method"] == "POST"
     assert call["path"] == "/v1/token/api/access"
-    assert call["headers"]["Authorization"] == "Bearer APIKEY"
+    _assert_groww_sdk_headers(call["headers"], "APIKEY")
     assert call["json_body"]["key_type"] == "approval"
     assert str(call["json_body"]["timestamp"]).isdigit()
     assert call["json_body"]["checksum"] == hashlib.sha256(
@@ -220,7 +232,7 @@ async def test_api_key_totp_login_mints_access_token() -> None:
     call = transport.calls[0]
     assert call["method"] == "POST"
     assert call["path"] == "/v1/token/api/access"
-    assert call["headers"]["Authorization"] == "Bearer APIKEY"
+    _assert_groww_sdk_headers(call["headers"], "APIKEY")
     assert call["json_body"] == {"key_type": "totp", "totp": "123456"}
 
 

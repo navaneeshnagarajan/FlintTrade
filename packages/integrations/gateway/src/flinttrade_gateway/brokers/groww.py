@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
+from importlib import metadata
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from zoneinfo import ZoneInfo
 
@@ -38,6 +40,35 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
 Transport = Callable[..., tuple[int, Any]]
+
+
+def _growwapi_version() -> str:
+    """Return the installed official SDK version for header parity."""
+    try:
+        return metadata.version("growwapi")
+    except metadata.PackageNotFoundError:  # pragma: no cover - dependency is pinned
+        return "unknown"
+
+
+_GROWWAPI_VERSION = _growwapi_version()
+
+
+def _groww_sdk_headers(key_or_token: str) -> dict[str, str]:
+    """Build headers matching ``growwapi.GrowwAPI._build_headers``.
+
+    FlintTrade keeps its own async/testable transport instead of instantiating
+    ``GrowwAPI`` because the SDK prints changelog/startup text on construction,
+    but request metadata should still match the official client.
+    """
+    return {
+        "x-request-id": str(uuid.uuid4()),
+        "Authorization": f"Bearer {key_or_token}",
+        "Content-Type": "application/json",
+        "x-client-id": "growwapi",
+        "x-client-platform": "growwapi-python-client",
+        "x-client-platform-version": _GROWWAPI_VERSION,
+        "x-api-version": "1.0",
+    }
 
 GROWW_CAPABILITIES = Capabilities(
     segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.MCX,
@@ -172,12 +203,7 @@ class GrowwAdapter(BrokerAdapter):
 
     @staticmethod
     def _headers(session: Session) -> dict[str, str]:
-        return {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {session.access_token}",
-            "X-API-VERSION": "1.0",
-        }
+        return _groww_sdk_headers(session.access_token)
 
     async def _request(
         self,
@@ -229,14 +255,7 @@ class GrowwAdapter(BrokerAdapter):
             transport,
             "POST",
             f"{M.BASE_URL}/v1/token/api/access",
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-                "x-client-id": "growwapi",
-                "x-client-platform": "flinttrade",
-                "X-API-VERSION": "1.0",
-            },
+            headers=_groww_sdk_headers(api_key),
             params=None,
             json_body=body,
         )
