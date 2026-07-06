@@ -14,7 +14,7 @@ export interface WebhookConfig {
   id: string;
   path: string;
   name: string;
-  type: "tradingview" | "chartink" | "custom";
+  type: "tradingview" | "chartink" | "gocharting" | "custom";
   enabled: boolean;
   /** Optional: supplied when creating a webhook; never echoed by the list/get
    * endpoints (the backend does not leak HMAC secrets in responses). */

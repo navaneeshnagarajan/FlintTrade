@@ -51,12 +51,14 @@ import { InlineToast, useInlineToast } from "./shared";
 function typeBadgeClass(type: WebhookConfig["type"]): string {
   if (type === "tradingview") return "bg-blue-500/10 text-blue-400 border-0";
   if (type === "chartink") return "bg-purple-500/10 text-purple-400 border-0";
+  if (type === "gocharting") return "bg-teal-500/10 text-teal-400 border-0";
   return "bg-surface-base text-text-muted border-0";
 }
 
 function typeLabel(type: WebhookConfig["type"]): string {
   if (type === "tradingview") return "TradingView";
   if (type === "chartink") return "ChartInk";
+  if (type === "gocharting") return "GoCharting";
   return "Custom";
 }
 
@@ -212,7 +214,7 @@ function ActiveWebhooksTab({
 // CreateWebhookTab — form schema
 // ---------------------------------------------------------------------------
 
-const WEBHOOK_TYPES = ["tradingview", "chartink", "custom"] as const;
+const WEBHOOK_TYPES = ["tradingview", "chartink", "gocharting", "custom"] as const;
 type WebhookType = (typeof WEBHOOK_TYPES)[number];
 
 const createSchema = z.object({
@@ -291,6 +293,7 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
           <SelectContent>
             <SelectItem value="tradingview" className="text-xs">TradingView</SelectItem>
             <SelectItem value="chartink" className="text-xs">ChartInk</SelectItem>
+            <SelectItem value="gocharting" className="text-xs">GoCharting</SelectItem>
             <SelectItem value="custom" className="text-xs">Custom</SelectItem>
           </SelectContent>
         </Select>
@@ -416,8 +419,8 @@ export default function WebhooksSection() {
             Webhooks
           </h3>
           <p className="text-sm text-text-secondary mt-0.5">
-            Register inbound webhook endpoints for TradingView, ChartInk, and custom
-            integrations. Each endpoint forwards payloads to the configured strategy.
+            Register inbound webhook endpoints for TradingView, ChartInk, GoCharting,
+            and custom integrations. Each endpoint forwards payloads to the configured strategy.
           </p>
         </div>
 

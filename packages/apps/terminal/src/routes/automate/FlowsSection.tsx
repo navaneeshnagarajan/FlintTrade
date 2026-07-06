@@ -69,6 +69,7 @@ const EMPTY_WEBHOOK_FORM: WebhookFormState = {
 const WEBHOOK_TYPE_LABELS: Record<WebhookConfig["type"], string> = {
   tradingview: "TradingView",
   chartink:    "ChartInk",
+  gocharting:  "GoCharting",
   custom:      "Custom",
 };
 

@@ -254,6 +254,49 @@ class TestParseChartink:
 
 
 # ---------------------------------------------------------------------------
+# parse_gocharting (B2)
+# ---------------------------------------------------------------------------
+
+
+class TestParseGoCharting:
+    def test_buy_maps_to_place_order(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting({
+            "symbol": "reliance", "exchange": "nse", "product": "MIS",
+            "action": "BUY", "quantity": 10,
+        })
+        assert payload.source == "gocharting"
+        assert payload.action == "place_order"
+        assert payload.symbol == "RELIANCE"
+        assert payload.exchange == "NSE"
+
+    def test_sell_maps_to_place_order(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting({"symbol": "TCS", "action": "SELL", "quantity": 5})
+        assert payload.action == "place_order"
+
+    def test_gc_action_and_defaults_in_data(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting({"symbol": "INFY", "action": "BUY", "quantity": 1, "product": "CNC"})
+        assert payload.data["gc_action"] == "BUY"
+        assert payload.data["pricetype"] == "MARKET"
+        assert payload.data["strategy"] == "GoCharting"
+        # Explicit order fields survive into data for the gated dispatcher.
+        assert payload.data["quantity"] == 1
+        assert payload.data["product"] == "CNC"
+
+    def test_non_actionable_downgraded_to_signal(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting({"symbol": "NIFTY"})
+        assert payload.action == "signal"
+
+    def test_default_exchange_nse(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting({"symbol": "NIFTY", "action": "BUY", "quantity": 1})
+        assert payload.exchange == "NSE"
+
+
+# ---------------------------------------------------------------------------
 # parse_custom
 # ---------------------------------------------------------------------------
 

@@ -319,6 +319,44 @@ class WebhookReceiver:
             data={k: v for k, v in extra.items()},
         )
 
+    def parse_gocharting(self, raw: dict[str, Any]) -> WebhookPayload:
+        """Parse a GoCharting alert webhook payload.
+
+        GoCharting sends JSON with explicit ``symbol``, ``exchange``,
+        ``product``, ``action`` (BUY/SELL) and ``quantity`` fields — the same
+        single-order shape as a TradingView alert — so it maps to the same
+        gated ``place_order`` action and flows through the identical
+        ``_handle_place_order`` → gated-dispatcher path. No separate order path
+        is introduced (one-core rule; ``test_no_legacy_order_path`` guard).
+
+        A GoCharting alert missing an actionable BUY/SELL is downgraded to a
+        ``signal`` so it is logged rather than routed to placement.
+
+        Args:
+            raw: Decoded JSON dict from the GoCharting webhook request.
+
+        Returns:
+            Populated :class:`WebhookPayload`.
+        """
+        action_raw = str(raw.get("action", "")).upper()
+        action = "place_order" if action_raw in ("BUY", "SELL") else action_raw.lower() or "signal"
+
+        extra = {k: v for k, v in raw.items() if k not in {"action", "symbol", "exchange"}}
+        # Preserve the original side and stamp the strategy, mirroring the
+        # ``tv_action`` convention so the gated dispatcher reads the side and a
+        # MARKET default when GoCharting omits ``pricetype``.
+        extra.setdefault("gc_action", action_raw)
+        extra.setdefault("pricetype", "MARKET")
+        extra.setdefault("strategy", "GoCharting")
+
+        return WebhookPayload(
+            source="gocharting",
+            action=action,
+            symbol=str(raw.get("symbol", "")).upper() or None,
+            exchange=str(raw.get("exchange", "NSE")).upper() or None,
+            data={k: v for k, v in extra.items()},
+        )
+
     def parse_chartink(self, raw: dict[str, Any]) -> WebhookPayload:
         """Parse a ChartInk scanner webhook payload.
 

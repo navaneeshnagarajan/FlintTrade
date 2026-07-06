@@ -4,7 +4,7 @@ External URLs (frontend/TradingView/ChartInk call these via /ft-api/v1/webhook/*
 the WSGI prefix stripper in app.py rewrites to /v1/webhook/* before Flask dispatch):
 
 - ``POST /ft-api/v1/webhook/<source>`` — receive, verify, parse, and
-  dispatch a webhook from ``tradingview``, ``chartink``, or ``custom``.
+  dispatch a webhook from ``tradingview``, ``chartink``, ``gocharting``, or ``custom``.
 - ``POST /ft-api/v1/webhook/<source>/<id>`` — named endpoint form used by the
   Flows panel registry; handled by the same receiver path.
 - ``GET  /ft-api/v1/webhook/log`` — return recent webhook history.
@@ -215,7 +215,7 @@ def _run_dispatch(receiver: WebhookReceiver, payload: WebhookPayload) -> dict[st
 # ---------------------------------------------------------------------------
 
 
-_VALID_SOURCES = frozenset({"tradingview", "chartink", "custom"})
+_VALID_SOURCES = frozenset({"tradingview", "chartink", "gocharting", "custom"})
 
 
 @webhook_bp.route("/<source>", methods=["POST"])
@@ -224,7 +224,7 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
     """Receive a webhook from an external source, verify, parse, and dispatch.
 
     Path parameters:
-        source: One of ``tradingview``, ``chartink``, ``custom``.
+        source: One of ``tradingview``, ``chartink``, ``gocharting``, ``custom``.
         webhook_id: Optional named endpoint slug from the UI registry.
 
     Headers (optional):
@@ -322,6 +322,8 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             payload = receiver.parse_tradingview(body_dict)
         elif source == "chartink":
             payload = receiver.parse_chartink(body_dict)
+        elif source == "gocharting":
+            payload = receiver.parse_gocharting(body_dict)
         else:
             payload = receiver.parse_custom(body_dict)
     except Exception as exc:

@@ -106,6 +106,22 @@ def test_receive_named_chartink_endpoint_ok(client):
     assert resp.get_json()["status"] == "success"
 
 
+def test_receive_gocharting_ok(client):
+    """200 for a valid GoCharting webhook — routes through the shared gate."""
+    payload = {"symbol": "NIFTY", "exchange": "NSE", "product": "MIS", "action": "BUY", "quantity": 50}
+    with patch(
+        "flinttrade_webhooks.webhook_routes._run_dispatch",
+        return_value={"status": "executed", "order_id": "OID123"},
+    ):
+        resp = client.post(
+            "/v1/webhook/gocharting",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "success"
+
+
 def test_receive_invalid_source(client):
     """404 for unknown webhook source."""
     resp = client.post(
