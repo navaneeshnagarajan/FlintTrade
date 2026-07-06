@@ -30,9 +30,11 @@ vi.mock("@/services/ftApi.native", () => ({
 }));
 
 import {
+  listLiveNativeReadAccounts,
   listBrokerAccounts,
   reconnectBrokerAccount,
   removeBrokerAccount,
+  selectNativeReadAccount,
   setPrimaryBrokerAccount,
 } from "../brokerAccountsApi";
 
@@ -126,5 +128,49 @@ describe("brokerAccountsApi", () => {
     expect(mocks.removeGateway).toHaveBeenCalledWith("GW1");
     expect(mocks.reconnectGateway).toHaveBeenCalledWith("GW1");
     expect(mocks.setGatewayPrimary).toHaveBeenCalledWith("GW1");
+  });
+
+  it("lists only live native read accounts in the shared account client", async () => {
+    mocks.listNative.mockResolvedValue([
+      { adapter_id: "dhan", account_id: "DH1", has_session: false, is_primary: true },
+      { adapter_id: "upstox", account_id: "UPX1", has_session: true, is_primary: false },
+      { adapter_id: "kotakneo", account_id: "K1", has_session: true, is_primary: true },
+    ]);
+
+    await expect(listLiveNativeReadAccounts()).resolves.toEqual([
+      { adapter_id: "upstox", account_id: "UPX1", is_primary: false },
+      { adapter_id: "kotakneo", account_id: "K1", is_primary: true },
+    ]);
+  });
+
+  it("selects the active native read account before the primary fallback", () => {
+    const readAccounts = [
+      { adapter_id: "dhan", account_id: "SHARED", is_primary: true },
+      { adapter_id: "upstox", account_id: "SHARED", is_primary: false },
+    ];
+    const brokerAccounts: BrokerAccount[] = [
+      { ...gatewayAccount, account_id: "SHARED", broker: "zerodha", source: "gateway" },
+      {
+        account_id: "SHARED",
+        broker: "upstox",
+        label: "Upstox",
+        status: "connected",
+        connected_at: null,
+        error_message: null,
+        is_primary: false,
+        source: "native",
+      },
+    ];
+
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "native:upstox:SHARED")).toEqual({
+      adapter_id: "upstox",
+      account_id: "SHARED",
+      is_primary: false,
+    });
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "gateway:zerodha:SHARED")).toEqual({
+      adapter_id: "dhan",
+      account_id: "SHARED",
+      is_primary: true,
+    });
   });
 });

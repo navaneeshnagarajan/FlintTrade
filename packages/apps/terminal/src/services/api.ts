@@ -58,12 +58,14 @@ import {
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
 import { mockDataEngine } from "@/services/mockDataEngine";
 import {
-  listNativeAccounts,
   readNativeAccount,
-  type NativeAccount,
   type NativeReadKind,
   type NativeReadParams,
 } from "@/services/ftApi.native";
+import {
+  listLiveNativeReadAccounts,
+  selectNativeReadAccount,
+} from "@/services/brokerAccountsApi";
 import {
   getPnlSymbols as getFtPnlSymbols,
   type PnLSymbolsResponse,
@@ -151,17 +153,9 @@ function isExploreModeWithoutKey(): boolean {
   return useModeStore.getState().mode === "explore" && getApiKey().trim().length === 0;
 }
 
-function pickNativeReadAccount(accounts: NativeAccount[]): NativeAccount | undefined {
-  const live = accounts.filter((account) => account.has_session === true);
+function pickNativeReadAccount(accounts: Awaited<ReturnType<typeof listLiveNativeReadAccounts>>) {
   const { accounts: brokerAccounts, activeAccountId } = useBrokerStore.getState();
-  const active = brokerAccounts.find((account) => isBrokerAccountMatch(account, activeAccountId));
-  if (active?.source === "native") {
-    const selected = live.find((account) => (
-      account.account_id === active.account_id && account.adapter_id === active.broker
-    ));
-    if (selected) return selected;
-  }
-  return live.find((account) => account.is_primary) ?? live[0];
+  return selectNativeReadAccount(accounts, brokerAccounts, activeAccountId);
 }
 
 function normaliseOrderBody(body: object): Record<string, unknown> {
@@ -935,7 +929,7 @@ function nativeCapabilityBrokerFromStore(): string | undefined {
 async function nativeCapabilityBroker(): Promise<string | undefined> {
   const broker = nativeCapabilityBrokerFromStore();
   if (broker) return broker;
-  const account = pickNativeReadAccount(await listNativeAccounts());
+  const account = pickNativeReadAccount(await listLiveNativeReadAccounts());
   return account?.adapter_id;
 }
 
@@ -976,7 +970,7 @@ async function readPrimaryNative<T>(endpoint: string, extra: object = {}): Promi
   if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
     return undefined;
   }
-  const account = pickNativeReadAccount(await listNativeAccounts());
+  const account = pickNativeReadAccount(await listLiveNativeReadAccounts());
   if (!account) return undefined;
   const value = await readNativeAccount<unknown>(
     account.adapter_id,

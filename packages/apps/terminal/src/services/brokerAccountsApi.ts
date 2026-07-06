@@ -9,6 +9,11 @@ import {
 import type { AccountStatus, BrokerAccount } from "@/types/broker";
 
 export type BrokerAccountRef = Pick<BrokerAccount, "account_id" | "broker" | "source">;
+export interface NativeReadAccountRef {
+  adapter_id: string;
+  account_id: string;
+  is_primary: boolean;
+}
 
 function nativeStatus(account: NativeAccount): AccountStatus {
   if (account.has_session === true) return "connected";
@@ -56,6 +61,41 @@ export async function listBrokerAccounts(previous: BrokerAccount[] = []): Promis
     ? nativeResult.value.map(nativeToBrokerAccount)
     : previous.filter((a) => a.source === "native");
   return [...gatewayAccounts, ...nativeAccounts];
+}
+
+export async function listLiveNativeReadAccounts(): Promise<NativeReadAccountRef[]> {
+  return (await listNativeAccounts())
+    .filter((account) => account.has_session === true)
+    .map((account) => ({
+      adapter_id: account.adapter_id,
+      account_id: account.account_id,
+      is_primary: !!account.is_primary,
+    }));
+}
+
+export function selectNativeReadAccount(
+  accounts: NativeReadAccountRef[],
+  brokerAccounts: BrokerAccount[],
+  activeAccountId: string | null,
+): NativeReadAccountRef | undefined {
+  const active = brokerAccounts.find((account) => (
+    (account.source ?? "gateway") === "native"
+    && (
+      [
+        account.source ?? "gateway",
+        account.broker,
+        account.account_id,
+      ].map(encodeURIComponent).join(":") === activeAccountId
+      || account.account_id === activeAccountId
+    )
+  ));
+  if (active) {
+    const selected = accounts.find((account) => (
+      account.account_id === active.account_id && account.adapter_id === active.broker
+    ));
+    if (selected) return selected;
+  }
+  return accounts.find((account) => account.is_primary) ?? accounts[0];
 }
 
 export async function removeBrokerAccount(account: BrokerAccountRef): Promise<void> {
