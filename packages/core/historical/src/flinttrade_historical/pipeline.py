@@ -369,7 +369,10 @@ class DataPipeline:
             query += " AND timestamp >= ?"
             params.append(start_date)
         if end_date:
-            query += " AND timestamp <= ?::DATE + INTERVAL '1 day'"
+            # Inclusive end DATE = strictly before the next midnight. The old
+            # `<=` bound also matched a bar stamped exactly at end+1day 00:00
+            # (the next session's daily bar), leaking one extra row.
+            query += " AND timestamp < ?::DATE + INTERVAL '1 day'"
             params.append(end_date)
 
         query += " ORDER BY timestamp"
@@ -387,6 +390,30 @@ class DataPipeline:
         )
         row = result.fetchone()
         return row[0] if row else 0
+
+    def summary(self) -> dict[str, dict[str, Any]]:
+        """Summarise the local store: per interval table, row/symbol counts.
+
+        Returns:
+            ``{table: {"rows": int, "symbols": int, "first": str|None,
+            "last": str|None}}`` for every interval table that exists. Missing
+            tables (store not initialised) report zeros.
+        """
+        out: dict[str, dict[str, Any]] = {}
+        for table in sorted(VALID_TABLES):
+            try:
+                row = self.connection.execute(
+                    f"SELECT COUNT(*), COUNT(DISTINCT symbol), MIN(timestamp), MAX(timestamp) FROM {table}"
+                ).fetchone()
+                out[table] = {
+                    "rows": int(row[0]) if row else 0,
+                    "symbols": int(row[1]) if row else 0,
+                    "first": str(row[2]) if row and row[2] is not None else None,
+                    "last": str(row[3]) if row and row[3] is not None else None,
+                }
+            except Exception:
+                out[table] = {"rows": 0, "symbols": 0, "first": None, "last": None}
+        return out
 
     # ------------------------------------------------------------------
     # Aggregation
