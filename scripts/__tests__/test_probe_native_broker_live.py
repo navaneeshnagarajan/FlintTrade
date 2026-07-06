@@ -271,6 +271,28 @@ def test_run_probe_keeps_session_on_service_window_read_error(monkeypatch, capsy
     assert "TOKEN1" not in out
 
 
+def test_run_probe_dispatches_upstox_analytics_access_token_as_read_only(monkeypatch, capsys) -> None:
+    fake = _FakeAdapter()
+    values = iter(["analytics-token", "upstox-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "upstox", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("upstox", "analytics_access_token", ["profile", "funds"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert fake.credentials == {
+        "access_token": "analytics-token",
+        "client_id": "upstox-user",
+        "read_only": "true",
+        "token_scope": "analytics",
+    }
+    assert "profile: ok object_keys=1" in out
+    assert "funds: ok object_keys=1" in out
+    assert "analytics-token" not in out
+    assert "upstox-user" not in out
+
+
 def test_kotak_probe_prompts_for_docs_token_once() -> None:
     fields = probe.CREDENTIAL_FIELDS["kotakneo"]["totp_mpin"]
 
@@ -565,6 +587,7 @@ def test_shared_probe_help_lists_current_method_defaults(capsys) -> None:
     assert "Credential methods by broker:" in out
     assert "dhan: access_token, oauth_token_id, pin_totp (default: access_token)" in out
     assert "groww: access_token, api_key_secret, api_key_totp (default: api_key_secret)" in out
+    assert "upstox: access_token, analytics_access_token, oauth_code (default: access_token)" in out
     assert "kotakneo: totp_mpin (default: totp_mpin)" in out
     assert "Read choices by broker:" in out
     assert "kotakneo: funds limits positions holdings orders trades orderhistory ordertrades margin" in out

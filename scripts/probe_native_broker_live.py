@@ -168,6 +168,10 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
             CredentialField("access_token", "Upstox access token"),
             CredentialField("client_id", "Optional Upstox account/client label", required=False),
         ),
+        "analytics_access_token": (
+            CredentialField("access_token", "Upstox Analytics access token"),
+            CredentialField("client_id", "Optional Upstox account/client label", required=False),
+        ),
         "oauth_code": (
             CredentialField("code", "Upstox OAuth code"),
             CredentialField("api_key", "Upstox API key"),
@@ -176,6 +180,10 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
             CredentialField("client_id", "Optional Upstox account/client label", required=False),
         ),
     },
+}
+
+CREDENTIAL_DEFAULTS: dict[tuple[str, str], dict[str, str]] = {
+    ("upstox", "analytics_access_token"): {"read_only": "true", "token_scope": "analytics"},
 }
 
 SECRET_FIELD_NAMES = (
@@ -324,6 +332,7 @@ def collect_credentials(broker: str, method: str, environment: str) -> dict[str,
         value = _secret_prompt(field.label, required=field.required)
         if value:
             credentials[field.name] = value
+    credentials.update(CREDENTIAL_DEFAULTS.get((broker, method), {}))
     return credentials
 
 
