@@ -99,6 +99,7 @@ const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
   tradebook: "trades",
   positionbook: "positions",
   holdings: "holdings",
+  ltp: "ltp",
   quotes: "quotes",
   quote_details: "quote_details",
   ticker: "quotes",
@@ -153,9 +154,21 @@ function isExploreModeWithoutKey(): boolean {
   return useModeStore.getState().mode === "explore" && getApiKey().trim().length === 0;
 }
 
+type NativeReadAccountCandidate = Awaited<ReturnType<typeof listLiveNativeReadAccounts>>[number];
+
 function pickNativeReadAccount(accounts: Awaited<ReturnType<typeof listLiveNativeReadAccounts>>) {
   const { accounts: brokerAccounts, activeAccountId } = useBrokerStore.getState();
   return selectNativeReadAccount(accounts, brokerAccounts, activeAccountId);
+}
+
+async function primaryNativeReadAccountFor(kind: NativeReadKind): Promise<NativeReadAccountCandidate | undefined> {
+  if (getApiKey().trim().length > 0 || isExploreModeWithoutKey()) return undefined;
+  // Account-scoped reads expose the REAL broker account and must be Live-only.
+  // Market-data kinds stay readable in every mode.
+  if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
+    return undefined;
+  }
+  return pickNativeReadAccount(await listLiveNativeReadAccounts());
 }
 
 function normaliseOrderBody(body: object): Record<string, unknown> {
@@ -206,7 +219,7 @@ function nativeSymbolKey(symbol: unknown, exchange: unknown): string {
 
 function buildNativeReadParams(endpoint: string, extra: object): NativeReadParams | undefined {
   const params = extra as Record<string, unknown>;
-  if (endpoint === "quotes" || endpoint === "ticker") {
+  if (endpoint === "ltp" || endpoint === "quotes" || endpoint === "ticker") {
     return {
       symbol: stringParam(params.symbol),
       exchange: stringParam(params.exchange, "NSE"),
@@ -380,6 +393,36 @@ function normaliseNativeQuote(value: unknown): Quote {
     volume: toNumber(raw.volume),
     prev_close: toNumber(raw.prev_close ?? raw.previous_close ?? raw.previousClose),
   };
+}
+
+function normaliseNativeLtpDetails(value: unknown, symbol: string, exchange: string): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter(isRecord).map((row) => ({
+      ...row,
+      symbol: String(row.symbol ?? symbol),
+      exchange: String(row.exchange ?? exchange),
+      ltp: toNumber(row.ltp ?? row.last_price ?? row.lastPrice),
+    }));
+  }
+  if (isRecord(value)) {
+    if (value.ltp !== undefined || value.last_price !== undefined || value.lastPrice !== undefined) {
+      return [{
+        ...value,
+        symbol: String(value.symbol ?? symbol),
+        exchange: String(value.exchange ?? exchange),
+        ltp: toNumber(value.ltp ?? value.last_price ?? value.lastPrice),
+      }];
+    }
+    return Object.entries(value).map(([key, ltp]) => {
+      const [mappedExchange, mappedSymbol] = key.includes(":") ? key.split(":", 2) : [exchange, key];
+      return {
+        symbol: mappedSymbol || symbol,
+        exchange: mappedExchange || exchange,
+        ltp: toNumber(ltp),
+      };
+    });
+  }
+  return [{ symbol, exchange, ltp: toNumber(value) }];
 }
 
 function normaliseNativeMultiQuotes(value: unknown): { results: MultiQuoteResult[] } {
@@ -968,14 +1011,8 @@ function normaliseNativeRead(endpoint: string, value: unknown): unknown {
 
 async function readPrimaryNative<T>(endpoint: string, extra: object = {}): Promise<T | undefined> {
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
-  if (!kind || getApiKey().trim().length > 0 || isExploreModeWithoutKey()) return undefined;
-  // Account-scoped reads (funds/positions/orders/…) surface the live broker
-  // account and must be Live-only — in Practice/Explore the caller falls back to
-  // the sandbox/OpenAlgo path so real balances are never shown as sandbox state.
-  if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
-    return undefined;
-  }
-  const account = pickNativeReadAccount(await listLiveNativeReadAccounts());
+  if (!kind) return undefined;
+  const account = await primaryNativeReadAccountFor(kind);
   if (!account) return undefined;
   const value = await readNativeAccount<unknown>(
     account.adapter_id,
@@ -1569,15 +1606,37 @@ export interface MultiQuoteResult {
 export const getQuotes = (symbol: string, exchange = "NSE") =>
   post<Quote>("quotes", { symbol, exchange });
 
-export const getQuoteDetails = (
+export const getQuoteDetails = async (
   symbol: string,
   exchange = "NSE",
   quoteType = "all",
-) => readRequiredPrimaryNative<Array<Record<string, unknown>>>("quote_details", {
-  symbol,
-  exchange,
-  quote_type: quoteType,
-});
+) => {
+  if (quoteType.trim().toLowerCase() !== "ltp") {
+    return readRequiredPrimaryNative<Array<Record<string, unknown>>>("quote_details", {
+      symbol,
+      exchange,
+      quote_type: quoteType,
+    });
+  }
+
+  const account = await primaryNativeReadAccountFor("ltp");
+  if (!account) throw new Error("A live native broker account is required for quote_details.");
+  if (account.adapter_id === "kotakneo") {
+    return readNativeAccount<Array<Record<string, unknown>>>(
+      account.adapter_id,
+      account.account_id,
+      "quote_details",
+      buildNativeReadParams("quote_details", { symbol, exchange, quote_type: quoteType }),
+    );
+  }
+  const value = await readNativeAccount<unknown>(
+    account.adapter_id,
+    account.account_id,
+    "ltp",
+    buildNativeReadParams("ltp", { symbol, exchange }),
+  );
+  return normaliseNativeLtpDetails(value, symbol, exchange);
+};
 
 export const getBrokerLimits = (
   segment = "ALL",

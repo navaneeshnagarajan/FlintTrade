@@ -403,6 +403,61 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
+  it("uses native ltp reads for LTP quote details when the selected broker is not Kotak Neo", async () => {
+    mockConnectionState.apiKey = "";
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: {
+            accounts: [
+              { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: [{ symbol: "INFY", exchange: "NSE", last_price: "1450.25" }],
+        }),
+      );
+
+    const result = await getQuoteDetails("INFY", "NSE", "ltp");
+
+    expect(result).toEqual([{ symbol: "INFY", exchange: "NSE", last_price: "1450.25", ltp: 1450.25 }]);
+    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
+      "/api/v1/native/accounts/upstox/U1/ltp?symbol=INFY&exchange=NSE",
+    );
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/native/accounts/upstox/U1/quote_details"),
+      expect.anything(),
+    );
+  });
+
+  it("normalises mapping-style native ltp responses for quote detail callers", async () => {
+    mockConnectionState.apiKey = "";
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: {
+            accounts: [
+              { adapter_id: "groww", account_id: "G1", is_primary: true, has_session: true },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { "NSE:RELIANCE": "3010.75" } }));
+
+    const result = await getQuoteDetails("RELIANCE", "NSE", "ltp");
+
+    expect(result).toEqual([{ symbol: "RELIANCE", exchange: "NSE", ltp: 3010.75 }]);
+    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
+      "/api/v1/native/accounts/groww/G1/ltp?symbol=RELIANCE&exchange=NSE",
+    );
+  });
+
   it("uses native market depth when a live native account is connected without an OpenAlgo key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
