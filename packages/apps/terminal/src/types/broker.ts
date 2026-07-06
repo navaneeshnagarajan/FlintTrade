@@ -51,22 +51,3 @@ export interface BrokerAccount {
   needs_relogin?: boolean;
   login_retryable?: boolean;
 }
-
-export interface TOTPAuthFields {
-  client_id?: boolean;
-  password?: boolean;
-  totp?: boolean;
-  pin?: boolean;
-  api_key?: boolean;
-  api_secret?: boolean;
-}
-
-export type AuthFlowState =
-  | { step: "idle" }
-  | { step: "selecting_broker" }
-  | { step: "entering_credentials"; broker: BrokerInfo; fields: TOTPAuthFields }
-  | { step: "awaiting_redirect"; broker: BrokerInfo; redirectUrl: string }
-  | { step: "awaiting_otp"; broker: BrokerInfo }
-  | { step: "authenticating"; broker: BrokerInfo }
-  | { step: "success"; account: BrokerAccount }
-  | { step: "error"; message: string };

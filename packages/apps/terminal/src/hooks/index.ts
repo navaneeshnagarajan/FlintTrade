@@ -5,7 +5,6 @@ export { useFunds } from "./useFunds";
 export { useOptionChain } from "./useOptionChain";
 export { useTradebook } from "./useTradebook";
 export { useBrokerAccounts } from "./useBrokerAccounts";
-export { useBrokerAuth } from "./useBrokerAuth";
 export { useBrokerConnected } from "./useBrokerConnected";
 export { useBrokerCapabilities, useIsCryptoBroker } from "./useBrokerCapabilities";
 export { useRecentSignals, useSignalConfig, useUpdateSignalConfig, useSignalStream } from "./useSignals";
