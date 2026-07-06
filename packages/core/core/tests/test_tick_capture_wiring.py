@@ -97,3 +97,51 @@ def test_stop_stops_tick_recorder() -> None:
         if isinstance(n, ast.Attribute) and n.attr == "_tick_recorder"
     ]
     assert refs, "stop() must stop/cancel the tick recorder (_tick_recorder)"
+
+
+@pytest.mark.unit
+def test_workspace_config_readers(tmp_path, monkeypatch) -> None:
+    """Tick mode + auto-sync flags read from workspace.json with safe defaults."""
+    import json
+
+    from flinttrade_core.app import (
+        _auto_sync_enabled,
+        _auto_sync_lookback_days,
+        _tick_capture_mode,
+        _tick_capture_watchlist,
+    )
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+
+    # No workspace.json → safe defaults.
+    assert _tick_capture_mode() == "quote"
+    assert _auto_sync_enabled() is False
+    assert _auto_sync_lookback_days() == 7
+    assert len(_tick_capture_watchlist()) == 3  # default index trio
+
+    (tmp_path / "workspace.json").write_text(json.dumps({
+        "data": {
+            "tick_capture": {
+                "mode": "depth",
+                "symbols": [
+                    {"exchange": "nse", "symbol": "reliance"},
+                    {"bogus": True},
+                ],
+            },
+            "auto_sync": {"enabled": True, "lookback_days": 30},
+        },
+    }), encoding="utf-8")
+
+    assert _tick_capture_mode() == "depth"
+    assert _auto_sync_enabled() is True
+    assert _auto_sync_lookback_days() == 30
+    # Malformed entries skipped; valid ones normalised to upper case.
+    assert _tick_capture_watchlist() == [{"exchange": "NSE", "symbol": "RELIANCE"}]
+
+    # Invalid mode falls back to quote, lookback clamps.
+    (tmp_path / "workspace.json").write_text(json.dumps({
+        "data": {"tick_capture": {"mode": "warp"}, "auto_sync": {"enabled": 1, "lookback_days": 900}},
+    }), encoding="utf-8")
+    assert _tick_capture_mode() == "quote"
+    assert _auto_sync_enabled() is True
+    assert _auto_sync_lookback_days() == 90

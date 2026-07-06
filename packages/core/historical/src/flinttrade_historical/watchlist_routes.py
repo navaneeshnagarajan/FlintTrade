@@ -167,15 +167,30 @@ def trigger_download() -> tuple[Any, int]:
     start_date = body.get("start_date", default_start)
     end_date = body.get("end_date", today.isoformat())
 
-    enabled = _get_watchlist().get_enabled()
-    if not enabled:
-        return jsonify({"status": "error", "message": "No enabled watchlist items to download"}), 400
-
     try:
         from_date = date.fromisoformat(start_date)
         to_date = date.fromisoformat(end_date)
     except ValueError:
         return jsonify({"status": "error", "message": "start_date/end_date must be ISO dates"}), 400
+
+    job = start_watchlist_download(from_date, to_date)
+    if job is None:
+        return jsonify({"status": "error", "message": "No enabled watchlist items to download"}), 400
+    status_code = 507 if job.status == STATUS_REFUSED else 202
+    return jsonify({"status": "success", "data": job.to_dict()}), status_code
+
+
+def start_watchlist_download(from_date: date, to_date: date) -> Any | None:
+    """Start a background OHLCV download for all enabled watchlist items.
+
+    The shared core behind both ``POST /v1/historify/download`` and the
+    scheduled EOD auto-sync job (one download path — no parallel
+    implementations). Returns the initial job snapshot, or ``None`` when the
+    watchlist has nothing enabled.
+    """
+    enabled = _get_watchlist().get_enabled()
+    if not enabled:
+        return None
 
     symbols = sorted({(item.symbol, item.exchange) for item in enabled})
     intervals = sorted({item.interval for item in enabled})
@@ -195,9 +210,7 @@ def trigger_download() -> tuple[Any, int]:
         )
 
     storage_dir = str(Path.home() / ".flinttrade")
-    job = _get_job_manager().start(total=total, runner=_runner, storage_path=storage_dir)
-    status_code = 507 if job.status == STATUS_REFUSED else 202
-    return jsonify({"status": "success", "data": job.to_dict()}), status_code
+    return _get_job_manager().start(total=total, runner=_runner, storage_path=storage_dir)
 
 
 @historify_bp.route("/v1/historify/download/status", methods=["GET"])

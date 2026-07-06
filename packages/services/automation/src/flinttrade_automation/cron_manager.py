@@ -117,6 +117,11 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_type": "cron",
         "trigger_args": {"hour": 2, "minute": 0, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
     },
+    "eod_sync_job": {
+        "description": "EOD historical-data delta sync at 6:30 PM IST (after close)",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 18, "minute": 30, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
+    },
 }
 
 
@@ -300,6 +305,41 @@ def make_tick_retention_job(provider: Callable[[], Any]) -> Callable[[], None]:
     return tick_retention_job
 
 
+def make_eod_sync_job(
+    starter: Callable[[], Any],
+    holidays: set[str] | None = None,
+) -> Callable[[], None]:
+    """Create the eod_sync_job handler — daily historical-data delta sync.
+
+    Fires after market close and calls the injected ``starter`` (the shared
+    ``start_watchlist_download`` core — the SAME path the manual Settings
+    button uses, so there is no parallel download implementation). Skips
+    weekends/holidays; the underlying Historify engine handles delta/resume so
+    re-syncing an already-current store is cheap.
+
+    Args:
+        starter: Zero-arg callable that starts the sync and returns the job
+            snapshot (or None when the watchlist has nothing enabled).
+        holidays: Market holiday dates (ISO strings) to skip.
+    """
+
+    def eod_sync_job() -> None:
+        if _is_market_holiday(holidays):
+            logger.info("eod_sync_job: market holiday — skipping")
+            return
+        try:
+            job = starter()
+        except Exception as exc:
+            logger.error("eod_sync_job: sync start failed — %s", exc)
+            return
+        if job is None:
+            logger.info("eod_sync_job: no enabled watchlist items — nothing to sync")
+        else:
+            logger.info("eod_sync_job: started delta sync job %s", getattr(job, "job_id", "?"))
+
+    return eod_sync_job
+
+
 def make_overnight_optimise_job(optimiser: Callable[[], Any]) -> Callable[[], None]:
     """Create the overnight strategy-optimisation handler.
 
@@ -406,6 +446,10 @@ class CronManager:
         # Injected overnight strategy optimiser (a zero-arg callable). When set,
         # register_builtin_jobs schedules the "optimise overnight" trigger.
         self.overnight_optimiser: Callable[[], Any] | None = None
+        # Injected EOD data-sync starter (zero-arg; the shared
+        # start_watchlist_download core). Opt-in — set by the app factory only
+        # when workspace.json data.auto_sync.enabled is true.
+        self.eod_sync_starter: Callable[[], Any] | None = None
         self._holidays: set[str] = set()
 
     @property
@@ -492,6 +536,15 @@ class CronManager:
                 "overnight_optimise_job",
                 handler=make_overnight_optimise_job(self.overnight_optimiser),
                 **DEFAULT_JOBS["overnight_optimise_job"],
+            )
+
+        # EOD historical-data delta sync — only when the opt-in starter is
+        # injected (workspace.json data.auto_sync.enabled).
+        if self.eod_sync_starter is not None:
+            self.register(
+                "eod_sync_job",
+                handler=make_eod_sync_job(self.eod_sync_starter, self._holidays),
+                **DEFAULT_JOBS["eod_sync_job"],
             )
 
     # ------------------------------------------------------------------

@@ -216,6 +216,54 @@ def _tick_capture_watchlist() -> list[dict[str, str]]:
     return symbols or list(_DEFAULT_TICK_WATCHLIST)
 
 
+def _read_workspace_section(*keys: str) -> Any:
+    """Read a nested section from workspace.json (None when absent/unreadable)."""
+    import json  # noqa: PLC0415
+
+    path = _workspace_dir() / "workspace.json"
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            node: Any = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+
+def _tick_capture_mode() -> str:
+    """Capture mode from workspace.json data.tick_capture.mode (default quote).
+
+    ``depth`` records the full top-5 book; ``ltp`` is the lightest. Invalid
+    values fall back to ``quote`` so a typo cannot silently disable capture.
+    """
+    raw = _read_workspace_section("data", "tick_capture", "mode")
+    mode = str(raw or "").strip().lower()
+    return mode if mode in ("ltp", "quote", "depth") else "quote"
+
+
+def _auto_sync_enabled() -> bool:
+    """Whether the EOD historical delta-sync cron is enabled (workspace.json)."""
+    raw = _read_workspace_section("data", "auto_sync", "enabled")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _auto_sync_lookback_days() -> int:
+    """Delta-sync lookback window in days (default 7, clamped 1–90)."""
+    raw = _read_workspace_section("data", "auto_sync", "lookback_days")
+    try:
+        days = int(raw) if raw is not None else 7
+    except (TypeError, ValueError):
+        days = 7
+    return max(1, min(90, days))
+
+
 def _index_rag_docs_safely(rag: Any) -> None:
     """Index docs for RAG without letting background thread errors escape."""
     try:
@@ -2796,6 +2844,29 @@ class FlintTradeApp:
         except Exception as exc:
             logger.warning("Overnight optimiser not wired (%s); nightly optimisation will not run", exc)
 
+        # EOD historical-data auto-sync (opt-in via workspace.json
+        # data.auto_sync.enabled). Reuses the SAME start_watchlist_download core
+        # the Settings download button calls — one download path.
+        if _auto_sync_enabled():
+            try:
+                from datetime import date as _date  # noqa: PLC0415
+                from datetime import timedelta as _timedelta  # noqa: PLC0415
+
+                from flinttrade_historical.watchlist_routes import (  # noqa: PLC0415
+                    start_watchlist_download,
+                )
+
+                lookback = _auto_sync_lookback_days()
+
+                def _start_eod_sync() -> Any:
+                    today = _date.today()
+                    return start_watchlist_download(today - _timedelta(days=lookback), today)
+
+                self.cron.eod_sync_starter = _start_eod_sync
+                logger.info("EOD auto-sync wired (lookback %d days)", lookback)
+            except Exception as exc:
+                logger.warning("EOD auto-sync not wired (%s); scheduled sync will not run", exc)
+
         # Register built-in cron jobs AND start the scheduler. Without start()
         # APScheduler never runs, so none of the built-in jobs fire — the
         # nightly DuckDB CHECKPOINT+ANALYZE (db_optimise_job), square-off
@@ -2846,11 +2917,12 @@ class FlintTradeApp:
                 # the nightly tick_retention_job prunes older rows.
                 self.cron.tick_retention_days = 90
                 # Capture watchlist — workspace.json data.tick_capture.symbols
-                # when configured, else the major indices in quote mode. An
+                # when configured, else the major indices; capture mode from
+                # data.tick_capture.mode (ltp/quote/depth, default quote). An
                 # empty watchlist would capture nothing.
                 recorder.add_symbols(
                     _tick_capture_watchlist(),
-                    mode="quote",
+                    mode=_tick_capture_mode(),
                 )
                 self._tick_recorder = recorder
                 self._tick_recorder_task = asyncio.create_task(recorder.run())

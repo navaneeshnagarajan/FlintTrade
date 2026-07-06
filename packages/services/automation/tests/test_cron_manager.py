@@ -682,3 +682,57 @@ class TestTickRetentionJob:
         with_store.register_builtin_jobs()
         names = {j["name"] for j in with_store.list_jobs()}
         assert "tick_retention_job" in names
+
+
+class TestEodSyncJob:
+    """eod_sync_job — daily historical-data delta sync (opt-in)."""
+
+    def test_calls_starter_on_trading_day(self):
+        from flinttrade_automation.cron_manager import make_eod_sync_job
+
+        starter = MagicMock(return_value=MagicMock(job_id="job-1"))
+        with patch(
+            "flinttrade_automation.cron_manager._is_market_holiday", return_value=False
+        ):
+            make_eod_sync_job(starter)()
+        starter.assert_called_once_with()
+
+    def test_skips_on_holiday(self):
+        from flinttrade_automation.cron_manager import make_eod_sync_job
+
+        starter = MagicMock()
+        with patch(
+            "flinttrade_automation.cron_manager._is_market_holiday", return_value=True
+        ):
+            make_eod_sync_job(starter)()
+        starter.assert_not_called()
+
+    def test_swallows_starter_failure(self):
+        from flinttrade_automation.cron_manager import make_eod_sync_job
+
+        starter = MagicMock(side_effect=RuntimeError("openalgo down"))
+        with patch(
+            "flinttrade_automation.cron_manager._is_market_holiday", return_value=False
+        ):
+            make_eod_sync_job(starter)()  # must not raise
+
+    def test_none_job_logged_not_raised(self):
+        from flinttrade_automation.cron_manager import make_eod_sync_job
+
+        starter = MagicMock(return_value=None)  # empty watchlist
+        with patch(
+            "flinttrade_automation.cron_manager._is_market_holiday", return_value=False
+        ):
+            make_eod_sync_job(starter)()
+
+    def test_registered_only_when_starter_injected(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        without = CronManager()
+        without.register_builtin_jobs()
+        assert "eod_sync_job" not in {j["name"] for j in without.list_jobs()}
+
+        with_starter = CronManager()
+        with_starter.eod_sync_starter = MagicMock()
+        with_starter.register_builtin_jobs()
+        assert "eod_sync_job" in {j["name"] for j in with_starter.list_jobs()}
