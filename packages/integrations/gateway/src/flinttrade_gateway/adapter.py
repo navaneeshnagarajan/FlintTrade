@@ -578,6 +578,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "cautions": [
             "Broker MCP trade tools are outside FlintTrade's in-process safety gate; FlintTrade automation must still use gate_order or gate_broker_write through BrokerRouter.",
             "Dhan's agent skill pack is reference/setup help; it does not establish a FlintTrade broker session or remove order-confirmation requirements.",
+            "Dhan's documented skill guardrails require explicit confirmation before place/modify/cancel, use LIMIT defaults, and validate F&O lot sizes.",
         ],
         "client_configs": [
             {
@@ -659,6 +660,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "daily_reauthorization": True,
         "login_steps": [
             "Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.",
+            "Use an active, non-dormant Upstox account; dormant accounts cannot complete MCP authorisation.",
             "Complete the OAuth authorisation opened by that client.",
             "Repeat authorisation daily before relying on account context.",
         ],
@@ -676,6 +678,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
             "Upstox MCP cannot place, modify, or cancel orders.",
             "Use FlintTrade's native Upstox or OpenAlgo order path for live trading, with the normal safety gate.",
             "Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.",
+            "If the MCP client starts the wrong Node.js/npx binary, configure full node and npx paths instead of relying on PATH.",
         ],
         "client_configs": [
             {
@@ -737,6 +740,7 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
         "cautions": [
             "Sell orders through Groww MCP require DDPI authorisation.",
             "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
+            "Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.",
             "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
         ],
         "client_configs": [

@@ -214,6 +214,7 @@ const MCP_BROKERS = [
       cautions: [
         "Broker MCP trade tools are outside FlintTrade's in-process safety gate.",
         "Dhan's agent skill pack is reference/setup help; it does not establish a FlintTrade broker session.",
+        "Dhan's documented skill guardrails require explicit confirmation before place/modify/cancel, use LIMIT defaults, and validate F&O lot sizes.",
       ],
       client_configs: [
         { id: "remote_url", label: "Claude / ChatGPT / custom connector", url: "https://mcp.dhan.co/mcp" },
@@ -296,6 +297,7 @@ const MCP_BROKERS = [
       daily_reauthorization: true,
       login_steps: [
         "Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.",
+        "Use an active, non-dormant Upstox account; dormant accounts cannot complete MCP authorisation.",
         "Complete the OAuth authorisation opened by that client.",
         "Repeat authorisation daily before relying on account context.",
         "Keep FlintTrade live orders on the gated native/OpenAlgo path.",
@@ -314,6 +316,7 @@ const MCP_BROKERS = [
         "Upstox MCP cannot place, modify, or cancel orders.",
         "Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.",
         "Do not treat the hosted MCP as a FlintTrade live order path.",
+        "If the MCP client starts the wrong Node.js/npx binary, configure full node and npx paths instead of relying on PATH.",
       ],
       client_configs: [
         {
@@ -369,6 +372,7 @@ const MCP_BROKERS = [
       cautions: [
         "Sell orders through Groww MCP require DDPI authorisation.",
         "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
+        "Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.",
         "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
       ],
       client_configs: [
@@ -554,6 +558,7 @@ describe("BrokersSection", () => {
 
     expect(await screen.findByText("Broker MCP assistants")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Read-only");
+    expect(screen.getByText(/active, non-dormant Upstox account/)).toBeInTheDocument();
     expect(screen.getByText("Repeat authorisation daily before relying on account context.")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
       "Upstox MCP cannot place, modify, or cancel orders.",
@@ -565,6 +570,7 @@ describe("BrokersSection", () => {
       "not treat the hosted MCP as a FlintTrade live order path",
     );
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("verify critical data");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("full node and npx paths");
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("market-quote");
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("historical trading information");
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Portfolio beta");
@@ -586,6 +592,8 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-dhan-dhanhq_skill_pack")).toHaveTextContent(
       "skills add dhan-oss/dhanhq-skills --skill dhanhq",
     );
+    expect(screen.getByTestId("broker-mcp-dhan")).toHaveTextContent("LIMIT defaults");
+    expect(screen.getByTestId("broker-mcp-dhan")).toHaveTextContent("F&O lot sizes");
     expect(screen.getByTestId("broker-mcp-upstox-vscode_copilot")).toHaveTextContent("VS Code GitHub Copilot");
     expect(screen.getAllByText("https://mcp.groww.in/mcp").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("broker-mcp-groww-remote_url")).toHaveTextContent("GrowwMCP");
@@ -595,6 +603,8 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("Windsurf");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no background syncing");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no AI-server data storage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("future broker scope");

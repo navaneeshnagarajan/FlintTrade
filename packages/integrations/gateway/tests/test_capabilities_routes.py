@@ -212,6 +212,8 @@ class TestCapabilitiesRoute:
         ]
         assert "option chain with Greeks" in " ".join(brokers["dhan"]["mcp"]["use_cases"])
         assert "order-confirmation" in " ".join(brokers["dhan"]["mcp"]["cautions"])
+        assert "LIMIT defaults" in " ".join(brokers["dhan"]["mcp"]["cautions"])
+        assert "F&O lot sizes" in " ".join(brokers["dhan"]["mcp"]["cautions"])
 
         for broker_id in ("upstox", "groww"):
             mcp = brokers[broker_id]["mcp"]
@@ -234,7 +236,9 @@ class TestCapabilitiesRoute:
         assert "Portfolio beta" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
         assert "Professional investment-model" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
         assert "corporate-governance" in " ".join(brokers["upstox"]["mcp"]["use_cases"])
+        assert "active, non-dormant" in " ".join(brokers["upstox"]["mcp"]["login_steps"])
         assert "verify critical data" in " ".join(brokers["upstox"]["mcp"]["cautions"])
+        assert "full node and npx paths" in " ".join(brokers["upstox"]["mcp"]["cautions"])
 
     def test_mcp_catalogue_supports_single_broker_lookup(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp?broker=groww")
@@ -256,6 +260,8 @@ class TestCapabilitiesRoute:
             "52155",
         ]
         assert "early-stage" in " ".join(broker["mcp"]["cautions"])
+        assert "no background syncing" in " ".join(broker["mcp"]["cautions"])
+        assert "no AI-server data storage" in " ".join(broker["mcp"]["cautions"])
 
     def test_all_brokers_have_broker_name(self, client) -> None:  # type: ignore[no-untyped-def]
         """Every broker entry in the full list contains broker_name."""
