@@ -42,6 +42,15 @@ _FETCH_LITERAL_RE = re.compile(
     r"""fetch\(\s*[`"']/ft-api/(?P<path>[a-zA-Z0-9/_.-]+)""",
 )
 
+# Matches fetch(`${getBase()}/…`) — the shared-helper form the app-auth and
+# smart-route clients use. ``getBase()`` returns ``/ft-api`` in dev and ``""``
+# behind the desktop single-origin, so the path after it is exactly what the
+# WSGI stripper hands to the URL map. Without this pattern, every call site
+# migrated onto the shared helper would silently drop out of this contract.
+_FETCH_GETBASE_RE = re.compile(
+    r"""fetch\(\s*`\$\{getBase\(\)\}/(?P<path>[a-zA-Z0-9/_.-]+)""",
+)
+
 
 def _frontend_ft_api_paths() -> set[str]:
     """Collect every literal ``/ft-api/<path>`` fetch across the terminal source.
@@ -58,11 +67,17 @@ def _frontend_ft_api_paths() -> set[str]:
         if "__tests__" in ts_file.parts or ts_file.name.endswith((".test.ts", ".test.tsx")):
             continue
         source = ts_file.read_text(encoding="utf-8")
-        for match in _FETCH_LITERAL_RE.finditer(source):
-            raw = match.group("path")
-            # Drop a trailing dot the regex may greedily catch before ``${``.
-            stripped = "/" + raw.rstrip("./")
-            paths.add(stripped)
+        for pattern in (_FETCH_LITERAL_RE, _FETCH_GETBASE_RE):
+            for match in pattern.finditer(source):
+                # A ``${`` right after the captured prefix means the rest of the
+                # path is dynamic (e.g. ``${getBase()}/api/v1/${endpoint}``) —
+                # the literal fragment alone is not a checkable route.
+                if source[match.end():match.end() + 2] == "${":
+                    continue
+                raw = match.group("path")
+                # Drop a trailing dot the regex may greedily catch before ``${``.
+                stripped = "/" + raw.rstrip("./")
+                paths.add(stripped)
     return paths
 
 
