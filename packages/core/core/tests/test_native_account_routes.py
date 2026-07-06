@@ -300,6 +300,9 @@ def test_list_native_brokers_catalogue(client):
         "https://mcp.groww.in/mcp",
         "52155",
     ]
+    groww_cautions = " ".join(brokers["groww"]["mcp"]["cautions"])
+    assert "approving the API-key session in Groww Cloud" in groww_cautions
+    assert "session approval, market-data/API permissions" in groww_cautions
     indmoney = next(m for m in brokers["indmoney"]["auth_methods"] if m["id"] == "access_token")
     assert "INDstocks API dashboard" in indmoney["description"]
     assert "static outbound IP" in indmoney["description"]
@@ -313,6 +316,10 @@ def test_list_native_brokers_catalogue(client):
     groww_fields = {f["name"]: f for f in groww["fields"]}
     assert groww_fields["access_token"]["secret"] is True
     assert "06:00 IST expiry" in groww_fields["access_token"]["help"]
+    groww_secret = next(m for m in brokers["groww"]["auth_methods"] if m["id"] == "api_key_secret")
+    assert "session is approved in Groww Cloud" in groww_secret["description"]
+    groww_secret_fields = {f["name"]: f for f in groww_secret["fields"]}
+    assert "session approval is required" in groww_secret_fields["api_secret"]["help"]
     # Secret fields are flagged for masking.
     kotak = next(m for m in brokers["kotakneo"]["auth_methods"] if m["id"] == "totp_mpin")
     assert any(f["secret"] for f in kotak["fields"])

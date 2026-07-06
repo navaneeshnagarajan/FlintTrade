@@ -46,8 +46,10 @@ verification against real accounts; Kotak Neo and Groww remain catalogued but
 disabled as "coming soon" until their broker-specific blockers clear. Dhan and
 Upstox use native SDK/API clients, Groww has the official `growwapi` SDK pinned
 for attestation/reference parity while production calls use FlintTrade's tested
-REST transport, and INDmoney is REST-only with a dashboard-generated 24-hour
-token. INDstocks' FAQ advertises an `indstocks-sdk`, but no matching PyPI or npm
+REST transport, and its key-secret token mint now requires broker-side API-key
+session approval before FlintTrade can log in. INDmoney is REST-only with a
+dashboard-generated 24-hour token. INDstocks' FAQ advertises an `indstocks-sdk`,
+but no matching PyPI or npm
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus portal evidence but no promoted native connect
 yet. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK

@@ -527,13 +527,18 @@ _NATIVE_AUTH: dict[str, list[dict[str, Any]]] = {
             "id": "api_key_secret", "label": "API key + secret", "kind": "direct",
             "description": (
                 "Enter the Groww Trade API key and secret from Groww Cloud/API Keys. FlintTrade mints the "
-                "daily access token locally before creating the broker session. Live order placement still "
-                "requires static outbound IP setup."
+                "daily access token locally after the session is approved in Groww Cloud before creating the "
+                "broker session. Live order placement still requires static outbound IP setup."
             ),
             "fields": [
                 _f("user_id", "User ID", required=False),
                 _f("api_key", "API key", secret=True),
-                _f("api_secret", "API secret", secret=True),
+                _f(
+                    "api_secret",
+                    "API secret",
+                    secret=True,
+                    help_="If Groww says session approval is required, approve the API-key session in Groww Cloud/API Keys and retry.",
+                ),
             ],
         },
         {
@@ -741,7 +746,8 @@ _BROKER_MCP: dict[str, dict[str, Any]] = {
             "Sell orders through Groww MCP require DDPI authorisation.",
             "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
             "Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.",
-            "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
+            "Groww native token minting may require approving the API-key session in Groww Cloud before FlintTrade can log in.",
+            "Groww native account reads and margin checks have live proof, but native connect stays disabled until session approval, market-data/API permissions, static IP setup, and order-safety verification pass.",
         ],
         "client_configs": [
             {

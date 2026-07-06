@@ -85,7 +85,8 @@ gates pass. The current connectable native set is Dhan, Upstox, and INDmoney
 after live login/read verification. Kotak Neo and Groww are built and catalogued
 but kept `connectable=false` until their broker-specific blockers clear:
 Kotak Neo still needs a successful live adapter login/read probe, while Groww
-needs market-data/API permission, static-IP resolution, and order-safety proof.
+needs API-key session approval, market-data/API permission, static-IP
+resolution, and order-safety proof.
 Portal/static-IP evidence is not enough by itself to promote them.
 
 ---

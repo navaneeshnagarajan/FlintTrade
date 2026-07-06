@@ -373,7 +373,8 @@ const MCP_BROKERS = [
         "Sell orders through Groww MCP require DDPI authorisation.",
         "Groww describes MCP as early-stage and not investment advice; verify outputs before trading.",
         "Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.",
-        "Groww native account reads and margin checks have live proof, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.",
+        "Groww native token minting may require approving the API-key session in Groww Cloud before FlintTrade can log in.",
+        "Groww native account reads and margin checks have live proof, but native connect stays disabled until session approval, market-data/API permissions, static IP setup, and order-safety verification pass.",
       ],
       client_configs: [
         {
@@ -605,6 +606,8 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no background syncing");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no AI-server data storage");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("API-key session in Groww Cloud");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("session approval");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("market-data/API permissions");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("future broker scope");
