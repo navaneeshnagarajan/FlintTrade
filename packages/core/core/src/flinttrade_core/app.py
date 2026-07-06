@@ -173,6 +173,49 @@ def _tick_capture_enabled() -> bool:
     }
 
 
+_DEFAULT_TICK_WATCHLIST: list[dict[str, str]] = [
+    {"exchange": "NSE_INDEX", "symbol": "NIFTY"},
+    {"exchange": "NSE_INDEX", "symbol": "BANKNIFTY"},
+    {"exchange": "BSE_INDEX", "symbol": "SENSEX"},
+]
+
+
+def _tick_capture_watchlist() -> list[dict[str, str]]:
+    """Resolve the tick-capture watchlist from workspace.json, else defaults.
+
+    workspace.json shape::
+
+        {"data": {"tick_capture": {"symbols": [
+            {"exchange": "NSE", "symbol": "RELIANCE"}, ...
+        ]}}}
+
+    Malformed entries are skipped; an empty/missing list falls back to the
+    default major-index watchlist so enabling capture always records something.
+    """
+    import json  # noqa: PLC0415
+
+    path = _workspace_dir() / "workspace.json"
+    if not path.exists():
+        return list(_DEFAULT_TICK_WATCHLIST)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Could not read workspace.json for tick watchlist: %s", exc)
+        return list(_DEFAULT_TICK_WATCHLIST)
+
+    raw = (((data.get("data") or {}).get("tick_capture") or {}).get("symbols")) or []
+    symbols: list[dict[str, str]] = []
+    for inst in raw if isinstance(raw, list) else []:
+        if not isinstance(inst, dict):
+            continue
+        symbol = str(inst.get("symbol", "")).strip().upper()
+        exchange = str(inst.get("exchange", "")).strip().upper()
+        if symbol and exchange:
+            symbols.append({"exchange": exchange, "symbol": symbol})
+    return symbols or list(_DEFAULT_TICK_WATCHLIST)
+
+
 def _index_rag_docs_safely(rag: Any) -> None:
     """Index docs for RAG without letting background thread errors escape."""
     try:
@@ -1473,6 +1516,11 @@ def create_flask_app(
     from flinttrade_data.orderflow_routes import orderflow_bp  # noqa: PLC0415
     app.register_blueprint(orderflow_bp)
 
+    # Register Tick Capture blueprint (/api/v1/data/ticks/*) — status, recorded
+    # tick queries and runtime watchlist management for the opt-in recorder.
+    from flinttrade_data.tick_routes import ticks_bp  # noqa: PLC0415
+    app.register_blueprint(ticks_bp)
+
     # Register Tax Report blueprint (/v1/tax/*)
     from flinttrade_data.tax_routes import tax_bp  # noqa: PLC0415
     app.register_blueprint(tax_bp)
@@ -1789,6 +1837,11 @@ def create_flask_app(
     # Register Intervals blueprint (/api/v1/intervals)
     from flinttrade_historical.intervals_routes import intervals_bp  # noqa: PLC0415
     app.register_blueprint(intervals_bp)
+
+    # Register Local Data Store blueprint (/v1/historify/bars*, bhavcopy download)
+    # — browse locally-downloaded OHLCV and fetch full-market NSE bhavcopies.
+    from flinttrade_historical.local_data_routes import local_data_bp  # noqa: PLC0415
+    app.register_blueprint(local_data_bp)
 
     # Register Instruments blueprint (/api/v1/instruments)
     from flinttrade_historical.instruments_routes import instruments_bp  # noqa: PLC0415
@@ -2792,18 +2845,20 @@ class FlintTradeApp:
                 # Keep ~90 days of ticks by default so the store stays bounded;
                 # the nightly tick_retention_job prunes older rows.
                 self.cron.tick_retention_days = 90
-                # Default watchlist — the major indices in quote mode. Operators
-                # can extend this; an empty watchlist would capture nothing.
+                # Capture watchlist — workspace.json data.tick_capture.symbols
+                # when configured, else the major indices in quote mode. An
+                # empty watchlist would capture nothing.
                 recorder.add_symbols(
-                    [
-                        {"exchange": "NSE_INDEX", "symbol": "NIFTY"},
-                        {"exchange": "NSE_INDEX", "symbol": "BANKNIFTY"},
-                        {"exchange": "BSE_INDEX", "symbol": "SENSEX"},
-                    ],
+                    _tick_capture_watchlist(),
                     mode="quote",
                 )
                 self._tick_recorder = recorder
                 self._tick_recorder_task = asyncio.create_task(recorder.run())
+                # Expose the recorder + store to the tick routes (status /
+                # query / watchlist) so the terminal can see and manage capture.
+                flask_app.config["TICK_RECORDER"] = recorder
+                flask_app.config["TICK_STORAGE"] = tick_storage
+                flask_app.config["TICK_STORAGE_LOCK"] = tick_lock
                 logger.info("Live tick capture started → %s", tick_db)
             except Exception as exc:
                 logger.warning("Tick capture failed to start (%s); not recording ticks", exc)

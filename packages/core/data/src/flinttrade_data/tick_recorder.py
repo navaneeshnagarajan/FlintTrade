@@ -101,6 +101,11 @@ class TickRecorder:
     def tick_count(self) -> int:
         return self._tick_count
 
+    @property
+    def is_running(self) -> bool:
+        """Whether the run() loop is active (set on start, cleared by stop())."""
+        return self._running
+
     # ------------------------------------------------------------------
     # Watchlist management
     # ------------------------------------------------------------------
