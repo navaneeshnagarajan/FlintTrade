@@ -662,3 +662,65 @@ class TestLiveRegistryHistory:
         assert params["exchange"] == "NSE_INDEX"
         assert params["interval"] == "W"
         assert "start" in params and "end" in params
+
+
+class TestFiiLongShortRoute:
+    """DP1 — FII long/short ratio surface endpoint."""
+
+    _BIAS_LABELS = ("Strongly Long", "Long", "Neutral", "Short", "Strongly Short")
+
+    def test_returns_ratio_surface_sample(self, client, monkeypatch):
+        # Force the offline sample path deterministically: no live cache/fetch,
+        # independent of any DuckDB cache on the host running the tests.
+        class _FailingTracker:
+            def __init__(self, *_a, **_k):
+                raise RuntimeError("no NSE in tests")
+
+        monkeypatch.setattr(
+            "flinttrade_screener.fii_dii.FiiDiiTracker", _FailingTracker
+        )
+
+        resp = client.get("/api/v1/screener/fii-long-short")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["status"] == "success"
+        data = body["data"]
+        assert data["is_sample_data"] is True
+        ratio = data["ratio"]
+        assert [s["segment"] for s in ratio["segments"]] == [
+            "index_futures",
+            "stock_futures",
+            "index_calls",
+            "index_puts",
+        ]
+        assert "futures_bias" in ratio
+        assert ratio["bias_label"] in self._BIAS_LABELS
+
+    def test_returns_ratio_surface_from_cache(self, client, monkeypatch):
+        # A live-ish path: tracker yields a cached snapshot → not sample data.
+        from flinttrade_screener.fii_dii import make_sample_fii_dii
+
+        class _CachedTracker:
+            def __init__(self, *_a, **_k):
+                pass
+
+            def get_latest_cached(self):
+                return make_sample_fii_dii()
+
+            def fetch_latest(self):  # pragma: no cover - cache hit wins
+                return make_sample_fii_dii()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(
+            "flinttrade_screener.fii_dii.FiiDiiTracker", _CachedTracker
+        )
+
+        resp = client.get("/api/v1/screener/fii-long-short")
+
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["is_sample_data"] is False
+        assert data["ratio"]["bias_label"] in self._BIAS_LABELS

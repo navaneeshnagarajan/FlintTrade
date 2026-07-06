@@ -75,6 +75,44 @@ export const getFiiDiiData = (days?: number, refresh?: boolean) => {
   return get<FiiDiiResponse>("screener/fii-dii" + (qs ? "?" + qs : ""));
 };
 
+// DP1 — FII long/short ratio surface (derived from participant-OI).
+export type FiiBiasLabel =
+  | "Strongly Long"
+  | "Long"
+  | "Neutral"
+  | "Short"
+  | "Strongly Short";
+
+export interface FiiLongShortSegment {
+  segment: string;
+  label: string;
+  long: number;
+  short: number;
+  net: number;
+  ls_ratio: number;
+  long_pct: number;
+}
+
+export interface FiiLongShortRatio {
+  trade_date: string;
+  segments: FiiLongShortSegment[];
+  futures_long: number;
+  futures_short: number;
+  futures_bias: number;
+  bias_label: FiiBiasLabel;
+  updated_at: string;
+}
+
+export interface FiiLongShortResponse {
+  is_sample_data: boolean;
+  ratio: FiiLongShortRatio;
+}
+
+export const getFiiLongShortData = (refresh?: boolean) => {
+  const qs = refresh ? "?refresh=true" : "";
+  return get<FiiLongShortResponse>("screener/fii-long-short" + qs);
+};
+
 export const getRRGData = (tailLength?: number): Promise<RRGResponse> => {
   const params = new URLSearchParams();
   if (tailLength !== undefined) params.set("tail_length", String(tailLength));

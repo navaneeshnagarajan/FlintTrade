@@ -1330,3 +1330,68 @@ def fii_dii_endpoint() -> Any:
             "trend": trend_data,
         },
     })
+
+
+@analysis_bp.route("/screener/fii-long-short", methods=["GET"])
+def fii_long_short_endpoint() -> Any:
+    """FII long/short ratio surface (DP1).
+
+    Derives per-segment FII long/short ratios (index futures, stock futures,
+    index calls, index puts) plus an aggregate futures directional bias from the
+    F&O participant-OI already captured by :class:`FiiDiiTracker`. No extra NSE
+    round-trip beyond the shared FII/DII fetch.
+
+    Query params:
+        refresh (bool): Force a fresh NSE fetch (default false; uses cache).
+
+    Returns:
+        JSON with the derived ratio surface::
+
+            {
+              "status": "success",
+              "data": {
+                "is_sample_data": bool,
+                "ratio": { ...FiiLongShortRatio fields... }
+              }
+            }
+    """
+    from .fii_dii import (  # noqa: PLC0415
+        FiiDiiTracker,
+        compute_fii_long_short,
+        make_sample_fii_dii,
+    )
+
+    force_refresh = request.args.get("refresh", "false").lower() in ("true", "1", "yes")
+
+    is_sample_data = False
+    tracker: FiiDiiTracker | None = None
+    latest = None
+
+    try:
+        tracker = FiiDiiTracker()
+        if force_refresh:
+            latest = tracker.fetch_latest()
+        else:
+            latest = tracker.get_latest_cached()
+            if latest is None:
+                latest = tracker.fetch_latest()
+    except Exception as exc:
+        logger.warning("FII long/short live data unavailable: %s", exc)
+
+    if latest is None:
+        is_sample_data = True
+        latest = make_sample_fii_dii()
+        logger.info("FII long/short: using sample data")
+
+    if tracker is not None:
+        tracker.close()
+
+    ratio = compute_fii_long_short(latest)
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "is_sample_data": is_sample_data,
+            "ratio": ratio.to_dict(),
+        },
+    })

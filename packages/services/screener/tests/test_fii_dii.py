@@ -10,9 +10,12 @@ from flinttrade_screener.fii_dii import (
     FiiDiiSnapshot,
     FiiDiiTracker,
     FiiDiiTrend,
+    FiiLongShortRatio,
+    _bias_label,
     _compute_sentiment,
     _parse_fao_csv,
     _transform_data,
+    compute_fii_long_short,
     make_sample_fii_dii,
     make_sample_trend,
 )
@@ -289,3 +292,56 @@ class TestSampleData:
     def test_make_sample_trend_single_day(self):
         trend = make_sample_trend(days=1)
         assert trend.days == 1
+
+
+# ---------------------------------------------------------------------------
+# DP1 — FII long/short ratio surface
+# ---------------------------------------------------------------------------
+
+
+class TestFiiLongShort:
+    """Verify the FII long/short ratio derivation (pure computation)."""
+
+    def test_computes_four_segments(self):
+        ratio = compute_fii_long_short(make_sample_fii_dii())
+        assert isinstance(ratio, FiiLongShortRatio)
+        keys = [s.segment for s in ratio.segments]
+        assert keys == ["index_futures", "stock_futures", "index_calls", "index_puts"]
+
+    def test_ratio_and_pct_match_sample_index_futures(self):
+        # Sample: fii_idx_fut_long=125000, short=140000.
+        ratio = compute_fii_long_short(make_sample_fii_dii())
+        idx_fut = next(s for s in ratio.segments if s.segment == "index_futures")
+        assert idx_fut.long == 125000
+        assert idx_fut.short == 140000
+        assert idx_fut.net == -15000
+        assert idx_fut.ls_ratio == round(125000 / 140000, 4)
+        assert idx_fut.long_pct == round(125000 / 265000 * 100.0, 2)
+
+    def test_futures_bias_aggregates_index_and_stock(self):
+        # long = 125000+80000 = 205000; short = 140000+75000 = 215000.
+        ratio = compute_fii_long_short(make_sample_fii_dii())
+        assert ratio.futures_long == 205000
+        assert ratio.futures_short == 215000
+        assert ratio.futures_bias == round(205000 / 420000 * 100.0, 2)
+
+    def test_zero_denominator_is_neutral_not_error(self):
+        ratio = compute_fii_long_short(FiiDiiSnapshot(trade_date="01-Jan-2026"))
+        assert ratio.futures_bias == 50.0
+        assert ratio.bias_label == "Neutral"
+        for seg in ratio.segments:
+            assert seg.ls_ratio == 0.0
+            assert seg.long_pct == 50.0
+
+    def test_bias_label_buckets(self):
+        assert _bias_label(70.0) == "Strongly Long"
+        assert _bias_label(60.0) == "Long"
+        assert _bias_label(50.0) == "Neutral"
+        assert _bias_label(40.0) == "Short"
+        assert _bias_label(30.0) == "Strongly Short"
+
+    def test_to_dict_is_json_serialisable(self):
+        import json
+
+        payload = compute_fii_long_short(make_sample_fii_dii()).to_dict()
+        assert json.loads(json.dumps(payload))["segments"][0]["segment"] == "index_futures"

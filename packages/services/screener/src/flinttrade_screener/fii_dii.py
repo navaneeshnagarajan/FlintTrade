@@ -741,3 +741,137 @@ def make_sample_trend(days: int = 10) -> FiiDiiTrend:
         dii_net_total=round(dii_total, 2),
         avg_sentiment=round(avg_sent, 1),
     )
+
+
+# ---------------------------------------------------------------------------
+# DP1 — FII long/short ratio surface (derived from FiiDiiSnapshot F&O OI)
+# ---------------------------------------------------------------------------
+
+# The four F&O participant-OI segments the NSE archive reports for FIIs, in the
+# order they surface most usefully for directional reading (index futures is the
+# headline sentiment gauge Indian desks watch).
+_FII_LS_SEGMENTS: tuple[tuple[str, str, str, str], ...] = (
+    ("index_futures", "Index Futures", "fii_idx_fut_long", "fii_idx_fut_short"),
+    ("stock_futures", "Stock Futures", "fii_stk_fut_long", "fii_stk_fut_short"),
+    ("index_calls", "Index Calls", "fii_idx_call_long", "fii_idx_call_short"),
+    ("index_puts", "Index Puts", "fii_idx_put_long", "fii_idx_put_short"),
+)
+
+
+@dataclass
+class FiiLongShortSegment:
+    """FII long/short positioning for a single F&O segment.
+
+    ``ls_ratio`` is long ÷ short (>1 = net long); ``long_pct`` is
+    long ÷ (long + short) as a percentage (>50 = net long). Both are guarded
+    against a zero denominator.
+    """
+
+    segment: str = ""
+    label: str = ""
+    long: int = 0
+    short: int = 0
+    net: int = 0
+    ls_ratio: float = 0.0
+    long_pct: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class FiiLongShortRatio:
+    """Derived FII long/short ratio surface for one trade date.
+
+    ``futures_bias`` aggregates index + stock futures into a single directional
+    read (long_pct across both futures books); ``bias_label`` buckets it into a
+    plain-English tag for the widget header.
+    """
+
+    trade_date: str = ""
+    segments: list[FiiLongShortSegment] = field(default_factory=list)
+    futures_long: int = 0
+    futures_short: int = 0
+    futures_bias: float = 50.0
+    bias_label: str = "Neutral"
+    updated_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return {
+            "trade_date": self.trade_date,
+            "segments": [s.to_dict() for s in self.segments],
+            "futures_long": self.futures_long,
+            "futures_short": self.futures_short,
+            "futures_bias": self.futures_bias,
+            "bias_label": self.bias_label,
+            "updated_at": self.updated_at,
+        }
+
+
+def _bias_label(long_pct: float) -> str:
+    """Bucket a futures long-percentage into a directional tag.
+
+    Args:
+        long_pct: Long share of futures OI, 0–100.
+
+    Returns:
+        One of ``Strongly Long``/``Long``/``Neutral``/``Short``/``Strongly Short``.
+    """
+    if long_pct >= 65.0:
+        return "Strongly Long"
+    if long_pct >= 55.0:
+        return "Long"
+    if long_pct <= 35.0:
+        return "Strongly Short"
+    if long_pct <= 45.0:
+        return "Short"
+    return "Neutral"
+
+
+def compute_fii_long_short(snap: FiiDiiSnapshot) -> FiiLongShortRatio:
+    """Derive the FII long/short ratio surface from a snapshot's F&O OI.
+
+    Pure computation over the participant-OI fields already captured by
+    :class:`FiiDiiTracker` — no network access. Divide-by-zero is guarded so an
+    all-flat (or sample) snapshot returns neutral ratios rather than raising.
+
+    Args:
+        snap: A populated :class:`FiiDiiSnapshot`.
+
+    Returns:
+        A :class:`FiiLongShortRatio` with per-segment ratios plus an aggregate
+        futures directional bias.
+    """
+    segments: list[FiiLongShortSegment] = []
+    for key, label, long_attr, short_attr in _FII_LS_SEGMENTS:
+        long_oi = int(getattr(snap, long_attr, 0) or 0)
+        short_oi = int(getattr(snap, short_attr, 0) or 0)
+        total = long_oi + short_oi
+        ls_ratio = round(long_oi / short_oi, 4) if short_oi > 0 else 0.0
+        long_pct = round(long_oi / total * 100.0, 2) if total > 0 else 50.0
+        segments.append(FiiLongShortSegment(
+            segment=key,
+            label=label,
+            long=long_oi,
+            short=short_oi,
+            net=long_oi - short_oi,
+            ls_ratio=ls_ratio,
+            long_pct=long_pct,
+        ))
+
+    fut_long = int(snap.fii_idx_fut_long or 0) + int(snap.fii_stk_fut_long or 0)
+    fut_short = int(snap.fii_idx_fut_short or 0) + int(snap.fii_stk_fut_short or 0)
+    fut_total = fut_long + fut_short
+    futures_bias = round(fut_long / fut_total * 100.0, 2) if fut_total > 0 else 50.0
+
+    return FiiLongShortRatio(
+        trade_date=snap.trade_date,
+        segments=segments,
+        futures_long=fut_long,
+        futures_short=fut_short,
+        futures_bias=futures_bias,
+        bias_label=_bias_label(futures_bias),
+        updated_at=snap.updated_at,
+    )
