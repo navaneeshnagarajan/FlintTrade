@@ -36,17 +36,25 @@ mkdir -p "$EXTERNAL_DIR"
 # MarginCalculator, RiskManager) and run in-process. There is nothing to
 # clone for testing.
 # ---------------------------------------------------------------------------
-declare -A PINS=(
-    # OpenAlgo v2.0.1.1 — synced 2026-05-21. Brings GTT orders,
-    # NCO/MCX_INDEX/GLOBAL_INDEX exchanges, WhatsApp bot, IIFL Capital,
-    # FERNET_SALT rotation, and ProxyFix-style forwarded-IP gating.
-    [openalgo]="7e48b2e8b9b682347c2985f6d7339541bcee70c7"
-    [openclaw]="8c4ecf42dfcf8f0265081e2801d221a70dc96886"
-)
-declare -A REPOS=(
-    [openalgo]="https://github.com/marketcalls/openalgo.git"
-    [openclaw]="https://github.com/openclaw/openclaw.git"
-)
+# Associative arrays (declare -A) require bash 4+, but macOS ships bash 3.2,
+# so the pin/repo tables are resolved by a case function instead.
+# OpenAlgo v2.0.1.1 — synced 2026-05-21. Brings GTT orders,
+# NCO/MCX_INDEX/GLOBAL_INDEX exchanges, WhatsApp bot, IIFL Capital,
+# FERNET_SALT rotation, and ProxyFix-style forwarded-IP gating.
+dep_repo() {
+    case "$1" in
+        openalgo) echo "https://github.com/marketcalls/openalgo.git" ;;
+        openclaw) echo "https://github.com/openclaw/openclaw.git" ;;
+        *) return 1 ;;
+    esac
+}
+dep_pin() {
+    case "$1" in
+        openalgo) echo "7e48b2e8b9b682347c2985f6d7339541bcee70c7" ;;
+        openclaw) echo "8c4ecf42dfcf8f0265081e2801d221a70dc96886" ;;
+        *) return 1 ;;
+    esac
+}
 
 MODE="pinned"
 for arg in "$@"; do
@@ -96,7 +104,7 @@ case "$MODE" in
     pinned|latest)
         echo "==> Setup-test-deps: $MODE mode"
         for name in openalgo openclaw; do
-            clone_pinned "$name" "${REPOS[$name]}" "${PINS[$name]}"
+            clone_pinned "$name" "$(dep_repo "$name")" "$(dep_pin "$name")"
         done
         ;;
     update)

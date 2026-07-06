@@ -425,13 +425,23 @@ def _all_broker_names() -> list[str]:
     return sorted(BROKER_CATALOG.keys())
 
 
+# Catalogue keys whose OpenAlgo bridge directory is named differently. FlintTrade
+# carries a NATIVE ``kotakneo`` adapter alongside the OpenAlgo-bridge ``kotak``
+# entry; OpenAlgo bridges Kotak under ``broker/kotak/`` only, so the native alias
+# resolves to that same directory for this existence check.
+_OPENALGO_DIR_ALIASES = {
+    "kotakneo": "kotak",
+}
+
+
 @pytest.mark.parametrize("broker_name", _all_broker_names())
 def test_broker_directory_exists(broker_name: str):
     """Each catalog entry must have a corresponding directory in OpenAlgo."""
     if not _OPENALGO_AVAILABLE:
         pytest.skip(".local/external/openalgo not present (run scripts/setup-test-deps.sh)")
 
-    broker_dir = _OPENALGO_BROKER_DIR / broker_name
+    openalgo_dir_name = _OPENALGO_DIR_ALIASES.get(broker_name, broker_name)
+    broker_dir = _OPENALGO_BROKER_DIR / openalgo_dir_name
     assert broker_dir.is_dir(), (
         f"Expected broker directory at {broker_dir} for '{broker_name}'"
     )
