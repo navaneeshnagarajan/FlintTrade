@@ -49,6 +49,21 @@ export interface BrokerMcpInfo {
   client_configs: McpClientConfig[];
 }
 
+export type BrokerSdkAttestationStatus =
+  | "ok"
+  | "mismatch"
+  | "missing"
+  | "skipped"
+  | "not_required"
+  | "unknown";
+
+export interface BrokerSdkAttestation {
+  pin?: string | null;
+  pinned_version?: string | null;
+  installed_version?: string | null;
+  status: BrokerSdkAttestationStatus;
+}
+
 export interface NativeBroker {
   adapter_id: string;
   display_name: string;
@@ -57,6 +72,8 @@ export interface NativeBroker {
    * it, and the backend rejects a connect for it. */
   connectable: boolean;
   auth_methods: NativeAuthMethod[];
+  sdk_pin?: string | null;
+  sdk_attestation?: BrokerSdkAttestation | null;
   mcp?: BrokerMcpInfo | null;
   oauth_redirect_uri?: string;
   postback_uri?: string;
@@ -67,6 +84,8 @@ export interface BrokerMcpCatalogueEntry {
   display_name: string;
   native: boolean;
   connectable: boolean;
+  sdk_pin?: string | null;
+  sdk_attestation?: BrokerSdkAttestation | null;
   mcp: BrokerMcpInfo;
 }
 

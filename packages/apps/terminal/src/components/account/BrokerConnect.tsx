@@ -47,8 +47,10 @@ import {
   listBrokerMcpCatalogue,
   connectNativeAccount,
   oauthStartNativeAccount,
+  type BrokerSdkAttestation,
   type McpClientConfig,
   type NativeAuthMethod,
+  type NativeBroker,
 } from "@/services/ftApi.native";
 
 const BROKERS_KEY = ["native", "brokers"] as const;
@@ -77,6 +79,33 @@ function joinBrokerNames(names: string[]): string {
   if (names.length <= 1) return names[0] ?? "";
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+function sdkStatusLabel(broker: NativeBroker): string {
+  const attestation: BrokerSdkAttestation | null | undefined = broker.sdk_attestation;
+  if (!attestation) return "SDK status unknown";
+  if (attestation.status === "not_required") return "REST-native; no third-party SDK";
+  const pin = attestation.pin ?? broker.sdk_pin ?? "SDK";
+  const pinned = attestation.pinned_version ? ` ${attestation.pinned_version}` : "";
+  const installed = attestation.installed_version ? ` installed ${attestation.installed_version}` : "";
+  switch (attestation.status) {
+    case "ok":
+      return `${pin}${pinned} OK`;
+    case "missing":
+      return `${pin}${pinned} missing`;
+    case "mismatch":
+      return `${pin}${pinned}${installed} mismatch`;
+    case "skipped":
+      return `${pin} not yet pinned`;
+    default:
+      return `${pin} status unknown`;
+  }
+}
+
+function sdkStatusTone(status?: BrokerSdkAttestation["status"] | null): string {
+  if (status === "ok" || status === "not_required") return "border-profit/40 text-profit";
+  if (status === "missing" || status === "mismatch") return "border-loss/40 text-loss";
+  return "border-warning/40 text-warning";
 }
 
 function McpSetupValue({
@@ -780,6 +809,21 @@ export function BrokerConnect() {
           <div role="status" className="flex items-center gap-2 text-sm text-warning">
             <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
             {broker.display_name} native connect is coming soon.
+          </div>
+        )}
+
+        {broker && (
+          <div
+            className="flex flex-wrap items-center gap-2 text-xs text-text-muted"
+            data-testid="native-broker-sdk-status"
+          >
+            <span>SDK readiness</span>
+            <Badge
+              variant="outline"
+              className={`text-xs ${sdkStatusTone(broker.sdk_attestation?.status)}`}
+            >
+              {sdkStatusLabel(broker)}
+            </Badge>
           </div>
         )}
 

@@ -82,6 +82,27 @@ _ACCOUNT_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW
 native_accounts_bp = Blueprint("native_accounts", __name__, url_prefix="/api/v1/native")
 
 
+def _sdk_attestations_by_pin() -> dict[str, dict[str, Any]]:
+    """Return installed SDK attestation rows keyed by brokers.lock pin name."""
+    try:
+        from .broker_sdk_attest import attestations_by_pin  # noqa: PLC0415
+    except Exception as exc:  # pragma: no cover - optional during isolated imports
+        logger.warning("Broker SDK attestation unavailable for native catalogue (%s)", exc)
+        return {}
+    try:
+        return attestations_by_pin()
+    except Exception as exc:  # pragma: no cover - route must remain non-fatal
+        logger.warning("Broker SDK attestation failed for native catalogue (%s)", exc)
+        return {}
+
+
+def _native_sdk_fields(info: Any) -> dict[str, Any]:
+    """Expose repo-managed SDK readiness on native broker catalogue rows."""
+    from .broker_sdk_attest import sdk_attestation_fields  # noqa: PLC0415
+
+    return sdk_attestation_fields(info.sdk_pin, attestations=_sdk_attestations_by_pin())
+
+
 @native_accounts_bp.before_request
 def _guard_account_writes() -> Any | None:
     """Require a valid session JWT on every account-management write (G9).
@@ -597,8 +618,11 @@ def list_native_brokers() -> Any:
     preferred login method per broker (full broker support). Secret fields are
     flagged so the UI masks them.
     """
-    brokers = [
-        {
+    brokers = []
+    for info in BROKER_CATALOG.values():
+        if not info.native:
+            continue
+        row = {
             "adapter_id": info.name,
             "display_name": info.display_name,
             "connectable": info.connectable,
@@ -608,9 +632,8 @@ def list_native_brokers() -> Any:
             "oauth_redirect_uri": _default_oauth_redirect_uri(),
             "postback_uri": _default_native_postback_uri(info.name),
         }
-        for info in BROKER_CATALOG.values()
-        if info.native
-    ]
+        row.update(_native_sdk_fields(info))
+        brokers.append(row)
     return jsonify({"status": "success", "data": {"brokers": brokers}})
 
 

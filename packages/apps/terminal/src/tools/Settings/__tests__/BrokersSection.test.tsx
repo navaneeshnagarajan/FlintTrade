@@ -42,6 +42,13 @@ const BROKERS = [
     adapter_id: "dhan",
     display_name: "Dhan",
     connectable: true,
+    sdk_pin: "dhanhq",
+    sdk_attestation: {
+      pin: "dhanhq",
+      pinned_version: "2.2.0",
+      installed_version: "2.2.0",
+      status: "ok" as const,
+    },
     oauth_redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
     postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
     auth_methods: [
@@ -481,6 +488,17 @@ describe("BrokersSection", () => {
       expect(nativeWarning).toHaveTextContent("Kotak Neo and Groww stay visible");
       expect(nativeWarning).toHaveTextContent("not been live-verified for any broker");
     });
+  });
+
+  it("shows SDK readiness for the selected native broker", async () => {
+    renderSection();
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+
+    expect(screen.getByTestId("native-broker-sdk-status")).toHaveTextContent("SDK readiness");
+    expect(screen.getByTestId("native-broker-sdk-status")).toHaveTextContent("dhanhq 2.2.0 OK");
   });
 
   it("lists a legacy gateway account and disconnects it (finding #9 — no orphaned management)", async () => {

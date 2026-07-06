@@ -238,8 +238,28 @@ def test_remove_native_account_is_selector_scoped(client):
     assert "dhan:SHARED01" in brokers.get("registered", [])
 
 
-def test_list_native_brokers_catalogue(client):
+def test_list_native_brokers_catalogue(client, monkeypatch):
     c, _app, _tmp = client
+    from flinttrade_core import native_account_routes as native_routes
+
+    monkeypatch.setattr(
+        native_routes,
+        "_sdk_attestations_by_pin",
+        lambda: {
+            "dhanhq": {
+                "pin": "dhanhq",
+                "pinned_version": "2.2.0",
+                "installed_version": "2.2.0",
+                "status": "ok",
+            },
+            "neo-api-client": {
+                "pin": "neo-api-client",
+                "pinned_version": "2.0.0",
+                "installed_version": "2.0.0",
+                "status": "ok",
+            },
+        },
+    )
     data = c.get("/api/v1/native/brokers").get_json()["data"]
     brokers = {b["adapter_id"]: b for b in data["brokers"]}
     assert set(brokers) == {"dhan", "upstox", "kotakneo", "indmoney", "groww"}
@@ -252,9 +272,20 @@ def test_list_native_brokers_catalogue(client):
     upstox_kinds = {m["kind"] for m in brokers["upstox"]["auth_methods"]}
     assert "oauth" in upstox_kinds
     assert brokers["dhan"]["connectable"] is True
+    assert brokers["dhan"]["sdk_pin"] == "dhanhq"
+    assert brokers["dhan"]["sdk_attestation"] == {
+        "pin": "dhanhq",
+        "pinned_version": "2.2.0",
+        "installed_version": "2.2.0",
+        "status": "ok",
+    }
     assert brokers["upstox"]["connectable"] is True
     assert brokers["indmoney"]["connectable"] is True
+    assert brokers["indmoney"]["sdk_pin"] is None
+    assert brokers["indmoney"]["sdk_attestation"]["status"] == "not_required"
     assert brokers["kotakneo"]["connectable"] is False
+    assert brokers["kotakneo"]["sdk_pin"] == "neo-api-client"
+    assert brokers["kotakneo"]["sdk_attestation"]["status"] == "ok"
     assert {"BCD", "MCX"} <= set(brokers["kotakneo"]["exchanges"])
     assert brokers["groww"]["connectable"] is False
     assert "MCX" in brokers["groww"]["exchanges"]

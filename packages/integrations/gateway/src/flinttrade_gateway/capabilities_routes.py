@@ -38,6 +38,30 @@ logger = logging.getLogger("flinttrade.gateway.capabilities_routes")
 capabilities_bp = Blueprint("capabilities", __name__, url_prefix="/api/v1")
 
 
+def _sdk_attestations_by_pin() -> dict[str, dict[str, Any]]:
+    """Return installed SDK attestation rows keyed by brokers.lock pin name."""
+    try:
+        from flinttrade_core.broker_sdk_attest import attestations_by_pin  # noqa: PLC0415
+    except Exception as exc:  # pragma: no cover - optional at import time
+        logger.warning("Broker SDK attestation unavailable for catalogue (%s)", exc)
+        return {}
+    try:
+        return attestations_by_pin()
+    except Exception as exc:  # pragma: no cover - route must remain non-fatal
+        logger.warning("Broker SDK attestation failed for catalogue (%s)", exc)
+        return {}
+
+
+def _catalog_sdk_fields(broker_name: str) -> dict[str, Any]:
+    """Expose the repo-managed SDK pin and local install status for native brokers."""
+    info = BROKER_CATALOG.get(broker_name)
+    if info is None or not info.native:
+        return {}
+    from flinttrade_core.broker_sdk_attest import sdk_attestation_fields  # noqa: PLC0415
+
+    return sdk_attestation_fields(info.sdk_pin, attestations=_sdk_attestations_by_pin())
+
+
 def _minute_interval_label(minutes: int) -> str:
     """Return the terminal's canonical label for an intraday interval."""
     if minutes > 0 and minutes % 60 == 0:
@@ -49,7 +73,9 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
     """Expose optional native-adapter metadata alongside legacy capabilities."""
     native = NATIVE_BROKER_CAPABILITIES.get(broker_name)
     if native is None:
-        return _catalog_mcp_fields(broker_name)
+        data = _catalog_mcp_fields(broker_name)
+        data.update(_catalog_sdk_fields(broker_name))
+        return data
     intraday = list(native.historical_intraday_intervals_minutes)
     intervals = [_minute_interval_label(minutes) for minutes in intraday]
     intervals.extend(native.historical_calendar_intervals)
@@ -97,6 +123,7 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         "basket_order_native": native.basket_order_native,
     }
     data.update(_catalog_mcp_fields(broker_name))
+    data.update(_catalog_sdk_fields(broker_name))
     return data
 
 
@@ -191,13 +218,15 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
 
 def _mcp_entry(info: Any) -> dict[str, Any]:
     """Serialise one broker-hosted MCP catalogue row."""
-    return {
+    data = {
         "adapter_id": info.name,
         "display_name": info.display_name,
         "native": info.native,
         "connectable": info.connectable,
         "mcp": info.mcp.model_dump(),
     }
+    data.update(_catalog_sdk_fields(info.name))
+    return data
 
 
 def _openalgo_mcp_entry() -> dict[str, Any]:

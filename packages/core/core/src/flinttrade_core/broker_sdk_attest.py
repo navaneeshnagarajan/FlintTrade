@@ -31,6 +31,8 @@ STATUS_OK = "ok"
 STATUS_MISMATCH = "mismatch"
 STATUS_MISSING = "missing"
 STATUS_SKIPPED = "skipped"  # pin not yet populated (placeholder) — broker not live
+STATUS_NOT_REQUIRED = "not_required"  # REST-native broker has no third-party SDK to attest
+STATUS_UNKNOWN = "unknown"
 
 # brokers.lock pin name → installed distribution name for version lookup.
 _DIST_NAMES: dict[str, str] = {
@@ -122,6 +124,55 @@ def required_failures(results: list[AttestationResult]) -> list[AttestationResul
 def attest_all_ok(results: list[AttestationResult]) -> bool:
     """True when no non-skipped pin is missing or mismatched."""
     return not required_failures(results)
+
+
+def attestations_by_pin(
+    lock_path: Path | None = None,
+    version_resolver: Callable[[str], str | None] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return serialisable attestation rows keyed by brokers.lock pin name."""
+    return {
+        result.broker: {
+            "pin": result.broker,
+            "pinned_version": result.pinned_version,
+            "installed_version": result.installed_version,
+            "status": result.status,
+        }
+        for result in attest_all(lock_path=lock_path, version_resolver=version_resolver)
+    }
+
+
+def sdk_attestation_fields(
+    sdk_pin: str | None,
+    *,
+    attestations: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the public catalogue SDK fields for one native broker.
+
+    ``sdk_pin=None`` is intentional for REST-native brokers such as INDmoney:
+    activation is credential-gated, not SDK-gated. Missing attestation data is
+    surfaced as ``unknown`` rather than throwing from read-only catalogue routes.
+    """
+    if sdk_pin is None:
+        return {
+            "sdk_pin": None,
+            "sdk_attestation": {
+                "pin": None,
+                "pinned_version": None,
+                "installed_version": None,
+                "status": STATUS_NOT_REQUIRED,
+            },
+        }
+    rows = attestations if attestations is not None else attestations_by_pin()
+    attestation = rows.get(sdk_pin)
+    if attestation is None:
+        attestation = {
+            "pin": sdk_pin,
+            "pinned_version": None,
+            "installed_version": None,
+            "status": STATUS_UNKNOWN,
+        }
+    return {"sdk_pin": sdk_pin, "sdk_attestation": attestation}
 
 
 def log_report(results: list[AttestationResult]) -> None:

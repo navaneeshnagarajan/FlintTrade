@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from flask import Flask
 
+import flinttrade_gateway.capabilities_routes as routes
 from flinttrade_gateway.capabilities_routes import capabilities_bp
 
 
@@ -102,6 +103,32 @@ class TestCapabilitiesRoute:
         assert caps["mcp"]["read_only"] is True
         assert caps["mcp"]["trading_supported"] is False
 
+    def test_native_capabilities_expose_sdk_attestation(self, client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """Native capability rows include the repo-managed SDK pin and install status."""
+        monkeypatch.setattr(
+            routes,
+            "_sdk_attestations_by_pin",
+            lambda: {
+                "upstox-python-sdk": {
+                    "pin": "upstox-python-sdk",
+                    "pinned_version": "2.28.0",
+                    "installed_version": "2.28.0",
+                    "status": "ok",
+                }
+            },
+        )
+
+        response = client.get("/api/v1/broker/capabilities?broker=upstox")
+        assert response.status_code == 200
+        caps = response.get_json()["capabilities"]
+        assert caps["sdk_pin"] == "upstox-python-sdk"
+        assert caps["sdk_attestation"] == {
+            "pin": "upstox-python-sdk",
+            "pinned_version": "2.28.0",
+            "installed_version": "2.28.0",
+            "status": "ok",
+        }
+
     def test_indmoney_native_safety_metadata_present(self, client) -> None:  # type: ignore[no-untyped-def]
         """INDmoney's mandatory algo tag and rate limits survive the unified endpoint."""
         response = client.get("/api/v1/broker/capabilities?broker=indmoney")
@@ -183,6 +210,8 @@ class TestCapabilitiesRoute:
         assert brokers["dhan"]["mcp"]["trading_supported"] is True
         assert brokers["upstox"]["mcp"]["read_only"] is True
         assert brokers["upstox"]["mcp"]["daily_reauthorization"] is True
+        assert brokers["upstox"]["sdk_pin"] == "upstox-python-sdk"
+        assert "status" in brokers["upstox"]["sdk_attestation"]
         assert brokers["groww"]["native"] is True
         assert brokers["groww"]["connectable"] is False
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"

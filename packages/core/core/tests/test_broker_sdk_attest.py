@@ -9,12 +9,16 @@ import pytest
 from flinttrade_core.broker_sdk_attest import (
     STATUS_MISMATCH,
     STATUS_MISSING,
+    STATUS_NOT_REQUIRED,
     STATUS_OK,
     STATUS_SKIPPED,
+    STATUS_UNKNOWN,
     attest_all,
     attest_all_ok,
+    attestations_by_pin,
     load_pins,
     required_failures,
+    sdk_attestation_fields,
 )
 
 pytestmark = pytest.mark.unit
@@ -74,3 +78,24 @@ def test_loads_the_repo_brokers_lock():
 
 def test_missing_lock_returns_empty(tmp_path):
     assert attest_all(tmp_path / "nope.lock", version_resolver=lambda d: None) == []
+
+
+def test_catalogue_sdk_fields_are_serialisable(lock_file):
+    rows = attestations_by_pin(
+        lock_file,
+        version_resolver=lambda d: {"dhanhq": "2.2.0"}.get(d),
+    )
+    assert rows["dhanhq"] == {
+        "pin": "dhanhq",
+        "pinned_version": "2.2.0",
+        "installed_version": "2.2.0",
+        "status": STATUS_OK,
+    }
+    assert sdk_attestation_fields("dhanhq", attestations=rows)["sdk_attestation"]["status"] == STATUS_OK
+    assert sdk_attestation_fields(None)["sdk_attestation"]["status"] == STATUS_NOT_REQUIRED
+    assert sdk_attestation_fields("not-in-lock", attestations=rows)["sdk_attestation"] == {
+        "pin": "not-in-lock",
+        "pinned_version": None,
+        "installed_version": None,
+        "status": STATUS_UNKNOWN,
+    }
