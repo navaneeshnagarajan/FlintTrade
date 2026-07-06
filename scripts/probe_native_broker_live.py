@@ -46,7 +46,7 @@ COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "t
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
-UPSTOX_MARKET_READ_CHOICES = COMMON_MARKET_READ_CHOICES + ("ohlc",)
+UPSTOX_MARKET_READ_CHOICES = COMMON_MARKET_READ_CHOICES + ("ltp", "ohlc")
 PROBE_EXCHANGE = "NSE"
 PROBE_SYMBOL = "RELIANCE"
 PROBE_QUOTE_SYMBOL = f"{PROBE_EXCHANGE}:{PROBE_SYMBOL}"
@@ -371,11 +371,8 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
     if name == "quotes":
         return lambda session: adapter.quotes(session, [PROBE_QUOTE_SYMBOL])
     if name == "ltp":
-        return (
-            (lambda session: adapter.ltp(session, [PROBE_QUOTE_SYMBOL]))
-            if callable(getattr(adapter, "ltp", None))
-            else None
-        )
+        call = getattr(adapter, "ltp", None) or getattr(adapter, "ltp_quotes", None)
+        return (lambda session: call(session, [PROBE_QUOTE_SYMBOL])) if callable(call) else None
     if name == "ohlc":
         call = getattr(adapter, "ohlc", None) or getattr(adapter, "ohlc_quotes", None)
         return (

@@ -105,6 +105,14 @@ class _FakeAdapter:
         return []
 
 
+class _FakeLtpQuotesOnlyAdapter(_FakeAdapter):
+    ltp = None
+
+    async def ltp_quotes(self, _session: object, symbols: list[str]) -> list[dict[str, float]]:
+        self.calls.append(("ltp_quotes", tuple(symbols)))
+        return [{"symbol": symbols[0], "ltp": 123.45}]
+
+
 def test_redact_removes_secret_and_account_like_values() -> None:
     raw = (
         "consumer_key=abcdef1234567890TOKEN mobile_number=9876543210 "
@@ -272,6 +280,7 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "expiry" in probe._resolve_reads("groww", ["default"])
     assert "depth" not in probe._resolve_reads("groww", ["all"])
     assert "search" in probe._resolve_reads("upstox", ["default"])
+    assert "ltp" in probe._resolve_reads("upstox", ["default"])
     assert "ohlc" in probe._resolve_reads("upstox", ["default"])
     assert "optiongreeks" in probe._resolve_reads("upstox", ["all"])
     assert "market_depth" in probe._resolve_reads("kotakneo", ["all"])
@@ -290,6 +299,7 @@ def test_upstox_default_probe_exercises_market_and_calendar_reads(monkeypatch, c
     assert code == 0
     assert fake.credentials == {"access_token": "upstox-test-token", "client_id": "upstox-user"}
     assert ("quotes", ("NSE:RELIANCE",)) in fake.calls
+    assert ("ltp", ("NSE:RELIANCE",)) in fake.calls
     assert ("market_depth", ("NSE:RELIANCE",)) in fake.calls
     assert ("ohlc", ("NSE:RELIANCE",)) in fake.calls
     assert ("margin", "RELIANCE", "NSE") in fake.calls
@@ -298,9 +308,26 @@ def test_upstox_default_probe_exercises_market_and_calendar_reads(monkeypatch, c
     assert any(call[0] == "timings" for call in fake.calls)
     assert ("holidays", None) in fake.calls
     assert "quotes: ok rows=1" in out
+    assert "ltp: ok object_keys=1" in out
     assert "depth: ok rows=1" in out
     assert "ohlc: ok rows=1" in out
     assert "history: ok object_keys=1" in out
+    assert "upstox-test-token" not in out
+    assert "upstox-user" not in out
+
+
+def test_upstox_probe_uses_ltp_quotes_when_ltp_method_is_absent(monkeypatch, capsys) -> None:
+    fake = _FakeLtpQuotesOnlyAdapter()
+    values = iter(["upstox-test-token", "upstox-user"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "upstox", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("upstox", "access_token", ["ltp"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert ("ltp_quotes", ("NSE:RELIANCE",)) in fake.calls
+    assert "ltp: ok rows=1" in out
     assert "upstox-test-token" not in out
     assert "upstox-user" not in out
 
