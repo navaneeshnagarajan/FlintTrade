@@ -17,6 +17,7 @@ YANKED_VERSIONS = {"dhanhq": {"2.1.0"}}
 
 PIN_RE = re.compile(r"^([a-zA-Z0-9_.-]+)==([^\s;]+)")
 HASH_RE = re.compile(r"--hash=sha256:([a-f0-9]{64})")
+STALE_PLACEHOLDER_RE = re.compile(r"PLACEHOLDER|hash pending|pending hash", re.IGNORECASE)
 
 
 def _parse_requirements(text: str) -> dict[str, tuple[str, set[str]]]:
@@ -69,8 +70,11 @@ def main() -> int:
         if activated:
             for field in ("version", "sha256", "licence", "licence_source", "sandbox_tested", "approved_by"):
                 value = str(entry.get(field, ""))
-                if not value or "PLACEHOLDER" in value:
+                if not value or STALE_PLACEHOLDER_RE.search(value):
                     failures.append(f"{name}: activated wave has placeholder {field}")
+            for field, raw in entry.items():
+                if isinstance(raw, str) and STALE_PLACEHOLDER_RE.search(raw):
+                    failures.append(f"{name}: activated wave has stale placeholder text in {field}")
         if name in pins:
             version, hashes = pins[name]
             if entry["version"] != version:
