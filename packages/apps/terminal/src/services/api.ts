@@ -395,36 +395,6 @@ function normaliseNativeQuote(value: unknown): Quote {
   };
 }
 
-function normaliseNativeLtpDetails(value: unknown, symbol: string, exchange: string): Array<Record<string, unknown>> {
-  if (Array.isArray(value)) {
-    return value.filter(isRecord).map((row) => ({
-      ...row,
-      symbol: String(row.symbol ?? symbol),
-      exchange: String(row.exchange ?? exchange),
-      ltp: toNumber(row.ltp ?? row.last_price ?? row.lastPrice),
-    }));
-  }
-  if (isRecord(value)) {
-    if (value.ltp !== undefined || value.last_price !== undefined || value.lastPrice !== undefined) {
-      return [{
-        ...value,
-        symbol: String(value.symbol ?? symbol),
-        exchange: String(value.exchange ?? exchange),
-        ltp: toNumber(value.ltp ?? value.last_price ?? value.lastPrice),
-      }];
-    }
-    return Object.entries(value).map(([key, ltp]) => {
-      const [mappedExchange, mappedSymbol] = key.includes(":") ? key.split(":", 2) : [exchange, key];
-      return {
-        symbol: mappedSymbol || symbol,
-        exchange: mappedExchange || exchange,
-        ltp: toNumber(ltp),
-      };
-    });
-  }
-  return [{ symbol, exchange, ltp: toNumber(value) }];
-}
-
 function normaliseNativeMultiQuotes(value: unknown): { results: MultiQuoteResult[] } {
   const rawRows = Array.isArray(value)
     ? value
@@ -1606,37 +1576,31 @@ export interface MultiQuoteResult {
 export const getQuotes = (symbol: string, exchange = "NSE") =>
   post<Quote>("quotes", { symbol, exchange });
 
-export const getQuoteDetails = async (
+/**
+ * Canonical row shape the core reads facade guarantees for ltp/quote_details —
+ * every broker's payload is normalised server-side (one-core rule: broker
+ * differences are absorbed in the core facade, never in the terminal), so
+ * these clients are thin envelope readers with NO per-broker logic.
+ */
+export interface CanonicalLtpRow {
+  symbol: string;
+  exchange: string;
+  ltp: number;
+  [key: string]: unknown;
+}
+
+export const getQuoteDetails = (
   symbol: string,
   exchange = "NSE",
   quoteType = "all",
-) => {
-  if (quoteType.trim().toLowerCase() !== "ltp") {
-    return readRequiredPrimaryNative<Array<Record<string, unknown>>>("quote_details", {
-      symbol,
-      exchange,
-      quote_type: quoteType,
-    });
-  }
-
-  const account = await primaryNativeReadAccountFor("ltp");
-  if (!account) throw new Error("A live native broker account is required for quote_details.");
-  if (account.adapter_id === "kotakneo") {
-    return readNativeAccount<Array<Record<string, unknown>>>(
-      account.adapter_id,
-      account.account_id,
-      "quote_details",
-      buildNativeReadParams("quote_details", { symbol, exchange, quote_type: quoteType }),
-    );
-  }
-  const value = await readNativeAccount<unknown>(
-    account.adapter_id,
-    account.account_id,
-    "ltp",
-    buildNativeReadParams("ltp", { symbol, exchange }),
-  );
-  return normaliseNativeLtpDetails(value, symbol, exchange);
-};
+) =>
+  // The core facade serves quote_details uniformly for every broker (adapters
+  // without the verb fall back to their ltp read server-side).
+  readRequiredPrimaryNative<CanonicalLtpRow[]>("quote_details", {
+    symbol,
+    exchange,
+    quote_type: quoteType,
+  });
 
 export const getBrokerLimits = (
   segment = "ALL",

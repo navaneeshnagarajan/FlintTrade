@@ -78,16 +78,10 @@ import {
   orderStatus,
   getGttOrderbook,
   getQuotes,
-  getQuoteDetails,
   getDepth,
   getIntervals,
   getFunds,
   getMargin,
-  getBrokerLimits,
-  getScripMaster,
-  getOrderHistory,
-  getOrderTrades,
-  searchScrip,
   getHolidays,
   getTimings,
   getMultiOptionGreeks,
@@ -113,6 +107,12 @@ import {
   ping,
   searchSymbol,
   getPositionbook,
+  getQuoteDetails,
+  getBrokerLimits,
+  getScripMaster,
+  searchScrip,
+  getOrderHistory,
+  getOrderTrades,
 } from "../api";
 import {
   orderLimiter,
@@ -273,13 +273,38 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("falls back to primary native account when the active native account has no live session", async () => {
+  it("fails closed instead of serving another account's data when the active native session lapses", async () => {
+    // Wave-2 audit finding: silently falling back to the primary account would
+    // render a DIFFERENT real account's positions under the operator's
+    // selection with no affordance. The read must fail so the UI surfaces the
+    // needs-relogin state.
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
       { account_id: "D1", broker: "dhan", source: "native" },
       { account_id: "U1", broker: "upstox", source: "native" },
     ];
     mockBrokerState.activeAccountId = "U1";
+    fetchSpy.mockResolvedValue(
+      jsonResponse({
+        status: "success",
+        data: {
+          accounts: [
+            { adapter_id: "dhan", account_id: "D1", is_primary: true, has_session: true },
+            { adapter_id: "upstox", account_id: "U1", is_primary: false, has_session: false },
+          ],
+        },
+      }),
+    );
+
+    await expect(getPositionbook()).rejects.toThrow();
+    const urls = fetchSpy.mock.calls.map(([url]) => String(url));
+    expect(urls.some((url) => url.includes("/api/v1/native/accounts/dhan/D1/positions"))).toBe(false);
+  });
+
+  it("still uses the primary native account when no account is actively selected", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
     fetchSpy
       .mockResolvedValueOnce(
         jsonResponse({
@@ -287,7 +312,6 @@ describe("OpenAlgo API client (api.ts)", () => {
           data: {
             accounts: [
               { adapter_id: "dhan", account_id: "D1", is_primary: true, has_session: true },
-              { adapter_id: "upstox", account_id: "U1", is_primary: false, has_session: false },
             ],
           },
         }),
@@ -403,61 +427,6 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native ltp reads for LTP quote details when the selected broker is not Kotak Neo", async () => {
-    mockConnectionState.apiKey = "";
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: [{ symbol: "INFY", exchange: "NSE", last_price: "1450.25" }],
-        }),
-      );
-
-    const result = await getQuoteDetails("INFY", "NSE", "ltp");
-
-    expect(result).toEqual([{ symbol: "INFY", exchange: "NSE", last_price: "1450.25", ltp: 1450.25 }]);
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
-      "/api/v1/native/accounts/upstox/U1/ltp?symbol=INFY&exchange=NSE",
-    );
-    expect(fetchSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining("/api/v1/native/accounts/upstox/U1/quote_details"),
-      expect.anything(),
-    );
-  });
-
-  it("normalises mapping-style native ltp responses for quote detail callers", async () => {
-    mockConnectionState.apiKey = "";
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "groww", account_id: "G1", is_primary: true, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { "NSE:RELIANCE": "3010.75" } }));
-
-    const result = await getQuoteDetails("RELIANCE", "NSE", "ltp");
-
-    expect(result).toEqual([{ symbol: "RELIANCE", exchange: "NSE", ltp: 3010.75 }]);
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
-      "/api/v1/native/accounts/groww/G1/ltp?symbol=RELIANCE&exchange=NSE",
-    );
-  });
-
   it("uses native market depth when a live native account is connected without an OpenAlgo key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
@@ -539,21 +508,28 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native broker-specific read exports without falling through to OpenAlgo", async () => {
+  it("reads native broker verbs as thin envelope readers with no per-broker branching", async () => {
+    // One-core rule: the core facade absorbs broker payload differences and
+    // serves canonical shapes, so these clients pass rows through unchanged
+    // and EVERY broker uses the same verb — a groww account calls
+    // quote_details exactly like kotakneo (the facade falls back server-side).
     mockConnectionState.apiKey = "";
     const accounts = {
       status: "success",
       data: {
         accounts: [
-          { adapter_id: "kotakneo", account_id: "K1", is_primary: true, has_session: true },
+          { adapter_id: "groww", account_id: "G1", is_primary: true, has_session: true },
         ],
       },
     };
     fetchSpy
       .mockResolvedValueOnce(jsonResponse(accounts))
-      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { segment: "CASH" } }))
+      .mockResolvedValueOnce(jsonResponse({
+        status: "success",
+        data: [{ symbol: "INFY", exchange: "NSE", ltp: 1450.25 }],
+      }))
       .mockResolvedValueOnce(jsonResponse(accounts))
-      .mockResolvedValueOnce(jsonResponse({ status: "success", data: [{ symbol: "INFY", ltp: 1450.25 }] }))
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { segment: "CASH" } }))
       .mockResolvedValueOnce(jsonResponse(accounts))
       .mockResolvedValueOnce(jsonResponse({ status: "success", data: { segments: [{ exchange: "NSE" }] } }))
       .mockResolvedValueOnce(jsonResponse(accounts))
@@ -563,32 +539,25 @@ describe("OpenAlgo API client (api.ts)", () => {
       .mockResolvedValueOnce(jsonResponse(accounts))
       .mockResolvedValueOnce(jsonResponse({ status: "success", data: [{ order_id: "OID-1", trade_id: "T1" }] }));
 
+    await expect(getQuoteDetails("INFY", "NSE", "ltp")).resolves.toEqual(
+      [{ symbol: "INFY", exchange: "NSE", ltp: 1450.25 }],
+    );
     await expect(getBrokerLimits("CASH", "NSE", "MIS")).resolves.toMatchObject({ segment: "CASH" });
-    await expect(getQuoteDetails("INFY", "NSE", "ltp")).resolves.toEqual([{ symbol: "INFY", ltp: 1450.25 }]);
     await expect(getScripMaster("NSE")).resolves.toMatchObject({ segments: [{ exchange: "NSE" }] });
-    await expect(searchScrip("NIFTY", {
-      exchange: "NFO",
-      expiry: "30JUL2026",
-      option_type: "CE",
-      strike_price: "25000",
-      ignore_50multiple: false,
-    })).resolves.toEqual([{ symbol: "NIFTY", token: "12345" }]);
+    await expect(searchScrip("NIFTY", { exchange: "NFO" })).resolves.toEqual(
+      [{ symbol: "NIFTY", token: "12345" }],
+    );
     await expect(getOrderHistory("OID-1")).resolves.toEqual([{ order_id: "OID-1", status: "OPEN" }]);
     await expect(getOrderTrades("OID-1")).resolves.toEqual([{ order_id: "OID-1", trade_id: "T1" }]);
 
     const urls = fetchSpy.mock.calls.map(([url]) => String(url));
-    expect(urls).toEqual(expect.arrayContaining([
-      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/limits?segment=CASH&exchange=NSE&product=MIS"),
-      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/quote_details?symbol=INFY&exchange=NSE&quote_type=ltp"),
-      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/scrip_master?exchange=NSE"),
-      expect.stringContaining(
-        "/api/v1/native/accounts/kotakneo/K1/search_scrip?symbol=NIFTY&exchange=NFO&expiry=30JUL2026&option_type=CE&strike_price=25000&ignore_50multiple=false",
-      ),
-      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/orderhistory?order_id=OID-1"),
-      expect.stringContaining("/api/v1/native/accounts/kotakneo/K1/ordertrades?order_id=OID-1"),
-    ]));
-    expect(urls.some((url) => url.includes("/api/v1/limits"))).toBe(false);
-    expect(urls.some((url) => url.includes("/api/v1/search_scrip"))).toBe(false);
+    // The SAME quote_details verb for a non-Kotak broker — no client-side
+    // adapter_id branch, no client-side ltp reshaping.
+    expect(urls.some((url) => url.includes(
+      "/api/v1/native/accounts/groww/G1/quote_details?symbol=INFY&exchange=NSE&quote_type=ltp",
+    ))).toBe(true);
+    expect(urls.some((url) => url.includes("/api/v1/native/accounts/groww/G1/limits"))).toBe(true);
+    expect(urls.some((url) => url.includes("/api/v1/native/accounts/groww/G1/orderhistory?order_id=OID-1"))).toBe(true);
   });
 
   it("uses native market calendar reads when a live native account is connected without an OpenAlgo key", async () => {

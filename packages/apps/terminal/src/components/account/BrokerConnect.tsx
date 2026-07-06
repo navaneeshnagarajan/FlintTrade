@@ -180,6 +180,27 @@ export function BrokerConnect() {
     }
   }
 
+  function dropRemovedAccountEverywhere(ref: {
+    source: "gateway" | "native";
+    broker: string;
+    account_id: string;
+  }) {
+    const key = brokerAccountKey(ref);
+    // Drop from the store immediately so the next account poll's last-good
+    // preservation cannot resurrect a just-removed account as a live write
+    // target while its source refreshes.
+    useBrokerStore.getState().removeAccount(key);
+    // Also evict from the TanStack cache: until the invalidated refetch
+    // resolves, a freshly-mounting useBrokerAccounts consumer would otherwise
+    // sync the pre-removal snapshot back into the store, transiently
+    // re-listing the removed account as connected.
+    qc.setQueryData<BrokerAccount[]>(
+      BROKER_ACCOUNTS_QUERY_KEY,
+      (cached) => cached?.filter((a) => brokerAccountKey(a) !== key),
+    );
+    invalidateAccountQueries();
+  }
+
   const connectMutation = useMutation({
     mutationFn: async () => {
       if (!broker || !method) throw new Error("Pick a broker and a login method.");
@@ -252,13 +273,9 @@ export function BrokerConnect() {
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} disconnected.`);
-      // Drop the row from the store immediately so the next account poll's
-      // last-good preservation (useBrokerAccounts) cannot resurrect a
-      // just-removed account as a live write target while its source refreshes.
-      useBrokerStore.getState().removeAccount(
-        brokerAccountKey({ source: "native", broker: sel.adapter, account_id: sel.account }),
-      );
-      invalidateAccountQueries();
+      dropRemovedAccountEverywhere({
+        source: "native", broker: sel.adapter, account_id: sel.account,
+      });
     },
     onError: (e: unknown, sel) => {
       setNotice("");
@@ -321,14 +338,12 @@ export function BrokerConnect() {
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`Gateway account ${sel.accountId} disconnected.`);
-      // Remove by a source-qualified key, never the bare id: isBrokerAccountMatch
-      // also matches on account_id alone, so a bare id would cross-evict a native
-      // row that shares this broker-supplied client code (dual-linked account) and
-      // silently null the active native write target.
-      useBrokerStore.getState().removeAccount(
-        brokerAccountKey({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
-      );
-      invalidateAccountQueries();
+      // Source-qualified key, never the bare id: isBrokerAccountMatch also
+      // matches on account_id alone, so a bare id would cross-evict a native
+      // row sharing this broker-supplied client code (dual-linked account).
+      dropRemovedAccountEverywhere({
+        source: "gateway", broker: sel.broker, account_id: sel.accountId,
+      });
     },
     onError: (e: unknown, sel) => {
       setNotice("");

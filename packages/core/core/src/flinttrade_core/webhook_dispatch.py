@@ -329,47 +329,12 @@ class WebhookOrderDispatcher:
         }
 
     async def _gather_l2_state(self, adapter_id: str, *, account_id: str) -> tuple[list[Any], float, float]:
-        from .l2_state import normalise_l2_state  # noqa: PLC0415
+        # Delegates to the ONE shared L2 input-gathering implementation (also
+        # used by the human order route) so the openalgo-vs-native branch and
+        # error classification can never drift between two copies.
+        from .l2_state import gather_l2_state  # noqa: PLC0415
 
-        if adapter_id == "openalgo":
-            client = self._app.config.get("OPENALGO_CLIENT")
-            if client is None:
-                return [], 0.0, 0.0
-            try:
-                positions = await _maybe_await(client.positionbook())
-                funds = await _maybe_await(client.funds())
-            except Exception:
-                logger.debug(
-                    "Webhook L2 portfolio-state fetch failed - L2 limits not enforced this order",
-                    exc_info=True,
-                )
-                return [], 0.0, 0.0
-            return normalise_l2_state(positions, funds)
-
-        native_adapters = self._app.config.get("NATIVE_ADAPTERS") or {}
-        registry = self._app.config.get("REGISTRY")
-        adapter = native_adapters.get(adapter_id)
-        if adapter is None or registry is None:
-            return [], 0.0, 0.0
-        try:
-            session = registry.get_session_for(adapter_id, account_id)
-        except Exception:
-            return [], 0.0, 0.0
-
-        positions_reader = getattr(adapter, "positions", None)
-        funds_reader = getattr(adapter, "funds", None)
-        if not callable(positions_reader) or not callable(funds_reader):
-            return [], 0.0, 0.0
-        try:
-            positions = await _maybe_await(positions_reader(session))
-            funds = await _maybe_await(funds_reader(session))
-        except Exception:
-            logger.debug(
-                "Webhook native L2 portfolio-state fetch failed - L2 limits not enforced this order",
-                exc_info=True,
-            )
-            return [], 0.0, 0.0
-        return normalise_l2_state(positions, funds)
+        return await gather_l2_state(self._app.config, adapter_id, account_id=account_id)
 
     def _audit(
         self,

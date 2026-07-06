@@ -247,6 +247,18 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             "status": "error",
             "message": f"Unknown source '{source}'. Allowed: {sorted(_VALID_SOURCES)}",
         }), 404
+    # Rate limiting FIRST: this intake is reachable unauthenticated (signed
+    # external webhooks bypass the API-key guard), so the limiter must shed
+    # floods before the endpoint-registry lookup below does a workspace.json
+    # disk read + parse per request.
+    if not receiver.check_rate_limit():
+        logger.warning("Webhook rate limit exceeded for source=%s", source)
+        return jsonify({
+            "status": "error",
+            "message": "Rate limit exceeded",
+            "remaining": 0,
+        }), 429
+
     mounted_path = _mounted_webhook_path(source, webhook_id)
     if mounted_path:
         try:
@@ -256,15 +268,6 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             return jsonify({"status": "error", "message": "Webhook endpoint registry unavailable"}), 503
         if enabled is False:
             return jsonify({"status": "error", "message": "Webhook endpoint disabled"}), 503
-
-    # Rate limiting
-    if not receiver.check_rate_limit():
-        logger.warning("Webhook rate limit exceeded for source=%s", source)
-        return jsonify({
-            "status": "error",
-            "message": "Rate limit exceeded",
-            "remaining": 0,
-        }), 429
 
     # Read body
     raw, body_dict = _parse_request_body()

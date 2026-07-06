@@ -84,7 +84,12 @@ export function selectNativeReadAccount(
     const selected = accounts.find((account) => (
       account.account_id === active.account_id && account.adapter_id === active.broker
     ));
-    if (selected) return selected;
+    // Fail closed when the SELECTED native account has no live session (daily
+    // token lapsed, dropped after a probe error): silently falling back to the
+    // primary/first account would render a DIFFERENT real account's funds and
+    // positions under the operator's selection with no affordance. Returning
+    // undefined lets the caller surface the needs-relogin state instead.
+    return selected;
   }
   return accounts.find((account) => account.is_primary) ?? accounts[0];
 }

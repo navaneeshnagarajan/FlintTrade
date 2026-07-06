@@ -328,18 +328,27 @@ def groww_exchange_symbol(exchange: str, symbol: str) -> str:
 
 
 def from_quote(symbol: str, exchange: str, row: dict[str, Any]) -> dict[str, Any]:
+    # The documented /v1/live-data/quote payload nests OHLC under an "ohlc"
+    # object and names the ask "offer_price" (captured official docs:
+    # .local/reference-research/2026-07-03/groww-trade-api-docs). Flat keys stay
+    # as tolerance fallbacks only — reading them alone rendered every quote's
+    # open/high/low/close/ask as fabricated zeros.
+    raw_ohlc = row.get("ohlc")
+    ohlc: dict[str, Any] = raw_ohlc if isinstance(raw_ohlc, dict) else {}
     return {
         "symbol": symbol,
         "exchange": exchange,
         "ltp": _float(row.get("last_price") or row.get("ltp") or row.get("live_price")),
-        "open": _float(row.get("open")),
-        "high": _float(row.get("high")),
-        "low": _float(row.get("low")),
-        "close": _float(row.get("close")),
+        "open": _float(ohlc.get("open") or row.get("open")),
+        "high": _float(ohlc.get("high") or row.get("high")),
+        "low": _float(ohlc.get("low") or row.get("low")),
+        "close": _float(ohlc.get("close") or row.get("close")),
         "volume": _int(row.get("volume")),
         "bid": _float(row.get("bid_price")),
-        "ask": _float(row.get("ask_price")),
-        "prev_close": _float(row.get("previous_close") or row.get("prev_close")),
+        "ask": _float(row.get("offer_price") or row.get("ask_price")),
+        "prev_close": _float(
+            row.get("previous_close") or row.get("prev_close") or ohlc.get("close")
+        ),
         "oi": _int(row.get("open_interest") or row.get("oi")),
     }
 

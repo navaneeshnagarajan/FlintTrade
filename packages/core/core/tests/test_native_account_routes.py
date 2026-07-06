@@ -711,6 +711,53 @@ def test_native_account_reads_include_ltp(client, monkeypatch):
     assert ltp.get_json()["data"][0]["ltp"] == 1450.25
 
 
+def test_ltp_reads_serve_one_canonical_shape_for_every_adapter_payload(client, monkeypatch):
+    """One-core contract: broker payload differences are absorbed in the core
+    reads facade, never in the terminal. Every adapter ltp shape — a raw SDK
+    row list, an EXCHANGE:SYMBOL->price map, or a scalar — must serialise to
+    the SAME canonical [{symbol, exchange, ltp}] rows."""
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    payloads = {
+        "rows": [{"instrument_token": "NSE_EQ|INE1", "symbol": "INFY", "last_price": "1450.25"}],
+        "mapping": {"NSE:INFY": "1450.25"},
+        "scalar": 1450.25,
+    }
+    served: dict[str, object] = {}
+
+    async def _ltp_quotes(_self, _session, _symbols):
+        return served["value"]
+
+    monkeypatch.setattr(UpstoxAdapter, "ltp_quotes", _ltp_quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXSHAPE", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    for name, payload in payloads.items():
+        served["value"] = payload
+        resp = c.get("/api/v1/native/accounts/upstox/UPXSHAPE/ltp?symbol=INFY&exchange=NSE")
+        assert resp.status_code == 200, (name, resp.get_json())
+        rows = resp.get_json()["data"]
+        assert isinstance(rows, list) and rows, name
+        assert rows[0]["symbol"] == "INFY", (name, rows)
+        assert rows[0]["exchange"] == "NSE", (name, rows)
+        assert rows[0]["ltp"] == 1450.25, (name, rows)
+
+    # quote_details falls back to the ltp read for adapters without the verb —
+    # the terminal never selects verbs per broker.
+    served["value"] = payloads["mapping"]
+    detail = c.get(
+        "/api/v1/native/accounts/upstox/UPXSHAPE/quote_details?symbol=INFY&exchange=NSE&quote_type=ltp"
+    )
+    assert detail.status_code == 200, detail.get_json()
+    assert detail.get_json()["data"][0] == {"symbol": "INFY", "exchange": "NSE", "ltp": 1450.25}
+
+
 def test_native_account_reads_include_market_depth(client, monkeypatch):
     """Depth/DOM widgets can use native market-depth reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter

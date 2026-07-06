@@ -108,7 +108,7 @@ dev: ## Start terminal dev server + FlintTrade backend
 	  PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.app > .local/dev-logs/backend.log 2>&1 & \
 	  backend_pid="$$!"; \
 	  if [ -n "$(NPM)" ]; then \
-	    (cd packages/apps/terminal && npm run dev) > "$(FLINTTRADE_DIR)/.local/dev-logs/terminal.log" 2>&1 & \
+	    (cd packages/apps/terminal && VITE_FLINTTRADE_HOST="$${VITE_FLINTTRADE_HOST:-http://127.0.0.1:$(FLINTTRADE_BACKEND_PORT)}" npm run dev) > "$(FLINTTRADE_DIR)/.local/dev-logs/terminal.log" 2>&1 & \
 	    terminal_pid="$$!"; \
 	  else \
 	    echo -e "$(RED)npm not found; terminal dev server was not started.$(RESET)"; \

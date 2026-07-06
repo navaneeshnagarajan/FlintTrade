@@ -130,10 +130,18 @@ def _resolve_backend_port() -> int:
     if not raw:
         return DEFAULT_BACKEND_PORT
     try:
-        return int(raw)
+        port = int(raw)
     except ValueError:
         logger.warning("Ignoring non-integer FLINTTRADE_BACKEND_PORT=%r", raw)
         return DEFAULT_BACKEND_PORT
+    # Out-of-range ports would make waitress raise inside the daemon serve
+    # thread AFTER the "started on" log line — the app keeps running with no
+    # API server and no visible error. (Port 0 is desktop.py's ephemeral-port
+    # contract; the standalone serve path has no way to discover the real port.)
+    if not 1 <= port <= 65535:
+        logger.warning("Ignoring out-of-range FLINTTRADE_BACKEND_PORT=%r", raw)
+        return DEFAULT_BACKEND_PORT
+    return port
 
 
 def _rag_auto_index_enabled() -> bool:

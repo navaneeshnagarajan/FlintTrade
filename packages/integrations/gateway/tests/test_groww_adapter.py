@@ -122,12 +122,15 @@ class MockGrowwTransport:
         if path == "/v1/user/detail":
             return 200, {"status": "SUCCESS", "payload": {"name": "Test User", "user_id": "G1"}}
         if path == "/v1/live-data/quote":
+            # Documented payload shape: OHLC nested under "ohlc", ask named
+            # "offer_price". (The earlier flat fixture was self-confirming —
+            # the mapper read flat keys the real payload does not carry, so
+            # live quotes rendered fabricated zeros while the suite passed.)
             return 200, {"status": "SUCCESS", "payload": {
                 "last_price": 2905.5,
-                "open": 2890,
-                "high": 2910,
-                "low": 2880,
-                "close": 2899,
+                "ohlc": {"open": 2890, "high": 2910, "low": 2880, "close": 2899},
+                "bid_price": 2905.0,
+                "offer_price": 2906.0,
                 "volume": 12345,
             }}
         if path == "/v1/live-data/ltp":
@@ -344,6 +347,15 @@ async def test_reads_map_groww_envelopes() -> None:
     assert funds["availablecash"] == 50000.0
     assert profile["user_id"] == "G1"
     assert quotes[0].ltp == 2905.5
+    # Field-value assertions (not just ltp/row-count): the OHLC must map from
+    # the documented nested "ohlc" object and the ask from "offer_price" —
+    # zeros here mean the mapper regressed to the flat-key misread.
+    assert quotes[0].open == 2890.0
+    assert quotes[0].high == 2910.0
+    assert quotes[0].low == 2880.0
+    assert quotes[0].close == 2899.0
+    assert quotes[0].ask == 2906.0
+    assert quotes[0].bid == 2905.0
     assert ltps == {"NSE:RELIANCE": 2905.5}
     assert ohlc == [{
         "symbol": "RELIANCE",
@@ -417,6 +429,30 @@ async def test_mcx_commodity_surface_uses_groww_commodity_segment() -> None:
         if call["path"] == "/v1/order/list"
     ]
     assert list_segments == ["CASH", "FNO", "COMMODITY"]
+
+
+@pytest.mark.asyncio
+async def test_historical_honours_start_date_end_date_keys() -> None:
+    """The terminal history read and the shared live probe both send
+    start_date/end_date — the adapter must honour them like Upstox/INDmoney do
+    (previously it dropped them, sending an empty window to the broker)."""
+    transport = MockGrowwTransport()
+    adapter = _adapter(transport)
+    session = await _session(adapter)
+
+    await adapter.historical(session, {
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "interval": "1m",
+        "start_date": "2026-07-01 09:15:00",
+        "end_date": "2026-07-01 09:16:00",
+    })
+
+    history_call = next(
+        call for call in transport.calls if call["path"] == "/v1/historical/candle/range"
+    )
+    assert history_call["params"]["start_time"] == "2026-07-01 09:15:00"
+    assert history_call["params"]["end_time"] == "2026-07-01 09:16:00"
 
 
 @pytest.mark.asyncio

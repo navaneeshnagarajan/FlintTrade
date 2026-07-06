@@ -142,10 +142,17 @@ def sync_git_mirror(source: BrokerSdkSource, audit_root: Path) -> dict[str, str]
     else:
         repo.parent.mkdir(parents=True, exist_ok=True)
         _run(["git", "clone", source.git_url, str(repo)])
+    # Drift must be measured against the REMOTE head, not the local checkout's
+    # HEAD: `git fetch` only updates remote-tracking refs, so rev-parse HEAD is
+    # frozen at clone time and would report `git-current` forever even after
+    # upstream moves — silently defeating the drift gate for the one SDK whose
+    # only distribution channel is git (Renovate cannot watch git-pinned uv
+    # sources either).
+    remote_head = _run(["git", "-C", str(repo), "ls-remote", "origin", "HEAD"]).split()[0]
     return {
         "path": str(repo.relative_to(REPO)),
         "remote": _run(["git", "-C", str(repo), "remote", "get-url", "origin"]),
-        "head": _run(["git", "-C", str(repo), "rev-parse", "HEAD"]),
+        "head": remote_head,
         "describe": _run(["git", "-C", str(repo), "describe", "--tags", "--always", "--dirty"]),
     }
 

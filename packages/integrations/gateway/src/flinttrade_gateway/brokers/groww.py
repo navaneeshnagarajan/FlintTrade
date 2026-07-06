@@ -521,8 +521,16 @@ class GrowwAdapter(BrokerAdapter):
         symbol = str(req.get("symbol") or "")
         exchange = str(req.get("exchange") or "NSE")
         groww_exchange, segment = M.exchange_segment(exchange)
-        start = M.normalise_date(req.get("start_time") or req.get("start") or req.get("from_date"))
-        end = M.normalise_date(req.get("end_time") or req.get("end") or req.get("to_date"))
+        # start_date/end_date are the keys the terminal history read and the
+        # shared live probe both send (mirroring Upstox/INDmoney fallbacks).
+        start = M.normalise_date(
+            req.get("start_time") or req.get("start")
+            or req.get("start_date") or req.get("from_date")
+        )
+        end = M.normalise_date(
+            req.get("end_time") or req.get("end")
+            or req.get("end_date") or req.get("to_date")
+        )
         interval = str(req.get("interval") or req.get("timeframe") or "1m")
         payload = await self._request(
             session,

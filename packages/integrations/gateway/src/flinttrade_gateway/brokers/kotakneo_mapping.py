@@ -34,8 +34,17 @@ EXCHANGE_TO_KOTAK = {
     "CDS": "cde_fo",
     "BCD": "bcs-fo",
     "MCX": "mcx_fo",
+    # OpenAlgo/terminal index convention: NEO has no separate index segment —
+    # index quotes ride the cash segments. Without these entries the
+    # ex.lower() fallback emitted the invalid segment "nse_index".
+    "NSE_INDEX": "nse_cm",
+    "BSE_INDEX": "bse_cm",
 }
-KOTAK_TO_EXCHANGE = {v: k for k, v in EXCHANGE_TO_KOTAK.items()}
+# Reverse map built from the FIRST occurrence of each segment so the primary
+# NSE/BSE rows win over the *_INDEX aliases added after them.
+KOTAK_TO_EXCHANGE: dict[str, str] = {}
+for _ft_exchange, _kotak_segment in EXCHANGE_TO_KOTAK.items():
+    KOTAK_TO_EXCHANGE.setdefault(_kotak_segment, _ft_exchange)
 
 # FlintTrade product -> NEO product. NEO also exposes INTRADAY/CO/BO/MTF; we map
 # the reverse codes back to the FlintTrade trio.

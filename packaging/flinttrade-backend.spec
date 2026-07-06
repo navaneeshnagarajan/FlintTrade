@@ -181,6 +181,13 @@ EXCLUDES = [
     "vectorbt",
     # Telegram bot (automation loop — not started by the desktop sidecar).
     "telegram",
+    # Kotak Neo SDK: licence is operator-cleared for personal-use self-hosting
+    # only (LicenseRef-operator-cleared-broker-sdk, no upstream LICENSE file) —
+    # bundling it in published installers would redistribute all-rights-reserved
+    # code. The adapter already fails closed to dormant when the SDK is missing,
+    # and desktop operators can install it locally under their own clearance.
+    # dhanhq / upstox-python-sdk / growwapi are MIT and stay bundled.
+    "neo_api_client",
 ]
 
 block_cipher = None

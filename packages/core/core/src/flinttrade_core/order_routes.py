@@ -353,65 +353,16 @@ def _live_kill_switch_block() -> Any | None:
 def _gather_l2_state(adapter_id: str, *, account_id: str = "default") -> tuple[list[Any], float, float]:
     """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
 
-    Reads the connected account's positions + funds through the same broker
-    surface the order will use: OpenAlgo for the bridge path, or the active
-    native adapter + registry session for routed native brokers. Best-effort by
-    design: any failure (no client/session, network, auth) returns empty/zero
-    state, so L2 simply enforces nothing for that order — a state-read hiccup
-    must never block a live order (L1/L4/L5 still apply). Runs two reads on the
-    human order path; acceptable latency for the cumulative-exposure brake.
+    Sync wrapper over the ONE shared :func:`flinttrade_core.l2_state.gather_l2_state`
+    implementation (also used by the webhook dispatcher) — the openalgo-vs-native
+    branch, session resolution, and error classification must never drift
+    between copies. Runs two reads on the human order path; acceptable latency
+    for the cumulative-exposure brake.
     """
     import asyncio  # noqa: PLC0415
-    from .l2_state import normalise_l2_state  # noqa: PLC0415
+    from .l2_state import gather_l2_state  # noqa: PLC0415
 
-    if adapter_id == "openalgo":
-        client = current_app.config.get("OPENALGO_CLIENT")
-        if client is None:
-            return [], 0.0, 0.0
-
-        async def _fetch_openalgo() -> tuple[Any, Any]:
-            return await client.positionbook(), await client.funds()
-
-        try:
-            positions, funds = asyncio.run(_fetch_openalgo())
-        except Exception:
-            logger.debug(
-                "L2 portfolio-state fetch failed — L2 limits not enforced this order",
-                exc_info=True,
-            )
-            return [], 0.0, 0.0
-
-        return normalise_l2_state(positions, funds)
-
-    native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
-    registry = current_app.config.get("REGISTRY")
-    adapter = native_adapters.get(adapter_id)
-    if adapter is None or registry is None:
-        return [], 0.0, 0.0
-
-    try:
-        session = registry.get_session_for(adapter_id, account_id)
-    except Exception:
-        return [], 0.0, 0.0
-
-    positions_reader = getattr(adapter, "positions", None)
-    funds_reader = getattr(adapter, "funds", None)
-    if not callable(positions_reader) or not callable(funds_reader):
-        return [], 0.0, 0.0
-
-    async def _fetch_native() -> tuple[Any, Any]:
-        return await positions_reader(session), await funds_reader(session)
-
-    try:
-        positions, funds = asyncio.run(_fetch_native())
-    except Exception:
-        logger.debug(
-            "Native L2 portfolio-state fetch failed — L2 limits not enforced this order",
-            exc_info=True,
-        )
-        return [], 0.0, 0.0
-
-    return normalise_l2_state(positions, funds)
+    return asyncio.run(gather_l2_state(current_app.config, adapter_id, account_id=account_id))
 
 
 def _dispatch_live_order(

@@ -84,6 +84,20 @@ export function BrokerRecommendations() {
         </p>
       )}
 
+      {data?.openalgo_first && (
+        <div className="rounded border border-accent/40 bg-accent/10 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xxs uppercase tracking-wider text-text-muted">Recommended first</span>
+            <span className="text-xs font-semibold text-accent">
+              {data.openalgo_first.display_name}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xxs text-text-secondary leading-snug">
+            {data.openalgo_first.note}
+          </p>
+        </div>
+      )}
+
       {!isLoading && !isError && rows.length === 0 && (
         <p className="text-xs text-text-muted">
           No native brokers available to rank yet.

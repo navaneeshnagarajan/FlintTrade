@@ -155,6 +155,18 @@ def _public_connect_failure_body() -> dict[str, Any]:
     }
 
 
+def _backend_loopback_base() -> str:
+    """This backend's own loopback base, honouring the port override.
+
+    Uses the same resolver the serve path binds with, so a backend started on
+    ``FLINTTRADE_BACKEND_PORT=5127`` mints OAuth/postback defaults that land on
+    ITSELF — not on a dead (or different) instance at 5100.
+    """
+    from flinttrade_core.app import _resolve_backend_port  # noqa: PLC0415
+
+    return f"http://127.0.0.1:{_resolve_backend_port()}"
+
+
 def _default_native_postback_uri(adapter_id: str) -> str:
     """Return the native postback receiver URL.
 
@@ -164,7 +176,9 @@ def _default_native_postback_uri(adapter_id: str) -> str:
     """
     import os  # noqa: PLC0415
 
-    base = os.environ.get("FLINTTRADE_NATIVE_POSTBACK_BASE_URL", "http://127.0.0.1:5100").rstrip("/")
+    base = os.environ.get(
+        "FLINTTRADE_NATIVE_POSTBACK_BASE_URL", _backend_loopback_base()
+    ).rstrip("/")
     return f"{base}/api/v1/native/postbacks/{adapter_id}"
 
 
@@ -649,14 +663,15 @@ _OAUTH_TTL_SECONDS = 600.0
 def _default_oauth_redirect_uri() -> str:
     """The loopback redirect URI the operator registers in the broker app.
 
-    Defaults to this backend's own callback on 127.0.0.1:5100. Overridable via
-    ``FLINTTRADE_OAUTH_REDIRECT_URI`` for non-default ports / the desktop shell.
+    Defaults to this backend's own callback, honouring the port override so it
+    lands on the instance that holds the pending OAuth state. Overridable via
+    ``FLINTTRADE_OAUTH_REDIRECT_URI`` for public URLs / the desktop shell.
     """
     import os  # noqa: PLC0415
 
     return os.environ.get(
         "FLINTTRADE_OAUTH_REDIRECT_URI",
-        "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+        f"{_backend_loopback_base()}/api/v1/native/oauth/callback",
     )
 
 
@@ -973,7 +988,9 @@ _READ_METHODS = {
     "trades": ("trade_book",),
     "ltp": ("ltp", "ltp_quotes"),
     "quotes": ("quotes",),
-    "quote_details": ("quote_details",),
+    # quote_details falls back to the ltp read so the verb exists uniformly for
+    # every broker — the terminal must never branch on adapter_id to pick a verb.
+    "quote_details": ("quote_details", "ltp", "ltp_quotes"),
     "ohlc": ("ohlc", "ohlc_quotes"),
     "depth": ("market_depth",),
     "margin": ("margin_calculator",),
@@ -1227,13 +1244,67 @@ def _native_read_args(kind: str) -> tuple[tuple[Any, ...] | None, str | None]:
     return (), None
 
 
+def _canonical_ltp_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _split_requested_symbol(entry: str) -> tuple[str, str]:
+    text = str(entry or "").strip()
+    if ":" in text:
+        exchange, symbol = text.split(":", 1)
+        return symbol.strip(), (exchange.strip().upper() or "NSE")
+    return text, "NSE"
+
+
+def _canonical_ltp_rows(value: Any, requested: list[Any]) -> list[dict[str, Any]]:
+    """Normalise an ltp/quote_details read to ONE canonical row shape.
+
+    Broker adapters return three incompatible shapes for the same verb — a
+    ``{"EXCHANGE:SYMBOL": price}`` map (Groww/INDmoney), a list of raw SDK rows
+    (Upstox/Kotak), or a single record. The core reads facade is the ONLY place
+    broker differences are absorbed (architecture north star), so every shape is
+    unified here to ``[{"symbol", "exchange", "ltp", ...extras}]`` and the
+    terminal stays a thin envelope reader.
+    """
+    fallback_symbol, fallback_exchange = (
+        _split_requested_symbol(requested[0]) if requested else ("", "NSE")
+    )
+
+    def _row(record: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **record,
+            "symbol": str(record.get("symbol") or record.get("trading_symbol") or fallback_symbol),
+            "exchange": str(record.get("exchange") or fallback_exchange),
+            "ltp": _canonical_ltp_float(
+                record.get("ltp") or record.get("last_price") or record.get("last_traded_price")
+            ),
+        }
+
+    if isinstance(value, list):
+        return [_row(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        if any(key in value for key in ("ltp", "last_price", "last_traded_price")):
+            return [_row(value)]
+        rows: list[dict[str, Any]] = []
+        for key, price in value.items():
+            symbol, exchange = _split_requested_symbol(str(key))
+            rows.append({"symbol": symbol or fallback_symbol, "exchange": exchange, "ltp": _canonical_ltp_float(price)})
+        return rows
+    return [{"symbol": fallback_symbol, "exchange": fallback_exchange, "ltp": _canonical_ltp_float(value)}]
+
+
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/<kind>", methods=["GET"])
 def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
     """Read a native account's account book or read-only market data via its adapter.
 
     Exercises the live broker session end-to-end (a real broker API call using
     the stored token). Reads are not gated (no order), only require an
-    established session. Returns the adapter's raw read result.
+    established session. Account-book reads return the adapter's raw result;
+    ltp/quote_details are normalised to one canonical row shape here so broker
+    payload differences never leak past the core facade.
     """
     import asyncio  # noqa: PLC0415
 
@@ -1259,18 +1330,24 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
         }), 409
 
     reader = None
+    chosen_method = ""
     for method_name in _READ_METHODS[kind]:
         reader = getattr(adapter, method_name, None)
         if reader is not None:
+            chosen_method = method_name
             break
     if reader is None:
         return jsonify({"status": "error", "message": f"{adapter_id} adapter has no '{kind}' read."}), 400
     args, message = _native_read_args(kind)
     if message is not None:
         return jsonify({"status": "error", "message": message}), 400
+    call_args = args or ()
+    if kind == "quote_details" and chosen_method in {"ltp", "ltp_quotes"}:
+        # The ltp fallback takes only the symbols list — drop quote_type.
+        call_args = call_args[:1]
     kwargs = _native_read_kwargs(kind)
     try:
-        result = asyncio.run(reader(session, *(args or ()), **kwargs))
+        result = asyncio.run(reader(session, *call_args, **kwargs))
     except NotImplementedError:
         return jsonify({"status": "error", "message": f"{adapter_id} adapter does not support {kind} reads."}), 501
     except Exception as exc:  # noqa: BLE001 - classify before surfacing a public route error
@@ -1314,7 +1391,11 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
             return [_dump(x) for x in v]
         return v
 
-    return jsonify({"status": "success", "data": _dump(result)})
+    data = _dump(result)
+    if kind in {"ltp", "quote_details"}:
+        requested = list(args[0]) if args and isinstance(args[0], (list, tuple)) else []
+        data = _canonical_ltp_rows(data, requested)
+    return jsonify({"status": "success", "data": data})
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/set-primary", methods=["POST"])

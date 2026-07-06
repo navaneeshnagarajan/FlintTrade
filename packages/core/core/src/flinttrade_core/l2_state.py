@@ -99,3 +99,75 @@ def normalise_l2_state(positions: Any, funds: Any) -> tuple[list[Any], float, fl
     """Return ``(positions, used_margin, total_balance)`` for L2 validation."""
     used_margin, total_balance = normalise_l2_funds(funds)
     return normalise_l2_positions(positions), used_margin, total_balance
+
+
+async def _maybe_await(value: Any) -> Any:
+    import inspect  # noqa: PLC0415
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def gather_l2_state(
+    config: Mapping[str, Any],
+    adapter_id: str,
+    *,
+    account_id: str = "default",
+) -> tuple[list[Any], float, float]:
+    """THE shared best-effort ``(positions, used_margin, total_balance)`` gather.
+
+    One implementation of the SafetySystem L2 input-gathering path — used by the
+    human order route AND the webhook dispatcher, so the openalgo-vs-native
+    branch, session resolution, and error classification can never drift between
+    two copies. Reads the connected account's positions + funds through the
+    same broker surface the order will use: OpenAlgo for the bridge path, or the
+    active native adapter + registry session for routed native brokers.
+    Best-effort by design: any failure (no client/session, network, auth)
+    returns empty/zero state, so L2 simply enforces nothing for that order — a
+    state-read hiccup must never block a live order (L1/L4/L5 still apply).
+    """
+    import logging  # noqa: PLC0415
+
+    logger = logging.getLogger("flinttrade.l2_state")
+
+    if adapter_id == "openalgo":
+        client = config.get("OPENALGO_CLIENT")
+        if client is None:
+            return [], 0.0, 0.0
+        try:
+            positions = await _maybe_await(client.positionbook())
+            funds = await _maybe_await(client.funds())
+        except Exception:
+            logger.debug(
+                "L2 portfolio-state fetch failed — L2 limits not enforced this order",
+                exc_info=True,
+            )
+            return [], 0.0, 0.0
+        return normalise_l2_state(positions, funds)
+
+    native_adapters = config.get("NATIVE_ADAPTERS") or {}
+    registry = config.get("REGISTRY")
+    adapter = native_adapters.get(adapter_id)
+    if adapter is None or registry is None:
+        return [], 0.0, 0.0
+
+    try:
+        session = registry.get_session_for(adapter_id, account_id)
+    except Exception:
+        return [], 0.0, 0.0
+
+    positions_reader = getattr(adapter, "positions", None)
+    funds_reader = getattr(adapter, "funds", None)
+    if not callable(positions_reader) or not callable(funds_reader):
+        return [], 0.0, 0.0
+    try:
+        positions = await _maybe_await(positions_reader(session))
+        funds = await _maybe_await(funds_reader(session))
+    except Exception:
+        logger.debug(
+            "Native L2 portfolio-state fetch failed — L2 limits not enforced this order",
+            exc_info=True,
+        )
+        return [], 0.0, 0.0
+    return normalise_l2_state(positions, funds)

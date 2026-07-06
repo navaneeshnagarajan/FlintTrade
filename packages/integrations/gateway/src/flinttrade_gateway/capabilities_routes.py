@@ -287,6 +287,24 @@ def _default_recommendation_capabilities(include_coming_soon: bool) -> dict[str,
     }
 
 
+# OpenAlgo is the first-preference path on every user-facing surface
+# (architecture north star): the ranking engine deliberately excludes the
+# bridge (a meta-adapter cannot be capability-ranked), so the route emits this
+# platform-level leading note for the recommendations panel to render FIRST —
+# mirroring the MCP catalogue's leading OpenAlgo entry. Without it, the panel
+# steers operators toward native brokers whose order paths are not yet
+# live-verified while never mentioning the recommended path.
+_OPENALGO_FIRST_NOTE: dict[str, str] = {
+    "broker_id": "openalgo",
+    "display_name": "OpenAlgo (bridge)",
+    "note": (
+        "Recommended first: the OpenAlgo bridge covers every use case through "
+        "your configured broker — 30+ community-tested brokers on the primary, "
+        "battle-tested path. Native adapters below are the secondary path."
+    ),
+}
+
+
 @capabilities_bp.route("/broker/recommendations", methods=["GET"])
 def get_recommendations() -> tuple[Any, int]:
     """Rank native broker capability metadata for an operator-selected job.
@@ -352,6 +370,7 @@ def get_recommendations() -> tuple[Any, int]:
                 {
                     "status": "success",
                     "use_case": use_case.value,
+                    "openalgo_first": _OPENALGO_FIRST_NOTE,
                     "recommendations": [_rec_to_dict(r) for r in recs],
                 }
             ),
@@ -363,6 +382,7 @@ def get_recommendations() -> tuple[Any, int]:
         jsonify(
             {
                 "status": "success",
+                "openalgo_first": _OPENALGO_FIRST_NOTE,
                 "use_cases": {
                     uc: [_rec_to_dict(r) for r in recs] for uc, recs in everything.items()
                 },

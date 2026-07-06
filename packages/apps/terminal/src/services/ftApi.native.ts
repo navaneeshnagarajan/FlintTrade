@@ -78,8 +78,16 @@ export interface BrokerRecommendation {
   rationale: string;
 }
 
+export interface OpenAlgoFirstNote {
+  broker_id: string;
+  display_name: string;
+  note: string;
+}
+
 export interface BrokerRecommendationsResponse {
   status: string;
+  /** Server-emitted OpenAlgo-first affordance — rendered as the leading row. */
+  openalgo_first?: OpenAlgoFirstNote;
   use_cases: Record<string, BrokerRecommendation[]>;
 }
 
@@ -119,6 +127,7 @@ export async function listBrokerRecommendations(): Promise<BrokerRecommendations
   const r = await get<BrokerRecommendationsResponse>("broker/recommendations");
   return {
     status: r?.status ?? "success",
+    openalgo_first: r?.openalgo_first,
     use_cases: r?.use_cases ?? {},
   };
 }

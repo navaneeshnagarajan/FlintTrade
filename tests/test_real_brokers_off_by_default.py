@@ -22,10 +22,22 @@ def test_real_brokers_off_by_default(monkeypatch):
     # No opt-in env var → never authorised → the swap installs the safety mocks.
     monkeypatch.delenv("FLINTTRADE_REAL_BROKERS", raising=False)
     assert real_brokers_authorised() is False
-    install_broker_mocks()
-    assert sys.modules.get("dhanhq") is dhan_mock
-    assert sys.modules.get("upstox_python_sdk") is upstox_mock
-    assert sys.modules.get("neo_api_client") is kotak_neo_mock
+    # Snapshot and restore sys.modules: leaking the swap into the rest of the
+    # randomly-ordered session made any later call-time SDK import (e.g. the
+    # Kotak REST cancel branch) resolve to the mock — a seed-dependent flake.
+    swapped = ("dhanhq", "upstox_python_sdk", "neo_api_client")
+    before = {name: sys.modules.get(name) for name in swapped}
+    try:
+        install_broker_mocks()
+        assert sys.modules.get("dhanhq") is dhan_mock
+        assert sys.modules.get("upstox_python_sdk") is upstox_mock
+        assert sys.modules.get("neo_api_client") is kotak_neo_mock
+    finally:
+        for name in swapped:
+            if before[name] is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = before[name]
 
 
 def test_opt_in_alone_insufficient_without_dev_machines_file(monkeypatch, tmp_path):
