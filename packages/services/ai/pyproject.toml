@@ -22,6 +22,13 @@ dependencies = [
 ml = [
     "scikit-learn>=1.4",
     "scipy>=1.12",
+    # Hyper-parameter optimisation for the ensemble/strategy tuners
+    # (hyperopt_strategy.py, ensemble_selector.py).
+    "optuna>=3.6",
+]
+# ChromaDB-backed RAG + agent memory (rag.py, rag_pipeline.py, memory.py).
+rag = [
+    "chromadb>=0.5",
 ]
 
 [build-system]

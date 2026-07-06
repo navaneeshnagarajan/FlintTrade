@@ -59,6 +59,19 @@ separately, or clone a local-dev copy into `.local/external/openalgo/` with
 `scripts/setup-test-deps.sh`, only when you want the OpenAlgo-compatible
 integration path.
 
+For the FULL Python stack — every workspace member plus the ML/AI extras
+(vectorbt+numba backtesting, lightgbm/optuna ensemble tuning, ChromaDB RAG,
+reportlab PDF export, openpyxl Excel bridge) — sync all packages and extras;
+only `talib` stays opt-in because it needs the TA-Lib C library:
+
+```bash
+uv sync --all-packages --all-extras --no-extra talib
+```
+
+On macOS, `lightgbm` additionally needs OpenMP: `brew install libomp`. A plain
+`uv sync` installs a lean base environment; the corresponding ML/export tests
+skip with a reason instead of failing.
+
 ---
 
 ## 3. Running tests

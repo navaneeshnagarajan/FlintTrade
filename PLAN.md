@@ -154,7 +154,8 @@ The chain to prove: signal → SafetySystem L1–L5 → `gate_order` → `Broker
 
 ## Phase 5 — Distribution + surfaces
 
-- [ ] Desktop updater story (currently none): in-app update check against GitHub releases at minimum; install/uninstall verified on macOS (hands-on) + Linux/Windows (CI artefacts + checklist).
+- [x] **Desktop background runtime (Hermes-pattern, 2026-07-06):** the Tauri shell no longer quits on window close — it hides to the system tray so the backend, the autonomous AI agent, and live position monitoring keep running. Tray Show/Quit menu + left-click toggle, macOS dock-reopen, a global hotkey (`Cmd/Ctrl+Shift+F`), and native OS notifications for backend-emitted events (a live order dispatched, a safety-gate block) via a `FLINTTRADE_NOTIFY` stdout protocol (producer `desktop_notify.py`, no-op unless `FLINTTRADE_DESKTOP=1`; consumer in the shell's `lib.rs`). 8 Rust + 5 Python tests; `cargo check`/`cargo test --lib` green. Studied against `~/Documents/GitHub/hermes-agent`. NOT yet done from that study (deferred, lower value for a trading app): always-on-top quick-order overlay, voice read-aloud, git-review UI, terminal emulation. `make desktop-build` end-to-end verification still pending (below).
+- [ ] Desktop updater story (currently none): in-app update check against GitHub releases at minimum (use Tauri's updater, not a git-pull); install/uninstall verified on macOS (hands-on) + Linux/Windows (CI artefacts + checklist).
 - [ ] In-app bug reporting (error log export → GitHub issue template; no telemetry beyond opt-in).
 - [ ] Site/docs truth pass to "built, done, or actively building" (G36 remainder): desktop README (fixes the site's 17-vs-18 cascade), sidebar meta, CI.md, USER_GUIDE against the stabilised matrix.
 - [ ] make desktop-build verified locally end-to-end on this machine.
