@@ -15,16 +15,41 @@
 //! 4. Kills the sidecar when the app exits.
 //!
 //! A small splash window covers steps 1–2 so the user sees immediate feedback.
+//!
+//! ## Background runtime (AI-trading desktop)
+//!
+//! FlintTrade runs an autonomous AI agent and live position monitoring, so the
+//! backend must keep working when the window is closed. Closing the window
+//! therefore HIDES it to the system tray instead of quitting; the sidecar (and
+//! the agent) keep running. The app quits only from the tray "Quit" item. A
+//! global hotkey (``CommandOrControl+Shift+F``) toggles the window, and the
+//! backend can raise native OS notifications for fills / safety blocks / agent
+//! turns by printing ``FLINTTRADE_NOTIFY\t<title>\t<body>`` on stdout — so
+//! alerts reach the operator even while the window is hidden.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use tauri::menu::{Menu, MenuEvent, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 /// Stdout line the backend prints once its listening socket is bound.
 const READY_SENTINEL: &str = "FLINTTRADE_BACKEND_READY";
+
+/// Stdout prefix the backend prints to raise a native desktop notification.
+/// Format: ``FLINTTRADE_NOTIFY\t<title>\t<body>`` (tab-delimited, one line).
+const NOTIFY_SENTINEL: &str = "FLINTTRADE_NOTIFY";
+
+/// Global hotkey (parsed cross-platform) that toggles the main window.
+const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+F";
+
+/// Set to true once the operator chooses "Quit" from the tray, so the window's
+/// close handler performs a real exit instead of hiding to tray.
+struct QuitRequested(std::sync::atomic::AtomicBool);
 
 /// Holds the spawned backend child so it can be killed on exit.
 struct BackendState(Mutex<Option<CommandChild>>);
@@ -34,16 +59,33 @@ struct BackendState(Mutex<Option<CommandChild>>);
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(BackendState(Mutex::new(None)))
+        .manage(QuitRequested(std::sync::atomic::AtomicBool::new(false)))
         .setup(|app| {
             // First-run secret provisioning (best-effort; never blocks launch).
             provision_master_password();
+
+            // Tray + global hotkey: the app lives in the background (agent +
+            // monitoring keep running) and the operator can summon it anytime.
+            if let Err(e) = build_tray(app.handle()) {
+                eprintln!("[flinttrade] tray setup failed: {e}");
+            }
+            register_toggle_shortcut(app.handle());
 
             let handle = app.handle().clone();
 
             // Spawn the backend sidecar on an OS-chosen loopback port so the app
             // never collides with another local FlintTrade or service.
-            let command = app.shell().sidecar("flinttrade-backend")?.args(["--port", "0"]);
+            // FLINTTRADE_DESKTOP=1 tells the backend it is running under the
+            // desktop shell, so it may emit FLINTTRADE_NOTIFY stdout lines for
+            // native notifications (a no-op under plain CLI/`make start`).
+            let command = app
+                .shell()
+                .sidecar("flinttrade-backend")?
+                .args(["--port", "0"])
+                .env("FLINTTRADE_DESKTOP", "1");
             let (mut rx, child) = command.spawn()?;
             if let Some(state) = app.try_state::<BackendState>() {
                 *state.0.lock().unwrap() = Some(child);
@@ -58,8 +100,17 @@ pub fn run() {
                 while let Some(event) = rx.recv().await {
                     match event {
                         CommandEvent::Stdout(bytes) => {
+                            let chunk = String::from_utf8_lossy(&bytes);
+                            // Backend-emitted native notifications (fills, safety
+                            // blocks, agent turns) — dispatched even while the
+                            // window is hidden in the tray.
+                            for line in chunk.lines() {
+                                if let Some((title, body)) = parse_notify_line(line) {
+                                    raise_notification(&handle, &title, &body);
+                                }
+                            }
                             if !shown {
-                                buffer.push_str(&String::from_utf8_lossy(&bytes));
+                                buffer.push_str(&chunk);
                                 if let Some(port) = parse_ready_port(&buffer) {
                                     shown = true;
                                     let h = handle.clone();
@@ -90,10 +141,17 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building the FlintTrade desktop app")
-        .run(|app_handle, event| {
-            if let RunEvent::ExitRequested { .. } = event {
+        .run(|app_handle, event| match event {
+            RunEvent::ExitRequested { .. } => {
                 kill_backend(app_handle);
             }
+            // macOS: clicking the dock icon while the window is hidden in the
+            // tray brings it back, matching close-to-tray expectations.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => {
+                show_and_focus_main(app_handle);
+            }
+            _ => {}
         });
 }
 
@@ -134,12 +192,23 @@ fn show_main_window(app: &AppHandle, port: u16) {
         .build();
     match result {
         Ok(win) => {
-            // Closing the main window quits the app (and so kills the backend),
-            // matching single-window desktop expectations on macOS too.
+            // Close-to-tray: hide the window instead of exiting so the backend —
+            // and the autonomous AI agent + live position monitoring it runs —
+            // keeps working in the background. A real quit only happens from the
+            // tray "Quit" item (which sets QuitRequested).
             let app_for_close = app.clone();
             win.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { .. } = event {
-                    app_for_close.exit(0);
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    let quitting = app_for_close
+                        .try_state::<QuitRequested>()
+                        .map(|q| q.0.load(std::sync::atomic::Ordering::SeqCst))
+                        .unwrap_or(false);
+                    if !quitting {
+                        api.prevent_close();
+                        if let Some(w) = app_for_close.get_webview_window("main") {
+                            let _ = w.hide();
+                        }
+                    }
                 }
             });
             if let Some(splash) = app.get_webview_window("splash") {
@@ -148,6 +217,109 @@ fn show_main_window(app: &AppHandle, port: u16) {
         }
         Err(e) => eprintln!("[flinttrade] failed to create main window: {e}"),
     }
+}
+
+/// Show and focus the main window (create it lazily is not needed here — it is
+/// built once the backend is ready; before that the tray/hotkey are no-ops for
+/// the main window).
+fn show_and_focus_main(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+/// Toggle the main window's visibility (global hotkey + tray double-click).
+fn toggle_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.hide();
+        } else {
+            show_and_focus_main(app);
+        }
+    }
+}
+
+/// Build the system tray icon + menu (Show / Quit). Reuses the app's own icon.
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "show", "Show FlintTrade", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit FlintTrade", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id("flinttrade-tray")
+        .tooltip("FlintTrade")
+        .menu(&menu)
+        // Left-click toggles the window; the menu stays reachable via right-click.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event: MenuEvent| match event.id().as_ref() {
+            "show" => show_and_focus_main(app),
+            "quit" => {
+                if let Some(q) = app.try_state::<QuitRequested>() {
+                    q.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Register the global hotkey that toggles the window from anywhere.
+fn register_toggle_shortcut(app: &AppHandle) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let shortcut: tauri_plugin_global_shortcut::Shortcut = match TOGGLE_SHORTCUT.parse() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[flinttrade] invalid toggle shortcut {TOGGLE_SHORTCUT:?}: {e}");
+            return;
+        }
+    };
+    let result = app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
+        if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+            toggle_main_window(app);
+        }
+    });
+    if let Err(e) = result {
+        eprintln!("[flinttrade] could not register global toggle shortcut: {e}");
+    }
+}
+
+/// Raise a native OS notification.
+fn raise_notification(app: &AppHandle, title: &str, body: &str) {
+    let _ = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
+}
+
+/// Parse a ``FLINTTRADE_NOTIFY\t<title>\t<body>`` stdout line into (title, body).
+/// Returns ``None`` for any line that is not a well-formed notify sentinel.
+fn parse_notify_line(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix(NOTIFY_SENTINEL)?.strip_prefix('\t')?;
+    let (title, body) = rest.split_once('\t')?;
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    Some((title.to_string(), body.trim().to_string()))
 }
 
 /// Update the splash to report that the backend failed to come up.
@@ -291,5 +463,30 @@ mod tests {
     #[test]
     fn hex_encoding_is_lowercase_and_fixed_width() {
         assert_eq!(to_hex(&[0x00, 0x0f, 0xff, 0xa0]), "000fffa0");
+    }
+
+    #[test]
+    fn parses_well_formed_notify_line() {
+        let line = "FLINTTRADE_NOTIFY\tOrder filled\tRELIANCE BUY 10 @ 2900";
+        assert_eq!(
+            parse_notify_line(line),
+            Some(("Order filled".to_string(), "RELIANCE BUY 10 @ 2900".to_string()))
+        );
+    }
+
+    #[test]
+    fn notify_line_allows_empty_body() {
+        assert_eq!(
+            parse_notify_line("FLINTTRADE_NOTIFY\tKill switch armed\t"),
+            Some(("Kill switch armed".to_string(), String::new()))
+        );
+    }
+
+    #[test]
+    fn rejects_non_notify_or_malformed_lines() {
+        assert_eq!(parse_notify_line("FLINTTRADE_BACKEND_READY port=5100"), None);
+        assert_eq!(parse_notify_line("FLINTTRADE_NOTIFY no tabs here"), None);
+        assert_eq!(parse_notify_line("FLINTTRADE_NOTIFY\t\tbody only"), None);
+        assert_eq!(parse_notify_line("random log line"), None);
     }
 }

@@ -474,6 +474,13 @@ def _dispatch_live_order(
             "Live order blocked by safety layer %s | action=%s adapter=%s symbol=%s: %s",
             blocked.layer, ft_action, adapter_id, body.get("symbol", "?"), blocked.reason,
         )
+        # Native desktop notification (best-effort, desktop-shell only): a safety
+        # block is exactly the kind of event the operator must see even with the
+        # window hidden while the agent runs in the background.
+        _desktop_notify(
+            f"Order blocked by safety [{blocked.layer}]",
+            f"{ft_action} {body.get('symbol', '?')}: {blocked.reason}",
+        )
         return jsonify({
             "status": "error",
             "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
@@ -584,9 +591,25 @@ def _dispatch_live_order(
         "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
         ft_action, adapter_id, safe_account, body.get("symbol", "?"),
     )
+    # Native desktop notification (best-effort, desktop-shell only) — after the
+    # order is already placed, so it can never affect execution.
+    _desktop_notify(
+        "Live order dispatched",
+        f"{ft_action} {body.get('symbol', '?')} via {adapter_id}",
+    )
     # Return both keys: ``orderid`` (legacy OpenAlgo response shape the UI reads)
     # and ``data`` (the routed-path shape) so the frontend works either way.
     return jsonify({"status": "success", "orderid": result, "data": result}), 200
+
+
+def _desktop_notify(title: str, body: str = "") -> None:
+    """Raise a native desktop notification, never letting it break the caller."""
+    try:
+        from .desktop_notify import notify  # noqa: PLC0415
+
+        notify(title, body)
+    except Exception:  # noqa: BLE001 - order/safety path must be unaffected
+        pass
 
 
 def _record_trade_journal(typed_order: Any, orderid: str, strategy: str = "manual") -> None:

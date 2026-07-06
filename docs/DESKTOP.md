@@ -51,7 +51,26 @@ real FlintTrade backend:
 
 Because the backend serves *both* the terminal and the API from one loopback
 origin, the app's same-origin requests resolve with no in-app URL configuration.
-When the window closes, the shell terminates the sidecar.
+
+### Background runtime (the AI-trading shell)
+
+FlintTrade runs an autonomous AI agent and live position monitoring, so closing
+the window must **not** stop it. The shell therefore keeps the backend alive in
+the background:
+
+- **Close to tray.** Clicking the window's close button hides it to the system
+  tray; the sidecar (and the agent) keep running. The app quits only via the
+  tray's **Quit FlintTrade** item.
+- **System tray.** Left-click the tray icon to toggle the window; right-click for
+  the **Show / Quit** menu. On macOS the dock icon re-shows a hidden window.
+- **Global hotkey.** `Cmd/Ctrl + Shift + F` summons or hides the window from
+  anywhere.
+- **Native notifications.** The backend can raise OS notifications for events the
+  operator must see with the window hidden — a live order dispatched, or a
+  safety-gate block — by printing `FLINTTRADE_NOTIFY\t<title>\t<body>` on stdout
+  (only when running under the desktop shell, i.e. `FLINTTRADE_DESKTOP=1`; a
+  no-op under `make start`). The shell parses those lines and shows a native
+  notification. Producer: [desktop_notify.py](../packages/core/core/src/flinttrade_core/desktop_notify.py); consumer: the Tauri shell's `lib.rs`.
 
 The pieces live under:
 
@@ -59,6 +78,7 @@ The pieces live under:
 |---|---|
 | [packages/apps/desktop/](../packages/apps/desktop) | Tauri 2 shell (Rust + splash) |
 | [packages/core/core/src/flinttrade_core/desktop.py](../packages/core/core/src/flinttrade_core/desktop.py) | Backend sidecar entry point |
+| [packages/core/core/src/flinttrade_core/desktop_notify.py](../packages/core/core/src/flinttrade_core/desktop_notify.py) | Backend → shell native-notification producer |
 | [packaging/flinttrade-backend.spec](../packaging/flinttrade-backend.spec) | PyInstaller freeze spec |
 | [packaging/build-backend.sh](../packaging/build-backend.sh) | Frontend build + freeze + sidecar placement |
 | [packaging/make-icons.py](../packaging/make-icons.py) | Brand icon generation |
