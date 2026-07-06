@@ -795,7 +795,8 @@ class TestLiveModeErrors:
         from flinttrade_core.order_routes import _openalgo_api_key, _openalgo_base_url
 
         settings = MagicMock()
-        settings.openalgo_host = "http://192.0.2.10:5010"
+        settings.openalgo_host = "http://192.0.2.10"
+        settings.openalgo_port = 5010
         settings.openalgo_api_key = "app-client-key"
         configured_client = MagicMock()
         configured_client.settings = settings
@@ -822,7 +823,8 @@ class TestLiveModeErrors:
         config = workspace.as_dict()
         config["openalgo"] = {
             "api_key": "workspace-order-key",
-            "host": "http://127.0.0.1:5002",
+            "host": "http://127.0.0.1",
+            "port": 5002,
             "ws_port": 8767,
         }
         workspace.save(config)

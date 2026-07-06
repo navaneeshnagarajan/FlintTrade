@@ -31,7 +31,7 @@ function resetStores() {
 }
 
 function mockFetchWithOpenAlgoConfig(
-  config = { api_key_configured: false, api_key_last4: "", host: "", ws_port: 8765 },
+  config = { api_key_configured: false, api_key_last4: "", host: "", port: 5000, ws_port: 8765 },
 ) {
   const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
@@ -50,7 +50,7 @@ function mockFetchWithOpenAlgoConfig(
 }
 
 function mockFetchWithFailedPost(
-  config = { api_key_configured: false, api_key_last4: "", host: "", ws_port: 8765 },
+  config = { api_key_configured: false, api_key_last4: "", host: "", port: 5000, ws_port: 8765 },
 ) {
   const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
@@ -138,6 +138,7 @@ describe("useSettingsState", () => {
     const { result } = renderHook(() => useSettingsState());
 
     expect(result.current.connection.host).toBe("http://192.168.1.10:5000");
+    expect(result.current.connection.port).toBe("5000");
     expect(result.current.connection.apiKey).toBe("test-api-key");
     expect(result.current.connection.wsPort).toBe("8765");
   });
@@ -146,14 +147,16 @@ describe("useSettingsState", () => {
     mockFetchWithOpenAlgoConfig({
       api_key_configured: true,
       api_key_last4: "-key",
-      host: "http://192.168.1.20:5000",
+      host: "http://192.168.1.20",
+      port: 5001,
       ws_port: 8770,
     });
 
     const { result } = renderHook(() => useSettingsState());
 
     await waitFor(() => {
-      expect(result.current.connection.host).toBe("http://192.168.1.20:5000");
+      expect(result.current.connection.host).toBe("http://192.168.1.20");
+      expect(result.current.connection.port).toBe("5001");
       expect(result.current.connection.apiKey).toBe("");
       expect(result.current.connection.wsPort).toBe("8770");
     });
@@ -179,6 +182,38 @@ describe("useSettingsState", () => {
       );
     });
     expect(useConnectionStore.getState().wsUrl).toBe("wss://openalgo.local:8765");
+  });
+
+  it("persists REST port edits as partial backend patches", async () => {
+    const fetchMock = mockFetchWithOpenAlgoConfig({
+      api_key_configured: true,
+      api_key_last4: "-key",
+      host: "http://192.168.1.20",
+      port: 5001,
+      ws_port: 8770,
+    });
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.port).toBe("5001");
+    });
+
+    act(() => {
+      result.current.updateConnection("port", "5010");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/openalgo",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            port: "5010",
+          }),
+        }),
+      );
+      expect(result.current.connection.port).toBe("5010");
+    });
   });
 
   it("merges late hydration data around a pre-hydration edit", async () => {
@@ -222,6 +257,7 @@ describe("useSettingsState", () => {
             api_key_configured: true,
             api_key_last4: "-key",
             host: "http://192.168.1.20:5000",
+            port: 5001,
             ws_port: 8770,
           },
         }),
@@ -230,6 +266,7 @@ describe("useSettingsState", () => {
 
     await waitFor(() => {
       expect(result.current.connection.host).toBe("https://openalgo.local:5000");
+      expect(result.current.connection.port).toBe("5000");
       expect(result.current.connection.apiKey).toBe("");
       expect(result.current.connection.wsPort).toBe("8770");
     });
@@ -241,6 +278,7 @@ describe("useSettingsState", () => {
       api_key_configured: true,
       api_key_last4: "-key",
       host: "http://192.168.1.20:5000",
+      port: 5000,
       ws_port: 8770,
     });
     const { result } = renderHook(() => useSettingsState());
@@ -289,6 +327,7 @@ describe("useSettingsState", () => {
             api_key_configured: false,
             api_key_last4: "",
             host: "http://192.168.1.20:5000",
+            port: 5000,
             ws_port: 8770,
           },
         }),
@@ -326,6 +365,7 @@ describe("useSettingsState", () => {
       api_key_configured: true,
       api_key_last4: "-key",
       host: "http://192.168.1.20:5000",
+      port: 5000,
       ws_port: 8770,
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

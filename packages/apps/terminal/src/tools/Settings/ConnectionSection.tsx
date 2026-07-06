@@ -5,9 +5,11 @@
 import { Loader2, Wifi, CheckCircle2, XCircle } from "lucide-react";
 import { FieldRow, TextInput, SectionTitle } from "./shared";
 import { useTestConnection } from "@/hooks/useTestConnection";
+import { applyOpenAlgoRestPort } from "@/services/ftApi.openalgo";
 
 interface ApiSettings {
   host: string;
+  port: string;
   apiKey: string;
   wsPort: string;
 }
@@ -23,7 +25,7 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
   const testing = connStatus === "testing";
 
   async function handleTestConnection() {
-    await testConnection(settings.host, settings.apiKey);
+    await testConnection(applyOpenAlgoRestPort(settings.host, settings.port), settings.apiKey);
   }
 
   return (
@@ -39,6 +41,18 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
           onChange={(v) => onChange("host", v)}
           placeholder="http://127.0.0.1:5100"
           aria-label="Broker gateway URL"
+        />
+      </FieldRow>
+
+      <FieldRow
+        label="REST Port"
+        hint="Used when Gateway URL omits an explicit port."
+      >
+        <TextInput
+          value={settings.port}
+          onChange={(v) => onChange("port", v)}
+          placeholder="5000"
+          aria-label="REST port"
         />
       </FieldRow>
 

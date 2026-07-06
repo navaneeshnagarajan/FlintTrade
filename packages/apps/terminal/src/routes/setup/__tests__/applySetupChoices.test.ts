@@ -67,6 +67,7 @@ describe("persistSetupChoices", () => {
       experience: "professional",
       connection: {
         host: "http://localhost:5000",
+        port: "5000",
         apiKey: "test-api-key",
         wsPort: "8765",
       },
@@ -93,7 +94,15 @@ describe("persistSetupChoices", () => {
     });
     expect(fetch).toHaveBeenCalledWith(
       "/ft-api/v1/config/openalgo",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          api_key: "test-api-key",
+          host: "http://localhost:5000",
+          port: "5000",
+          ws_port: "8765",
+        }),
+      }),
     );
     expect(storeMocks.setPersona).toHaveBeenCalledWith("investor");
     expect(storeMocks.setName).toHaveBeenCalledWith("Nav");
@@ -123,6 +132,7 @@ describe("persistSetupChoices", () => {
       persona: "trader",
       connection: {
         host: "http://127.0.0.1:5100",
+        port: "5100",
         apiKey: "direct-connect",
         wsPort: "8765",
       },

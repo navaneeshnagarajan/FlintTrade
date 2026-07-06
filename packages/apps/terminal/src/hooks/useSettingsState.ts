@@ -25,6 +25,7 @@ export interface GeneralData {
 
 export interface ConnectionData {
   host: string;
+  port: string;
   apiKey: string;
   wsPort: string;
 }
@@ -103,6 +104,14 @@ function wsPortFromUrl(wsUrl: string): string {
   }
 }
 
+function restPortFromHost(host: string): string {
+  try {
+    return new URL(host).port || "";
+  } catch {
+    return "";
+  }
+}
+
 async function persistOpenAlgoPatch(connection: Partial<ConnectionData>): Promise<void> {
   await persistOpenAlgoConfigPatch(connection);
 }
@@ -161,6 +170,7 @@ export function useSettingsState(): SettingsState {
 
   // ---- restart state (local — not persisted) ----
   const [restarting, setRestarting] = useState(false);
+  const [connRestPort, setConnRestPort] = useState("");
   const restartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingConnectionPatchRef = useRef<Partial<ConnectionData>>({});
 
@@ -178,8 +188,13 @@ export function useSettingsState(): SettingsState {
         const patch = pendingConnectionPatchRef.current;
         const current = useConnectionStore.getState();
         const host = "host" in patch ? String(patch.host ?? "") : String(data.host ?? "");
+        const hostPort = restPortFromHost(host);
+        const port = "port" in patch
+          ? String(patch.port ?? "")
+          : (hostPort || String(data.port ?? "5000"));
         const apiKey = "apiKey" in patch ? String(patch.apiKey ?? "") : current.apiKey;
         const wsPort = "wsPort" in patch ? String(patch.wsPort ?? "") : String(data.ws_port ?? "8765");
+        setConnRestPort(port);
         useConnectionStore.getState().setConfig({
           host,
           apiKey,
@@ -249,11 +264,17 @@ export function useSettingsState(): SettingsState {
     pendingConnectionPatchRef.current = { ...pendingConnectionPatchRef.current, [field]: value };
     const current = useConnectionStore.getState();
     let host = current.host;
+    let port = connRestPort || restPortFromHost(current.host) || "5000";
     let apiKey = current.apiKey;
     let wsPort = wsPortFromUrl(current.wsUrl);
 
     if (field === "host") {
       host = value;
+      port = restPortFromHost(value) || port;
+      setConnRestPort(port);
+    } else if (field === "port") {
+      port = value;
+      setConnRestPort(port);
     } else if (field === "apiKey") {
       apiKey = value;
     } else if (field === "wsPort") {
@@ -265,7 +286,7 @@ export function useSettingsState(): SettingsState {
     void save.catch((err) => {
       console.warn("[settings] failed to persist OpenAlgo config:", err);
     });
-  }, []);
+  }, [connRestPort]);
 
   const handleRestart = useCallback((onDone?: (msg: string) => void) => {
     if (restarting) return;
@@ -344,8 +365,13 @@ export function useSettingsState(): SettingsState {
   );
 
   const connection = useMemo<ConnectionData>(() => {
-    return { host: connHost, apiKey: connApiKey, wsPort: wsPortFromUrl(connWsUrl) };
-  }, [connHost, connApiKey, connWsUrl]);
+    return {
+      host: connHost,
+      port: connRestPort || restPortFromHost(connHost) || "5000",
+      apiKey: connApiKey,
+      wsPort: wsPortFromUrl(connWsUrl),
+    };
+  }, [connHost, connRestPort, connApiKey, connWsUrl]);
 
   return {
     general,

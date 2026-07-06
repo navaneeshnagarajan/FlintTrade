@@ -86,7 +86,9 @@ Read [`contributing.md`](../../contributing.md) for the contribution flow, then 
 4. Login to broker via OAuth redirect
 5. Go to API Key section, generate key
 6. Paste the OpenAlgo URL and API key into FlintTrade Setup → OpenAlgo Bridge
-   or Settings → Broker Gateway. FlintTrade stores it in the OS workspace.
+   or Settings → Broker Gateway. If the URL omits a port, set REST Port
+   (default `5000`); WebSocket Port defaults to `8765`. FlintTrade stores these
+   settings in the OS workspace.
 
 Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
 

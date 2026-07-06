@@ -10,6 +10,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, field_validator
@@ -51,11 +52,14 @@ def _workspace_openalgo_overrides() -> dict[str, Any]:
 
     api_key = str(openalgo.get("api_key", "") or "").strip()
     host = str(openalgo.get("host", "") or "").strip()
+    port_raw = openalgo.get("port")
+    port = str(port_raw or "").strip()
     ws_port_raw = openalgo.get("ws_port")
     ws_port = str(ws_port_raw or "").strip()
 
     has_user_value = bool(api_key)
     has_user_value = has_user_value or (bool(host) and host.rstrip("/") != DEFAULT_OPENALGO_HOST)
+    has_user_value = has_user_value or (bool(port) and port != str(DEFAULT_OPENALGO_PORT))
     has_user_value = has_user_value or (bool(ws_port) and ws_port != str(DEFAULT_OPENALGO_WS_PORT))
     if not has_user_value:
         return {}
@@ -65,6 +69,8 @@ def _workspace_openalgo_overrides() -> dict[str, Any]:
         overrides["openalgo_api_key"] = api_key
     if host:
         overrides["openalgo_host"] = host
+    if port:
+        overrides["openalgo_port"] = int(port)
     if ws_port:
         overrides["openalgo_ws_port"] = int(ws_port)
     return overrides
@@ -99,6 +105,13 @@ class Settings(BaseModel):
             raise ValueError("openalgo_api_key must be set to a real API key")
         return v
 
+    @field_validator("openalgo_port", "openalgo_ws_port")
+    @classmethod
+    def ports_must_be_valid(cls, v: int) -> int:
+        if not 1 <= int(v) <= 65535:
+            raise ValueError("OpenAlgo ports must be between 1 and 65535")
+        return v
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Build Settings from UI workspace config, with env as a fallback."""
@@ -117,6 +130,25 @@ class Settings(BaseModel):
         settings.update(_workspace_openalgo_overrides())
 
         return cls(**settings)
+
+
+def openalgo_rest_base_url(settings: Settings) -> str:
+    """Return the OpenAlgo REST base URL, applying the fallback REST port."""
+    host = settings.openalgo_host.rstrip("/")
+    try:
+        parsed = urlsplit(host)
+        if parsed.port is not None:
+            return host
+    except ValueError:
+        return host
+
+    hostname = parsed.hostname or parsed.netloc
+    if not hostname:
+        return host
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = f"{hostname}:{settings.openalgo_port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), parsed.query, parsed.fragment)).rstrip("/")
 
 
 class FlintTradeConfig:

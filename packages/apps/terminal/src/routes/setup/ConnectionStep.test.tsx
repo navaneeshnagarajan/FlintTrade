@@ -34,6 +34,7 @@ describe("ConnectionStep", () => {
       "false",
     );
     expect(screen.getByText(/Recommended/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/REST port/i)).toHaveValue("5000");
     // The native section is behind the secondary tab, not shown by default.
     expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
   });

@@ -60,6 +60,7 @@ def default_workspace_config(*, initialized: bool = False) -> dict[str, Any]:
         },
         "openalgo": {
             "host": "http://127.0.0.1:5000",
+            "port": 5000,
             "ws_port": 8765,
         },
         "ui": {

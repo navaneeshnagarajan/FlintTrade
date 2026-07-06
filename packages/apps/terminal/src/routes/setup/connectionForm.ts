@@ -10,6 +10,7 @@ import { z } from "zod";
 
 export const connectionSchema = z.object({
   host: z.string().min(1, "Host is required").url("Must be a valid URL (include http://)"),
+  port: z.string().min(1, "REST port is required"),
   apiKey: z.string().min(8, "API key must be at least 8 characters"),
   wsPort: z.string().min(1, "WebSocket port is required"),
 });

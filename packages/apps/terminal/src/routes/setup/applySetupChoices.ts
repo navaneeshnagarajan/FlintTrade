@@ -69,7 +69,7 @@ export function deriveSkillLevels(
 function isOpenAlgoConnection(
   connection: Partial<ConnectionFormValues> | null | undefined,
 ): connection is ConnectionFormValues {
-  return Boolean(connection?.host && connection.apiKey && connection.apiKey !== "direct-connect" && connection.wsPort);
+  return Boolean(connection?.host && connection.port && connection.apiKey && connection.apiKey !== "direct-connect" && connection.wsPort);
 }
 
 function persistOpenAlgoConnection(connection: ConnectionFormValues): void {
@@ -83,6 +83,7 @@ function persistOpenAlgoConnection(connection: ConnectionFormValues): void {
   void persistOpenAlgoConfigPatch({
     apiKey: connection.apiKey,
     host: connection.host,
+    port: connection.port,
     wsPort: connection.wsPort,
   }).catch((err) => {
     console.warn("[setup] failed to persist connection to backend:", err);

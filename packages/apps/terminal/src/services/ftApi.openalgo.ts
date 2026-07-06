@@ -4,6 +4,7 @@ export interface OpenAlgoConfigData {
   api_key_configured?: boolean;
   api_key_last4?: string;
   host?: string;
+  port?: string | number;
   ws_port?: string | number;
 }
 
@@ -16,6 +17,7 @@ export interface OpenAlgoConfigResponse {
 export interface OpenAlgoConnectionPatch {
   apiKey?: string;
   host?: string;
+  port?: string;
   wsPort?: string;
 }
 
@@ -30,10 +32,23 @@ export function isAcceptedOpenAlgoConfigStatus(status?: string): boolean {
   return !status || ["ok", "success", "partial"].includes(status);
 }
 
+export function applyOpenAlgoRestPort(host: string, port?: string): string {
+  try {
+    const url = new URL(host);
+    if (!url.port && port) {
+      url.port = port;
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return host;
+  }
+}
+
 function toOpenAlgoConfigPayload(connection: Partial<OpenAlgoConnectionPatch>): Record<string, string> {
   const body: Record<string, string> = {};
   if ("apiKey" in connection) body.api_key = connection.apiKey ?? "";
   if ("host" in connection) body.host = connection.host ?? "";
+  if ("port" in connection) body.port = connection.port ?? "";
   if ("wsPort" in connection) body.ws_port = connection.wsPort ?? "";
   return body;
 }

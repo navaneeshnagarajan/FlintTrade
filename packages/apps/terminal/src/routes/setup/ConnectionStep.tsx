@@ -30,7 +30,8 @@ import { Label } from "@/components/ui/label";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import { ping } from "@/services/api";
+import { useTestConnection } from "@/hooks/useTestConnection";
+import { applyOpenAlgoRestPort } from "@/services/ftApi.openalgo";
 import { BrokerConnect } from "@/components/account/BrokerConnect";
 import type { BrokerAccount } from "@/types/broker";
 
@@ -93,28 +94,19 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
     resolver: zodResolver(connectionSchema),
     defaultValues: {
       host: defaultValues?.host ?? "http://localhost:5000",
+      port: defaultValues?.port ?? "5000",
       apiKey: defaultValues?.apiKey ?? "",
       wsPort: defaultValues?.wsPort ?? "8765",
     },
   });
 
-  const [testState, setTestState] = useState<"idle" | "testing" | "ok" | "fail">("idle");
-  const [testError, setTestError] = useState("");
+  const { status: testState, message: testMessage, testConnection } = useTestConnection();
 
   async function handleTest() {
     const vals = getValues();
     const wsUrl = deriveWsUrl(vals.host, vals.wsPort);
     useConnectionStore.getState().setConfig({ host: vals.host, apiKey: vals.apiKey, wsUrl });
-
-    setTestState("testing");
-    setTestError("");
-    try {
-      await ping();
-      setTestState("ok");
-    } catch (err) {
-      setTestState("fail");
-      setTestError(err instanceof Error ? err.message : "Connection failed");
-    }
+    await testConnection(applyOpenAlgoRestPort(vals.host, vals.port), vals.apiKey);
   }
 
   return (
@@ -134,6 +126,24 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
         </div>
         {errors.host && (
           <p className="text-red-400 text-xs">{errors.host.message}</p>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="port" className="text-text-secondary text-xs uppercase tracking-wider">
+          REST Port
+        </Label>
+        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+          <Input
+            id="port"
+            placeholder="5000"
+            aria-label="REST port"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+            {...register("port")}
+          />
+        </div>
+        {errors.port && (
+          <p className="text-red-400 text-xs">{errors.port.message}</p>
         )}
       </div>
 
@@ -197,10 +207,10 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
             <CheckCircle className="size-4" /> Connected
           </span>
         )}
-        {testState === "fail" && (
+        {testState === "error" && (
           <span className="flex items-center gap-1.5 text-red-400 text-sm">
             <XCircle className="size-4" />
-            <span className="truncate max-w-50">{testError || "Failed"}</span>
+            <span className="truncate max-w-50">{testMessage || "Failed"}</span>
           </span>
         )}
       </div>
@@ -227,6 +237,7 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
  */
 const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
   host: "http://127.0.0.1:5100",
+  port: "5100",
   apiKey: "direct-connect",
   wsPort: "8765",
 };
@@ -316,7 +327,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
       <div className="pt-2 border-t border-border-default space-y-2">
         <button
           type="button"
-          onClick={() => onComplete({ host: "", apiKey: "", wsPort: "8765" })}
+          onClick={() => onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" })}
           className="w-full text-xs text-text-muted hover:text-text-primary transition-colors py-1.5 rounded focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
         >
           I&apos;ll connect later →

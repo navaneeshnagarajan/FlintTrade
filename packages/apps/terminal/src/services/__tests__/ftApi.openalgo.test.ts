@@ -14,6 +14,7 @@ vi.mock("@/stores/authStore", () => ({
 }));
 
 import {
+  applyOpenAlgoRestPort,
   persistOpenAlgoConfigPatch,
   readOpenAlgoConfig,
   testOpenAlgoConnection,
@@ -45,6 +46,7 @@ describe("ftApi.openalgo", () => {
     await persistOpenAlgoConfigPatch({
       apiKey: "broker-api-key",
       host: "http://localhost:5000",
+      port: "5000",
       wsPort: "8765",
     });
 
@@ -58,9 +60,15 @@ describe("ftApi.openalgo", () => {
       body: JSON.stringify({
         api_key: "broker-api-key",
         host: "http://localhost:5000",
+        port: "5000",
         ws_port: "8765",
       }),
     });
+  });
+
+  it("applies REST port only when the host URL omits an explicit port", () => {
+    expect(applyOpenAlgoRestPort("http://localhost", "5010")).toBe("http://localhost:5010");
+    expect(applyOpenAlgoRestPort("http://localhost:5000", "5010")).toBe("http://localhost:5000");
   });
 
   it("reads OpenAlgo config with auth headers but no JSON content type", async () => {

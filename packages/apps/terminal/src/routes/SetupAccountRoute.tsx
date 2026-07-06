@@ -99,6 +99,7 @@ const setupProgressSchema = z.object({
   connection: z
     .object({
       host: z.string().optional(),
+      port: z.string().optional(),
       apiKey: z.string().optional(),
       wsPort: z.string().optional(),
     })

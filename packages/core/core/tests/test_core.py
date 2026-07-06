@@ -35,6 +35,7 @@ class TestConfig:
         s = Settings.from_env()
         assert s.openalgo_host == "http://127.0.0.1:5000"
         assert s.openalgo_api_key == "test_key_123"
+        assert s.openalgo_port == 5000
         assert s.openalgo_ws_port == 8765
 
     def test_from_env_uses_defaults_without_openalgo(self, monkeypatch):
@@ -46,6 +47,7 @@ class TestConfig:
         s = Settings.from_env()
         assert s.openalgo_host == "http://127.0.0.1:5000"
         assert s.openalgo_api_key == ""
+        assert s.openalgo_port == 5000
 
     def test_from_env_allows_missing_openalgo_key(self, monkeypatch):
         monkeypatch.setenv("OPENALGO_HOST", "http://127.0.0.1:5000")
@@ -66,14 +68,34 @@ class TestConfig:
 
         workspace = Workspace()
         workspace.initialise()
-        workspace.set("openalgo.host", "http://127.0.0.1:5002")
+        workspace.set("openalgo.host", "http://127.0.0.1")
+        workspace.set("openalgo.port", 5002)
         workspace.set("openalgo.api_key", "workspace-key")
         workspace.set("openalgo.ws_port", 8767)
 
         s = Settings.from_env()
-        assert s.openalgo_host == "http://127.0.0.1:5002"
+        assert s.openalgo_host == "http://127.0.0.1"
+        assert s.openalgo_port == 5002
         assert s.openalgo_api_key == "workspace-key"
         assert s.openalgo_ws_port == 8767
+
+    def test_openalgo_rest_base_url_uses_fallback_port(self):
+        from flinttrade_core.config import Settings, openalgo_rest_base_url
+
+        settings = Settings(openalgo_host="http://127.0.0.1", openalgo_port=5010, openalgo_api_key="key123")
+        assert openalgo_rest_base_url(settings) == "http://127.0.0.1:5010"
+
+    def test_openalgo_rest_base_url_preserves_explicit_host_port(self):
+        from flinttrade_core.config import Settings, openalgo_rest_base_url
+
+        settings = Settings(openalgo_host="http://127.0.0.1:5002", openalgo_port=5010, openalgo_api_key="key123")
+        assert openalgo_rest_base_url(settings) == "http://127.0.0.1:5002"
+
+    def test_openalgo_ports_must_be_valid(self):
+        from flinttrade_core.config import Settings
+
+        with pytest.raises(ValueError, match="between 1 and 65535"):
+            Settings(openalgo_host="http://localhost:5000", openalgo_api_key="key123", openalgo_port=0)
 
     def test_host_must_be_url(self):
         from flinttrade_core.config import Settings

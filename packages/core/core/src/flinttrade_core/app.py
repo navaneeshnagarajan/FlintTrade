@@ -86,7 +86,7 @@ from flask_limiter.util import get_remote_address  # noqa: E402
 import sentry_sdk  # noqa: E402
 from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 
-from .config import Settings  # noqa: E402
+from .config import DEFAULT_OPENALGO_PORT, DEFAULT_OPENALGO_WS_PORT, Settings  # noqa: E402
 from .csp import (  # noqa: E402
     build_csp_header as _build_csp_header,
     csp_report_bp as _csp_report_bp,
@@ -525,7 +525,7 @@ def _get_master_password() -> str:
 def _read_openalgo_from_workspace() -> dict[str, Any]:
     """Read OpenAlgo overrides from ``~/.flinttrade/workspace.json``.
 
-    Returns a dict with any of ``api_key``, ``host``, ``ws_port`` keys that
+    Returns a dict with any of ``api_key``, ``host``, ``port``, ``ws_port`` keys that
     are present and non-empty.  Returns an empty dict if the file is
     missing, unreadable, or doesn't contain an ``openalgo`` section.
 
@@ -557,7 +557,7 @@ def _read_openalgo_from_workspace() -> dict[str, Any]:
         return {}
 
     result: dict[str, Any] = {}
-    for key in ("api_key", "host", "ws_port"):
+    for key in ("api_key", "host", "port", "ws_port"):
         val = openalgo.get(key)
         if val:
             result[key] = val
@@ -2329,7 +2329,7 @@ def create_flask_app(
 
     # ------------------------------------------------------------------
     # Config persistence endpoint — /ft-api/v1/config/openalgo
-    # Accepts {api_key, host, ws_port} from the Setup wizard, persists
+    # Accepts {api_key, host, port, ws_port} from the Setup wizard, persists
     # them to workspace.json, and hot-reloads app.config["CLIENT"] so no
     # process restart is needed.
     # ------------------------------------------------------------------
@@ -2349,8 +2349,17 @@ def create_flask_app(
         so we also permit requests that originate from localhost without
         an API-key header.
 
-        Request JSON: ``{"api_key": "...", "host": "...", "ws_port": 8765}``
+        Request JSON: ``{"api_key": "...", "host": "...", "port": 5000, "ws_port": 8765}``
         """
+        def _coerce_port(value: Any, label: str) -> int:
+            try:
+                port_value = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{label} must be an integer") from exc
+            if not 1 <= port_value <= 65535:
+                raise ValueError(f"{label} must be between 1 and 65535")
+            return port_value
+
         remote = request.remote_addr or ""
         if remote not in ("127.0.0.1", "::1", "localhost"):
             return jsonify({
@@ -2375,7 +2384,8 @@ def create_flask_app(
                         "api_key_configured": bool(api_key),
                         "api_key_last4": api_key[-4:] if api_key else "",
                         "host": str(openalgo.get("host", "") or ""),
-                        "ws_port": openalgo.get("ws_port", 8765),
+                        "port": openalgo.get("port", DEFAULT_OPENALGO_PORT),
+                        "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
                     },
                 }), 200
             except Exception as exc:
@@ -2388,15 +2398,17 @@ def create_flask_app(
         payload = request.get_json(silent=True) or {}
         has_api_key = "api_key" in payload
         has_host = "host" in payload
+        has_port = "port" in payload
         has_ws_port = "ws_port" in payload
         api_key = str(payload.get("api_key", "")).strip()
         host = str(payload.get("host", "")).strip()
+        port = payload.get("port")
         ws_port = payload.get("ws_port")
 
-        if not has_api_key and not has_host and not has_ws_port:
+        if not has_api_key and not has_host and not has_port and not has_ws_port:
             return jsonify({
                 "status": "error",
-                "message": "At least one of api_key, host, ws_port is required",
+                "message": "At least one of api_key, host, port, ws_port is required",
             }), 400
 
         # Persist to workspace.json
@@ -2409,8 +2421,15 @@ def create_flask_app(
                 ws.set("openalgo.api_key", api_key)
             if has_host:
                 ws.set("openalgo.host", host)
+            if has_port:
+                ws.set("openalgo.port", _coerce_port(port, "port"))
             if has_ws_port:
-                ws.set("openalgo.ws_port", int(ws_port))
+                ws.set("openalgo.ws_port", _coerce_port(ws_port, "ws_port"))
+        except ValueError as exc:
+            return jsonify({
+                "status": "error",
+                "message": str(exc),
+            }), 400
         except Exception as exc:
             logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)
             return jsonify({

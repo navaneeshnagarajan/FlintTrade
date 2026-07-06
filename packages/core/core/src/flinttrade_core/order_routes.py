@@ -33,7 +33,6 @@ import logging
 import time
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -175,19 +174,16 @@ def _openalgo_base_url() -> str:
     client = current_app.config.get("CLIENT")
     if client is not None:
         try:
-            return client.settings.openalgo_host.rstrip("/")
+            from .config import openalgo_rest_base_url  # noqa: PLC0415
+
+            return openalgo_rest_base_url(client.settings)
         except AttributeError:
             pass
 
-    from .config import Settings  # noqa: PLC0415
+    from .config import Settings, openalgo_rest_base_url  # noqa: PLC0415
 
     settings = Settings.from_env()
-    host = settings.openalgo_host.rstrip("/")
-    try:
-        has_port = urlsplit(host).port is not None
-    except ValueError:
-        has_port = True
-    return host if has_port else f"{host}:{settings.openalgo_port}"
+    return openalgo_rest_base_url(settings)
 
 
 def _openalgo_api_key() -> str:

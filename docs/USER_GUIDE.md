@@ -88,6 +88,8 @@ currently verified first-party adapters.
 4. **Set the OpenAlgo key in FlintTrade.** Open Setup → OpenAlgo Bridge, or
    Settings → Broker Gateway, then paste the OpenAlgo URL and API key. The app
    stores these settings in the OS workspace and hot-reloads the backend client.
+   If the URL does not include a port, set REST Port (default `5000`); the
+   WebSocket Port defaults to `8765`.
 5. **Verify the bridge.** Use the Test Connection button in the same UI. Source
    contributors can open `http://localhost:5173/setup`; desktop users use the
    in-app setup window.
@@ -463,7 +465,9 @@ text.
 
 ### "Connection refused" on the OpenAlgo port
 
-OpenAlgo is not running, or it is bound to a different port.
+OpenAlgo is not running, or it is bound to a different port. In Settings →
+Broker Gateway, keep the port in the Gateway URL or set REST Port when the URL
+omits it.
 
 ```bash
 make status          # shows FlintTrade backend health and optional OpenAlgo status

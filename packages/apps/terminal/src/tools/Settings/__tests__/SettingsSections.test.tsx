@@ -194,13 +194,14 @@ describe("ConnectionSection", () => {
   it("renders with host input and section title", () => {
     render(
       <ConnectionSection
-        settings={{ host: "http://127.0.0.1:5000", apiKey: "", wsPort: "8765" }}
+        settings={{ host: "http://127.0.0.1:5000", port: "5000", apiKey: "", wsPort: "8765" }}
         onChange={vi.fn()}
       />,
     );
 
     expect(screen.getByText("Broker Gateway")).toBeInTheDocument();
     expect(screen.getByLabelText("Broker gateway URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("REST port")).toBeInTheDocument();
     expect(screen.getByLabelText("WebSocket port")).toBeInTheDocument();
     expect(screen.getByText("Test Connection")).toBeInTheDocument();
   });

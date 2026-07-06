@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from .config import Settings
+from .config import Settings, openalgo_rest_base_url
 from .exceptions import APIError, OpenAlgoAuthError, OpenAlgoRateLimitError
 from .models import (
     BasketOrder,
@@ -85,7 +85,7 @@ class OpenAlgoClient:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings.from_env()
-        self._base = f"{self.settings.openalgo_host}/api/v1"
+        self._base = f"{openalgo_rest_base_url(self.settings)}/api/v1"
         self._http = httpx.AsyncClient(timeout=30.0)
         self._api_key = self.settings.openalgo_api_key
 
