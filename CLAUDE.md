@@ -85,9 +85,9 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `ditto` | services | Py | Multi-account mirror, margin calc, trailing SL, risk manager (AlgoMirror patterns reimplemented natively) |
 | `automation` | services | Py | Cron, Telegram bot (kill switch), post-market analysis, voice orders |
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
-| `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (32 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
-| `webhooks` | integrations | Py | TradingView/ChartInk/custom webhooks + flow builder (n8n + WhatsApp bridges actually live in `automation`) |
-| `terminal` | apps | TS/React | SPA: Dockview workspace, 95 widgets, routes — single source of truth for UI |
+| `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (35 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
+| `webhooks` | integrations | Py | TradingView/ChartInk/GoCharting/custom webhooks + flow builder (n8n + WhatsApp bridges actually live in `automation`) |
+| `terminal` | apps | TS/React | SPA: Dockview workspace, 101 widgets, routes — single source of truth for UI |
 | `desktop` | apps | TS/Rust | Tauri 2 native shell — bundles the PyInstaller-frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 

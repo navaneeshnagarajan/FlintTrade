@@ -76,7 +76,7 @@ placeorder(
 )
 ```
 
-Note: `stoploss`, `squareoff`, and `trailing_stoploss` are in points/ticks, not prices. Confirm parameter names with your broker's OpenAlgo adapter — not all 32 brokers support trailing SL.
+Note: `stoploss`, `squareoff`, and `trailing_stoploss` are in points/ticks, not prices. Confirm parameter names with your broker's OpenAlgo adapter — not all brokers support trailing SL.
 
 ## Common Mistakes
 

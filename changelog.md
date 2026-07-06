@@ -8,6 +8,32 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Six new Analysis widgets** — FII Long/Short, Gamma Density, Arbitrage Scanner,
+  Index Contribution, Pattern Detection, and Time & Sales, taking the widget
+  catalogue from 95 to 101. Backed by new screener routes:
+  `GET /api/v1/screener/fii-long-short`, `POST /api/v1/gammadensity`,
+  `POST /api/v1/screener/arbitrage`, `POST /api/v1/candlestick-patterns`, and
+  `GET /v1/index-contribution`.
+- **Watchlist formula builder** — a safe expression engine (no `eval`; a
+  purpose-built parser over quote fields) powers user-defined formula columns in
+  the Watchlist, plus row-hover **quick Buy/Sell** buttons that open the OrderPad
+  pre-filled for that scrip — the ticket still traverses the full gated execution
+  path.
+- **Invest hide-values toggle** — a privacy control on the Invest workspace that
+  masks holdings, net-worth, and P&L amounts on screen.
+- **GoCharting webhook source** — `/v1/webhook/gocharting` joins TradingView,
+  ChartInk, and custom as an accepted webhook source, routed through the same
+  gated dispatcher.
+- **BROKER_CATALOG 32 → 35** — catalogued the OpenAlgo MCP entry plus the
+  upstream `arrow` and `tradesmart` adapters in the broker catalogue.
+- **Desktop close-to-tray background runtime** — closing the window now hides it
+  to the system tray while the backend sidecar (and any running agent) keeps
+  working, with a tray menu (Show/Quit), a global show/hide hotkey
+  (Cmd/Ctrl+Shift+F), and native notifications; quit fully via the tray's
+  "Quit FlintTrade".
+- **ML/AI dependency stack installed by default** — vectorbt, lightgbm, optuna,
+  chromadb, openpyxl, and reportlab join the default environment, unlocking 68
+  previously skipped tests.
 - **Native desktop app (Linux, Windows, macOS)** — a Tauri 2 shell
   (`packages/apps/desktop`) packages the FlintTrade backend and terminal into a
   single installable app. On launch it provisions the credential-vault master
@@ -104,6 +130,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- NOTICE regeneration — the ML/AI dependency wave changed the lockfiles without
+  regenerating `notice.generated`, failing the Supply Chain NOTICE-drift gate;
+  the bundle is regenerated against the current lockfiles and the gate is green
+  again.
 - Final `v0.6.0-beta.1` app audit fixes: Live setup now verifies the PIN and
   stores the live-unlocked session token before entering Live mode; normal
   password and 2FA login clears stale Live UI state; Explore onboarding CTAs

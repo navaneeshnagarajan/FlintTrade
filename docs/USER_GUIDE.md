@@ -204,7 +204,7 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (95)
+### The widgets (101)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are
@@ -225,7 +225,9 @@ count:
   Bands, Correlation Pairs, Multi-Timeframe, PCR Trend, Instrument
   Compare, Spread View, Greeks Heatmap, Gap Analysis, Implied Move,
   Options Flow, Market Microstructure, Correlation Matrix, IV Skew,
-  Sector Performance, Footprint Chart, and DOM Heatmap.
+  Sector Performance, Footprint Chart, DOM Heatmap, FII Long/Short,
+  Gamma Density, Arbitrage Scanner, Index Contribution, Pattern
+  Detection, and Time & Sales.
 - **Utility** — Watchlist, Calculator, News Feed, Ticker, AI
   Advisor, Pre-Market Scanner, Price Alerts, System Health, Funding
   Rates, Currency Converter, Earnings Calendar, Global Indices,

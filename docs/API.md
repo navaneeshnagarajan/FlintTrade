@@ -131,7 +131,7 @@ the WSGI prefix-strip.
 
 ### Analysis (`/ft-api/v1/gex` etc.)
 
-GET endpoints. Powered by `packages/services/screener/`.
+GET endpoints unless marked otherwise. Powered by `packages/services/screener/`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -141,6 +141,11 @@ GET endpoints. Powered by `packages/services/screener/`.
 | `straddlepnl` | Live straddle P&L for an at-the-money pair. |
 | `oiprofile` | OI profile data. |
 | `maxpain` | Max-pain calculation. |
+| `gammadensity` (**POST**) | Gamma density surface across strikes and expiries. |
+| `screener/fii-long-short` | FII long/short ratio from participant-wise derivative positions. |
+| `screener/arbitrage` (**POST**) | Cash-future and cross-exchange arbitrage scan. |
+| `candlestick-patterns` (**POST**) | Candlestick pattern detection over OHLCV history. |
+| `index-contribution` | Index constituent contribution decomposition. |
 
 ### Gateway (`/ft-api/v1/broker/*`)
 

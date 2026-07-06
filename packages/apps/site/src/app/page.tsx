@@ -176,7 +176,7 @@ export default function HomePage() {
             <span>Package surfaces across Python, React, shared UI, and Rust/PyO3.</span>
           </div>
           <div>
-            <strong>95</strong>
+            <strong>101</strong>
             <span>Terminal widgets described by the public contributor documentation.</span>
           </div>
           <div>

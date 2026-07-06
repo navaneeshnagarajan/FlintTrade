@@ -18,7 +18,8 @@ on:
       - 'docs/**'
       - 'flinttrade-design/**'   # ME35
       - '.local/**'              # ME35
-      - 'NOTICE'
+      # NB: no ignore for 'notice'/'notice.generated' — a notice-only commit MUST
+      # still run the NOTICE-drift gate below (a hand-edited notice has to fail CI).
       - '.gitignore'
       - '.gitattributes'
       - '.editorconfig'

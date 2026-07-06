@@ -142,7 +142,7 @@ and 1 Rust/PyO3 tick engine.
 | `packages/core/indicators` | Python + Numba | TA-Lib batch indicators, Numba streaming variants, Pine conversion |
 | `packages/core/ticks` | Rust + PyO3 | High-performance tick processing for tick-level backtests |
 | `packages/integrations/gateway` | Python | Native broker gateway, adapter pattern, credential vault, WebSocket bridge |
-| `packages/integrations/webhooks` | Python | TradingView, ChartInk, custom webhooks, visual flow builder |
+| `packages/integrations/webhooks` | Python | TradingView, ChartInk, GoCharting, custom webhooks, visual flow builder |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
 | `packages/services/automation` | Python | Cron jobs, Telegram bot, OpenClaw bridge, post-market analysis |
 | `packages/services/backtest` | Python | Event-driven simulator, 94 strategy templates, walk-forward optimiser |

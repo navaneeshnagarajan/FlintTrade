@@ -4,6 +4,7 @@
 
 import { Settings, Github, ExternalLink } from "lucide-react";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
+import { widgetCatalog } from "@/layout/widgetFactory";
 import { SectionTitle } from "./shared";
 
 export function AboutSection() {
@@ -25,7 +26,7 @@ export function AboutSection() {
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
           Native-first trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
-          FlintTrade has its own backend, native gateway contract, 95 widgets, and an optional
+          FlintTrade has its own backend, native gateway contract, {widgetCatalog.length} widgets, and an optional
           OpenAlgo-compatible bridge, and ships as a native desktop app for macOS, Windows, and Linux.
           Monorepo with 18 package surfaces across Python, React, Tauri, shared UI, and Rust.
         </p>

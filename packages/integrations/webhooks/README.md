@@ -1,6 +1,6 @@
 # Webhooks
 
-> TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge.
+> TradingView webhooks, ChartInk integration, GoCharting webhooks, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 

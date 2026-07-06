@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organisation
 
-FlintTrade is a monorepo for an Indian trading platform. Python packages live under `packages/core/<name>/src`, `packages/services/<name>/src`, and `packages/integrations/<name>/src`, with tests beside them under `tests/`; shared repository tests live in the root `tests/` folder. The React/Vite terminal is in `packages/apps/terminal/src`, with Vitest tests under `packages/apps/terminal/tests` or co-located as `*.test.tsx`, and Playwright specs in `packages/apps/terminal/e2e`. Rust/PyO3 tick processing lives in `packages/core/ticks`. Operational scripts are in `scripts/` and `infra/`; docs are in `docs/`.
+FlintTrade is a monorepo for an Indian trading platform. Python packages live under `packages/core/<name>/src`, `packages/services/<name>/src`, and `packages/integrations/<name>/src`, with tests beside them under `tests/`; shared repository tests live in the root `tests/` folder. The React/Vite terminal is in `packages/apps/terminal/src`, with Vitest tests co-located as `*.test.tsx` (plus suites under `src/__tests__/`), and Playwright specs in `packages/apps/terminal/e2e`. Rust/PyO3 tick processing lives in `packages/core/ticks`. Operational scripts are in `scripts/` and `infra/`; docs are in `docs/`.
 
 ## Build, Test, and Development Commands
 
@@ -23,7 +23,7 @@ EditorConfig sets LF endings, final newlines, two-space indentation by default, 
 
 ## Testing Guidelines
 
-Run focused tests before broad suites, for example `python -m pytest packages/integrations/gateway/tests/ -v --import-mode=importlib` or `cd packages/apps/terminal && npx vitest run -t "places a market order"`. Pytest markers are `unit`, `integration`, and `slow`; misspelled markers fail CI. New widgets should include a co-located `<Name>.test.tsx` and be registered as Dockview panels.
+Run focused tests before broad suites, for example `uv run pytest packages/integrations/gateway/tests/ -v --import-mode=importlib` or `cd packages/apps/terminal && npx vitest run -t "places a market order"`. Pytest markers are `unit`, `integration`, and `slow`; misspelled markers fail CI. New widgets should include a co-located `<Name>.test.tsx` and be registered as Dockview panels.
 
 ## Commit & Pull Request Guidelines
 
@@ -32,7 +32,7 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 ## Agentic Workflow
 
 - **Review pipeline:** claude (ultracode multi-agent panels) → maintainer. Codex is retired from the loop. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
-- **Full arsenal:** for substantial work use the ultracode `Workflow` tool (fan-out → adversarial verify → synthesise), relevant skills, specialised agents, and MCP (`context7` for library APIs, `playwright`/`gstack` for UI). Don't fall back to bare read/edit when a specialised tool fits.
+- **Full arsenal:** for substantial work use the ultracode `Workflow` tool (fan-out → adversarial verify → synthesise), relevant skills, specialised agents, and MCP (a library-docs MCP for APIs, the browser-preview toolset for UI). Don't fall back to bare read/edit when a specialised tool fits.
 - **Gated execution is load-bearing:** any new order path must mint a `SafetyContext` through `gate_order` → `BrokerRouter`. Never add a path that reaches a broker adapter or `OpenAlgoClient.place_order` ungated.
 - **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `PLAN.md` is the living roadmap; `changelog.md` is for **shipped** code only (no in-flight design entries).
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
@@ -40,4 +40,4 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 
 ## Security & Configuration
 
-Never commit `.env`, API keys, broker credentials, fund amounts, order IDs, hostnames, or personal IPs. Start from `.env.example`. Secrets (master password, JWT secret, API-key pepper, safety-gate secret) are file-backed + hardened under `~/.flinttrade/`, never in `.env`. Native-adapter broker credentials live in the encrypted gateway vault (`gateway/credentials.py`, Fernet + per-row DEK); the OpenAlgo bridge path keeps broker auth inside OpenAlgo and holds only the OpenAlgo API key. Report vulnerabilities through `security.md` rather than public issues.
+Never commit `.env`, API keys, broker credentials, fund amounts, order IDs, hostnames, or personal IPs. Start from `.env.example`. Secrets (master password, JWT secret, API-key pepper, safety-gate secret) are file-backed + hardened under the platform workspace dir (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on macOS, `%APPDATA%/flinttrade/` on Windows), never in `.env`. Native-adapter broker credentials live in the encrypted gateway vault (`gateway/credentials.py`, Fernet with a per-row random salt + PBKDF2-derived key from the master password); the OpenAlgo bridge path keeps broker auth inside OpenAlgo and holds only the OpenAlgo API key. Report vulnerabilities through `security.md` rather than public issues.

@@ -46,9 +46,9 @@ describe('docs index generation', () => {
     const architectureDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/ARCHITECTURE.md');
     const userGuideDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/USER_GUIDE.md');
 
-    expect(architectureDoc?.content).toContain('95 widgets');
-    expect(architectureDoc?.content).toContain('26 trading + 43 analysis + 26 utility');
-    expect(userGuideDoc?.content).toContain('The widgets (95)');
+    expect(architectureDoc?.content).toContain('101 widgets');
+    expect(architectureDoc?.content).toContain('26 trading + 49 analysis + 26 utility');
+    expect(userGuideDoc?.content).toContain('The widgets (101)');
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`82 ${'widgets'}`);
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`38 ${'analysis'}`);
   });
@@ -56,7 +56,7 @@ describe('docs index generation', () => {
   it('keeps homepage facts aligned with the audited gateway and widget state', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 
-    expect(pageSource).toContain('<strong>95</strong>');
+    expect(pageSource).toContain('<strong>101</strong>');
     expect(pageSource).toContain('Native broker contract and routing are safety-gated');
     expect(pageSource).toContain('adapters stay behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>82</strong>');
