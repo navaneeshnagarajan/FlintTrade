@@ -4,6 +4,7 @@ runs ML model prediction, and emits trading signals.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,13 +13,41 @@ from typing import Any
 logger = logging.getLogger("flinttrade.ai.pipeline")
 
 
+def _run_async(coro: Any) -> Any:
+    """Run an async OpenAlgo client call from the synchronous signal cycle."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _normalise_history_rows(rows: Any) -> list[dict[str, Any]]:
+    """Convert OpenAlgo history models/responses into plain indicator rows."""
+    if isinstance(rows, dict):
+        rows = rows.get("data", [])
+    if not isinstance(rows, list):
+        return []
+
+    normalised: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            normalised.append(row)
+        elif hasattr(row, "model_dump"):
+            normalised.append(row.model_dump())
+        elif hasattr(row, "__dict__"):
+            normalised.append(dict(row.__dict__))
+    return normalised
+
+
 class SignalPipeline:
     """Orchestrates: fetch bars -> compute indicators -> predict signal -> emit."""
 
     def __init__(
         self,
-        openalgo_host: str = "http://127.0.0.1:5000",
-        openalgo_api_key: str = "",
+        openalgo_host: str | None = None,
+        openalgo_api_key: str | None = None,
+        openalgo_client: Any | None = None,
         model_path: str = "",
         instruments: list[dict] | None = None,
         interval: str = "5m",
@@ -26,8 +55,12 @@ class SignalPipeline:
         turbulence_threshold: float = 3.0,
         turbulence_window: int = 60,
     ) -> None:
-        self.host = openalgo_host
-        self.api_key = openalgo_api_key
+        from flinttrade_core.config import Settings
+
+        settings = Settings.from_env()
+        self.host = (openalgo_host or settings.openalgo_host).rstrip("/")
+        self.api_key = openalgo_api_key if openalgo_api_key is not None else settings.openalgo_api_key
+        self._openalgo_client = openalgo_client
         self.model_path = model_path or str(
             Path.home() / ".flinttrade" / "models" / "signal_model.joblib"
         )
@@ -60,37 +93,37 @@ class SignalPipeline:
 
     def fetch_bars(self, symbol: str, exchange: str, count: int = 200) -> list[dict]:
         """Fetch OHLCV bars from OpenAlgo history API."""
-        import httpx
+        from flinttrade_core.config import Settings
+        from flinttrade_core.openalgo_client import OpenAlgoClient
 
         end = datetime.now()
         start = end - timedelta(days=30)
-        try:
-            resp = httpx.post(
-                f"{self.host}/api/v1/history",
-                json={
-                    "apikey": self.api_key,
-                    "symbol": symbol,
-                    "exchange": exchange,
-                    "interval": self.interval,
-                    "start_date": start.strftime("%Y-%m-%d"),
-                    "end_date": end.strftime("%Y-%m-%d"),
-                },
-                timeout=15,
+        client = self._openalgo_client
+        close_client = False
+        if client is None:
+            client = OpenAlgoClient(
+                Settings(openalgo_host=self.host, openalgo_api_key=self.api_key)
             )
-        except httpx.HTTPError as exc:
-            logger.error("HTTP error fetching bars for %s: %s", symbol, exc)
-            return []
+            close_client = True
 
-        if resp.status_code != 200:
-            logger.error("History API error for %s: %s", symbol, resp.status_code)
-            return []
-        data = resp.json()
-        if data.get("status") == "error":
-            logger.error(
-                "History API error for %s: %s", symbol, data.get("message")
+        try:
+            rows = _run_async(
+                client.history(
+                    symbol=symbol,
+                    exchange=exchange,
+                    interval=self.interval,
+                    start_date=start.strftime("%Y-%m-%d"),
+                    end_date=end.strftime("%Y-%m-%d"),
+                )
             )
+        except Exception as exc:
+            logger.error("History fetch failed for %s: %s", symbol, exc)
             return []
-        return data.get("data", [])
+        finally:
+            if close_client:
+                _run_async(client.close())
+
+        return _normalise_history_rows(rows)
 
     def run_cycle(self) -> dict[str, dict[str, Any]]:
         """Run one signal cycle for all instruments.

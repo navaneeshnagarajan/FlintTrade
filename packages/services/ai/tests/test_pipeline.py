@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 
 class TestSignalPipeline:
     """Test signal pipeline initialisation and helpers."""
@@ -22,6 +24,47 @@ class TestSignalPipeline:
         p = SignalPipeline(instruments=instruments)
         assert len(p.instruments) == 1
         assert p.instruments[0]["symbol"] == "RELIANCE"
+
+    def test_init_uses_workspace_openalgo_settings(self, monkeypatch, tmp_path):
+        from flinttrade_ai.pipeline import SignalPipeline
+        from flinttrade_core.workspace import Workspace
+
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+        monkeypatch.delenv("OPENALGO_HOST", raising=False)
+
+        workspace = Workspace()
+        workspace.initialise()
+        config = workspace.as_dict()
+        config["openalgo"] = {
+            "api_key": "workspace-ai-key",
+            "host": "http://127.0.0.1:5003",
+            "ws_port": 8767,
+        }
+        workspace.save(config)
+
+        p = SignalPipeline()
+
+        assert p.host == "http://127.0.0.1:5003"
+        assert p.api_key == "workspace-ai-key"
+
+    def test_fetch_bars_uses_injected_openalgo_client(self):
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        class _Row:
+            def model_dump(self):
+                return {"timestamp": "2026-07-06", "close": 100.5}
+
+        openalgo_client = MagicMock()
+        openalgo_client.history = AsyncMock(return_value=[_Row()])
+        openalgo_client.close = AsyncMock()
+        p = SignalPipeline(openalgo_client=openalgo_client)
+
+        rows = p.fetch_bars("RELIANCE", "NSE")
+
+        assert rows == [{"timestamp": "2026-07-06", "close": 100.5}]
+        openalgo_client.history.assert_awaited_once()
+        openalgo_client.close.assert_not_awaited()
 
     def test_ema_basic(self):
         from flinttrade_ai.pipeline import SignalPipeline
