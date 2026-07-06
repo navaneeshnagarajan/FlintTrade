@@ -28,11 +28,9 @@ logger = logging.getLogger("flinttrade.historical.instruments_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import resolve_openalgo_client
 except Exception:  # pragma: no cover
-    OpenAlgoClient = None  # type: ignore[assignment,misc]
-    Settings = None  # type: ignore[assignment,misc]
+    resolve_openalgo_client = None  # type: ignore[assignment,misc]
 
 instruments_bp = Blueprint("instruments", __name__, url_prefix="/api/v1")
 
@@ -88,12 +86,15 @@ def get_instruments() -> tuple[Any, int] | Response:
     exchange: str = request.args.get("exchange", "NSE").upper()
 
     try:
-        if OpenAlgoClient is None or Settings is None:
-            raise ImportError("OpenAlgoClient or Settings not available")
+        if resolve_openalgo_client is None:
+            raise ImportError("OpenAlgo client resolver not available")
 
-        client = OpenAlgoClient(Settings.from_env())
-        raw = _run_async(client.instruments(exchange=exchange))
-        _run_async(client.close())
+        client, close_client = resolve_openalgo_client()
+        try:
+            raw = _run_async(client.instruments(exchange=exchange))
+        finally:
+            if close_client:
+                _run_async(client.close())
 
         data = raw.get("data", raw) if isinstance(raw, dict) else raw
         instruments: list[Any] = data if isinstance(data, list) else []
@@ -101,7 +102,9 @@ def get_instruments() -> tuple[Any, int] | Response:
         if len(instruments) > _STREAM_THRESHOLD:
             logger.info(
                 "Streaming %d instruments for %s (threshold=%d)",
-                len(instruments), exchange, _STREAM_THRESHOLD,
+                len(instruments),
+                exchange,
+                _STREAM_THRESHOLD,
             )
             return Response(
                 stream_with_context(_ndjson_stream(instruments)),

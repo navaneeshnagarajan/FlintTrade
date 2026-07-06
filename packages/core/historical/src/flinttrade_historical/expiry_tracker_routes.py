@@ -21,11 +21,9 @@ from .expiry_tracker import ExpiryTracker
 logger = logging.getLogger("flinttrade.historical.expiry_tracker_routes")
 
 try:
-    from flinttrade_core.config import Settings
-    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.openalgo_client import get_openalgo_client
 except Exception:  # pragma: no cover - optional when package is imported standalone
-    OpenAlgoClient = None  # type: ignore[assignment,misc]
-    Settings = None  # type: ignore[assignment,misc]
+    get_openalgo_client = None  # type: ignore[assignment,misc]
 
 expiry_tracker_bp = Blueprint("expiry_tracker", __name__, url_prefix="/api/v1")
 
@@ -38,9 +36,9 @@ def _get_tracker() -> ExpiryTracker:
     global _tracker  # noqa: PLW0603
     if _tracker is None:
         client = None
-        if OpenAlgoClient is not None and Settings is not None:
+        if get_openalgo_client is not None:
             try:
-                client = OpenAlgoClient(Settings.from_env())
+                client = get_openalgo_client()
             except Exception as exc:  # pragma: no cover - defensive startup guard
                 logger.warning("OpenAlgo client unavailable for ExpiryTracker capture: %s", exc)
         _tracker = ExpiryTracker(client=client)

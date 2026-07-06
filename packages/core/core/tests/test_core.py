@@ -339,6 +339,37 @@ class TestClientInit:
         assert hasattr(client, "__aenter__")
         assert hasattr(client, "__aexit__")
 
+    def test_resolver_prefers_configured_app_client(self):
+        """Routes should reuse app.config['CLIENT'] instead of rebuilding it."""
+        from flinttrade_core.openalgo_client import get_openalgo_client, resolve_openalgo_client
+
+        configured_client = MagicMock()
+        app = MagicMock()
+        app.config = {"CLIENT": configured_client}
+
+        client, owns_client = resolve_openalgo_client(app)
+
+        assert client is configured_client
+        assert owns_client is False
+        assert get_openalgo_client(app) is configured_client
+
+    def test_resolver_falls_back_to_owned_client(self, monkeypatch, tmp_path):
+        """Standalone callers still get an env/workspace-backed client to close."""
+        import asyncio
+
+        from flinttrade_core.openalgo_client import OpenAlgoClient, resolve_openalgo_client
+
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+        monkeypatch.setenv("OPENALGO_HOST", "http://127.0.0.1:5000")
+        monkeypatch.setenv("OPENALGO_API_KEY", "test123")
+
+        client, owns_client = resolve_openalgo_client()
+
+        assert isinstance(client, OpenAlgoClient)
+        assert owns_client is True
+        assert client.settings.openalgo_api_key == "test123"
+        asyncio.run(client.close())
+
     def test_all_endpoint_methods_exist(self):
         client = self._make_client()
         expected_methods = [

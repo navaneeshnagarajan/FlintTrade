@@ -28,11 +28,9 @@ logger = logging.getLogger("flinttrade.historical.holidays_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import resolve_openalgo_client
 except Exception:  # pragma: no cover
-    OpenAlgoClient = None  # type: ignore[assignment,misc]
-    Settings = None  # type: ignore[assignment,misc]
+    resolve_openalgo_client = None  # type: ignore[assignment,misc]
 
 holidays_bp = Blueprint("holidays", __name__, url_prefix="/api/v1")
 
@@ -87,12 +85,15 @@ def get_holidays() -> tuple[Any, int]:
 
     # Try OpenAlgo first for live/official holiday data
     try:
-        if OpenAlgoClient is None or Settings is None:
-            raise ImportError("OpenAlgoClient or Settings not available")
+        if resolve_openalgo_client is None:
+            raise ImportError("OpenAlgo client resolver not available")
 
-        client = OpenAlgoClient(Settings.from_env())
-        raw = _run_async(client.holidays(year=str(year)))
-        _run_async(client.close())
+        client, close_client = resolve_openalgo_client()
+        try:
+            raw = _run_async(client.holidays(year=str(year)))
+        finally:
+            if close_client:
+                _run_async(client.close())
 
         data = raw.get("data", raw) if isinstance(raw, dict) else raw
         holidays_list: list[str] = []

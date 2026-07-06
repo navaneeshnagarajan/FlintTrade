@@ -758,3 +758,39 @@ class OpenAlgoClient:
                     if isinstance(row, dict)
                 ]
         return []
+
+
+def _configured_app_client(app: Any | None = None) -> Any | None:
+    """Return the Flask app-owned OpenAlgo client when one is configured."""
+    if app is None:
+        try:
+            from flask import current_app  # noqa: PLC0415
+
+            app = current_app._get_current_object()
+        except Exception:  # pragma: no cover - no Flask app context available
+            return None
+
+    try:
+        return app.config.get("CLIENT")
+    except AttributeError:
+        return None
+
+
+def resolve_openalgo_client(app: Any | None = None) -> tuple[Any, bool]:
+    """Return an OpenAlgo client plus whether the caller owns its lifecycle.
+
+    Flask routes should prefer the client held in ``app.config["CLIENT"]`` so
+    workspace/UI OpenAlgo settings are honoured. Standalone imports and tests
+    without an app context still receive a short-lived env/workspace-backed
+    client and should close it after use.
+    """
+    configured_client = _configured_app_client(app)
+    if configured_client is not None:
+        return configured_client, False
+    return OpenAlgoClient(Settings.from_env()), True
+
+
+def get_openalgo_client(app: Any | None = None) -> Any:
+    """Return the configured OpenAlgo client, falling back to Settings.from_env()."""
+    client, _owns_client = resolve_openalgo_client(app)
+    return client

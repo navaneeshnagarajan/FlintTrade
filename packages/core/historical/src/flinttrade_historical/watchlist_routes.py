@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from .historify_jobs import STATUS_REFUSED, HistorifyJobManager
 from .watchlist import DownloadWatchlist
@@ -196,18 +196,26 @@ def start_watchlist_download(from_date: date, to_date: date) -> Any | None:
     intervals = sorted({item.interval for item in enabled})
     total = len(symbols) * len(intervals)
 
+    try:
+        app_obj = current_app._get_current_object()
+    except RuntimeError:
+        app_obj = None
+
     async def _runner(progress: Any) -> None:
-        from flinttrade_core.config import Settings  # noqa: PLC0415
-        from flinttrade_core.openalgo_client import OpenAlgoClient  # noqa: PLC0415
+        from flinttrade_core.openalgo_client import resolve_openalgo_client  # noqa: PLC0415
 
         from .historify import HistorifyDownloader  # noqa: PLC0415
         from .pipeline import DataPipeline  # noqa: PLC0415
 
-        client = OpenAlgoClient(Settings.from_env())
-        downloader = HistorifyDownloader(client, DataPipeline())
-        await downloader.download_symbols(
-            symbols, intervals, from_date, to_date, progress_callback=progress,
-        )
+        client, close_client = resolve_openalgo_client(app_obj)
+        try:
+            downloader = HistorifyDownloader(client, DataPipeline())
+            await downloader.download_symbols(
+                symbols, intervals, from_date, to_date, progress_callback=progress,
+            )
+        finally:
+            if close_client:
+                await client.close()
 
     storage_dir = str(Path.home() / ".flinttrade")
     return _get_job_manager().start(total=total, runner=_runner, storage_path=storage_dir)

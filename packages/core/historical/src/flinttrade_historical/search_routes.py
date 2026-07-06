@@ -26,11 +26,9 @@ logger = logging.getLogger("flinttrade.historical.search_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import resolve_openalgo_client
 except Exception:  # pragma: no cover
-    OpenAlgoClient = None  # type: ignore[assignment,misc]
-    Settings = None  # type: ignore[assignment,misc]
+    resolve_openalgo_client = None  # type: ignore[assignment,misc]
 
 search_bp = Blueprint("search", __name__, url_prefix="/api/v1")
 
@@ -94,22 +92,22 @@ def search_symbols() -> tuple[Any, int]:
         )
 
     try:
-        if OpenAlgoClient is None or Settings is None:
-            raise ImportError("OpenAlgoClient or Settings not available")
+        if resolve_openalgo_client is None:
+            raise ImportError("OpenAlgo client resolver not available")
 
-        client = OpenAlgoClient(Settings.from_env())
-        raw = _run_async(client.search(query=query))
-        _run_async(client.close())
+        client, close_client = resolve_openalgo_client()
+        try:
+            raw = _run_async(client.search(query=query))
+        finally:
+            if close_client:
+                _run_async(client.close())
 
         data = raw.get("data", raw) if isinstance(raw, dict) else raw
         results: list[dict[str, Any]] = data if isinstance(data, list) else []
 
         # Apply exchange filter if provided
         if exchange_filter:
-            results = [
-                r for r in results
-                if str(r.get("exchange", "")).upper() == exchange_filter
-            ]
+            results = [r for r in results if str(r.get("exchange", "")).upper() == exchange_filter]
 
         # Apply limit
         results = results[:limit]

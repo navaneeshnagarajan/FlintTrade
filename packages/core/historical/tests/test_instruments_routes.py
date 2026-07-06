@@ -52,21 +52,16 @@ class TestInstrumentsRoute:
     def test_default_exchange_returns_200(self, client) -> None:  # type: ignore[no-untyped-def]
         """Calling without ?exchange defaults to NSE and returns 200."""
         mock = _mock_client([{"symbol": "RELIANCE", "exchange": "NSE"}])
-        with (
-            patch("flinttrade_historical.instruments_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.instruments_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.instruments_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/instruments")
         assert response.status_code == 200
+        mock.close.assert_awaited_once()
 
     def test_response_shape_small(self, client) -> None:  # type: ignore[no-untyped-def]
         """Small result set returns standard JSON with count and instruments list."""
         data_rows = [{"symbol": f"SYM{i}", "exchange": "NSE"} for i in range(5)]
         mock = _mock_client(data_rows)
-        with (
-            patch("flinttrade_historical.instruments_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.instruments_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.instruments_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/instruments?exchange=NSE")
         body = response.get_json()
         assert body["status"] == "success"
@@ -78,22 +73,16 @@ class TestInstrumentsRoute:
         """Result sets above _STREAM_THRESHOLD use streaming NDJSON content-type."""
         large_data = [{"symbol": f"SYM{i}"} for i in range(_STREAM_THRESHOLD + 1)]
         mock = _mock_client(large_data)
-        with (
-            patch("flinttrade_historical.instruments_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.instruments_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.instruments_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/instruments?exchange=NSE")
         assert response.status_code == 200
         assert "ndjson" in response.content_type
 
     def test_openalgo_failure_returns_503(self, client) -> None:  # type: ignore[no-untyped-def]
         """OpenAlgo failure returns HTTP 503 with error status."""
-        with (
-            patch(
-                "flinttrade_historical.instruments_routes.OpenAlgoClient",
-                side_effect=Exception("timeout"),
-            ),
-            patch("flinttrade_historical.instruments_routes.Settings"),
+        with patch(
+            "flinttrade_historical.instruments_routes.resolve_openalgo_client",
+            side_effect=Exception("timeout"),
         ):
             response = client.get("/api/v1/instruments")
         assert response.status_code == 503

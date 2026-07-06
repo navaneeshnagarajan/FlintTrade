@@ -52,20 +52,15 @@ class TestHolidaysRoute:
     def test_default_params_returns_200(self, client) -> None:  # type: ignore[no-untyped-def]
         """Calling without params uses NSE + current year and returns 200."""
         mock = _mock_client(["2026-01-26", "2026-08-15"])
-        with (
-            patch("flinttrade_historical.holidays_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.holidays_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.holidays_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/holidays")
         assert response.status_code == 200
+        mock.close.assert_awaited_once()
 
     def test_response_shape(self, client) -> None:  # type: ignore[no-untyped-def]
         """Response contains status, exchange, year, holidays, count."""
         mock = _mock_client(["2026-01-26", "2026-08-15"])
-        with (
-            patch("flinttrade_historical.holidays_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.holidays_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.holidays_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/holidays?exchange=NSE&year=2026")
         data = response.get_json()
         assert data["status"] == "success"
@@ -86,12 +81,9 @@ class TestHolidaysRoute:
 
     def test_openalgo_failure_returns_fallback(self, client) -> None:  # type: ignore[no-untyped-def]
         """When OpenAlgo is unreachable a fallback empty list is returned (not 5xx)."""
-        with (
-            patch(
-                "flinttrade_historical.holidays_routes.OpenAlgoClient",
-                side_effect=Exception("connection refused"),
-            ),
-            patch("flinttrade_historical.holidays_routes.Settings"),
+        with patch(
+            "flinttrade_historical.holidays_routes.resolve_openalgo_client",
+            side_effect=Exception("connection refused"),
         ):
             response = client.get("/api/v1/holidays?year=2026")
         assert response.status_code == 200

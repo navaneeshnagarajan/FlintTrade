@@ -26,11 +26,9 @@ logger = logging.getLogger("flinttrade.engine.leverage_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import OpenAlgoClient
-    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import resolve_openalgo_client
 except Exception:  # pragma: no cover
-    OpenAlgoClient = None  # type: ignore[assignment,misc]
-    Settings = None  # type: ignore[assignment,misc]
+    resolve_openalgo_client = None  # type: ignore[assignment,misc]
 
 leverage_bp = Blueprint("leverage", __name__, url_prefix="/api/v1")
 
@@ -69,27 +67,24 @@ def get_current_margin() -> tuple[Any, int]:
         otherwise ``0.0``.
     """
     try:
-        if OpenAlgoClient is None or Settings is None:
-            raise ImportError("OpenAlgoClient or Settings not available")
+        if resolve_openalgo_client is None:
+            raise ImportError("OpenAlgo client resolver not available")
 
-        client = OpenAlgoClient(Settings.from_env())
+        client, close_client = resolve_openalgo_client()
 
         # Call margin with an empty positions list — returns account-level margin
-        raw = _run_async(client.margin(positions=[]))
-        _run_async(client.close())
+        try:
+            raw = _run_async(client.margin(positions=[]))
+        finally:
+            if close_client:
+                _run_async(client.close())
 
         data: dict[str, Any] = raw.get("data", raw) if isinstance(raw, dict) else {}
 
         # Normalise field names — OpenAlgo uses both snake_case and flat names
-        available = float(
-            data.get("available", data.get("availablecash", data.get("available_balance", 0)))
-        )
-        used = float(
-            data.get("used", data.get("usedmargin", data.get("used_margin", 0)))
-        )
-        total = float(
-            data.get("total", data.get("totalbalance", data.get("total_balance", available + used)))
-        )
+        available = float(data.get("available", data.get("availablecash", data.get("available_balance", 0))))
+        used = float(data.get("used", data.get("usedmargin", data.get("used_margin", 0))))
+        total = float(data.get("total", data.get("totalbalance", data.get("total_balance", available + used))))
         leverage_ratio = round(used / total, 4) if total > 0 else 0.0
 
         return (

@@ -52,20 +52,17 @@ class TestLeverageMarginRoute:
     def test_returns_200_on_success(self, client) -> None:  # type: ignore[no-untyped-def]
         """Returns HTTP 200 when OpenAlgo responds."""
         margin_payload = {"available": 50000.0, "used": 10000.0, "total": 60000.0}
-        with (
-            patch("flinttrade_engine.leverage_routes.OpenAlgoClient", return_value=_mock_client(margin_payload)),
-            patch("flinttrade_engine.leverage_routes.Settings"),
-        ):
+        mock = _mock_client(margin_payload)
+        with patch("flinttrade_engine.leverage_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/leverage/margin/current")
         assert response.status_code == 200
+        mock.close.assert_awaited_once()
 
     def test_response_shape(self, client) -> None:  # type: ignore[no-untyped-def]
         """Response contains available, used, total, leverage_ratio."""
         margin_payload = {"available": 50000.0, "used": 10000.0, "total": 60000.0}
-        with (
-            patch("flinttrade_engine.leverage_routes.OpenAlgoClient", return_value=_mock_client(margin_payload)),
-            patch("flinttrade_engine.leverage_routes.Settings"),
-        ):
+        mock = _mock_client(margin_payload)
+        with patch("flinttrade_engine.leverage_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/leverage/margin/current")
         data = response.get_json()
         assert data["status"] == "success"
@@ -76,22 +73,17 @@ class TestLeverageMarginRoute:
     def test_leverage_ratio_calculation(self, client) -> None:  # type: ignore[no-untyped-def]
         """leverage_ratio = used / total."""
         margin_payload = {"available": 80000.0, "used": 20000.0, "total": 100000.0}
-        with (
-            patch("flinttrade_engine.leverage_routes.OpenAlgoClient", return_value=_mock_client(margin_payload)),
-            patch("flinttrade_engine.leverage_routes.Settings"),
-        ):
+        mock = _mock_client(margin_payload)
+        with patch("flinttrade_engine.leverage_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/leverage/margin/current")
         data = response.get_json()
         assert data["leverage_ratio"] == pytest.approx(0.2, abs=1e-4)
 
     def test_openalgo_failure_returns_503(self, client) -> None:  # type: ignore[no-untyped-def]
         """Returns HTTP 503 when OpenAlgo is unreachable."""
-        with (
-            patch(
-                "flinttrade_engine.leverage_routes.OpenAlgoClient",
-                side_effect=Exception("connection refused"),
-            ),
-            patch("flinttrade_engine.leverage_routes.Settings"),
+        with patch(
+            "flinttrade_engine.leverage_routes.resolve_openalgo_client",
+            side_effect=Exception("connection refused"),
         ):
             response = client.get("/api/v1/leverage/margin/current")
         assert response.status_code == 503

@@ -72,24 +72,19 @@ class TestSearchRoute:
     def test_basic_search_returns_results(self, client) -> None:  # type: ignore[no-untyped-def]
         """Valid query returns results list with status=success."""
         mock = _mock_client(_SAMPLE_RESULTS)
-        with (
-            patch("flinttrade_historical.search_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.search_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.search_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/search?q=RELI")
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "success"
         assert data["query"] == "RELI"
         assert isinstance(data["results"], list)
+        mock.close.assert_awaited_once()
 
     def test_exchange_filter_applied(self, client) -> None:  # type: ignore[no-untyped-def]
         """?exchange=NSE filters results to NSE-only entries."""
         mock = _mock_client(_SAMPLE_RESULTS)
-        with (
-            patch("flinttrade_historical.search_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.search_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.search_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/search?q=RELI&exchange=NSE")
         data = response.get_json()
         assert data["exchange"] == "NSE"
@@ -99,10 +94,7 @@ class TestSearchRoute:
     def test_limit_applied(self, client) -> None:  # type: ignore[no-untyped-def]
         """?limit=1 caps results at 1 entry."""
         mock = _mock_client(_SAMPLE_RESULTS)
-        with (
-            patch("flinttrade_historical.search_routes.OpenAlgoClient", return_value=mock),
-            patch("flinttrade_historical.search_routes.Settings"),
-        ):
+        with patch("flinttrade_historical.search_routes.resolve_openalgo_client", return_value=(mock, True)):
             response = client.get("/api/v1/search?q=RELI&limit=1")
         data = response.get_json()
         assert data["count"] == 1
