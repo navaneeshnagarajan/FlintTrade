@@ -17,4 +17,4 @@ integration,packages/integration,packages/integrations/webhooks,flinttrade-webho
 terminal,packages/terminal,packages/apps/terminal,@flinttrade/terminal,n/a (ts)
 (from apps/),apps/site,packages/apps/site,@flinttrade/site,n/a (ts)
 chrome-extension,packages/chrome-extension,.local/archive/restructure-2026-05-23/chrome-extension,,
-desktop,packages/desktop,.local/archive/restructure-2026-05-23/desktop,,
+desktop,packages/desktop,packages/apps/desktop,@flinttrade/desktop,n/a (rust+ts)
