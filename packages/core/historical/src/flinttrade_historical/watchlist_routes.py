@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -44,7 +43,9 @@ def _get_watchlist() -> DownloadWatchlist:
     """Return the module-level watchlist singleton, creating it lazily."""
     global _watchlist  # noqa: PLW0603
     if _watchlist is None:
-        default_path = Path.home() / ".flinttrade" / "watchlist.db"
+        from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
+
+        default_path = workspace_dir() / "watchlist.db"
         _watchlist = DownloadWatchlist(default_path)
     return _watchlist
 
@@ -217,7 +218,9 @@ def start_watchlist_download(from_date: date, to_date: date) -> Any | None:
             if close_client:
                 await client.close()
 
-    storage_dir = str(Path.home() / ".flinttrade")
+    from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
+
+    storage_dir = str(workspace_dir())
     return _get_job_manager().start(total=total, runner=_runner, storage_path=storage_dir)
 
 

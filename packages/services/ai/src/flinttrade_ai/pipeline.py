@@ -56,13 +56,14 @@ class SignalPipeline:
         turbulence_window: int = 60,
     ) -> None:
         from flinttrade_core.config import Settings
+        from flinttrade_core.workspace import workspace_dir
 
         settings = Settings.from_env()
         self.host = (openalgo_host or settings.openalgo_host).rstrip("/")
         self.api_key = openalgo_api_key if openalgo_api_key is not None else settings.openalgo_api_key
         self._openalgo_client = openalgo_client
         self.model_path = model_path or str(
-            Path.home() / ".flinttrade" / "models" / "signal_model.joblib"
+            workspace_dir() / "models" / "signal_model.joblib"
         )
         self.instruments = instruments or [
             {"symbol": "NIFTY", "exchange": "NSE_INDEX"},

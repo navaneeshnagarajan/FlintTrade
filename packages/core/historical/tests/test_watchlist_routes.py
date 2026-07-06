@@ -30,6 +30,9 @@ def app_client(monkeypatch_module, tmp_path_factory):
     from flinttrade_historical.watchlist_routes import init_watchlist_routes
 
     monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
+    workspace_root = tmp_path_factory.mktemp("workspace")
+    monkeypatch_module.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace_root))
+    (workspace_root / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
     db_path = tmp_path_factory.mktemp("wl") / "watchlist.db"
     watchlist = DownloadWatchlist(db_path)
@@ -108,6 +111,7 @@ class TestWatchlistRoutes:
         shuffled under pytest-randomly), and stubs the job manager so no real
         download thread spawns.
         """
+        from flinttrade_core.workspace import workspace_dir
         import flinttrade_historical.watchlist_routes as wr
 
         _post(app_client, "/v1/historify/watchlist",
@@ -139,3 +143,4 @@ class TestWatchlistRoutes:
         assert data["data"]["job_id"] == "stub-1"
         assert data["data"]["status"] == "running"
         assert captured["total"] >= 1
+        assert captured["storage_path"] == str(workspace_dir())

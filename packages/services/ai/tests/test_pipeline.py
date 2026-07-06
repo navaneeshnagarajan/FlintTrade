@@ -113,12 +113,13 @@ class TestSignalPipeline:
         p.latest_signals = {"NSE_INDEX:NIFTY": {"signal": "BUY"}}
         assert p.get_latest_signals() == {"NSE_INDEX:NIFTY": {"signal": "BUY"}}
 
-    def test_model_path_default(self):
+    def test_model_path_default(self, monkeypatch, tmp_path):
         from flinttrade_ai.pipeline import SignalPipeline
 
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
         p = SignalPipeline()
         assert "signal_model.joblib" in p.model_path
-        assert ".flinttrade" in p.model_path
+        assert str(tmp_path / "models") in p.model_path
 
     def test_model_path_custom(self):
         from flinttrade_ai.pipeline import SignalPipeline
