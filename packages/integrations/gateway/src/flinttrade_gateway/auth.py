@@ -129,33 +129,31 @@ def list_accounts() -> Any:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-def _reject_coming_soon_native(broker: str) -> Any | None:
-    """Reject a native broker that is catalogued but not yet connectable.
+def _reject_legacy_native_connect(broker: str) -> Any | None:
+    """Reject native broker ids on the legacy gateway connect surface.
 
-    The "coming soon" gate (only live-verified native adapters may connect) is
-    enforced on the /api/v1/native/* routes; mirror it on these legacy gateway
-    account/OAuth/OTP routes so a native adapter its own surface refuses cannot
-    be connected through the back door. Bridge-only brokers (native=False) are
-    unaffected — they connect through OpenAlgo regardless. Returns an error
-    response tuple to short-circuit, or None to proceed.
+    The G40 contract is one broker catalogue with two account surfaces:
+    bridge-only brokers use the OpenAlgo-backed ``/v1`` gateway, and native
+    broker ids use ``/api/v1/native/accounts`` so credentials land in the
+    encrypted native vault and sessions are established transactionally.
+    Bridge-only brokers (native=False) are unaffected.
     """
     info = BROKER_CATALOG.get(broker)
-    if info is not None and info.native and not info.connectable:
-        return jsonify({
-            "status": "error",
-            "message": f"'{broker}' is not yet available for native connect (coming soon).",
-        }), 400
-    return None
+    if info is None or not info.native:
+        return None
+    if not info.connectable:
+        message = f"'{broker}' is not yet available for native connect (coming soon)."
+    else:
+        message = f"'{broker}' uses FlintTrade native connect; use /api/v1/native/accounts."
+    return jsonify({"status": "error", "message": message}), 400
 
 
-def _reject_coming_soon_native_account(account_id: str) -> Any | None:
-    """Reject account-id operations when the existing account is disabled native.
+def _reject_legacy_native_account_operation(account_id: str) -> Any | None:
+    """Reject legacy account operations when an existing account is native.
 
     Legacy gateway operations such as reconnect and set-primary receive only an
-    ``account_id``. If a native broker is later demoted back to
-    ``connectable=False`` after an old account row already exists, those routes
-    must honour the same gate as fresh connect routes instead of reactivating or
-    promoting a coming-soon adapter.
+    ``account_id``. If an old native row exists in the gateway registry, these
+    routes must not reactivate or promote it outside the native account surface.
     """
     try:
         accounts = _registry().list_accounts()
@@ -164,7 +162,7 @@ def _reject_coming_soon_native_account(account_id: str) -> Any | None:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
     for account in accounts:
         if str(account.account_id) == str(account_id):
-            return _reject_coming_soon_native(str(account.broker))
+            return _reject_legacy_native_connect(str(account.broker))
     return None
 
 
@@ -191,9 +189,9 @@ def add_account() -> Any:
 
     if not broker:
         return jsonify({"status": "error", "message": "Missing required field: broker"}), 400
-    coming_soon = _reject_coming_soon_native(broker)
-    if coming_soon is not None:
-        return coming_soon
+    native_reject = _reject_legacy_native_connect(broker)
+    if native_reject is not None:
+        return native_reject
 
     try:
         info = _registry().add_account(account_id, broker, label, credentials)
@@ -245,9 +243,9 @@ def reconnect_account(account_id: str) -> Any:
     body: dict[str, Any] = request.get_json(silent=True) or {}
     credentials: dict[str, Any] | None = body.get("credentials") or None
 
-    coming_soon = _reject_coming_soon_native_account(account_id)
-    if coming_soon is not None:
-        return coming_soon
+    native_reject = _reject_legacy_native_account_operation(account_id)
+    if native_reject is not None:
+        return native_reject
 
     try:
         info = _registry().reconnect_account(
@@ -277,9 +275,9 @@ def set_primary(account_id: str) -> Any:
     Returns:
         JSON with ``status`` on success, or an error response.
     """
-    coming_soon = _reject_coming_soon_native_account(account_id)
-    if coming_soon is not None:
-        return coming_soon
+    native_reject = _reject_legacy_native_account_operation(account_id)
+    if native_reject is not None:
+        return native_reject
 
     try:
         _registry().set_primary(account_id)
@@ -318,9 +316,9 @@ def oauth_start() -> Any:
 
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    coming_soon = _reject_coming_soon_native(broker)
-    if coming_soon is not None:
-        return coming_soon
+    native_reject = _reject_legacy_native_connect(broker)
+    if native_reject is not None:
+        return native_reject
 
     broker_info = BROKER_CATALOG[broker]
     if broker_info.auth_flow != AuthFlowType.oauth_redirect:
@@ -380,8 +378,8 @@ def oauth_callback() -> Any:
     label: str = state_data["label"]
     account_id: str = state_data["account_id"] or secrets.token_hex(8)
 
-    coming_soon = _reject_coming_soon_native(broker)
-    if coming_soon is not None:
+    native_reject = _reject_legacy_native_connect(broker)
+    if native_reject is not None:
         return redirect("/setup?auth=error")
 
     try:
@@ -433,9 +431,9 @@ def submit_credentials() -> Any:
 
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": f"Broker not found: {broker}"}), 404
-    coming_soon = _reject_coming_soon_native(broker)
-    if coming_soon is not None:
-        return coming_soon
+    native_reject = _reject_legacy_native_connect(broker)
+    if native_reject is not None:
+        return native_reject
 
     try:
         info = _registry().add_account(account_id, broker, label, credentials)
@@ -476,9 +474,9 @@ def otp_request() -> Any:
 
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
-    coming_soon = _reject_coming_soon_native(broker)
-    if coming_soon is not None:
-        return coming_soon
+    native_reject = _reject_legacy_native_connect(broker)
+    if native_reject is not None:
+        return native_reject
 
     broker_info = BROKER_CATALOG[broker]
     if broker_info.auth_flow != AuthFlowType.otp_sms:
@@ -536,15 +534,12 @@ def otp_verify() -> Any:
     if broker not in BROKER_CATALOG:
         return jsonify({"status": "error", "message": _BROKER_NOT_FOUND_MESSAGE}), 404
 
-    # otp_verify is a fully connect-completing native entrypoint that does not
-    # depend on a prior otp_request (it takes broker/account_id from its own
-    # body), so it must enforce the coming-soon gate itself — otherwise a native
-    # adapter whose own surface refuses connection could be attached via this
-    # back door. Mirrors the guard on add_account/oauth_start/submit_credentials/
-    # otp_request.
-    coming_soon = _reject_coming_soon_native(broker)
-    if coming_soon is not None:
-        return coming_soon
+    # otp_verify is a fully connect-completing entrypoint that does not depend
+    # on a prior otp_request (it takes broker/account_id from its own body), so
+    # it must enforce the same legacy-native rejection itself.
+    native_reject = _reject_legacy_native_connect(broker)
+    if native_reject is not None:
+        return native_reject
 
     try:
         full_credentials = {"otp": otp, **credentials}

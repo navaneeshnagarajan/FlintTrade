@@ -228,6 +228,27 @@ def test_native_connect_routes_reject_coming_soon_native(client, route, extra_bo
     assert "coming soon" in response.get_json()["message"].lower(), (route, broker)
 
 
+@pytest.mark.parametrize(
+    ("route", "extra_body"),
+    [
+        ("/v1/accounts", {"label": "x", "credentials": {"access_token": "x"}}),
+        ("/v1/auth/oauth/start", {}),
+        ("/v1/auth/credentials", {"credentials": {"api_key": "x"}}),
+        ("/v1/auth/otp/request", {"mobile": "9999999999"}),
+        ("/v1/auth/otp/verify", {"otp": "123456"}),
+    ],
+)
+@pytest.mark.parametrize("broker", ["dhan", "upstox", "indmoney"])
+def test_native_connect_routes_reject_connectable_native_on_legacy_gateway(client, route, extra_body, broker) -> None:
+    """Connectable native brokers must still use the transactional native
+    account surface, not the legacy OpenAlgo gateway registry."""
+    response = client.post(route, json={"broker": broker, **extra_body})
+    assert response.status_code == 400, (route, broker)
+    message = response.get_json()["message"].lower()
+    assert "native connect" in message, (route, broker)
+    assert "/api/v1/native/accounts" in message, (route, broker)
+
+
 @pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
 @pytest.mark.parametrize("broker", ["kotakneo", "groww"])
 def test_legacy_account_id_routes_reject_existing_coming_soon_native(app, client, route_suffix, broker) -> None:
@@ -243,28 +264,35 @@ def test_legacy_account_id_routes_reject_existing_coming_soon_native(app, client
     assert "coming soon" in response.get_json()["message"].lower()
 
 
-def test_oauth_callback_rejects_state_for_broker_demoted_to_coming_soon(app, client, monkeypatch) -> None:
-    """A pre-existing OAuth state must not connect a native broker after demotion."""
-    from flinttrade_gateway import auth
+@pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
+@pytest.mark.parametrize("broker", ["dhan", "upstox", "indmoney"])
+def test_legacy_account_id_routes_reject_existing_connectable_native(app, client, route_suffix, broker) -> None:
+    """Stale native rows in the legacy registry must not be reactivated there."""
+    account_id = f"NATIVE_{broker.upper()}"
+    with app.app_context():
+        app.config["REGISTRY"].add_account(account_id, broker, "Native row", {"access_token": "old"})
+        app.config["CREDENTIAL_STORE"].store(account_id, broker, "Native row", {"access_token": "old"})
+
+    response = client.post(f"/v1/accounts/{account_id}/{route_suffix}")
+
+    assert response.status_code == 400
+    message = response.get_json()["message"].lower()
+    assert "native connect" in message
+    assert "/api/v1/native/accounts" in message
+
+
+def test_oauth_callback_rejects_legacy_native_state(app, client) -> None:
+    """A pre-existing OAuth state must not connect a native broker via /v1."""
 
     broker = "upstox"
-    state = "state-from-before-demotion"
+    state = "legacy-native-state"
     with app.app_context():
         app.config["OAUTH_STATES"][state] = {
             "broker": broker,
-            "label": "Upstox stale state",
-            "account_id": "UPX_DEMOTED",
+            "label": "Upstox native",
+            "account_id": "UPX_NATIVE",
             "timestamp": time.time(),
         }
-
-    original_gate = auth._reject_coming_soon_native
-
-    def fake_demoted_gate(candidate: str):
-        if candidate == broker:
-            return ({"status": "error", "message": "coming soon"}, 400)
-        return original_gate(candidate)
-
-    monkeypatch.setattr(auth, "_reject_coming_soon_native", fake_demoted_gate)
 
     response = client.get("/v1/auth/oauth/callback", query_string={"state": state, "code": "valid_auth_code"})
 
@@ -373,7 +401,7 @@ def test_oauth_start_stores_csrf_state(app, client) -> None:
 
     response = client.post(
         "/v1/auth/oauth/start",
-        json={"broker": "upstox", "label": "Upstox"},
+        json={"broker": "zerodha", "label": "Zerodha"},
     )
     assert response.status_code == 200
     state_token = response.get_json()["state"]
@@ -382,8 +410,8 @@ def test_oauth_start_stores_csrf_state(app, client) -> None:
         states = app.config["OAUTH_STATES"]
         assert state_token in states
         entry = states[state_token]
-        assert entry["broker"] == "upstox"
-        assert entry["label"] == "Upstox"
+        assert entry["broker"] == "zerodha"
+        assert entry["label"] == "Zerodha"
         assert "timestamp" in entry
         assert len(states) == initial_count + 1
 
@@ -532,7 +560,7 @@ def test_oauth_start_expires_old_states(app, client) -> None:
     # A new OAuth start should purge the expired entry
     client.post(
         "/v1/auth/oauth/start",
-        json={"broker": "dhan", "label": "Dhan"},
+        json={"broker": "zerodha", "label": "Zerodha"},
     )
 
     with app.app_context():
