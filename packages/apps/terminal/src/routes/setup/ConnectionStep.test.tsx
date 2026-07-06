@@ -46,7 +46,7 @@ describe("ConnectionStep", () => {
     expect(screen.getByText(/availability and login fields come from the broker catalogue/i)).toBeInTheDocument();
     expect(screen.getByText(/use at your own risk/i)).toBeInTheDocument();
     expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /connect at least one broker/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /connect a write-capable broker/i })).toBeDisabled();
   });
 
   it("allows continuing when a native broker has a live session", () => {
@@ -63,6 +63,7 @@ describe("ConnectionStep", () => {
             error_message: null,
             is_primary: true,
             source: "native",
+            read_only: false,
           },
         ],
       });
@@ -72,6 +73,36 @@ describe("ConnectionStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
+  });
+
+  it("keeps continuing disabled when the only connected native session is read-only", () => {
+    const onComplete = vi.fn();
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "U1",
+            broker: "upstox",
+            label: "Upstox Analytics",
+            status: "connected",
+            connected_at: null,
+            error_message: null,
+            is_primary: false,
+            source: "native",
+            read_only: true,
+          },
+        ],
+      });
+    });
+
+    render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
+    const continueButton = screen.getByRole("button", { name: /connect a write-capable broker/i });
+
+    expect(continueButton).toBeDisabled();
+    fireEvent.click(continueButton);
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it("allows continuing when a gateway broker account is connected", () => {
@@ -121,6 +152,6 @@ describe("ConnectionStep", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
-    expect(screen.getByRole("button", { name: /connect at least one broker/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /connect a write-capable broker/i })).toBeDisabled();
   });
 });

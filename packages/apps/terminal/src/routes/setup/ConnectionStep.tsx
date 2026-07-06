@@ -32,6 +32,7 @@ import { useBrokerStore } from "@/stores/brokerStore";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { ping } from "@/services/api";
 import { BrokerConnect } from "@/components/account/BrokerConnect";
+import type { BrokerAccount } from "@/types/broker";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -230,13 +231,17 @@ const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
   wsPort: "8765",
 };
 
+function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
+  return account.status === "connected" && account.read_only !== true;
+}
+
 interface DirectConnectPanelProps {
   onComplete: (values: ConnectionFormValues) => void;
 }
 
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
   useBrokerAccounts();
-  const hasConnectedBroker = useBrokerStore((s) => s.accounts.some((account) => account.status === "connected"));
+  const hasWriteCapableBroker = useBrokerStore((s) => s.accounts.some(isWriteCapableBrokerAccount));
 
   return (
     <div className="space-y-4">
@@ -245,12 +250,12 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
       <Button
         type="button"
         className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-        disabled={!hasConnectedBroker}
+        disabled={!hasWriteCapableBroker}
         onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
       >
         <CheckCheck className="size-4 mr-2" />
-        {hasConnectedBroker ? "Continue" : "Connect at least one broker"}
-        {hasConnectedBroker && <ArrowRight className="size-4 ml-2" />}
+        {hasWriteCapableBroker ? "Continue" : "Connect a write-capable broker"}
+        {hasWriteCapableBroker && <ArrowRight className="size-4 ml-2" />}
       </Button>
     </div>
   );
