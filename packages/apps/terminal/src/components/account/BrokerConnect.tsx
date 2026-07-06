@@ -492,6 +492,11 @@ export function BrokerConnect() {
                         {!entry.connectable && (
                           <Badge variant="outline" className="text-xxs">Native unavailable</Badge>
                         )}
+                        {entry.requires_static_ip && (
+                          <Badge variant="outline" className="border-warning/50 text-xxs text-warning">
+                            Static IP for live API orders
+                          </Badge>
+                        )}
                       </div>
                     </div>
                     <a
@@ -850,6 +855,19 @@ export function BrokerConnect() {
             {!brokerSdkReady && (
               <span className="text-loss">Run setup or sync dependencies before connecting.</span>
             )}
+          </div>
+        )}
+
+        {broker?.requires_static_ip && (
+          <div
+            role="status"
+            className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-text-secondary"
+            data-testid="native-broker-static-ip"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+            <span>
+              <strong className="text-text-primary">Static outbound IP required</strong> for live API orders.
+            </span>
           </div>
         )}
 

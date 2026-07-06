@@ -272,6 +272,13 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
     upstox_kinds = {m["kind"] for m in brokers["upstox"]["auth_methods"]}
     assert "oauth" in upstox_kinds
     assert brokers["dhan"]["connectable"] is True
+    assert {broker_id for broker_id, row in brokers.items() if row["requires_static_ip"]} == {
+        "dhan",
+        "upstox",
+        "kotakneo",
+        "indmoney",
+        "groww",
+    }
     assert brokers["dhan"]["sdk_pin"] == "dhanhq"
     assert brokers["dhan"]["sdk_attestation"] == {
         "pin": "dhanhq",

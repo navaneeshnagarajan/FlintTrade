@@ -96,6 +96,7 @@ class TestCapabilitiesRoute:
         assert caps["historical_calendar_intervals"] == ["1D", "1W", "1M"]
         assert caps["historical_intervals"] == ["1m", "3m", "5m", "15m", "30m", "1D", "1W", "1M"]
         assert caps["connectable"] is True
+        assert caps["requires_static_ip"] is True
         assert caps["gtt_native"] is True
         assert caps["iceberg_native"] is True
         assert caps["cover_order_native"] is False
@@ -135,6 +136,7 @@ class TestCapabilitiesRoute:
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
         assert caps["connectable"] is True
+        assert caps["requires_static_ip"] is True
         assert caps["auth_model"] == "oauth_renewable_24h"
         assert caps["algo_tag_required"] is True
         assert caps["rate_limit_orders_per_sec"] == 10
@@ -153,6 +155,7 @@ class TestCapabilitiesRoute:
         caps = response.get_json()["capabilities"]
         assert caps["broker_name"] == "groww"
         assert caps["connectable"] is False
+        assert caps["requires_static_ip"] is True
         assert caps["auth_model"] == "oauth_renewable_24h"
         assert caps["rate_limit_orders_per_sec"] == 10
         assert caps["rate_limit_data_per_sec"] == 5
@@ -174,6 +177,7 @@ class TestCapabilitiesRoute:
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
         assert caps["connectable"] is False
+        assert caps["requires_static_ip"] is True
         assert caps["auth_model"] == "mpin_totp_daily"
         assert caps["rate_limit_orders_per_sec"] == 10
         assert caps["algo_tag_required"] is False
@@ -199,6 +203,7 @@ class TestCapabilitiesRoute:
         # OpenAlgo is the primary, community-tested path — it leads the list.
         assert data["brokers"][0]["adapter_id"] == "openalgo"
         assert brokers["openalgo"]["native"] is False
+        assert brokers["openalgo"]["requires_static_ip"] is False
         assert brokers["openalgo"]["mcp"]["trading_supported"] is True
         assert "30+" in " ".join(brokers["openalgo"]["mcp"]["use_cases"])
         assert "safety gate" in " ".join(brokers["openalgo"]["mcp"]["cautions"])
@@ -207,13 +212,16 @@ class TestCapabilitiesRoute:
         assert "mcp.mcpserver" in openalgo_configs["stdio_local"]["args"]
         assert brokers["dhan"]["native"] is True
         assert brokers["dhan"]["connectable"] is True
+        assert brokers["dhan"]["requires_static_ip"] is True
         assert brokers["dhan"]["mcp"]["trading_supported"] is True
         assert brokers["upstox"]["mcp"]["read_only"] is True
         assert brokers["upstox"]["mcp"]["daily_reauthorization"] is True
+        assert brokers["upstox"]["requires_static_ip"] is True
         assert brokers["upstox"]["sdk_pin"] == "upstox-python-sdk"
         assert "status" in brokers["upstox"]["sdk_attestation"]
         assert brokers["groww"]["native"] is True
         assert brokers["groww"]["connectable"] is False
+        assert brokers["groww"]["requires_static_ip"] is True
         assert brokers["groww"]["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
         assert "DDPI" in " ".join(brokers["groww"]["mcp"]["cautions"])
         assert "market-data/API permissions" in " ".join(brokers["groww"]["mcp"]["cautions"])
@@ -285,6 +293,7 @@ class TestCapabilitiesRoute:
         assert response.status_code == 200
         broker = response.get_json()["broker"]
         assert broker["adapter_id"] == "groww"
+        assert broker["requires_static_ip"] is True
         assert broker["mcp"]["client_configs"][1]["args"] == [
             "mcp-remote@0.1.18",
             "https://mcp.groww.in/mcp",
@@ -363,7 +372,9 @@ class TestRecommendationsRoute:
         by_id = {r["broker_id"]: r for r in data["recommendations"]}
         assert {"kotakneo", "groww"} <= set(by_id)
         assert by_id["kotakneo"]["connectable"] is False
+        assert by_id["kotakneo"]["requires_static_ip"] is True
         assert by_id["groww"]["connectable"] is False
+        assert by_id["groww"]["requires_static_ip"] is True
 
     def test_unknown_use_case_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/recommendations?use_case=teleport")
@@ -382,7 +393,9 @@ class TestRecommendationsRoute:
         assert ids == {"upstox", "dhan"}
         by_id = {r["broker_id"]: r for r in recommendations}
         assert by_id["upstox"]["raw_score"] > 0
+        assert by_id["upstox"]["requires_static_ip"] is True
         assert by_id["dhan"]["raw_score"] == 0
+        assert by_id["dhan"]["requires_static_ip"] is True
         assert "snapshot reads are not enabled yet" in by_id["dhan"]["rationale"]
 
     def test_unknown_broker_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
@@ -402,6 +415,7 @@ class TestRecommendationsRoute:
         ids = {r["broker_id"] for r in recommendations}
         assert ids == {"indmoney"}
         assert recommendations[0]["connectable"] is True
+        assert recommendations[0]["requires_static_ip"] is True
 
     def test_groww_broker_subset_accepted_but_marked_unavailable(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/recommendations?use_case=historical_data&brokers=groww")
@@ -409,3 +423,4 @@ class TestRecommendationsRoute:
         recommendations = response.get_json()["recommendations"]
         assert [r["broker_id"] for r in recommendations] == ["groww"]
         assert recommendations[0]["connectable"] is False
+        assert recommendations[0]["requires_static_ip"] is True

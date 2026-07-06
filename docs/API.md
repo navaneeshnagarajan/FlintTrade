@@ -179,7 +179,7 @@ require a live native session but do not create an order safety context.
 
 | Endpoint | Purpose |
 |---|---|
-| `native/brokers` (**GET**) | Native broker catalogue with connectability, login-method schemas, OAuth/postback URLs, and MCP metadata. |
+| `native/brokers` (**GET**) | Native broker catalogue with connectability, static-outbound-IP requirement, login-method schemas, OAuth/postback URLs, and MCP metadata. |
 | `native/accounts` (**GET**) | Vault-backed native account list with live session status, expiry, read-only flag, and `needs_relogin` / retryable login state. |
 | `native/accounts` (**POST**) | Direct native connect: `{adapter_id, account_id, label?, credentials, is_primary?}`. |
 | `native/oauth/start` (**POST**) | Start an OAuth/app-consent login and return the broker authorisation URL, loopback redirect URI, state, and optional postback URI. |
@@ -197,8 +197,8 @@ Source: `packages/integrations/gateway/src/flinttrade_gateway/capabilities_route
 | Endpoint | Purpose |
 |---|---|
 | `broker/capabilities` (**GET**) | Per-broker capability matrix (order types, segments, depth, rate limits). |
-| `broker/mcp` (**GET**) | Broker-hosted MCP setup catalogue for OpenAlgo, Dhan, Upstox, and Groww. Metadata only: URLs, client configs, read-only/trading flags, login notes, use cases, and cautions. FlintTrade does not proxy MCP tool calls or create an MCP order path around its safety gate. |
-| `broker/recommendations` (**GET**) | Filter broker capability metadata for an operator-selected use case. `?use_case=<id>` for one job (for example `low_cost_execution`, `market_depth`); `?brokers=a,b` restricts the response to connected brokers. |
+| `broker/mcp` (**GET**) | Broker-hosted MCP setup catalogue for OpenAlgo, Dhan, Upstox, and Groww. Metadata only: URLs, client configs, read-only/trading flags, static-outbound-IP requirement, login notes, use cases, and cautions. FlintTrade does not proxy MCP tool calls or create an MCP order path around its safety gate. |
+| `broker/recommendations` (**GET**) | Filter broker capability metadata for an operator-selected use case, including display name, connectability, and static-outbound-IP requirement. `?use_case=<id>` for one job (for example `low_cost_execution`, `market_depth`); `?brokers=a,b` restricts the response to connected brokers. |
 
 `broker/mcp?broker=<id>` returns one MCP row. `openalgo` is accepted as the
 primary bridge MCP entry. Unknown broker ids and catalogued brokers without

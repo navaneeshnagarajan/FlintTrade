@@ -51,6 +51,8 @@ class BrokerCapabilities:
         supports_websocket: Broker provides a real-time WebSocket feed.
         supports_multi_quote: Broker returns multiple symbol quotes in one call.
         supports_multi_option_greeks: Broker provides batch option greeks.
+        requires_static_ip: Broker requires a fixed/approved outbound IP before
+            live API order placement.
         order_rate_limit_per_sec: Maximum order requests per second.
         quote_rate_limit_per_sec: Maximum quote requests per second.
     """
@@ -74,6 +76,7 @@ class BrokerCapabilities:
     supports_websocket: bool = False
     supports_multi_quote: bool = False
     supports_multi_option_greeks: bool = False
+    requires_static_ip: bool = False
     order_rate_limit_per_sec: int = 10
     quote_rate_limit_per_sec: int = 50
 

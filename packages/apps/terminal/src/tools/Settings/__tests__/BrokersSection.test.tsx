@@ -42,6 +42,7 @@ const BROKERS = [
     adapter_id: "dhan",
     display_name: "Dhan",
     connectable: true,
+    requires_static_ip: true,
     sdk_pin: "dhanhq",
     sdk_attestation: {
       pin: "dhanhq",
@@ -92,6 +93,7 @@ const BROKERS = [
     adapter_id: "upstox",
     display_name: "Upstox",
     connectable: true,
+    requires_static_ip: true,
     oauth_redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
     postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
     auth_methods: [
@@ -126,6 +128,7 @@ const BROKERS = [
     adapter_id: "kotakneo",
     display_name: "Kotak Neo",
     connectable: false,
+    requires_static_ip: true,
     auth_methods: [
       {
         id: "totp_mpin",
@@ -152,6 +155,7 @@ const BROKERS = [
     adapter_id: "indmoney",
     display_name: "INDmoney",
     connectable: true,
+    requires_static_ip: true,
     auth_methods: [
       {
         id: "access_token",
@@ -179,6 +183,7 @@ const BROKERS = [
     adapter_id: "groww",
     display_name: "Groww",
     connectable: false,
+    requires_static_ip: true,
     auth_methods: [
       {
         id: "api_key_totp",
@@ -214,6 +219,7 @@ const MCP_BROKERS = [
     display_name: "Dhan",
     native: true,
     connectable: true,
+    requires_static_ip: true,
     mcp: {
       remote_url: "https://mcp.dhan.co/mcp",
       docs_url: "https://docs.dhanhq.co/mcp/",
@@ -306,6 +312,7 @@ const MCP_BROKERS = [
     display_name: "Upstox",
     native: true,
     connectable: true,
+    requires_static_ip: true,
     mcp: {
       remote_url: "https://mcp.upstox.com/mcp",
       docs_url: "https://upstox.com/developer/api-documentation/mcp-integration/",
@@ -369,6 +376,7 @@ const MCP_BROKERS = [
     display_name: "Groww",
     native: true,
     connectable: false,
+    requires_static_ip: true,
     mcp: {
       remote_url: "https://mcp.groww.in/mcp",
       docs_url: "https://groww.in/updates/groww-mcp",
@@ -652,6 +660,7 @@ describe("BrokersSection", () => {
 
     expect(await screen.findByText("Broker MCP assistants")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Read-only");
+    expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Static IP for live API orders");
     expect(screen.getByText(/active, non-dormant Upstox account/)).toBeInTheDocument();
     expect(screen.getByText("Repeat authorisation daily before relying on account context.")).toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent(
@@ -688,6 +697,7 @@ describe("BrokersSection", () => {
     );
     expect(screen.getByTestId("broker-mcp-dhan")).toHaveTextContent("LIMIT defaults");
     expect(screen.getByTestId("broker-mcp-dhan")).toHaveTextContent("F&O lot sizes");
+    expect(screen.getByTestId("broker-mcp-dhan")).toHaveTextContent("Static IP for live API orders");
     expect(screen.getByTestId("broker-mcp-upstox-vscode_copilot")).toHaveTextContent("VS Code GitHub Copilot");
     expect(screen.getAllByText("https://mcp.groww.in/mcp").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("broker-mcp-groww-remote_url")).toHaveTextContent("GrowwMCP");
@@ -696,6 +706,7 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("growwmcp");
     expect(screen.getByTestId("broker-mcp-groww-mcp_remote_cursor_vscode")).toHaveTextContent("Windsurf");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Native unavailable");
+    expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("Static IP for live API orders");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("early-stage");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no background syncing");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("no AI-server data storage");
@@ -921,7 +932,10 @@ describe("BrokersSection", () => {
     fireEvent.click(await screen.findByRole("option", { name: "INDmoney" }));
 
     expect(screen.getByText(/INDstocks API dashboard/i)).toBeInTheDocument();
-    expect(screen.getByText(/static outbound IP/i)).toBeInTheDocument();
+    expect(screen.getByTestId("native-broker-static-ip")).toHaveTextContent(
+      "Static outbound IP required for live API orders.",
+    );
+    expect(screen.getByText(/Save your static outbound IP before live algo orders/i)).toBeInTheDocument();
     expect(screen.getByText(/resets tokens daily at 06:00 IST/i)).toBeInTheDocument();
     expect(screen.getByText(/up to five active tokens/i)).toBeInTheDocument();
     expect(screen.getByText(/daily 06:00 IST reset/i)).toBeInTheDocument();

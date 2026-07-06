@@ -55,6 +55,7 @@ def test_capabilities_defaults_are_false() -> None:
         "supports_websocket",
         "supports_multi_quote",
         "supports_multi_option_greeks",
+        "requires_static_ip",
     ]
     for f in bool_fields:
         assert getattr(caps, f) is False, f"Expected {f} to default to False"

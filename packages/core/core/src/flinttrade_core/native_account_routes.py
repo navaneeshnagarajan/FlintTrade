@@ -775,6 +775,7 @@ def list_native_brokers() -> Any:
             "adapter_id": info.name,
             "display_name": info.display_name,
             "connectable": info.connectable,
+            "requires_static_ip": info.requires_static_ip,
             "exchanges": list(info.exchanges),
             "auth_methods": [m.model_dump() for m in info.auth_methods],
             "mcp": info.mcp.model_dump() if info.mcp is not None else None,

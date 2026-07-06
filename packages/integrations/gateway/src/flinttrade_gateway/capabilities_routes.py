@@ -71,16 +71,19 @@ def _minute_interval_label(minutes: int) -> str:
 
 def _native_capability_fields(broker_name: str) -> dict[str, Any]:
     """Expose optional native-adapter metadata alongside legacy capabilities."""
+    info = BROKER_CATALOG.get(broker_name)
     native = NATIVE_BROKER_CAPABILITIES.get(broker_name)
     if native is None:
-        data = _catalog_mcp_fields(broker_name)
+        data = {"requires_static_ip": info.requires_static_ip} if info is not None else {}
+        data.update(_catalog_mcp_fields(broker_name))
         data.update(_catalog_sdk_fields(broker_name))
         return data
     intraday = list(native.historical_intraday_intervals_minutes)
     intervals = [_minute_interval_label(minutes) for minutes in intraday]
     intervals.extend(native.historical_calendar_intervals)
     data = {
-        "connectable": BROKER_CATALOG.get(broker_name).connectable if BROKER_CATALOG.get(broker_name) else False,
+        "connectable": info.connectable if info else False,
+        "requires_static_ip": info.requires_static_ip if info else False,
         "historical_intervals": intervals,
         "historical_intraday_intervals_minutes": intraday,
         "historical_calendar_intervals": list(native.historical_calendar_intervals),
@@ -213,6 +216,7 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
     if info is not None:
         data["connectable"] = info.connectable
         data["display_name"] = info.display_name
+        data["requires_static_ip"] = info.requires_static_ip
     return data
 
 
@@ -223,6 +227,7 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
         "display_name": info.display_name,
         "native": info.native,
         "connectable": info.connectable,
+        "requires_static_ip": info.requires_static_ip,
         "mcp": info.mcp.model_dump(),
     }
     data.update(_catalog_sdk_fields(info.name))
@@ -243,6 +248,7 @@ def _openalgo_mcp_entry() -> dict[str, Any]:
         "display_name": "OpenAlgo (bridge)",
         "native": False,
         "connectable": True,
+        "requires_static_ip": False,
         "mcp": BrokerMCPInfo(**OPENALGO_PLATFORM_MCP).model_dump(),
     }
 
