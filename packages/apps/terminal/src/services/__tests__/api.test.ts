@@ -31,23 +31,34 @@ vi.mock("@/stores/modeStore", () => ({
   },
 }));
 
-vi.mock("@/stores/brokerStore", () => ({
-  isBrokerAccountMatch: (
-    account: { account_id: string; broker: string; source?: string },
+vi.mock("@/stores/brokerStore", () => {
+  const brokerAccountKey = (account: { account_id: string; broker: string; source?: string }) => [
+    account.source ?? "gateway",
+    account.broker,
+    account.account_id,
+  ].map(encodeURIComponent).join(":");
+  const findBrokerAccountMatch = <T extends { account_id: string; broker: string; source?: string }>(
+    accounts: T[],
     selector: string | null,
-  ) => {
-    if (!selector) return false;
-    const key = [
-      account.source ?? "gateway",
-      account.broker,
-      account.account_id,
-    ].map(encodeURIComponent).join(":");
-    return key === selector || account.account_id === selector;
-  },
-  useBrokerStore: {
-    getState: () => mockBrokerState,
-  },
-}));
+  ): T | undefined => {
+    if (!selector) return undefined;
+    const exact = accounts.find((account) => brokerAccountKey(account) === selector);
+    if (exact) return exact;
+    const legacy = accounts.filter((account) => account.account_id === selector);
+    return legacy.length === 1 ? legacy[0] : undefined;
+  };
+  return {
+    brokerAccountKey,
+    findBrokerAccountMatch,
+    isBrokerAccountMatch: (
+      account: { account_id: string; broker: string; source?: string },
+      selector: string | null,
+    ) => findBrokerAccountMatch([account], selector) === account,
+    useBrokerStore: {
+      getState: () => mockBrokerState,
+    },
+  };
+});
 
 vi.mock("@/services/rateLimiter", () => ({
   orderLimiter: { tryConsume: vi.fn(() => true) },

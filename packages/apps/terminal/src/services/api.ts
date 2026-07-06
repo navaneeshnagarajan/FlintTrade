@@ -39,7 +39,7 @@ import type {
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import { isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
+import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import {
   assertNativeWriteTargetReadyOrThrow,
@@ -921,7 +921,7 @@ function intervalsFromCapability(value: BackendBrokerCapabilitiesData): string[]
 
 function nativeCapabilityBrokerFromStore(): string | undefined {
   const { accounts, activeAccountId } = useBrokerStore.getState();
-  const active = accounts.find((account) => isBrokerAccountMatch(account, activeAccountId));
+  const active = findBrokerAccountMatch(accounts, activeAccountId);
   const selected = active ?? accounts.find((account) => account.is_primary) ?? accounts[0];
   return selected?.source === "native" ? selected.broker : undefined;
 }

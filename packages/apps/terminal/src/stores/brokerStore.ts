@@ -17,6 +17,19 @@ export function isBrokerAccountMatch(account: BrokerAccountIdentity, selector: s
   return brokerAccountKey(account) === selector || account.account_id === selector;
 }
 
+export function findBrokerAccountMatch<T extends BrokerAccountIdentity>(
+  accounts: T[],
+  selector: string | null,
+): T | undefined {
+  if (!selector) return undefined;
+
+  const exact = accounts.find((account) => brokerAccountKey(account) === selector);
+  if (exact) return exact;
+
+  const legacy = accounts.filter((account) => account.account_id === selector);
+  return legacy.length === 1 ? legacy[0] : undefined;
+}
+
 /**
  * Persist migration for the broker store.
  *
@@ -68,7 +81,7 @@ export const useBrokerStore = create<BrokerState>()(
         setAccounts: (accounts) =>
           set((state) => ({
             accounts,
-            activeAccountId: accounts.some((account) => isBrokerAccountMatch(account, state.activeAccountId))
+            activeAccountId: findBrokerAccountMatch(accounts, state.activeAccountId)
               ? state.activeAccountId
               : null,
           })),
@@ -100,7 +113,7 @@ export const useBrokerStore = create<BrokerState>()(
 
         getActiveAccount: () => {
           const { accounts, activeAccountId } = get();
-          return accounts.find((a) => isBrokerAccountMatch(a, activeAccountId));
+          return findBrokerAccountMatch(accounts, activeAccountId);
         },
       }),
       {

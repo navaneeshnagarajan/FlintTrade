@@ -6,6 +6,7 @@ import {
   setPrimaryNativeAccount,
   type NativeAccount,
 } from "@/services/ftApi.native";
+import { findBrokerAccountMatch } from "@/stores/brokerStore";
 import type { AccountStatus, BrokerAccount } from "@/types/broker";
 
 export type BrokerAccountRef = Pick<BrokerAccount, "account_id" | "broker" | "source">;
@@ -78,18 +79,8 @@ export function selectNativeReadAccount(
   brokerAccounts: BrokerAccount[],
   activeAccountId: string | null,
 ): NativeReadAccountRef | undefined {
-  const active = brokerAccounts.find((account) => (
-    (account.source ?? "gateway") === "native"
-    && (
-      [
-        account.source ?? "gateway",
-        account.broker,
-        account.account_id,
-      ].map(encodeURIComponent).join(":") === activeAccountId
-      || account.account_id === activeAccountId
-    )
-  ));
-  if (active) {
+  const active = findBrokerAccountMatch(brokerAccounts, activeAccountId);
+  if (active && (active.source ?? "gateway") === "native") {
     const selected = accounts.find((account) => (
       account.account_id === active.account_id && account.adapter_id === active.broker
     ));

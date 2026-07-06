@@ -172,5 +172,10 @@ describe("brokerAccountsApi", () => {
       account_id: "SHARED",
       is_primary: true,
     });
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "SHARED")).toEqual({
+      adapter_id: "dhan",
+      account_id: "SHARED",
+      is_primary: true,
+    });
   });
 });

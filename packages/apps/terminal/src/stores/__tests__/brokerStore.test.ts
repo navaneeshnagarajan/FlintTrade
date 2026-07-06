@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { brokerAccountKey, migrateBrokerPersist, useBrokerStore } from "../brokerStore";
+import { brokerAccountKey, findBrokerAccountMatch, migrateBrokerPersist, useBrokerStore } from "../brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 
 const makeAccount = (overrides: Partial<BrokerAccount> = {}): BrokerAccount => ({
@@ -174,6 +174,25 @@ describe("brokerStore", () => {
     const result = useBrokerStore.getState().getActiveAccount();
 
     expect(result?.broker).toBe("upstox");
+  });
+
+  it("does not resolve an ambiguous legacy bare account id", () => {
+    const dhan = makeAccount({ account_id: "shared", broker: "dhan", label: "Dhan", source: "native" });
+    const upstox = makeAccount({ account_id: "shared", broker: "upstox", label: "Upstox", source: "native" });
+    const accounts = [dhan, upstox];
+
+    expect(findBrokerAccountMatch(accounts, "shared")).toBeUndefined();
+    expect(findBrokerAccountMatch(accounts, brokerAccountKey(upstox))).toBe(upstox);
+  });
+
+  it("clears an ambiguous legacy bare active account when refreshed rows collide", () => {
+    const dhan = makeAccount({ account_id: "shared", broker: "dhan", label: "Dhan", source: "native" });
+    const upstox = makeAccount({ account_id: "shared", broker: "upstox", label: "Upstox", source: "native" });
+
+    useBrokerStore.getState().setActiveAccount("shared");
+    useBrokerStore.getState().setAccounts([dhan, upstox]);
+
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
   });
 
   it("getActiveAccount returns undefined when no match", () => {

@@ -1,4 +1,4 @@
-import { isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
+import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 
 export interface NativeWriteTarget {
   broker: string;
@@ -32,7 +32,7 @@ export function pickNativeWriteTargetFromState(
 ): NativeWriteTarget | undefined {
   if (mode !== "live" || apiKey.trim().length > 0) return undefined;
 
-  const active = accounts.find((account) => isBrokerAccountMatch(account, activeAccountId));
+  const active = findBrokerAccountMatch(accounts, activeAccountId);
   if (active?.source !== "native" || active.status !== "connected") return undefined;
   return { broker: active.broker, accountId: active.account_id };
 }
@@ -64,7 +64,7 @@ export function hasUnconfirmedNativeActiveWriteTarget(
   activeAccountId: string | null,
 ): boolean {
   if (mode !== "live" || apiKey.trim().length > 0) return false;
-  const active = accounts.find((account) => isBrokerAccountMatch(account, activeAccountId));
+  const active = findBrokerAccountMatch(accounts, activeAccountId);
   return active?.source === "native" && active.status !== "connected";
 }
 
