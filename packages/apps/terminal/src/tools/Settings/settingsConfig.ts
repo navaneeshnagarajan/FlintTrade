@@ -26,8 +26,10 @@ import {
   Rss,
   UserCircle,
   Landmark,
+  Download,
   type LucideIcon,
 } from "lucide-react";
+import { isDesktopShell } from "@/lib/desktopShell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,6 +55,7 @@ export type SectionId =
   | "monitoring"
   | "skill"
   | "presets"
+  | "updates"
   | "about";
 
 export interface SectionDef {
@@ -65,25 +68,40 @@ export interface SectionDef {
 // Constants
 // ---------------------------------------------------------------------------
 
-export const SECTIONS: SectionDef[] = [
-  { id: "profile",    label: "Profile",            icon: UserCircle   },
-  { id: "general",    label: "General",           icon: Monitor      },
-  { id: "appearance", label: "Appearance",         icon: Palette      },
-  { id: "ticker",     label: "Ticker Bar",         icon: Rss          },
-  { id: "api",        label: "Broker Gateway",     icon: Wifi         },
-  { id: "brokers",    label: "Brokers",            icon: Landmark     },
-  { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
-  { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
-  { id: "leverage",   label: "Leverage",           icon: Scale        },
-  { id: "practice",   label: "Practice Mode",      icon: FlaskConical },
-  { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
-  { id: "llm",        label: "LLM Config",         icon: Brain        },
-  { id: "telegram",   label: "Telegram",           icon: Send         },
-  { id: "whatsapp",   label: "WhatsApp",           icon: MessageCircle },
-  { id: "dataPaths",  label: "Data Paths",         icon: HardDrive    },
-  { id: "security",   label: "Security",           icon: ShieldCheck  },
-  { id: "monitoring", label: "Monitoring",         icon: Activity     },
-  { id: "skill",      label: "Skill & Experience", icon: GraduationCap   },
-  { id: "presets",    label: "Workspace Presets",  icon: LayoutTemplate  },
-  { id: "about",      label: "About",              icon: Info            },
-];
+/**
+ * Build the visible section list.
+ *
+ * The Updates section drives the desktop shell's rebuild-from-source updater
+ * (Tauri IPC), so it only exists inside the desktop app — web builds must not
+ * show it at all.
+ */
+export function buildSections(desktopShell: boolean): SectionDef[] {
+  const sections: SectionDef[] = [
+    { id: "profile",    label: "Profile",            icon: UserCircle   },
+    { id: "general",    label: "General",           icon: Monitor      },
+    { id: "appearance", label: "Appearance",         icon: Palette      },
+    { id: "ticker",     label: "Ticker Bar",         icon: Rss          },
+    { id: "api",        label: "Broker Gateway",     icon: Wifi         },
+    { id: "brokers",    label: "Brokers",            icon: Landmark     },
+    { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
+    { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
+    { id: "leverage",   label: "Leverage",           icon: Scale        },
+    { id: "practice",   label: "Practice Mode",      icon: FlaskConical },
+    { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
+    { id: "llm",        label: "LLM Config",         icon: Brain        },
+    { id: "telegram",   label: "Telegram",           icon: Send         },
+    { id: "whatsapp",   label: "WhatsApp",           icon: MessageCircle },
+    { id: "dataPaths",  label: "Data Paths",         icon: HardDrive    },
+    { id: "security",   label: "Security",           icon: ShieldCheck  },
+    { id: "monitoring", label: "Monitoring",         icon: Activity     },
+    { id: "skill",      label: "Skill & Experience", icon: GraduationCap   },
+    { id: "presets",    label: "Workspace Presets",  icon: LayoutTemplate  },
+  ];
+  if (desktopShell) {
+    sections.push({ id: "updates", label: "Updates", icon: Download });
+  }
+  sections.push({ id: "about", label: "About", icon: Info });
+  return sections;
+}
+
+export const SECTIONS: SectionDef[] = buildSections(isDesktopShell());

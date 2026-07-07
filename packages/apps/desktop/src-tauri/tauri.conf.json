@@ -22,7 +22,7 @@
     ],
     "security": {
       "csp": null,
-      "capabilities": ["default"]
+      "capabilities": ["default", "main-remote"]
     }
   },
   "bundle": {

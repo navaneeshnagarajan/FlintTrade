@@ -96,6 +96,9 @@ const BROKERS = [
     connectable: true,
     requires_static_ip: true,
     native_connect_blockers: [],
+    // REST-native — no third-party SDK. The UI readiness check fails closed
+    // on ABSENT attestation, so the fixture must carry the real backend shape.
+    sdk_attestation: { status: "not_required" as const },
     oauth_redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
     postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
     auth_methods: [

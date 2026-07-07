@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-remote",
+  "description": "IPC surface for the main window, which loads the loopback backend over HTTP — a remote origin to Tauri. Exposes exactly three commands: opener:open_url scoped to https URLs (broker OAuth approval pages in the system browser — the webview has no window.open handler), plus the app's own updater_state / run_self_update pair driving the Settings → Updates rebuild-from-source flow. Nothing else is reachable from the page.",
+  "local": false,
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": [
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    },
+    "allow-updater-state",
+    "allow-run-self-update"
+  ]
+}

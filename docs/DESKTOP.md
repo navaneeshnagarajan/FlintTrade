@@ -17,12 +17,57 @@ The public website links to this guide from the homepage and primary
 navigation. Start here when you want to run FlintTrade as an end-user desktop
 app rather than as a contributor checkout.
 
+### One-command install (recommended)
+
+The bootstrap installer fetches the **latest release tag from GitHub and
+builds the app on your own machine** — like rustup or Homebrew. A locally
+built binary carries no unsigned-installer warning, and updating later is the
+same command (it fetches the newest tag into the same source workspace and
+rebuilds).
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/install.ps1 | iex
+```
+
+The script checks for the required toolchain (Rust, Node 22+, uv, plus the
+platform's Tauri libraries), prints the exact install command for anything
+missing, and never elevates or installs system packages silently. First build:
+roughly 10–20 minutes and a few GB of toolchain. The scripts live at
+[`scripts/install/`](../scripts/install/) — read them before piping to a shell
+if that is your policy (it should be).
+
+### Pre-built installers
+
 1. Open the [GitHub Releases](https://github.com/navaneeshnagarajan/FlintTrade/releases) page.
 2. Pick the latest release that has an installer for your operating system.
-3. If the current beta release has no installer asset for your OS yet, build it
-   locally with the commands in [Building locally](#building-locally).
+3. If the current beta release has no installer asset for your OS yet, use the
+   one-command install above or the commands in [Building locally](#building-locally).
 4. Launch FlintTrade and complete the in-app Setup flow. You do not need a
    `.env` file for desktop use.
+
+### Updating
+
+The desktop app has a built-in updater at **Settings → Updates** (desktop
+builds only — the web terminal never shows it). "Check for updates" compares
+the running version against the newest `v*` tag on GitHub; **Update &
+rebuild** then runs the bootstrap installer from the local source workspace
+(`~/.flinttrade/src/FlintTrade`, or `FLINTTRADE_SRC_DIR`) detached — the app
+closes whilst the build runs (roughly 10–20 minutes) and relaunches itself
+once the new version is installed. On macOS/Linux the build's output is
+appended to `self_update.log` in the FlintTrade workspace directory; on
+Windows the build runs in its own console window.
+
+Re-running the install one-liner above is exactly equivalent — the in-app
+updater invokes the same script against the same workspace. If no source
+workspace exists on the machine (for example, you installed a pre-built
+release), the Updates section shows that one-liner to copy instead of the
+rebuild button.
 
 ---
 

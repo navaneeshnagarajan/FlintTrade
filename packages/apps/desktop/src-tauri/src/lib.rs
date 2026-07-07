@@ -14,6 +14,23 @@
 //!    app's same-origin requests resolve without any in-app configuration.
 //! 4. Kills the sidecar when the app exits.
 //!
+//! ## Sidecar orphan protection
+//!
+//! The kill-on-exit path (4) only runs on a graceful quit. A shell crash or
+//! force-quit would otherwise orphan the backend, and repeated launches would
+//! accumulate duplicates. Three layers close that hole:
+//!
+//! * **Reap on launch** — the shell records the sidecar PID (plus its own) in
+//!   ``desktop_backend.pid`` under the workspace dir. On startup a stale entry
+//!   from a crashed run is terminated, but only after an identity check that
+//!   the PID still belongs to our ``flinttrade-backend`` binary — a reused PID
+//!   owned by any other process is never killed.
+//! * **Parent-liveness watchdog** — the shell passes its PID via
+//!   ``FLINTTRADE_PARENT_PID``; the sidecar entry script
+//!   (``packaging/desktop_backend.py``) watches that process from a daemon
+//!   thread and exits cleanly when the shell dies.
+//! * **Kill on exit** — the original graceful path, kept as-is.
+//!
 //! A small splash window covers steps 1–2 so the user sees immediate feedback.
 //!
 //! ## Background runtime (AI-trading desktop)
@@ -47,6 +64,27 @@ const NOTIFY_SENTINEL: &str = "FLINTTRADE_NOTIFY";
 /// Global hotkey (parsed cross-platform) that toggles the main window.
 const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+F";
 
+/// Workspace-dir file recording the sidecar PID (line 1) and the owning shell
+/// PID (line 2) so a later launch can reap an orphan from a crashed run.
+const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
+
+/// Substring that must appear in a process's command line / image name before
+/// the reaper will treat it as our backend sidecar and terminate it.
+const SIDECAR_PROCESS_MARKER: &str = "flinttrade-backend";
+
+/// File name of the platform's bootstrap install/update script inside the
+/// source workspace (``scripts/install/``).
+#[cfg(windows)]
+const INSTALL_SCRIPT_NAME: &str = "flinttrade-install.ps1";
+#[cfg(not(windows))]
+const INSTALL_SCRIPT_NAME: &str = "flinttrade-install.sh";
+
+/// Log file (under the workspace dir) capturing the detached self-update
+/// build's output, since the spawning app exits while the build runs. On
+/// Windows the build runs in its own console window instead.
+#[cfg(unix)]
+const SELF_UPDATE_LOG: &str = "self_update.log";
+
 /// Set to true once the operator chooses "Quit" from the tray, so the window's
 /// close handler performs a real exit instead of hiding to tray.
 struct QuitRequested(std::sync::atomic::AtomicBool);
@@ -54,18 +92,212 @@ struct QuitRequested(std::sync::atomic::AtomicBool);
 /// Holds the spawned backend child so it can be killed on exit.
 struct BackendState(Mutex<Option<CommandChild>>);
 
+// ---------------------------------------------------------------------------
+// In-app updater (Hermes-style: rebuild from source on this machine).
+//
+// The bootstrap installers (scripts/install/flinttrade-install.{sh,ps1}) fetch
+// the newest GitHub v* tag into a source workspace and rebuild/reinstall the
+// app. These two commands let the terminal drive that flow from Settings →
+// Updates: report where (and whether) the workspace exists, then run the
+// LOCAL script detached so it survives this process exiting. No remote code
+// is ever fetched or executed from Rust — only the script already present in
+// the workspace on disk.
+// ---------------------------------------------------------------------------
+
+/// Payload of the ``updater_state`` command.
+#[derive(serde::Serialize)]
+struct UpdaterState {
+    /// Version of the running app, from the Tauri package metadata.
+    app_version: String,
+    /// Resolved source workspace containing the install script, or ``None``
+    /// when no usable workspace exists (the UI then shows the website
+    /// one-liner to copy instead of the in-app rebuild button).
+    src_dir: Option<String>,
+}
+
+/// Resolve the bootstrap source workspace, mirroring the install scripts:
+/// ``FLINTTRADE_SRC_DIR`` when set, else ``~/.flinttrade/src/FlintTrade``
+/// (``%USERPROFILE%`` on Windows). Returns it only when the platform's
+/// install script actually exists inside it.
+fn resolve_source_workspace() -> Option<PathBuf> {
+    let dir = match env_nonempty("FLINTTRADE_SRC_DIR") {
+        Some(d) => PathBuf::from(d),
+        None => {
+            #[cfg(windows)]
+            let home = env_nonempty("USERPROFILE").or_else(|| env_nonempty("HOME"))?;
+            #[cfg(not(windows))]
+            let home = env_nonempty("HOME")?;
+            PathBuf::from(home).join(".flinttrade").join("src").join("FlintTrade")
+        }
+    };
+    if install_script_path(&dir).is_file() {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
+/// Path of the platform's install script inside a source workspace.
+fn install_script_path(src_dir: &Path) -> PathBuf {
+    src_dir.join("scripts").join("install").join(INSTALL_SCRIPT_NAME)
+}
+
+/// Report the running app version and the resolved source workspace (if any)
+/// to the terminal's Settings → Updates section.
+#[tauri::command]
+fn updater_state(app: AppHandle) -> UpdaterState {
+    UpdaterState {
+        app_version: app.package_info().version.to_string(),
+        src_dir: resolve_source_workspace().map(|d| d.display().to_string()),
+    }
+}
+
+/// Kick off a self-update: spawn the LOCAL bootstrap script detached (so the
+/// rebuild survives this app exiting), then schedule a graceful exit ~2s
+/// later so the build can replace the installed bundle. The script itself
+/// relaunches the app once the new build is installed (no ``--no-launch``).
+#[tauri::command]
+fn run_self_update(app: AppHandle) -> Result<(), String> {
+    let Some(src_dir) = resolve_source_workspace() else {
+        return Err(
+            "No source workspace found on this machine — run the bootstrap installer from the website first."
+                .to_string(),
+        );
+    };
+    let script = install_script_path(&src_dir);
+    spawn_detached_updater(&script, &src_dir)
+        .map_err(|e| format!("Could not start the update script: {e}"))?;
+
+    // Mark the quit as deliberate (close-to-tray must not intercept it), then
+    // exit shortly so the updater can replace the bundle underneath us.
+    if let Some(q) = app.try_state::<QuitRequested>() {
+        q.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || h.exit(0));
+    });
+    Ok(())
+}
+
+/// Open (create/append) the self-update log file under the workspace dir.
+#[cfg(unix)]
+fn self_update_log_file() -> Option<std::fs::File> {
+    let dir = flinttrade_home()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(SELF_UPDATE_LOG))
+        .ok()
+}
+
+/// PATH for the detached build, extended with the standard user-local tool
+/// directories. GUI-launched apps on macOS/Linux inherit a minimal PATH
+/// (no shell profile), which would hide the very toolchain (cargo, uv, pnpm,
+/// node) the install script needs.
+#[cfg(unix)]
+fn augmented_path() -> String {
+    let mut parts: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    let mut extras = vec![PathBuf::from("/usr/local/bin"), PathBuf::from("/opt/homebrew/bin")];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        extras.push(home.join(".cargo").join("bin"));
+        extras.push(home.join(".local").join("bin"));
+    }
+    for extra in extras {
+        let candidate = extra.display().to_string();
+        if !parts.iter().any(|p| p == &candidate) {
+            parts.push(candidate);
+        }
+    }
+    parts.join(":")
+}
+
+/// Spawn the update script fully detached from this process (unix): its own
+/// process group, no inherited stdio pipes, output appended to the workspace
+/// log file. ``--update`` WITHOUT ``--no-launch`` — the script relaunches the
+/// freshly built app itself. ``FLINTTRADE_YES=1`` consents to user-local tool
+/// installs (uv/pnpm) since the detached script has no TTY to ask on.
+#[cfg(unix)]
+fn spawn_detached_updater(script: &Path, src_dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let (out, err) = match self_update_log_file() {
+        Some(f) => {
+            let clone = f.try_clone();
+            (Stdio::from(f), clone.map(Stdio::from).unwrap_or_else(|_| Stdio::null()))
+        }
+        None => (Stdio::null(), Stdio::null()),
+    };
+    let mut cmd = std::process::Command::new("bash");
+    cmd.arg(script)
+        .arg("--update")
+        .env("FLINTTRADE_YES", "1")
+        .env("PATH", augmented_path())
+        .current_dir(src_dir)
+        .stdin(Stdio::null())
+        .stdout(out)
+        .stderr(err)
+        // New process group: the script survives this app's exit and any
+        // group-targeted signals sent to us on the way down.
+        .process_group(0);
+    cmd.spawn().map(|_| ())
+}
+
+/// Spawn the update script detached (Windows): its own console + process
+/// group, so the PowerShell build keeps running — and shows progress — after
+/// this app exits. ``FLINTTRADE_YES=1`` consents to user-local tool installs.
+#[cfg(windows)]
+fn spawn_detached_updater(script: &Path, src_dir: &Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(script)
+        .env("FLINTTRADE_YES", "1")
+        .current_dir(src_dir)
+        .creation_flags(CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .map(|_| ())
+}
+
 /// Build and run the FlintTrade desktop application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        // System-browser opener for broker OAuth approval pages — the main
+        // window's remote (loopback HTTP) origin is granted exactly the
+        // ``opener:allow-open-url`` permission, scoped to https URLs, in
+        // ``capabilities/main-remote.json``.
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // In-app updater commands (Settings → Updates). Like the opener above,
+        // the remote main window only reaches these via the explicit
+        // ``allow-updater-state`` / ``allow-run-self-update`` entries in
+        // ``capabilities/main-remote.json`` (autogenerated by build.rs).
+        .invoke_handler(tauri::generate_handler![updater_state, run_self_update])
         .manage(BackendState(Mutex::new(None)))
         .manage(QuitRequested(std::sync::atomic::AtomicBool::new(false)))
         .setup(|app| {
             // First-run secret provisioning (best-effort; never blocks launch).
             provision_master_password();
+
+            // Orphan-protection layer 1: terminate an identity-checked stale
+            // sidecar left behind by a crashed or force-quit previous run.
+            reap_stale_sidecar();
 
             // Tray + global hotkey: the app lives in the background (agent +
             // monitoring keep running) and the operator can summon it anytime.
@@ -85,8 +317,15 @@ pub fn run() {
                 .shell()
                 .sidecar("flinttrade-backend")?
                 .args(["--port", "0"])
-                .env("FLINTTRADE_DESKTOP", "1");
+                .env("FLINTTRADE_DESKTOP", "1")
+                // Orphan-protection layer 2: the sidecar entry script watches
+                // this PID and exits cleanly when the shell dies.
+                .env("FLINTTRADE_PARENT_PID", std::process::id().to_string());
             let (mut rx, child) = command.spawn()?;
+            // Orphan-protection layer 3: record the sidecar PID so the *next*
+            // launch can reap it if this shell dies without running its
+            // kill-on-exit cleanup.
+            write_sidecar_pid_file(child.pid());
             if let Some(state) = app.try_state::<BackendState>() {
                 *state.0.lock().unwrap() = Some(child);
             }
@@ -123,6 +362,9 @@ pub fn run() {
                         }
                         CommandEvent::Terminated(payload) => {
                             eprintln!("[flinttrade] backend terminated: {payload:?}");
+                            // The recorded PID is now dead — drop the file so a
+                            // later launch never inspects a reused PID.
+                            remove_sidecar_pid_file();
                             if !shown {
                                 let h = handle.clone();
                                 let _ = handle.run_on_main_thread(move || show_backend_error(&h));
@@ -339,6 +581,178 @@ fn kill_backend(app: &AppHandle) {
             let _ = child.kill();
         }
     }
+    remove_sidecar_pid_file();
+}
+
+// ---------------------------------------------------------------------------
+// Sidecar orphan protection (PID file + identity-checked reaping).
+// ---------------------------------------------------------------------------
+
+/// Path of the sidecar PID file inside the workspace dir.
+fn sidecar_pid_file() -> Option<PathBuf> {
+    flinttrade_home().map(|d| d.join(SIDECAR_PID_FILE))
+}
+
+/// Serialise the PID file: line 1 = sidecar PID, line 2 = owning shell PID.
+fn format_pid_file(sidecar_pid: u32, shell_pid: u32) -> String {
+    format!("{sidecar_pid}\n{shell_pid}\n")
+}
+
+/// Parse a PID file written by [`format_pid_file`].
+///
+/// Returns ``(sidecar_pid, shell_pid)``; the shell PID is ``None`` for a
+/// single-line file. Any malformed first line yields ``None``.
+fn parse_pid_file(contents: &str) -> Option<(u32, Option<u32>)> {
+    let mut lines = contents.lines();
+    let sidecar = lines.next()?.trim().parse::<u32>().ok().filter(|p| *p > 0)?;
+    let shell = lines
+        .next()
+        .and_then(|l| l.trim().parse::<u32>().ok())
+        .filter(|p| *p > 0);
+    Some((sidecar, shell))
+}
+
+/// True when a process command line / image name identifies our sidecar.
+fn looks_like_backend_sidecar(command_line: &str) -> bool {
+    command_line.contains(SIDECAR_PROCESS_MARKER)
+}
+
+/// Return the command line (unix `ps`) for a PID, or ``None`` when no such
+/// process exists.
+#[cfg(unix)]
+fn process_command_line(pid: u32) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "args="])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Return the `tasklist` CSV row (image name + PID) for a PID, or ``None``
+/// when no such process exists.
+#[cfg(windows)]
+fn process_command_line(pid: u32) -> Option<String> {
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    // A match prints a quoted CSV row; a miss prints an ``INFO:`` line.
+    let needle = format!("\"{pid}\"");
+    text.lines().find(|l| l.contains(&needle)).map(str::to_string)
+}
+
+/// Best-effort liveness probe for an arbitrary PID.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Best-effort liveness probe for an arbitrary PID.
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    process_command_line(pid).is_some()
+}
+
+/// Terminate a process: graceful TERM first, escalating to a hard kill only
+/// if it lingers past a short grace window.
+#[cfg(unix)]
+fn terminate_process(pid: u32) {
+    let pid_s = pid.to_string();
+    let _ = std::process::Command::new("kill").args(["-TERM", &pid_s]).status();
+    for _ in 0..20 {
+        if !process_alive(pid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = std::process::Command::new("kill").args(["-KILL", &pid_s]).status();
+}
+
+/// Terminate a process (Windows `taskkill`, including its child tree).
+#[cfg(windows)]
+fn terminate_process(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status();
+}
+
+/// Startup layer of orphan protection.
+///
+/// If a previous shell run crashed or was force-quit, its kill-on-exit path
+/// never ran and the sidecar keeps serving. Read the PID file it left behind
+/// and terminate that sidecar — but only after two safety checks:
+///
+/// * the shell recorded as its owner is no longer alive (a live shell means a
+///   second FlintTrade instance is running; killing its backend would be far
+///   worse than tolerating a duplicate), and
+/// * the PID's current command line still identifies our
+///   ``flinttrade-backend`` binary — a reused PID belonging to any other
+///   process is never killed.
+fn reap_stale_sidecar() {
+    let Some(path) = sidecar_pid_file() else { return };
+    let Ok(contents) = std::fs::read_to_string(&path) else { return };
+    let Some((sidecar_pid, shell_pid)) = parse_pid_file(&contents) else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
+    if let Some(owner) = shell_pid {
+        if owner != std::process::id() && process_alive(owner) {
+            eprintln!(
+                "[flinttrade] sidecar pid file is owned by a live shell (pid {owner}); skipping reap"
+            );
+            return;
+        }
+    }
+    match process_command_line(sidecar_pid) {
+        Some(cmd) if looks_like_backend_sidecar(&cmd) => {
+            eprintln!(
+                "[flinttrade] terminating stale backend sidecar (pid {sidecar_pid}) from a previous run"
+            );
+            terminate_process(sidecar_pid);
+        }
+        Some(_) => {
+            eprintln!(
+                "[flinttrade] pid {sidecar_pid} from a previous run was reused by another process; leaving it alone"
+            );
+        }
+        None => {} // already gone — just clean up the file
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Record the freshly spawned sidecar (and this shell) in the PID file so the
+/// next launch can reap it if this shell crashes without cleanup.
+fn write_sidecar_pid_file(sidecar_pid: u32) {
+    let Some(path) = sidecar_pid_file() else {
+        eprintln!("[flinttrade] could not resolve workspace dir; sidecar pid not recorded");
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&path, format_pid_file(sidecar_pid, std::process::id())) {
+        eprintln!("[flinttrade] could not write sidecar pid file: {e}");
+    }
+}
+
+/// Remove the PID file once the sidecar has been stopped deliberately.
+fn remove_sidecar_pid_file() {
+    if let Some(path) = sidecar_pid_file() {
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -488,5 +902,51 @@ mod tests {
         assert_eq!(parse_notify_line("FLINTTRADE_NOTIFY no tabs here"), None);
         assert_eq!(parse_notify_line("FLINTTRADE_NOTIFY\t\tbody only"), None);
         assert_eq!(parse_notify_line("random log line"), None);
+    }
+
+    #[test]
+    fn pid_file_round_trips() {
+        assert_eq!(parse_pid_file(&format_pid_file(1234, 99)), Some((1234, Some(99))));
+    }
+
+    #[test]
+    fn pid_file_tolerates_a_missing_shell_line() {
+        assert_eq!(parse_pid_file("4321\n"), Some((4321, None)));
+        assert_eq!(parse_pid_file("4321"), Some((4321, None)));
+        assert_eq!(parse_pid_file("4321\nnot-a-pid\n"), Some((4321, None)));
+    }
+
+    #[test]
+    fn rejects_malformed_pid_files() {
+        assert_eq!(parse_pid_file(""), None);
+        assert_eq!(parse_pid_file("not-a-pid\n77\n"), None);
+        assert_eq!(parse_pid_file("0\n77\n"), None);
+        assert_eq!(parse_pid_file("-5\n77\n"), None);
+    }
+
+    #[test]
+    fn install_script_lives_under_scripts_install() {
+        let path = install_script_path(Path::new("/home/op/.flinttrade/src/FlintTrade"));
+        let expected: PathBuf = ["/home/op/.flinttrade/src/FlintTrade", "scripts", "install", INSTALL_SCRIPT_NAME]
+            .iter()
+            .collect();
+        assert_eq!(path, expected);
+        // The updater must always target the platform's bootstrap script.
+        assert!(path.to_string_lossy().contains("flinttrade-install."));
+    }
+
+    #[test]
+    fn sidecar_identity_matches_only_our_binary() {
+        // macOS/Linux `ps -o args=` output for the bundled sidecar.
+        assert!(looks_like_backend_sidecar(
+            "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0"
+        ));
+        // Windows `tasklist /FO CSV /NH` row.
+        assert!(looks_like_backend_sidecar(
+            "\"flinttrade-backend.exe\",\"1234\",\"Console\",\"1\",\"120,000 K\""
+        ));
+        // A reused PID belonging to anything else must never match.
+        assert!(!looks_like_backend_sidecar("/usr/bin/python3 some_other_server.py"));
+        assert!(!looks_like_backend_sidecar("\"notepad.exe\",\"1234\",\"Console\",\"1\",\"9,000 K\""));
     }
 }

@@ -26,10 +26,17 @@ tauri-plugin-global-shortcut = "2"
 # blocks, agent turn-finished) — raised from Rust so they fire even when the
 # window is hidden and the AI agent is running headless in the background.
 tauri-plugin-notification = "2"
+# System-browser opener for broker OAuth approval pages. The desktop webview has
+# no window.open handler, so the terminal invokes plugin:opener|open_url (scoped
+# to https URLs in capabilities/default.json) to launch the default browser.
+tauri-plugin-opener = "2"
 # Cross-platform CSPRNG for provisioning the credential-vault master password
 # on first launch (loopback, single-user desktop). No other runtime deps —
 # kept minimal so the CI build matrix stays green across all three OSes.
 getrandom = "0.2"
+# Serialising the ``updater_state`` command payload over Tauri IPC. Already in
+# the dependency graph via tauri itself, so this adds no supply-chain weight.
+serde = { version = "1", features = ["derive"] }
 
 [features]
 # This feature is used to enable the production custom-protocol asset server in

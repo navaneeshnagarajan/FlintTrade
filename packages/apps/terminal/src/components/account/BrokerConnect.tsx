@@ -53,6 +53,7 @@ import {
   type NativeAuthMethod,
   type NativeBroker,
 } from "@/services/ftApi.native";
+import { isDesktopShell, openExternalUrl } from "@/lib/desktopShell";
 
 const BROKERS_KEY = ["native", "brokers"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
@@ -114,8 +115,11 @@ function sdkStatusTone(status?: BrokerSdkAttestation["status"] | null): string {
 }
 
 function sdkReadyForConnect(broker: NativeBroker): boolean {
+  // Fail closed: absent attestation data means "not verified", not "ready".
+  // The backend preflight refuses either way — this keeps the UI honest
+  // instead of offering a connect that the backend will reject.
   const status = broker.sdk_attestation?.status;
-  if (!status) return true;
+  if (!status) return false;
   return status === "ok" || status === "not_required";
 }
 
@@ -267,12 +271,15 @@ export function BrokerConnect() {
           ...(label ? { label } : {}),
         };
         const started = await oauthStartNativeAccount(payload);
-        window.open(started.auth_url, "_blank", "noopener");
+        // The Tauri webview has no window.open handler — the desktop shell
+        // routes this through the scoped opener plugin (system browser).
+        await openExternalUrl(started.auth_url);
         const postback = started.postback_uri ?? brokerPostbackUri;
         return {
           oauth: true,
           message: (
-            `Approve access in the new tab. Use redirect ${started.redirect_uri}. ` +
+            `Approve access in the ${isDesktopShell() ? "browser window" : "new tab"} that just opened. ` +
+            `Use redirect ${started.redirect_uri}. ` +
             `Postback ${postback} is optional and needs a broker-reachable public or tunnel URL.`
           ),
         };
