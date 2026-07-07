@@ -377,10 +377,22 @@ class EconomicCalendarProvider:
 
     Attributes:
         _events: All cached :class:`EconomicEvent` objects.
+        _is_sample_data: Whether the cached events are fabricated. True until
+            a verified live source loads real events (fail-honest default).
     """
 
     def __init__(self) -> None:
         self._events: list[EconomicEvent] = []
+        self._is_sample_data: bool = True
+
+    @property
+    def is_sample_data(self) -> bool:
+        """Whether the cached schedule is fabricated rather than a live feed.
+
+        Returns:
+            True unless :meth:`load_from_list` was called with ``sample=False``.
+        """
+        return self._is_sample_data
 
     # ------------------------------------------------------------------
     # Public query API
@@ -534,6 +546,7 @@ class EconomicCalendarProvider:
                 step += 1
 
         self._events = sorted(all_events, key=lambda e: (e.date, e.country, e.event))
+        self._is_sample_data = True
         logger.info(
             "EconomicCalendarProvider: generated %d events across %d months",
             len(self._events),
@@ -545,15 +558,19 @@ class EconomicCalendarProvider:
     # Persistence helpers
     # ------------------------------------------------------------------
 
-    def load_from_list(self, events: list[EconomicEvent]) -> None:
+    def load_from_list(self, events: list[EconomicEvent], *, sample: bool = True) -> None:
         """Populate the cache from an externally supplied list.
 
         Replaces any existing cached data.
 
         Args:
             events: Iterable of :class:`EconomicEvent` instances.
+            sample: Whether the supplied events are fabricated. Defaults to
+                True (fail-honest) — a future live-source integration must
+                explicitly pass ``sample=False`` to drop the sample-data flag.
         """
         self._events = list(events)
+        self._is_sample_data = sample
         logger.debug(
             "EconomicCalendarProvider: loaded %d events from list", len(self._events)
         )

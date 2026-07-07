@@ -31,7 +31,10 @@ an unverified broker in the connect UI.
 from __future__ import annotations
 
 import asyncio
+import base64
 import functools
+import json
+import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
@@ -52,13 +55,59 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
+logger = logging.getLogger("flinttrade.gateway.brokers.upstox")
+
 _PENDING = "Upstox {0} — streaming wave pending live SDK verification"
+
+# Upstox daily trading tokens always expire at ~03:30 IST the NEXT day (never
+# more than ~28h after minting). Analytics and extended tokens — the read-only
+# token classes — are valid for up to a year. Any server-minted token whose
+# ``exp`` claim lies beyond this bound therefore cannot be a daily trading
+# token, and is classified read-only (fail-closed).
+_DAILY_TOKEN_MAX_LIFETIME_SECONDS = 36 * 3600.0
+
+# Upstox error code for "APIs not permitted with this token" — raised when a
+# read-only (analytics/extended) token hits an order endpoint (errors doc).
+_TOKEN_SCOPE_REJECTION_CODES = frozenset({"UDAPI100067"})
 
 
 def _credential_truthy(value: Any) -> bool:
     """Return True for common truthy credential flag spellings."""
 
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "read_only"}
+
+
+def _jwt_expiry(token: str) -> float | None:
+    """Return the ``exp`` claim of a server-minted JWT access token, if decodable.
+
+    Upstox access tokens are JWTs minted by Upstox; the payload's ``exp`` is
+    server-issued metadata (NOT a client claim), so it is safe to use for
+    narrowing capability. No signature verification is needed — the claim is
+    only ever used to classify a session as read-only or to shorten its
+    lifetime, never to widen what it may do.
+
+    Args:
+        token: The raw access token string.
+
+    Returns:
+        The ``exp`` claim as a Unix timestamp, or ``None`` when the token is
+        not a decodable JWT or carries no ``exp``.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
+        exp = claims.get("exp") if isinstance(claims, dict) else None
+        return float(exp) if exp is not None else None
+    except Exception:  # noqa: BLE001 - an undecodable token is simply "no metadata"
+        return None
+
+
+def _is_write_scope_rejection(exc: BaseException) -> bool:
+    """Return True when Upstox rejected a call because the token class cannot trade."""
+    return str(getattr(exc, "broker_code", "") or "").upper() in _TOKEN_SCOPE_REJECTION_CODES
 
 
 def _split_symbol(raw: str) -> tuple[str, str]:

@@ -16,9 +16,20 @@ Response shape::
             "days": 14,
             "filters": { "countries": ["IN", "US"], "min_impact": "high" },
             "count": 3,
+            "is_sample_data": true,
             "events": [ { "date": "2026-04-10", "time": "10:00", ... }, ... ]
         }
     }
+
+Honesty contract: the provider fabricates the whole macro schedule (there is
+NO live macro feed yet), so ``is_sample_data`` appears BOTH as a sibling of
+``data`` (legacy consumers) AND inside ``data`` itself — the terminal's
+``parseResponse`` unwraps the ``data`` member, so a sibling-only flag was
+stripped in transit and only a hardcoded frontend badge disclosed the
+fabrication (same fix pattern as ``earnings_routes``/``sample_data_routes``).
+Deliberately, NO ``updated_at`` is stamped: fabricated RBI/CPI dates have no
+honest update time, and stamping ``now()`` would make them look seconds-fresh
+on every poll.
 """
 
 from __future__ import annotations
@@ -84,6 +95,7 @@ def economic_calendar() -> tuple[Any, int]:
                     "days": 14,
                     "filters": { "countries": ["IN", "US"], "min_impact": "high" },
                     "count": 3,
+                    "is_sample_data": true,
                     "events": [
                         {
                             "date": "2026-04-10",
@@ -132,11 +144,14 @@ def economic_calendar() -> tuple[Any, int]:
     events = provider.get_upcoming(
         days=days, countries=countries, min_impact=impact_raw
     )
+    is_sample = bool(getattr(provider, "is_sample_data", True))
 
+    # No ``updated_at`` on purpose — see the module docstring's honesty
+    # contract. Fabricated entries must never look freshly updated.
     return (
         jsonify({
             "status": "success",
-            "is_sample_data": True,
+            "is_sample_data": is_sample,
             "data": {
                 "days": days,
                 "filters": {
@@ -145,6 +160,9 @@ def economic_calendar() -> tuple[Any, int]:
                 },
                 "count": len(events),
                 "events": [e.to_dict() for e in events],
+                # Nested so it survives the frontend data-unwrap — see module
+                # docstring.
+                "is_sample_data": is_sample,
             },
         }),
         200,

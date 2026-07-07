@@ -24,6 +24,7 @@ for rel in ("packages/core/core/src", "packages/integrations/gateway/src"):
     if path not in sys.path:
         sys.path.insert(0, path)
 
+from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: E402
 from flinttrade_gateway.brokers.dhan import DhanAdapter  # noqa: E402
 from flinttrade_gateway.brokers.groww import GrowwAdapter  # noqa: E402
 from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter  # noqa: E402
@@ -183,9 +184,19 @@ CREDENTIAL_FIELDS: dict[str, dict[str, tuple[CredentialField, ...]]] = {
     },
 }
 
-CREDENTIAL_DEFAULTS: dict[tuple[str, str], dict[str, str]] = {
-    ("upstox", "analytics_access_token"): {"read_only": "true", "token_scope": "analytics"},
-}
+def _credential_defaults(broker: str, method: str) -> dict[str, str]:
+    """Auth-method credential defaults from the broker catalogue.
+
+    The in-app connect flow merges the selected method's ``credential_defaults``
+    (e.g. the Upstox analytics token's ``read_only``/``token_scope`` flags) into
+    the captured credentials. The probe derives them from the SAME catalogue
+    entry so the two paths can never drift.
+    """
+    info = BROKER_CATALOG.get(broker)
+    for entry in info.auth_methods if info else []:
+        if entry.id == method:
+            return {str(key): str(value) for key, value in entry.credential_defaults.items()}
+    return {}
 
 SECRET_FIELD_NAMES = (
     "access[_ -]?token",
@@ -333,7 +344,7 @@ def collect_credentials(broker: str, method: str, environment: str) -> dict[str,
         value = _secret_prompt(field.label, required=field.required)
         if value:
             credentials[field.name] = value
-    credentials.update(CREDENTIAL_DEFAULTS.get((broker, method), {}))
+    credentials.update(_credential_defaults(broker, method))
     return credentials
 
 

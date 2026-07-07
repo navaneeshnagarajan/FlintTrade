@@ -39,16 +39,24 @@ capabilities_bp = Blueprint("capabilities", __name__, url_prefix="/api/v1")
 
 
 def _sdk_attestations_by_pin() -> dict[str, dict[str, Any]]:
-    """Return installed SDK attestation rows keyed by brokers.lock pin name."""
+    """Return installed SDK attestation rows keyed by brokers.lock pin name.
+
+    The ONE error-swallowing wrapper for broker-catalogue routes: the gateway
+    owns SDK attestation, so this is the single implementation —
+    ``flinttrade_core.native_account_routes`` imports it rather than keeping
+    its own copy (a byte-identical duplicate used to live there and the two
+    could drift). Both failure modes stay non-fatal: catalogue routes must
+    render even when the attestation module is absent or raises.
+    """
     try:
         from flinttrade_core.broker_sdk_attest import attestations_by_pin  # noqa: PLC0415
     except Exception as exc:  # pragma: no cover - optional at import time
-        logger.warning("Broker SDK attestation unavailable for catalogue (%s)", exc)
+        logger.warning("Broker SDK attestation unavailable for broker catalogue (%s)", exc)
         return {}
     try:
         return attestations_by_pin()
     except Exception as exc:  # pragma: no cover - route must remain non-fatal
-        logger.warning("Broker SDK attestation failed for catalogue (%s)", exc)
+        logger.warning("Broker SDK attestation failed for broker catalogue (%s)", exc)
         return {}
 
 

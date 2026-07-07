@@ -44,6 +44,12 @@ from flask import Blueprint, current_app, jsonify, request
 
 from flinttrade_core.models import Order
 from flinttrade_gateway.adapter import BROKER_CATALOG
+
+# The single error-swallowing SDK-attestation wrapper lives in the gateway
+# (it owns SDK attestation); an identical copy used to be defined here and
+# the two could drift. Imported into this namespace so tests can still
+# monkeypatch ``native_account_routes._sdk_attestations_by_pin``.
+from flinttrade_gateway.capabilities_routes import _sdk_attestations_by_pin
 from flinttrade_gateway.log_safety import selector_ref
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 from .workspace import workspace_dir
@@ -91,20 +97,6 @@ def _native_connect_unavailable_body(adapter_id: str) -> dict[str, Any]:
         "message": f"'{adapter_id}' is not yet available for native connect (coming soon).",
         "data": {"native_connect_blockers": blockers},
     }
-
-
-def _sdk_attestations_by_pin() -> dict[str, dict[str, Any]]:
-    """Return installed SDK attestation rows keyed by brokers.lock pin name."""
-    try:
-        from .broker_sdk_attest import attestations_by_pin  # noqa: PLC0415
-    except Exception as exc:  # pragma: no cover - optional during isolated imports
-        logger.warning("Broker SDK attestation unavailable for native catalogue (%s)", exc)
-        return {}
-    try:
-        return attestations_by_pin()
-    except Exception as exc:  # pragma: no cover - route must remain non-fatal
-        logger.warning("Broker SDK attestation failed for native catalogue (%s)", exc)
-        return {}
 
 
 def _native_sdk_fields(info: Any) -> dict[str, Any]:
