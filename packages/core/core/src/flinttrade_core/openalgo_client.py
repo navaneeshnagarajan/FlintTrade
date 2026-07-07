@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from typing import Any
 
 import httpx
@@ -94,9 +96,84 @@ class OpenAlgoClient:
         self._smart_limiter = _RateLimiter(2, 1.0)
         self._general_limiter = _RateLimiter(50, 1.0)
 
+        # Owner event loop for sync callers (created lazily by run_sync).
+        # httpx pools keep-alive connections that are AFFINE to the loop they
+        # were created on; driving one shared client from a fresh
+        # asyncio.run()/new_event_loop() per request reuses a connection whose
+        # transport belongs to an already-closed loop and fails with
+        # "Event loop is closed" on alternating requests. All sync entry
+        # points must marshal onto this single persistent loop instead.
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        self._owner_thread: threading.Thread | None = None
+        self._owner_guard = threading.Lock()
+
+    def _ensure_owner_loop(self) -> asyncio.AbstractEventLoop:
+        """Start (once) and return the client's dedicated event loop."""
+        with self._owner_guard:
+            if self._owner_loop is None or self._owner_loop.is_closed():
+                loop = asyncio.new_event_loop()
+                thread = threading.Thread(
+                    target=loop.run_forever,
+                    daemon=True,
+                    name="openalgo-client-loop",
+                )
+                thread.start()
+                self._owner_loop = loop
+                self._owner_thread = thread
+            return self._owner_loop
+
+    def run_sync(self, coro: Any, timeout: float = 45.0) -> Any:
+        """Run one of THIS client's coroutines from synchronous code.
+
+        The coroutine executes on the client's own persistent event loop, so
+        pooled connections always live and die on one loop — never drive this
+        client through ad-hoc ``asyncio.run()`` loops. Thread-safe; for Flask
+        request threads, cron jobs and background schedulers.
+
+        Args:
+            coro: A coroutine created from this client's async API.
+            timeout: Seconds to wait for completion.
+
+        Returns:
+            The coroutine's result.
+
+        Raises:
+            TimeoutError: When the call does not finish within ``timeout``
+                (the underlying task is cancelled).
+        """
+        future = asyncio.run_coroutine_threadsafe(coro, self._ensure_owner_loop())
+        try:
+            return future.result(timeout)
+        except FuturesTimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(f"OpenAlgo call timed out after {timeout:.0f}s") from exc
+
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._http.aclose()
+
+    def close_sync(self, timeout: float = 10.0) -> None:
+        """Close from synchronous code, tearing down the owner loop if any.
+
+        Short-lived clients used by sync callers (``resolve_openalgo_client``
+        fallbacks) must close on the SAME loop that served their requests —
+        closing on a second fresh loop is the same cross-loop bug in reverse.
+        """
+        if self._owner_loop is not None and not self._owner_loop.is_closed():
+            loop = self._owner_loop
+            try:
+                asyncio.run_coroutine_threadsafe(self.close(), loop).result(timeout)
+            except Exception:  # pragma: no cover - best-effort shutdown
+                logger.debug("OpenAlgo client close on owner loop failed", exc_info=True)
+            loop.call_soon_threadsafe(loop.stop)
+            if self._owner_thread is not None:
+                self._owner_thread.join(timeout=5)
+            loop.close()
+            self._owner_loop = None
+            self._owner_thread = None
+        else:
+            # Never used from sync code — no owner loop, close on a fresh one.
+            asyncio.run(self.close())
 
     async def __aenter__(self) -> OpenAlgoClient:
         return self
@@ -794,3 +871,28 @@ def get_openalgo_client(app: Any | None = None) -> Any:
     """Return the configured OpenAlgo client, falling back to Settings.from_env()."""
     client, _owns_client = resolve_openalgo_client(app)
     return client
+
+
+def client_call_sync(client: Any, coro: Any, timeout: float = 45.0) -> Any:
+    """Run a client coroutine from sync code on the client's OWNER loop.
+
+    The one safe way to drive an :class:`OpenAlgoClient` from a Flask request
+    thread or scheduler job — pooled httpx connections are loop-affine, so a
+    fresh ``asyncio.run()`` per call poisons the shared pool ("Event loop is
+    closed" on alternating requests). Falls back to ``asyncio.run`` only for
+    duck-typed test fakes that expose no ``run_sync``.
+    """
+    if isinstance(client, OpenAlgoClient):
+        return client.run_sync(coro, timeout)
+    # Duck-typed fakes/mocks in tests: a plain fresh loop is correct there
+    # (single call, no shared pool). getattr-probing is NOT safe here because
+    # MagicMock fabricates a run_sync attribute.
+    return asyncio.run(coro)
+
+
+def client_close_sync(client: Any) -> None:
+    """Close a client from sync code on the SAME loop that served its calls."""
+    if isinstance(client, OpenAlgoClient):
+        client.close_sync()
+        return
+    asyncio.run(client.close())

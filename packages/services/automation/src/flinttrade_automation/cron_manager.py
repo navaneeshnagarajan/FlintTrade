@@ -154,8 +154,11 @@ def make_health_check_job(
         success = False
         error = ""
         try:
-            import asyncio
-            result = asyncio.run(openalgo_client.ping())
+            # One-owner-loop rule: never drive the shared client on a fresh
+            # asyncio.run() loop (poisons its pooled httpx connections).
+            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+            result = client_call_sync(openalgo_client, openalgo_client.ping())
             success = result.get("status") == "success" if isinstance(result, dict) else False
         except Exception as exc:
             error = str(exc)

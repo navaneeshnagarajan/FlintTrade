@@ -88,13 +88,17 @@ def _live_breadth_from_quotes(client: Any) -> dict[str, int] | None:
     """
     if client is None:
         return None
-    import asyncio  # noqa: PLC0415
 
     from .market_scanner import _NIFTY50_SYMBOLS  # noqa: PLC0415
 
     payload = [{"symbol": s, "exchange": "NSE"} for s in _NIFTY50_SYMBOLS]
     try:
-        quotes = asyncio.run(client.multi_quotes(payload))
+        # Marshal onto the client's own persistent loop — driving a shared
+        # httpx client via per-request asyncio.run() poisons its pooled
+        # connections ("Event loop is closed" on alternating polls).
+        from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+        quotes = client_call_sync(client, client.multi_quotes(payload))
     except Exception as exc:
         logger.warning("Live breadth quote sweep failed: %s", exc)
         return None
@@ -137,7 +141,6 @@ def _live_index_contribution(client: Any, index_name: str) -> dict[str, Any] | N
     """
     if client is None:
         return None
-    import asyncio  # noqa: PLC0415
 
     from .index_contribution import compute_index_contribution, index_weights  # noqa: PLC0415
 
@@ -147,7 +150,10 @@ def _live_index_contribution(client: Any, index_name: str) -> dict[str, Any] | N
 
     payload = [{"symbol": s, "exchange": "NSE"} for s in weights]
     try:
-        quotes = asyncio.run(client.multi_quotes(payload))
+        # Same one-owner-loop rule as the breadth sweep above.
+        from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+        quotes = client_call_sync(client, client.multi_quotes(payload))
     except Exception as exc:
         logger.warning("Live index-contribution quote sweep failed: %s", exc)
         return None

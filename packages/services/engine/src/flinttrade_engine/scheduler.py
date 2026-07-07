@@ -247,7 +247,10 @@ class TimeScheduler:
                 # Block the current thread briefly to collect the result.
                 data = future.result(timeout=10)
             else:
-                data = asyncio.run(self._client.holidays(year=y))  # type: ignore[union-attr]
+                # One-owner-loop rule for the shared client's pooled connections.
+                from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+                data = client_call_sync(self._client, self._client.holidays(year=y))  # type: ignore[union-attr]
 
             holidays = data.get("holidays", []) if isinstance(data, dict) else []
             if isinstance(holidays, list):

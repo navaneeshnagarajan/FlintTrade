@@ -29,6 +29,7 @@ Blueprint prefix: ``/v1/orders``
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -43,6 +44,26 @@ from flinttrade_gateway.log_safety import account_ref, log_ref
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
+
+
+
+def _run_on_client_loop(coro: Any) -> Any:
+    """Run a broker-bound coroutine on the shared client's owner event loop.
+
+    Order dispatch and gated reads ultimately await the app-owned OpenAlgo
+    client (and native adapters' pooled HTTP clients). Driving them on a fresh
+    ``asyncio.run()`` loop per request poisons those loop-affine connection
+    pools ("Event loop is closed" on alternating requests), so every sync
+    entry point marshals onto ONE persistent loop via the client's run_sync.
+    Falls back to ``asyncio.run`` when no shared client is configured (tests).
+    """
+    from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
+
+    client = current_app.config.get("CLIENT") or current_app.config.get("OPENALGO_CLIENT")
+    if isinstance(client, OpenAlgoClient):
+        return client.run_sync(coro)
+    # Test fakes / unconfigured apps: one fresh loop per call is correct.
+    return asyncio.run(coro)
 
 
 def _redact_exc(exc: object, account_id: object) -> str:
@@ -364,10 +385,9 @@ def _gather_l2_state(adapter_id: str, *, account_id: str = "default") -> tuple[l
     between copies. Runs two reads on the human order path; acceptable latency
     for the cumulative-exposure brake.
     """
-    import asyncio  # noqa: PLC0415
     from .l2_state import gather_l2_state  # noqa: PLC0415
 
-    return asyncio.run(gather_l2_state(current_app.config, adapter_id, account_id=account_id))
+    return _run_on_client_loop(gather_l2_state(current_app.config, adapter_id, account_id=account_id))
 
 
 def _dispatch_live_order(
@@ -390,7 +410,6 @@ def _dispatch_live_order(
     path. Fails CLOSED with an actionable message on every misconfiguration — it
     never forwards an ungated order.
     """
-    import asyncio  # noqa: PLC0415
 
     from pydantic import ValidationError  # noqa: PLC0415
 
@@ -501,7 +520,7 @@ def _dispatch_live_order(
     safe_account = account_ref(account_id)
     try:
         safety_ctx = gate_order(typed_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
-        result = asyncio.run(
+        result = _run_on_client_loop(
             router.place_order(
                 request_ctx,
                 order=typed_order,
@@ -710,7 +729,6 @@ def _gated_write_dispatch(
     coroutine. Mirrors the ``place`` path's fail-closed matrix
     (503/403/503/500) and echoes ``order_id`` on success.
     """
-    import asyncio  # noqa: PLC0415
 
     from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
     from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
@@ -741,7 +759,7 @@ def _gated_write_dispatch(
 
     try:
         safety_ctx = gate_order(canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
-        asyncio.run(dispatch(router, request_ctx, safety_ctx))
+        _run_on_client_loop(dispatch(router, request_ctx, safety_ctx))
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | order=%s: %s", op, safe_order, exc)
         return jsonify({"status": "error", "message": "Order refused"}), 403
@@ -1653,7 +1671,6 @@ def _gated_verb_write(
     Returns:
         A ``(flask.Response, http_status_code)`` tuple.
     """
-    import asyncio  # noqa: PLC0415
 
     from flinttrade_core.exceptions import (  # noqa: PLC0415
         BrokerError,
@@ -1699,7 +1716,7 @@ def _gated_verb_write(
     canonical: dict[str, Any] = {"_op": verb, **fields}
     try:
         safety_ctx = gate_broker_write(verb, canonical, request_ctx, adapter_id, account_id=account_id)
-        result = asyncio.run(
+        result = _run_on_client_loop(
             router.execute_gated(
                 request_ctx,
                 verb=verb,
@@ -1791,7 +1808,6 @@ def _gated_broker_read(
         A ``(flask.Response, http_status_code)`` tuple; 200 carries
         ``{"status": "success", "data": [...]}``.
     """
-    import asyncio  # noqa: PLC0415
 
     from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
@@ -1829,7 +1845,7 @@ def _gated_broker_read(
             raise UnsupportedCapabilityError(
                 f"broker adapter {adapter_id!r} does not support the {read_verb!r} listing"
             )
-        rows = asyncio.run(method(session))
+        rows = _run_on_client_loop(method(session))
     except SafetyBypassError as exc:
         logger.warning(
             "Broker read %s refused | adapter=%s account=%s: %s",

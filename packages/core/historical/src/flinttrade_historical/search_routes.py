@@ -26,9 +26,15 @@ logger = logging.getLogger("flinttrade.historical.search_routes")
 
 # Module-level imports so tests can patch at the correct namespace.
 try:
-    from flinttrade_core.openalgo_client import resolve_openalgo_client
+    from flinttrade_core.openalgo_client import (
+        client_call_sync,
+        client_close_sync,
+        resolve_openalgo_client,
+    )
 except Exception:  # pragma: no cover
     resolve_openalgo_client = None  # type: ignore[assignment,misc]
+    client_call_sync = None  # type: ignore[assignment,misc]
+    client_close_sync = None  # type: ignore[assignment,misc]
 
 search_bp = Blueprint("search", __name__, url_prefix="/api/v1")
 
@@ -97,10 +103,10 @@ def search_symbols() -> tuple[Any, int]:
 
         client, close_client = resolve_openalgo_client()
         try:
-            raw = _run_async(client.search(query=query))
+            raw = client_call_sync(client, client.search(query=query))
         finally:
             if close_client:
-                _run_async(client.close())
+                client_close_sync(client)
 
         data = raw.get("data", raw) if isinstance(raw, dict) else raw
         results: list[dict[str, Any]] = data if isinstance(data, list) else []

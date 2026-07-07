@@ -147,9 +147,12 @@ def _live_option_chain(symbol: str, exchange: str, expiry: str | None = None) ->
     client = current_app.config.get("OPENALGO_CLIENT")
     if client is not None:
         try:
-            import asyncio  # noqa: PLC0415
 
-            chain = asyncio.run(client.option_chain(symbol, exchange))
+            # One-owner-loop rule: the shared client's pooled connections are
+            # loop-affine; run on its owner loop, never a fresh asyncio.run().
+            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+            chain = client_call_sync(client, client.option_chain(symbol, exchange))
             strikes = getattr(chain, "strikes", None) or []
             if strikes:
                 return {"strikes": [s.model_dump() for s in strikes]}

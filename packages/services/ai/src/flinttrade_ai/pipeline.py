@@ -107,22 +107,38 @@ class SignalPipeline:
             )
             close_client = True
 
-        try:
-            rows = _run_async(
-                client.history(
+        # Fetch AND close on ONE loop. Running close on a second fresh loop
+        # raised "Event loop is closed" from the finally block AFTER a
+        # successful fetch (the keep-alive connection's transport belonged to
+        # the first, already-closed loop) — which superseded the return and
+        # silently zeroed every AI signal cycle.
+        async def _fetch_and_close() -> Any:
+            try:
+                return await client.history(
                     symbol=symbol,
                     exchange=exchange,
                     interval=self.interval,
                     start_date=start.strftime("%Y-%m-%d"),
                     end_date=end.strftime("%Y-%m-%d"),
                 )
-            )
+            finally:
+                if close_client:
+                    await client.close()
+
+        try:
+            if close_client:
+                # Short-lived fallback client: call + close on ONE fresh loop.
+                rows = _run_async(_fetch_and_close())
+            else:
+                # Shared/injected client: marshal onto its owner loop when it
+                # is a real OpenAlgoClient (isinstance-guarded inside — test
+                # fakes fall back to a plain fresh loop).
+                from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+                rows = client_call_sync(client, _fetch_and_close())
         except Exception as exc:
             logger.error("History fetch failed for %s: %s", symbol, exc)
             return []
-        finally:
-            if close_client:
-                _run_async(client.close())
 
         return _normalise_history_rows(rows)
 
