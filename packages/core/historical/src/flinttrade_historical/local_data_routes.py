@@ -175,7 +175,11 @@ def download_bhavcopy() -> tuple[Any, int]:
     try:
         result = downloader.download_range(start, end, segments)
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        logger.info("Bhavcopy range rejected: %s", exc)
+        return jsonify({
+            "status": "error",
+            "message": "Invalid range: end must not precede start and the span is capped at 31 days per call",
+        }), 400
     except Exception as exc:
         logger.warning("Bhavcopy download failed: %s", exc)
         return jsonify({"status": "error", "message": "Bhavcopy download failed"}), 500

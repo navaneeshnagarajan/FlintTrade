@@ -147,7 +147,9 @@ class TestBhavcopyRoute:
             json={"start": "2026-01-01", "end": "2026-03-01"},
         )
         assert resp.status_code == 400
-        assert "Range too large" in resp.get_json()["message"]
+        # Generic message — exception text is logged, never reflected (CodeQL
+        # stack-trace-exposure class).
+        assert "capped at 31 days" in resp.get_json()["message"]
 
     def test_download_with_injected_saver(self, client, monkeypatch, tmp_path):
         # Patch the jugaad saver resolution so the route runs offline.

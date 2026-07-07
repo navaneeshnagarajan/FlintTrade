@@ -196,8 +196,11 @@ def update_watchlist() -> Any:
             recorder.add_symbols(instruments, mode=mode)
         else:
             recorder.remove_symbols(instruments, mode=mode)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({
+            "status": "error",
+            "message": "mode must be one of ltp, quote or depth",
+        }), 400
 
     return jsonify({
         "status": "success",

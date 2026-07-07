@@ -116,7 +116,7 @@ def chart_preferences() -> tuple[Any, int]:
         return err
     if indicator_sets is not None:
         for name, indicators in indicator_sets.items():
-            indicator_list, err = _as_indicator_list(indicators, f"indicator_sets.{name}")
+            indicator_list, err = _as_indicator_list(indicators, "indicator_sets entries")
             if err is not None:
                 return err
             prefs.save_indicator_set(user_id, str(name), indicator_list or [])
@@ -132,7 +132,7 @@ def chart_preferences() -> tuple[Any, int]:
         return err
     if layouts is not None:
         for name, layout_value in layouts.items():
-            layout, err = _as_dict(layout_value, f"layouts.{name}")
+            layout, err = _as_dict(layout_value, "layouts entries")
             if err is not None:
                 return err
             prefs.save_layout(user_id, str(name), layout or {})

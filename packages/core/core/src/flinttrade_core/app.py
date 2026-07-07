@@ -2424,10 +2424,11 @@ def create_flask_app(
                 ws.set("openalgo.port", _coerce_port(port, "port"))
             if has_ws_port:
                 ws.set("openalgo.ws_port", _coerce_port(ws_port, "ws_port"))
-        except ValueError as exc:
+        except ValueError:
+            # Fixed message — never echo exception text into a response.
             return jsonify({
                 "status": "error",
-                "message": str(exc),
+                "message": "port and ws_port must be integers between 1 and 65535",
             }), 400
         except Exception as exc:
             logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)

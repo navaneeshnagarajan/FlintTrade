@@ -77,4 +77,4 @@ def test_post_chart_preferences_validates_indicator_sets(client: FlaskClient) ->
     response = client.post("/api/v1/chart", json={"indicator_sets": {"bad": {"name": "EMA"}}})
 
     assert response.status_code == 400
-    assert response.get_json()["message"] == "indicator_sets.bad must be an array of objects"
+    assert response.get_json()["message"] == "indicator_sets entries must be an array of objects"

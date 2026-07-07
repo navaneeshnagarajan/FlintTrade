@@ -647,7 +647,8 @@ def webhooks_create() -> tuple[Any, int]:
         try:
             path = _normalise_webhook_path(path_raw, source)
         except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+            logger.info("Webhook path rejected: %s", exc)
+            return jsonify({"status": "error", "message": "Invalid webhook path"}), 400
 
         secret_store = _get_webhook_secret_store()
         if secret and secret_store is None:

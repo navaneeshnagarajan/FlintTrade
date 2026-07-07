@@ -138,9 +138,15 @@ def capture_historical_chain(symbol: str, expiry: str) -> tuple[Any, int]:
     capture_error = getattr(tracker, "last_capture_error", None)
     if rows_inserted == 0 and capture_error:
         status_code = 503 if "No OpenAlgo client configured" in capture_error else 502
+        logger.warning("Historical chain capture failed: %s", capture_error)
+        message = (
+            "Historical chain capture failed: no OpenAlgo client is configured"
+            if status_code == 503
+            else "Historical chain capture failed — see the backend log for detail"
+        )
         return jsonify({
             "status": "error",
-            "message": f"Historical chain capture failed: {capture_error}",
+            "message": message,
             "data": {
                 "symbol": symbol_value,
                 "expiry": expiry,
