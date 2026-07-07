@@ -48,7 +48,10 @@ _RAW_ORDER_ALLOWLIST = {
     # (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
     #  go through an injected gated executor — SafetySystem → gate_order →
     #  BrokerRouter — and it fails closed without one.)
-    "packages/services/engine/src/flinttrade_engine/bracket_order.py",
+    # (flinttrade_engine/bracket_order.py REMOVED 2026-07-07: every bracket leg
+    #  now dispatches through the injected gated dispatchers — SafetySystem →
+    #  gate_order → BrokerRouter — and the service holds no raw client; the pin
+    #  test_bracket_order_writes_only_through_gated_router below keeps it out.)
     "packages/services/engine/src/flinttrade_engine/router.py",
     "packages/services/engine/src/flinttrade_engine/strategies/wheel_live.py",
     # Dormant automation service, not mounted by the FlintTrade core app. It
@@ -77,11 +80,10 @@ _ROUTE_ORDER_RE = re.compile(r"\.route_order\s*\(")
 
 # Raw OpenAlgoClient modify/cancel calls were another G12 blind spot: the older
 # guard watched place-order-ish attributes and endpoint strings, so a direct
-# ``client.cancel_order(...)`` could slip through. One pre-existing bracket-order
-# service still owns best-effort leg cancellation and is tracked as debt.
-_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST = {
-    "packages/services/engine/src/flinttrade_engine/bracket_order.py",
-}
+# ``client.cancel_order(...)`` could slip through. The allowlist is EMPTY as of
+# 2026-07-07 (bracket_order.py leg cancellation now routes through the gated
+# BrokerRouter cancel verb) — keep it that way.
+_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST: set[str] = set()
 _OPENALGO_MOD_CANCEL_RE = re.compile(r"\b(?:self\.)?[_\w]*client\.(modify_order|cancel_order)\s*\(")
 
 _GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "flinttrade_gateway"
@@ -530,6 +532,74 @@ def test_no_new_raw_openalgo_modify_cancel_calls():
         "Raw OpenAlgoClient modify/cancel call outside the gated BrokerRouter path "
         "(contract §8.1 / G12):\n" + "\n".join(offenders)
     )
+
+
+# The bracket service was re-architected off the raw-client debt allowlists on
+# 2026-07-07: every leg write now traverses SafetySystem -> gate_order ->
+# BrokerRouter via dispatchers injected by the core app. This pin keeps the
+# asymmetry exact — a future raw ``client.place_order(...)`` / ``client.
+# cancel_order(...)`` in bracket_order.py fails HERE even if someone also
+# re-adds the module to a generic allowlist above.
+_BRACKET_MODULE = "packages/services/engine/src/flinttrade_engine/bracket_order.py"
+_BRACKET_WRITE_RE = re.compile(
+    r"\.(place_order|placeorder|placesmartorder|modify_order|cancel_order"
+    r"|close_position|closeposition)\s*\("
+)
+
+
+def test_bracket_order_writes_only_through_gated_router():
+    """§8.1 pin: EVERY broker-write call in bracket_order.py is router-gated.
+
+    Three assertions:
+      * every ``.place_order(`` / ``.cancel_order(`` / ``.modify_order(`` (and
+        the OpenAlgo spellings) attribute call sits on the canonical gated
+        BrokerRouter receiver — a raw client write fails here;
+      * the module still mints through ``gate_order`` (the sole SafetyContext
+        producer), so the dispatchers cannot silently drop the gate; and
+      * the service holds NO raw client handle (``self._client`` is gone for
+        good — writes flow only through the injected dispatchers).
+    """
+    path = _REPO_ROOT / _BRACKET_MODULE
+    src = path.read_text(encoding="utf-8")
+
+    offenders: list[str] = []
+    for n, line in enumerate(src.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("#") or "def " in stripped:
+            continue
+        if not _BRACKET_WRITE_RE.search(line):
+            continue
+        if _is_gated_receiver(_BRACKET_MODULE, line):
+            continue
+        offenders.append(f"{_BRACKET_MODULE}:{n}: {stripped}")
+    assert not offenders, (
+        "Ungated broker write in the bracket service (contract §8.1) — every leg "
+        "must traverse gate_order -> BrokerRouter via the injected dispatchers:\n"
+        + "\n".join(offenders)
+    )
+
+    assert "gate_order(" in src, (
+        "bracket_order.py no longer mints through gate_order — the leg "
+        "dispatchers must keep using the sole SafetyContext producer (§8.1)"
+    )
+    assert re.search(r"self\._client\b", src) is None, (
+        "bracket_order.py re-grew a raw client handle (self._client) — the "
+        "service must hold only the injected gated dispatchers (§8.1)"
+    )
+
+
+def test_bracket_module_is_not_on_any_raw_debt_allowlist():
+    """The bracket service must never quietly rejoin a raw-write debt allowlist."""
+    for allowlist_name, allowlist in (
+        ("_RAW_ORDER_ALLOWLIST", _RAW_ORDER_ALLOWLIST),
+        ("_RAW_ROUTE_ORDER_ALLOWLIST", _RAW_ROUTE_ORDER_ALLOWLIST),
+        ("_RAW_OPENALGO_MOD_CANCEL_ALLOWLIST", _RAW_OPENALGO_MOD_CANCEL_ALLOWLIST),
+        ("_RAW_EXTENDED_VERB_ALLOWLIST", _RAW_EXTENDED_VERB_ALLOWLIST),
+    ):
+        assert _BRACKET_MODULE not in allowlist, (
+            f"bracket_order.py was re-added to {allowlist_name} — its writes were "
+            "gated on 2026-07-07 and must stay that way (contract §8.1)"
+        )
 
 
 def test_raw_openalgo_modify_cancel_allowlist_has_no_stale_entries():

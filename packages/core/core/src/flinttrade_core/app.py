@@ -1960,8 +1960,25 @@ def create_flask_app(
     from .chart_prefs_routes import chart_prefs_bp  # noqa: PLC0415
     app.register_blueprint(chart_prefs_bp)
 
-    # Register Bracket Order blueprint (/api/v1/orders/bracket*)
+    # Register Bracket Order blueprint (/api/v1/orders/bracket*) and construct
+    # the service it delegates to. Every bracket leg WRITE traverses the same
+    # gated chain as a human /place order — SafetySystem L1-L5 -> gate_order
+    # (one-shot HMAC SafetyContext) -> BrokerRouter -> adapter — through the
+    # injected dispatchers; the service never holds a raw broker/OpenAlgo
+    # client for writes (gateway/tests/test_no_legacy_order_path.py pins it).
+    # Practice-mode JWTs are refused 403 practice_unsupported at the route
+    # boundary (mode_guard.require_live_unlocked): the sandbox cannot execute
+    # multi-leg brackets, so an honest refusal beats a silent live order.
+    from flinttrade_engine.bracket_order import (  # noqa: PLC0415
+        BracketOrderService,
+        build_gated_leg_dispatchers,
+    )
     from flinttrade_engine.bracket_routes import bracket_bp  # noqa: PLC0415
+    _bracket_place_leg, _bracket_cancel_leg = build_gated_leg_dispatchers(app)
+    app.config["BRACKET_SERVICE"] = BracketOrderService(
+        place_leg=_bracket_place_leg,
+        cancel_leg=_bracket_cancel_leg,
+    )
     app.register_blueprint(bracket_bp)
 
     # Register Position Sizer blueprint (/api/v1/position/*)

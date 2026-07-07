@@ -26,7 +26,11 @@ from pathlib import Path
 _APP = Path(__file__).resolve().parents[1] / "src" / "flinttrade_core" / "app.py"
 
 # Executors confirmed (audit [0]) to place ungated orders — must not be wired.
-_UNGATED_EXECUTOR_KEYS = ("BASKET_EXECUTOR", "SPLIT_EXECUTOR", "BRACKET_SERVICE")
+# BRACKET_SERVICE graduated 2026-07-07: every bracket leg now traverses
+# SafetySystem -> gate_order -> BrokerRouter via injected dispatchers
+# (build_gated_leg_dispatchers in app.py; pinned by
+# gateway/tests/test_no_legacy_order_path.py and the engine bracket tests).
+_UNGATED_EXECUTOR_KEYS = ("BASKET_EXECUTOR", "SPLIT_EXECUTOR")
 
 
 def test_advanced_executors_not_wired_until_gated() -> None:
