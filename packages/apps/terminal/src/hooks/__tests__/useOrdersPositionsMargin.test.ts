@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import type { Order, Position, MarginData } from "@/types/api";
@@ -37,13 +37,19 @@ vi.mock("@/services/api", () => ({
   getMargin: (...args: [string, string, number, string, string]) => mockGetMargin(...args),
 }));
 
-// isMarketHours drives refetchInterval. Pinning it makes test timing
-// deterministic regardless of when the suite runs.
+// isMarketHours drives refetchInterval and the session-union helper.
+// Controllable per test; defaults to "everything closed" for determinism.
+const mockIsMarketHours = vi.fn<(exchange?: string) => boolean>(() => false);
+
 vi.mock("@/lib/market", () => ({
-  isMarketHours: () => false,
+  isMarketHours: (exchange?: string) => mockIsMarketHours(exchange),
 }));
 
-import { useOrders } from "../useOrders";
+import {
+  useOrders,
+  emitOrdersChanged,
+  isAnyOrderSessionOpen,
+} from "../useOrders";
 import { usePositions } from "../usePositions";
 import { useMargin } from "../useMargin";
 
@@ -68,6 +74,9 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations — re-pin the "all sessions closed"
+  // default so a per-test mockImplementation cannot leak forward.
+  mockIsMarketHours.mockImplementation(() => false);
 });
 
 // ---------------------------------------------------------------------------
@@ -111,6 +120,111 @@ describe("useOrders", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect((result.current.error as Error).message).toContain("unreachable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useOrders — refetch on order placement events
+// ---------------------------------------------------------------------------
+
+describe("useOrders — order placement events", () => {
+  it("refetches when the dedicated ordersChanged event fires", async () => {
+    mockGetOrderbook.mockResolvedValue([]);
+
+    renderHook(() => useOrders(), { wrapper: createWrapper() });
+    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      emitOrdersChanged();
+    });
+
+    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(2));
+  });
+
+  it("refetches when a category:'order' notification is emitted", async () => {
+    mockGetOrderbook.mockResolvedValue([]);
+
+    renderHook(() => useOrders(), { wrapper: createWrapper() });
+    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(1));
+
+    // OrderPad emits this on the Notification Centre bus after placeOrder.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:notify", {
+          detail: { category: "order", title: "Order placed: BUY 50 NIFTY", body: "Order ID 1" },
+        }),
+      );
+    });
+
+    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores non-order notifications", async () => {
+    mockGetOrderbook.mockResolvedValue([]);
+
+    renderHook(() => useOrders(), { wrapper: createWrapper() });
+    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:notify", {
+          detail: { category: "system", title: "Mode changed", body: "Practice mode" },
+        }),
+      );
+    });
+
+    // Give any (incorrect) invalidation a chance to run before asserting.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockGetOrderbook).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not listen for events when disabled", async () => {
+    mockGetOrderbook.mockResolvedValue([]);
+
+    renderHook(() => useOrders({ enabled: false }), { wrapper: createWrapper() });
+
+    act(() => {
+      emitOrdersChanged();
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:notify", {
+          detail: { category: "order", title: "Order placed", body: "x" },
+        }),
+      );
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockGetOrderbook).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isAnyOrderSessionOpen — union of Indian market sessions
+// ---------------------------------------------------------------------------
+
+describe("isAnyOrderSessionOpen", () => {
+  it("is false when every session is closed", () => {
+    expect(isAnyOrderSessionOpen()).toBe(false);
+  });
+
+  it("is true when only the MCX evening session is open (post NSE close)", () => {
+    mockIsMarketHours.mockImplementation((exchange) => exchange === "MCX");
+
+    expect(isAnyOrderSessionOpen()).toBe(true);
+  });
+
+  it("is true when only the CDS currency session is open", () => {
+    mockIsMarketHours.mockImplementation((exchange) => exchange === "CDS");
+
+    expect(isAnyOrderSessionOpen()).toBe(true);
+  });
+
+  it("checks the NSE/BSE/MCX/CDS session union (never NSE-only)", () => {
+    mockIsMarketHours.mockImplementation(() => false);
+
+    isAnyOrderSessionOpen();
+
+    const queried = mockIsMarketHours.mock.calls.map(([exchange]) => exchange);
+    expect(queried).toEqual(["NSE", "BSE", "MCX", "CDS"]);
   });
 });
 

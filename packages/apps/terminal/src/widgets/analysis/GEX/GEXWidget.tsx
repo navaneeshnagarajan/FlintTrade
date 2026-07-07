@@ -58,6 +58,18 @@ function fmtStrike(v: number): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(v);
 }
 
+/**
+ * True when the payload carries the backend's `is_sample_data: true` honesty
+ * flag (propagated onto object payloads by the ftApi response unwrapper).
+ */
+function carriesSampleFlag(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { is_sample_data?: unknown }).is_sample_data === true
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Selector sub-component
 // ---------------------------------------------------------------------------
@@ -118,6 +130,10 @@ function GEXWidget() {
   );
 
   const data = isConnected ? liveData : SAMPLE_GEX_DATA;
+  // Honesty affordance keyed on the payload FLAG, not connection state alone:
+  // the backend serves a clearly-flagged sample GEX payload (is_sample_data)
+  // when it has no live chain, even while a broker is connected.
+  const isSample = !isConnected || carriesSampleFlag(liveData);
 
   // Build Plotly traces for grouped bar chart (Call GEX green, Put GEX red)
   const { barData, lineData, barLayout, lineLayout } = useMemo<{
@@ -280,6 +296,16 @@ function GEXWidget() {
 
       {/* Controls bar */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+        {isSample && (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing demo data, not live gamma exposure"
+            title="Demo data — fabricated sample values, not a live option chain."
+          >
+            Demo data
+          </span>
+        )}
         <Selector
           value={symbol}
           options={SYMBOLS}

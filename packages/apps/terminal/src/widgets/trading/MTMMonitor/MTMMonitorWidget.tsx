@@ -37,10 +37,12 @@ import {
   FLINT_TRANSPARENT_CHART_LAYOUT,
   createFlintAreaChart,
 } from "@flinttrade/design-system";
-import { TrendingUp, TrendingDown, AlertTriangle, Target } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertTriangle, Target, Clock } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { isMarketHours } from "@/lib/market";
 import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -122,12 +124,42 @@ function StatCard({
 }
 
 // ---------------------------------------------------------------------------
+// Staleness — a frozen MTM figure is worse than an error. Data older than the
+// threshold (relative to the poll cadence) is flagged so the operator never
+// trades against a silently stale P&L.
+// ---------------------------------------------------------------------------
+function staleThresholdMs(): number {
+  return isMarketHours() ? 30_000 : 150_000;
+}
+
+function formatUpdatedAt(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+}
+
+// ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
 function MTMMonitorWidget(_props: WidgetProps) {
   const isBrokerConnected = useBrokerConnected();
-  const { data: positions } = usePositions({ enabled: isBrokerConnected });
+  const {
+    data: positions,
+    isError: isPositionsError,
+    error: positionsError,
+    refetch: refetchPositions,
+    isFetching: isPositionsFetching,
+    dataUpdatedAt,
+  } = usePositions({ enabled: isBrokerConnected });
   const { data: _funds } = useFunds({ enabled: isBrokerConnected }); // keeps store updated
+
+  // Ticks every 10s so the last-updated chip can flag staleness between polls.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 10_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const hasUpdate = typeof dataUpdatedAt === "number" && dataUpdatedAt > 0;
+  const isStale = hasUpdate && nowMs - dataUpdatedAt > staleThresholdMs();
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -378,11 +410,57 @@ function MTMMonitorWidget(_props: WidgetProps) {
               Broker required
             </Badge>
           )}
+          {isBrokerConnected && hasUpdate && (
+            <span
+              className={`text-xxs font-mono tabular-nums flex items-center gap-0.5 ${
+                isStale ? "text-warning" : "text-text-muted"
+              }`}
+              role="status"
+              aria-label={`MTM last updated ${formatUpdatedAt(dataUpdatedAt)}${isStale ? " — stale" : ""}`}
+              title={
+                isStale
+                  ? "Position data has not refreshed recently — MTM may be stale."
+                  : "Time of the last successful position refresh."
+              }
+            >
+              <Clock size={8} aria-hidden="true" />
+              {isStale ? "Stale since " : "Updated "}
+              {formatUpdatedAt(dataUpdatedAt)}
+            </span>
+          )}
           <Badge className={`text-xxs px-1.5 py-0 border ${status.color}`}>
             {status.label}
           </Badge>
         </div>
       </div>
+
+      {/* Position-feed failure banner — the chart freezes on the last good
+          tick, so say so instead of silently showing a frozen P&L. */}
+      {isBrokerConnected && isPositionsError && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 px-3 py-1.5 border-b border-loss/20 bg-loss/10 shrink-0"
+        >
+          <AlertTriangle size={12} className="text-loss shrink-0" aria-hidden="true" />
+          <span className="flex-1 text-xs text-loss leading-tight">
+            Position feed failed — MTM figures are frozen
+            {hasUpdate ? ` at ${formatUpdatedAt(dataUpdatedAt)}` : ""}
+            {positionsError instanceof Error && positionsError.message
+              ? `: ${positionsError.message}`
+              : "."}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void refetchPositions()}
+            disabled={isPositionsFetching}
+            className="h-5 px-2 text-xxs border-loss/30 text-loss hover:bg-loss/10 hover:text-loss shrink-0"
+            aria-label="Retry position fetch"
+          >
+            {isPositionsFetching ? "Retrying…" : "Retry"}
+          </Button>
+        </div>
+      )}
 
       {/* Stat row */}
       <div className="flex gap-1 px-2 py-1.5 shrink-0">

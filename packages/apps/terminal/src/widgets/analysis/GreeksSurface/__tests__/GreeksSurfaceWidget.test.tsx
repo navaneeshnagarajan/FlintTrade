@@ -113,6 +113,34 @@ describe("GreeksSurfaceWidget", () => {
     expect(screen.getByTestId("feature-teaser").getAttribute("data-feature")).toBe(
       "Greeks Surface",
     );
+    // Visible honesty affordance for the fabricated surface.
+    expect(screen.getByText("Demo data")).toBeTruthy();
+  });
+
+  it("shows the Demo data badge when a connected payload is flagged is_sample_data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseGreeksSurface.mockReturnValue({
+      ...IDLE_QUERY,
+      data: { expiries: SAMPLE_GREEKS_SURFACE_DATA, isSampleData: true },
+    });
+
+    render(<GreeksSurfaceWidget />, { wrapper });
+
+    expect(screen.getByText("Demo data")).toBeTruthy();
+    // No teaser when connected — the badge alone flags the fabricated data.
+    expect(screen.queryByTestId("feature-teaser")).toBeNull();
+  });
+
+  it("hides the Demo data badge for a live (unflagged) connected payload", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseGreeksSurface.mockReturnValue({
+      ...IDLE_QUERY,
+      data: { expiries: SAMPLE_GREEKS_SURFACE_DATA, isSampleData: false },
+    });
+
+    render(<GreeksSurfaceWidget />, { wrapper });
+
+    expect(screen.queryByText("Demo data")).toBeNull();
   });
 
   it("shows loading state when connected and fetching", () => {
@@ -154,7 +182,7 @@ describe("GreeksSurfaceWidget", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     mockUseGreeksSurface.mockReturnValue({
       ...IDLE_QUERY,
-      data: SAMPLE_GREEKS_SURFACE_DATA,
+      data: { expiries: SAMPLE_GREEKS_SURFACE_DATA, isSampleData: false },
     });
 
     render(<GreeksSurfaceWidget />, { wrapper });
@@ -168,7 +196,7 @@ describe("GreeksSurfaceWidget", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     mockUseGreeksSurface.mockReturnValue({
       ...IDLE_QUERY,
-      data: SAMPLE_GREEKS_SURFACE_DATA,
+      data: { expiries: SAMPLE_GREEKS_SURFACE_DATA, isSampleData: false },
     });
 
     render(<GreeksSurfaceWidget />, { wrapper });
@@ -195,7 +223,7 @@ describe("GreeksSurfaceWidget", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     mockUseGreeksSurface.mockReturnValue({
       ...IDLE_QUERY,
-      data: SAMPLE_GREEKS_SURFACE_DATA,
+      data: { expiries: SAMPLE_GREEKS_SURFACE_DATA, isSampleData: false },
     });
 
     render(<GreeksSurfaceWidget />, { wrapper });

@@ -40,13 +40,16 @@ const mockGetPositionbook = getPositionbook as ReturnType<typeof vi.fn>;
 // ---------------------------------------------------------------------------
 
 function makePosition(symbol: string, pnl: number, qty = 1) {
+  // (ltp − averagePrice) × qty reproduces `pnl` so the locally computed MTM
+  // (preferred over the broker figure) equals the requested value; closed
+  // positions (qty = 0) fall back to the broker-supplied pnl.
   return {
     symbol,
     exchange: "NSE",
     product:  "MIS",
     quantity: qty,
     averagePrice: 100,
-    ltp: 110,
+    ltp: qty === 0 ? 110 : 100 + pnl / qty,
     pnl,
     pnlPercent: 10,
   };
@@ -167,5 +170,65 @@ describe("IntradayPnLWidget", () => {
     // Net should still be 500
     const netEl = screen.getByTestId("net-pnl");
     expect(netEl.textContent).toContain("500");
+  });
+
+  // ── Broker numeric coercion + local P&L (OpenAlgo quirk 4) ────────────────
+
+  it("computes open-position P&L locally instead of trusting a wrong broker pnl", async () => {
+    // Broker reports a wildly wrong pnl; local MTM = (110 − 100) × 10 = 100.
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 10, averagePrice: 100, ltp: 110, pnl: 999999, pnlPercent: 0 },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    const netEl = screen.getByTestId("net-pnl");
+    expect(netEl.textContent).toContain("100.00");
+    expect(netEl.textContent).not.toContain("9,99,999");
+  });
+
+  it("coerces string-typed quantity/ltp/average_price from real adapters", async () => {
+    // Wire-format row: snake_case average_price and every numeric as a string.
+    // Local MTM = (150 − 134) × 75 = 1,200.
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "NIFTY24APR24000CE", exchange: "NFO", product: "NRML", quantity: "75", average_price: "134", ltp: "150", pnl: "0" },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    const netEl = screen.getByTestId("net-pnl");
+    expect(netEl.textContent).toContain("1,200.00");
+  });
+
+  it("treats a string \"0\" quantity as a closed position (realised broker pnl)", async () => {
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: "0", pnl: "150.25" },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    // Falls into the Realised bucket (local computation impossible for closed);
+    // the same figure legitimately repeats in Net and Peak P&L, so assert the
+    // buckets via their stat cards rather than a bare text query.
+    expect(screen.getByText("Realised").parentElement).toHaveTextContent("+₹150.25");
+    expect(screen.getByText("Unrealised").parentElement).toHaveTextContent("+₹0.00");
+    expect(screen.getByTestId("net-pnl").textContent).toContain("150.25");
+  });
+
+  it("falls back to the broker pnl when LTP or average price is missing", async () => {
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 5, pnl: "250.5" },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId("net-pnl").textContent).toContain("250.50");
+  });
+
+  it("guards against non-numeric garbage instead of rendering NaN", async () => {
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: "abc", pnl: "N/A", ltp: "", average_price: null },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    const netEl = screen.getByTestId("net-pnl");
+    expect(netEl.textContent).toContain("0.00");
+    expect(netEl.textContent).not.toContain("NaN");
   });
 });

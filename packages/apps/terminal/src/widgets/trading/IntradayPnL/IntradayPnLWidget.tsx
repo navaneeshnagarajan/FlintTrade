@@ -95,13 +95,50 @@ function strategyOf(pos: Position): string {
 }
 
 /**
- * OpenAlgo returns a single pnl field per position.
+ * Positionbook rows arrive unnormalised from the wire: real adapters send
+ * numerics as strings and some use snake_case field names.
+ */
+type WirePosition = Position & { average_price?: string | number };
+
+/** Coerce a possibly string-typed broker numeric to a finite number, else null. */
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Coerced quantity — string "0" and missing values both mean flat. */
+function quantityOf(pos: Position): number {
+  return toFiniteNumber(pos.quantity) ?? 0;
+}
+
+/**
+ * Effective P&L for a position. OpenAlgo's pnl field is wrong for some
+ * brokers (CLAUDE.md quirk 4), so for open positions we compute the
+ * mark-to-market locally as (LTP − average price) × quantity whenever those
+ * inputs exist, and fall back to the broker-supplied pnl only when the local
+ * computation is impossible (closed position, or LTP/average price missing).
+ * All inputs are coerced defensively — adapters send string-typed numerics.
+ */
+function effectivePnL(pos: Position): number {
+  const qty = quantityOf(pos);
+  const ltp = toFiniteNumber(pos.ltp);
+  const avg = toFiniteNumber(
+    (pos as WirePosition).averagePrice ?? (pos as WirePosition).average_price,
+  );
+  if (qty !== 0 && ltp !== null && avg !== null) {
+    return (ltp - avg) * qty;
+  }
+  return toFiniteNumber(pos.pnl) ?? 0;
+}
+
+/**
  * For closed positions (qty === 0) we treat the full pnl as realised;
  * for open positions the full pnl is unrealised.
  */
 function splitPnL(pos: Position): { realised: number; unrealised: number } {
-  const pnl = pos.pnl ?? 0;
-  if (pos.quantity === 0) return { realised: pnl, unrealised: 0 };
+  const pnl = effectivePnL(pos);
+  if (quantityOf(pos) === 0) return { realised: pnl, unrealised: 0 };
   return { realised: 0, unrealised: pnl };
 }
 
@@ -110,7 +147,7 @@ function buildStrategyPnL(positions: Position[]): StrategyPnL[] {
   const map = new Map<string, number>();
   for (const pos of positions) {
     const s = strategyOf(pos);
-    map.set(s, (map.get(s) ?? 0) + (pos.pnl ?? 0));
+    map.set(s, (map.get(s) ?? 0) + effectivePnL(pos));
   }
   return Array.from(map.entries())
     .map(([strategy, pnl]) => ({ strategy, pnl }))

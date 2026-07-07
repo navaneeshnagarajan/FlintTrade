@@ -2,7 +2,7 @@
 // Replaces direct getPositionbook() call with usePositions() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table for sortable positions grid.
 import { useMemo, useState, useCallback, memo } from "react";
-import { Clock, Layers, FileDown, LogOut, Repeat } from "lucide-react";
+import { Clock, Layers, FileDown, LogOut, Repeat, SquareX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { downloadExcel } from "@/services/ftApi.data";
 import { post } from "@/services/ftApi.helpers";
+import { placeOrder } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { BrokerTargetSelect, useBrokerOrderTarget } from "@/widgets/orders/OrdersManagerShared";
 import { useModeStore } from "@/stores/modeStore";
@@ -182,6 +183,110 @@ function ConvertPositionDialog({ position, target, onClose, onConverted }: Conve
 }
 
 // ---------------------------------------------------------------------------
+// Square-off dialog (per-position exit through the existing gated place path)
+// ---------------------------------------------------------------------------
+
+interface SquareOffDialogProps {
+  position: PositionRow;
+  onClose: () => void;
+  onSquaredOff: () => void;
+}
+
+function SquareOffDialog({ position, onClose, onSquaredOff }: SquareOffDialogProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const exitAction: "BUY" | "SELL" = position.qty > 0 ? "SELL" : "BUY";
+  const exitQty = Math.abs(position.qty);
+  // The counter-order must carry the position's own product, or the broker
+  // opens a fresh position in a different product instead of squaring off.
+  const product = (PRODUCTS as readonly string[]).includes(position.product)
+    ? (position.product as (typeof PRODUCTS)[number])
+    : null;
+
+  const handleSquareOff = useCallback(async () => {
+    if (!product) return;
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      // Existing gated order path: SafetySystem → gate_order → BrokerRouter.
+      // Identical route to the Order Pad — no new order path is introduced.
+      await placeOrder({
+        symbol: position.symbol,
+        exchange: position.exchange,
+        action: exitAction,
+        product,
+        orderType: "MARKET",
+        quantity: exitQty,
+        price: 0,
+        triggerPrice: 0,
+        strategy: "FlintPositions",
+      });
+      emitNotification({
+        category: "order",
+        title: "Square-off submitted",
+        body: `${exitAction} ${exitQty} ${position.symbol} at market.`,
+      });
+      onSquaredOff();
+      onClose();
+    } catch (err) {
+      // Surface mode-guard 403s and broker rejections honestly — the backend
+      // message tells the operator exactly what blocked the square-off.
+      setErrorMsg(err instanceof Error ? err.message : "Square-off failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [position, product, exitAction, exitQty, onClose, onSquaredOff]);
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Square off position?</DialogTitle>
+          <DialogDescription>
+            This places a {exitAction} market order for {exitQty} {position.symbol} (
+            {position.exchange}
+            {position.product ? `, ${position.product}` : ""}) to close your{" "}
+            {position.qty > 0 ? "long" : "short"} position. Fills in a fast market can land far
+            from the last traded price, and the action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        {!product && (
+          <p className="text-xs text-loss" role="alert">
+            Cannot square off: unrecognised product
+            {position.product ? ` “${position.product}”` : ""} on this position. Close it from your
+            broker terminal instead.
+          </p>
+        )}
+        {errorMsg && (
+          <p className="text-xs text-loss" role="alert">
+            {errorMsg}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleSquareOff()}
+            disabled={isSubmitting || !product}
+            aria-label={`Confirm square off ${position.symbol}`}
+            className="bg-loss hover:bg-loss/90 text-white"
+          >
+            {isSubmitting ? "Squaring off…" : `${exitAction} ${exitQty} at market`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Exit-all dialog (gated exit_all_positions verb — typed confirmation)
 // ---------------------------------------------------------------------------
 
@@ -289,6 +394,7 @@ function PositionsWidget(_props: WidgetProps) {
   });
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
+  const [squareOffTarget, setSquareOffTarget] = useState<PositionRow | null>(null);
   const [exitAllOpen, setExitAllOpen] = useState(false);
   // Broker/account target for the gated convert + exit-all verbs. The OpenAlgo
   // bridge implements NEITHER verb (it would 501), so the operator picks a
@@ -389,16 +495,30 @@ function PositionsWidget(_props: WidgetProps) {
         header: "",
         enableSorting: false,
         cell: ({ row }) => canWritePositions ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setConvertTarget(row.original)}
-            aria-label={`Convert ${row.original.symbol}`}
-            title={`Convert ${row.original.symbol} to another product`}
-            className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
-          >
-            <Repeat size={10} aria-hidden="true" /> Convert
-          </Button>
+          <span className="inline-flex items-center gap-0.5">
+            {row.original.qty !== 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSquareOffTarget(row.original)}
+                aria-label={`Square off ${row.original.symbol}`}
+                title={`Square off ${row.original.symbol} at market`}
+                className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
+              >
+                <SquareX size={10} aria-hidden="true" /> Square off
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setConvertTarget(row.original)}
+              aria-label={`Convert ${row.original.symbol}`}
+              title={`Convert ${row.original.symbol} to another product`}
+              className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
+            >
+              <Repeat size={10} aria-hidden="true" /> Convert
+            </Button>
+          </span>
         ) : (
           <span className="text-xxs text-text-muted">Live only</span>
         ),
@@ -567,6 +687,16 @@ function PositionsWidget(_props: WidgetProps) {
           target={brokerTarget}
           onClose={() => setConvertTarget(null)}
           onConverted={() => void refetch()}
+        />
+      )}
+
+      {/* Per-position square-off confirmation — keyed so state resets per position */}
+      {squareOffTarget && (
+        <SquareOffDialog
+          key={`${squareOffTarget.symbol}-${squareOffTarget.exchange}-${squareOffTarget.product}-${squareOffTarget.qty}`}
+          position={squareOffTarget}
+          onClose={() => setSquareOffTarget(null)}
+          onSquaredOff={() => void refetch()}
         />
       )}
 

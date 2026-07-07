@@ -257,6 +257,8 @@ vi.mock("@/hooks/useChartTheme", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { createStore, Provider } from "jotai";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import ChartWidget from "../ChartWidget";
 import { useIndicators } from "../useIndicators";
 
@@ -915,5 +917,58 @@ describe("ChartWidget", () => {
       expect(encoded).not.toBeNull();
       expect(JSON.parse(encoded as string).drawings).toEqual([]);
     });
+  });
+});
+
+describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("follows a watchlist selection written to selectedSymbolAtom", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget />
+      </Provider>,
+    );
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("TCS")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("NIFTY")).not.toBeInTheDocument();
+  });
+
+  it("keeps a pinned chart's instrument when the selection changes", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget params={{ symbol: "INFY", exchange: "NSE" }} />
+      </Provider>,
+    );
+    expect(screen.getByText("INFY")).toBeInTheDocument();
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // A pinned chart (explicit panel-params symbol) ignores the selection so
+    // multi-chart preset layouts are never clobbered by a watchlist click.
+    await waitFor(() => {
+      expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "TCS", exchange: "NSE" });
+    });
+    expect(screen.getByText("INFY")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
   });
 });

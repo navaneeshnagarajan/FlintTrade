@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { useStore } from "jotai";
-import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { tickAtomFamily, selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { getWsService } from "@/services/websocket";
 import { getExpiry } from "@/services/api";
-import type { WsTick, WsInstrument } from "@/types/api";
+import type { WsTick, WsInstrument, WsMode } from "@/types/api";
 
 const INDEX_INSTRUMENTS: WsInstrument[] = [
   { symbol: "NIFTY", exchange: "NSE_INDEX" },
@@ -47,11 +47,93 @@ async function resolveMcxFutures(): Promise<Map<string, string>> {
   return map;
 }
 
+/**
+ * Declare a tick interest for one instrument.
+ *
+ * Any widget that reads live LTP from `tickAtomFamily` MUST hold a tick
+ * interest for its instrument (directly or via a launcher that sets
+ * `selectedSymbolAtom`), otherwise the atom never receives data. This hook is
+ * the standard way to declare that interest — no per-widget socket code:
+ *
+ *   useTickSubscription(symbol, exchange);           // LTP stream
+ *   useTickSubscription(symbol, exchange, "quote");  // full quote stream
+ *
+ * The WebSocket service reference-counts subscriptions, so many widgets can
+ * declare the same instrument and the wire unsubscribe only fires when the
+ * last one unmounts. Ticks arrive in `tickAtomFamily("{exchange}:{symbol}")`
+ * via the useWsBridge tick pipeline (mounted once in AppLayout).
+ *
+ * Passing a null/undefined/empty symbol or exchange is a no-op, so callers
+ * can gate the subscription on their own readiness state.
+ */
+export function useTickSubscription(
+  symbol: string | null | undefined,
+  exchange: string | null | undefined,
+  mode: WsMode = "ltp",
+): void {
+  const wsUrl = useConnectionStore((s) => s.wsUrl);
+  const apiKey = useConnectionStore((s) => s.apiKey);
+
+  useEffect(() => {
+    if (!wsUrl || !symbol || !exchange) return;
+    const ws = getWsService(wsUrl, apiKey);
+    if (!ws) return;
+    const instrument: WsInstrument = { symbol, exchange };
+    // Reference-counted: safe even when another widget already streams this
+    // instrument. While disconnected the service buffers the wire message and
+    // replays it after (re)connect, so declaring interest early is safe too.
+    ws.subscribe([instrument], mode);
+    return () => {
+      ws.unsubscribe([instrument], mode);
+    };
+  }, [wsUrl, apiKey, symbol, exchange, mode]);
+}
+
 export function useWsBridge(): void {
   const setWsConnected = useConnectionStore((s) => s.setWsConnected);
+  const setWsFailure = useConnectionStore((s) => s.setWsFailure);
   const apiKey = useConnectionStore((s) => s.apiKey);
   const wsUrl = useConnectionStore((s) => s.wsUrl);
   const store = useStore();
+
+  // Keep a live tick subscription for the terminal-wide selected instrument
+  // (set by a watchlist row click, quick trade, etc.). Consumers that read
+  // `tickAtomFamily` for the active instrument — OrderPad fund-mode sizing,
+  // OrderLadder's shared-atom fallback, the command palette — depend on this;
+  // without it their atoms stay permanently null for non-index symbols.
+  // Implemented with store.sub (not useAtomValue) so selection changes do not
+  // re-render the app shell that mounts this bridge.
+  useEffect(() => {
+    if (!wsUrl) return;
+    const ws = getWsService(wsUrl, apiKey);
+    if (!ws) return;
+
+    let current: WsInstrument | null = null;
+    const applySelection = () => {
+      const next = store.get(selectedSymbolAtom);
+      if (
+        current &&
+        next &&
+        current.symbol === next.symbol &&
+        current.exchange === next.exchange
+      ) {
+        return;
+      }
+      if (current) ws.unsubscribe([current], "ltp");
+      current = next ? { symbol: next.symbol, exchange: next.exchange } : null;
+      if (current) ws.subscribe([current], "ltp");
+    };
+
+    applySelection();
+    const unsubSelection = store.sub(selectedSymbolAtom, applySelection);
+    return () => {
+      unsubSelection();
+      if (current) {
+        ws.unsubscribe([current], "ltp");
+        current = null;
+      }
+    };
+  }, [store, apiKey, wsUrl]);
 
   useEffect(() => {
     if (!wsUrl) return;
@@ -113,6 +195,14 @@ export function useWsBridge(): void {
       }
     });
 
+    // Mirror the service's failure state (auth rejection, transport drop)
+    // into the connection store so the status chrome can explain WHY the
+    // socket is down instead of a bare "Disconnected".
+    const unsubFailure = ws.onFailure(setWsFailure);
+    // Seed with the current value — the service may have latched an auth
+    // failure before this hook (re)mounted.
+    setWsFailure(ws.failure);
+
     ws.connect();
 
     return () => {
@@ -125,11 +215,12 @@ export function useWsBridge(): void {
       pendingTicks.clear();
       unsubTick();
       unsubStatus();
+      unsubFailure();
       // NOTE: The WebSocket service (getWsService singleton) is intentionally
       // NOT disconnected here. It persists across hook mount/unmount cycles so
       // that navigating between routes does not drop the WS connection and
       // lose real-time market data. The singleton is created once per (wsUrl,
       // apiKey) pair and lives for the lifetime of the browser tab.
     };
-  }, [setWsConnected, store, apiKey, wsUrl]);
+  }, [setWsConnected, setWsFailure, store, apiKey, wsUrl]);
 }

@@ -82,6 +82,18 @@ function fmtIv(v: number | undefined): string {
   return `${(v > 1.5 ? v : v * 100).toFixed(1)}%`;
 }
 
+/**
+ * True when the payload carries the backend's `is_sample_data: true` honesty
+ * flag (propagated onto object payloads by the ftApi response unwrapper).
+ */
+function carriesSampleFlag(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { is_sample_data?: unknown }).is_sample_data === true
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
@@ -118,6 +130,11 @@ function HistoricalChainWidget() {
   const strikes = useMemo(() => groupByStrike(chainData?.chain ?? []), [chainData]);
   const capturedAt = chainData?.chain?.[0]?.captured_at ?? null;
 
+  // Badge keys off the payload FLAG: the archive endpoints serve real captures
+  // (no local sample fallback exists here), but if the backend ever flags a
+  // payload is_sample_data the fabrication must be visible.
+  const isSample = carriesSampleFlag(expData) || carriesSampleFlag(chainData);
+
   const handleSymbol = (s: string) => {
     setSymbol(s);
     setExpiry("");
@@ -131,6 +148,16 @@ function HistoricalChainWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Archive size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Historical Chain</span>
+        {isSample && (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing demo data, not a real archived chain"
+            title="Demo data — the backend flagged this payload as fabricated sample values."
+          >
+            Demo data
+          </span>
+        )}
         <div className="flex-1" />
 
         {/* Symbol selector */}

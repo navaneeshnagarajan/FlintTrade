@@ -26,17 +26,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import useWebSocket from "@/hooks/useWebSocket";
+import { useOrders } from "@/hooks/useOrders";
 import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { placeOrder, cancelOrder } from "@/services/api";
-import type { WsInstrument } from "@/types/api";
+import type { Order, WsInstrument } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types & constants
 // ---------------------------------------------------------------------------
 
 type Side = "buy" | "sell";
-interface PendingOrder {
+export interface PendingOrder {
   /** Local row key — NEVER sent to the broker. */
   localId: string;
   /** Real broker order id from the placeOrder response; null until known. */
@@ -62,6 +63,54 @@ export function extractBrokerOrderId(result: unknown): string | null {
   if (typeof candidate === "string" && candidate.trim() !== "") return candidate;
   if (typeof candidate === "number") return String(candidate);
   return null;
+}
+
+/**
+ * Whether a broker order status is terminal — the order has left the book
+ * (filled, rejected or cancelled) and can no longer be cancelled/modified.
+ *
+ * Pending variants ("open pending", "trigger pending", "cancel pending") and
+ * partial fills are NOT terminal: the order is still live at the broker.
+ */
+export function isTerminalOrderStatus(status: string): boolean {
+  const s = status.toLowerCase();
+  if (s.includes("pending") || s.includes("partial")) return false;
+  return (
+    s.includes("complete") ||
+    s.includes("filled") ||
+    s.includes("executed") ||
+    s.includes("rejected") ||
+    s.includes("cancelled") ||
+    s.includes("canceled")
+  );
+}
+
+/**
+ * Reconcile the ladder's local pending rows against the live orderbook.
+ *
+ * Returns the rows that are still live. A row is dropped only when its REAL
+ * broker order id is found in the book with a terminal status — fills,
+ * rejections and cancellations done elsewhere (Orders widget, broker app) no
+ * longer leave stale rows on the ladder. Fail-safe by design:
+ *
+ *   - rows without a confirmed broker id are kept (the book cannot vouch for
+ *     them yet), and
+ *   - rows whose id is absent from the book are kept (a partial/erroneous
+ *     book response must never silently discard a live order's row).
+ */
+export function reconcilePendingOrders(
+  pending: PendingOrder[],
+  book: Order[],
+): PendingOrder[] {
+  if (pending.length === 0 || book.length === 0) return pending;
+  return pending.filter((row) => {
+    if (row.brokerOrderId == null) return true;
+    // The typed field is orderId, but broker bridges also emit orderid /
+    // order_id — extractBrokerOrderId handles all three aliases.
+    const match = book.find((o) => extractBrokerOrderId(o) === row.brokerOrderId);
+    if (!match || typeof match.status !== "string") return true;
+    return !isTerminalOrderStatus(match.status);
+  });
 }
 
 const TICK_OPTIONS = [0.05, 0.25, 0.5, 1, 5] as const;
@@ -203,6 +252,27 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
 
   useEffect(() => { track("trade", "widget_view_order_ladder"); }, [track]);
 
+  const showMsg = useCallback((msg: string) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(null), 3000); }, []);
+
+  // Reconcile ladder rows against the live orderbook (the same TanStack Query
+  // feed the Orders widget polls). Fills, rejections and cancellations done
+  // outside this widget would otherwise leave stale rows with live-looking
+  // cancel affordances.
+  const { data: brokerOrders } = useOrders({ enabled: !isExplore && pendingOrders.length > 0 });
+  useEffect(() => {
+    if (!brokerOrders || pendingOrders.length === 0) return;
+    const live = reconcilePendingOrders(pendingOrders, brokerOrders);
+    const removed = pendingOrders.length - live.length;
+    if (removed === 0) return;
+    const liveIds = new Set(live.map((o) => o.localId));
+    setPendingOrders((prev) => prev.filter((o) => liveIds.has(o.localId)));
+    showMsg(
+      removed === 1
+        ? "1 order left the book (filled/rejected/cancelled) — removed from ladder"
+        : `${removed} orders left the book (filled/rejected/cancelled) — removed from ladder`,
+    );
+  }, [brokerOrders, pendingOrders, showMsg]);
+
   // The ladder is only safe to trade on when we have a real centre price:
   // either a live LTP, or the labelled demo price shown in Explore mode.
   const centrePrice  = isExplore ? SAMPLE_PRICE : liveLtp;
@@ -216,8 +286,6 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
   );
   const maxQty  = useMemo(() => Math.max(...levels.map((l) => Math.max(l.bidQty, l.askQty)), 1), [levels]);
   const orderMap = useMemo(() => { const m = new Map<number, PendingOrder>(); for (const o of pendingOrders) m.set(o.price, o); return m; }, [pendingOrders]);
-
-  const showMsg = useCallback((msg: string) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(null), 3000); }, []);
 
   const sendOrder = useCallback(async (action: "BUY" | "SELL", price: number) => {
     if (mode === "explore") { showMsg("Connect a broker to place orders"); return; }

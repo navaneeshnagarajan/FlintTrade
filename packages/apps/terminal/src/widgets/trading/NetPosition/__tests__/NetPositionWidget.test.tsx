@@ -247,4 +247,47 @@ describe("NetPositionWidget (connected)", () => {
     renderWidget();
     expect(await screen.findByText("No open positions")).toBeTruthy();
   });
+
+  // ── Error honesty + staleness — P&L must never freeze silently ────────────
+
+  it("shows an error banner with the server message when the position feed fails", async () => {
+    mockConnected.mockReturnValue(true);
+    mockPositions.mockRejectedValue(new Error("Connection failed. Check OpenAlgo is running."));
+    renderWidget();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/position feed failed/i);
+    expect(alert.textContent).toContain("Connection failed. Check OpenAlgo is running.");
+    expect(screen.getByRole("button", { name: "Retry position fetch" })).toBeTruthy();
+  });
+
+  it("retries the positionbook fetch when Retry is clicked", async () => {
+    mockConnected.mockReturnValue(true);
+    mockPositions.mockRejectedValue(new Error("timeout"));
+    renderWidget();
+
+    await screen.findByRole("alert");
+    expect(mockPositions).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry position fetch" }));
+    await waitFor(() => expect(mockPositions).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a last-updated indicator once live data arrives", async () => {
+    mockConnected.mockReturnValue(true);
+    mockPositions.mockResolvedValue(LIVE);
+    renderWidget();
+
+    await screen.findAllByText("TATAMOTORS");
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toMatch(/updated \d{2}:\d{2}:\d{2}/i);
+  });
+
+  it("shows no error banner or staleness chip for sample data while disconnected", () => {
+    mockConnected.mockReturnValue(false);
+    renderWidget();
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

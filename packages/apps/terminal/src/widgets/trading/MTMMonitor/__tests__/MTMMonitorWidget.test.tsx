@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -224,5 +224,70 @@ describe("MTMMonitorWidget", () => {
     expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
     expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
     expect(screen.getByText("Broker required")).toBeInTheDocument();
+  });
+
+  // ── Error honesty + staleness — a silently frozen MTM is a trading hazard ──
+
+  it("shows an error banner with the server message and a retry when the feed fails", () => {
+    const refetch = vi.fn();
+    mockUsePositions.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: new Error("positionbook 500"),
+      refetch,
+      isFetching: false,
+      dataUpdatedAt: 0,
+    });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/position feed failed/i);
+    expect(alert).toHaveTextContent("positionbook 500");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry position fetch" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stamps the failure banner with the time of the last good data", () => {
+    mockUsePositions.mockReturnValue({
+      data: [{ pnl: 100 }],
+      isError: true,
+      error: new Error("timeout"),
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: Date.now(),
+    });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/frozen at \d{2}:\d{2}:\d{2}/i);
+  });
+
+  it("shows a last-updated indicator when live data is present", () => {
+    mockUsePositions.mockReturnValue({ data: [], dataUpdatedAt: Date.now() });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/updated \d{2}:\d{2}:\d{2}/i);
+  });
+
+  it("flags the last-updated indicator as stale when data stops refreshing", () => {
+    mockUsePositions.mockReturnValue({ data: [], dataUpdatedAt: Date.now() - 10 * 60_000 });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    expect(screen.getByRole("status")).toHaveTextContent(/stale since/i);
+  });
+
+  it("suppresses the error banner and staleness chip while disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUsePositions.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: new Error("not polled"),
+      dataUpdatedAt: Date.now(),
+    });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

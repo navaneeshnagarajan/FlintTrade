@@ -29,6 +29,27 @@ interface SubscriptionInfo {
 type TickCallback = (tick: WsTick) => void;
 type StatusCallback = (connected: boolean) => void;
 
+/**
+ * Reason the socket is not (or cannot become) connected, surfaced so the UI
+ * can show something more useful than a bare "Disconnected".
+ */
+export interface WsFailure {
+  /**
+   * "auth" — the server rejected the API key (fatal once retries are
+   * exhausted; only new credentials clear it). "network" — a transport-level
+   * drop; the service keeps retrying with exponential backoff.
+   */
+  kind: "auth" | "network";
+  /** Human-readable reason, e.g. the server's auth-failure message. */
+  reason: string;
+  /** Consecutive failures of this kind since the last healthy connection. */
+  attempts: number;
+  /** True when the service has stopped retrying (auth failures only). */
+  fatal: boolean;
+}
+
+type FailureCallback = (failure: WsFailure | null) => void;
+
 export class WebSocketService {
   private ws: WebSocket | null = null;
   private reconnectDelay = 1000;
@@ -50,10 +71,25 @@ export class WebSocketService {
   /** `Date.now()` timestamp of the last tick received (0 = no ticks yet). */
   private lastTickTimestamp = 0;
 
+  /** Consecutive auth rejections since the last successful authentication. */
+  private authFailureCount = 0;
+  /** Auth rejections tolerated before the reconnect loop is stopped. */
+  private static readonly MAX_AUTH_ATTEMPTS = 3;
+  /**
+   * Latched after MAX_AUTH_ATTEMPTS consecutive auth rejections. While set,
+   * no reconnect is scheduled — retrying the same bad key every backoff
+   * interval forever is pointless and hammers the server. Cleared only by
+   * `updateCredentials()` (the key may have been fixed).
+   */
+  private authLocked = false;
+  /** Most recent failure surfaced to the UI; null when healthy. */
+  private lastFailure: WsFailure | null = null;
+
   // Legacy broadcast callbacks — kept for backward compatibility.
   private tickCallbacks = new Set<TickCallback>();
   private depthCallbacks = new Set<(data: Record<string, unknown>) => void>();
   private statusCallbacks = new Set<StatusCallback>();
+  private failureCallbacks = new Set<FailureCallback>();
 
   // Per-mode handler sets (new in v2). Each set holds handlers registered via
   // registerHandler(). Ticks are dispatched to the matching mode's set AND to
@@ -71,6 +107,13 @@ export class WebSocketService {
   constructor(private url: string, private apiKey: string = "") {}
 
   get isConnected(): boolean { return this.connected; }
+
+  /**
+   * The most recent connection failure, or null when healthy. `kind: "auth"`
+   * with `fatal: true` means the service has stopped retrying — the UI should
+   * surface "authentication failed" rather than a generic "disconnected".
+   */
+  get failure(): WsFailure | null { return this.lastFailure; }
 
   /**
    * Diagnostic snapshot useful for health panels and debugging.
@@ -100,6 +143,16 @@ export class WebSocketService {
   onStatus(cb: StatusCallback): () => void {
     this.statusCallbacks.add(cb);
     return () => this.statusCallbacks.delete(cb);
+  }
+
+  /**
+   * Register a callback fired whenever the failure state changes — with a
+   * `WsFailure` when a failure is recorded, or `null` when it clears (e.g.
+   * after a successful authentication). Read `failure` for the current value.
+   */
+  onFailure(cb: FailureCallback): () => void {
+    this.failureCallbacks.add(cb);
+    return () => this.failureCallbacks.delete(cb);
   }
 
   // ---------------------------------------------------------------------------
@@ -247,6 +300,10 @@ export class WebSocketService {
   }
 
   connect(): void {
+    // A fatal auth failure latches the service — reconnecting with the same
+    // rejected key would just restart the failure loop. updateCredentials()
+    // clears the latch when the key actually changes.
+    if (this.authLocked) return;
     this.shouldConnect = true;
     this.doConnect();
   }
@@ -372,7 +429,11 @@ export class WebSocketService {
     }
 
     this.ws.onopen = () => {
-      this.reconnectDelay = 1000;
+      // NOTE: the backoff delay is deliberately NOT reset here. A socket that
+      // opens and then fails authentication would otherwise retry every ~1s
+      // forever (open → reset → auth reject → close → 1s → repeat). The reset
+      // happens only after a healthy handshake (auth success, or open with no
+      // key required).
       this.startHeartbeat();
       // OpenAlgo v2: authenticate first, then subscribe after auth response
       if (this.apiKey) {
@@ -380,6 +441,8 @@ export class WebSocketService {
         // Don't set connected or resubscribe yet — wait for auth response in onmessage
       } else {
         // No auth needed — connect and subscribe immediately
+        this.reconnectDelay = 1000;
+        this.setFailure(null);
         this.setConnected(true);
         this.resubscribeAll();
       }
@@ -403,15 +466,35 @@ export class WebSocketService {
         // Auth response: { type: "auth", status: "success", message: "Authentication successful" }
         if (msg["type"] === "auth") {
           if (msg["status"] === "success") {
+            // Healthy handshake — reset the failure loop state.
+            this.authFailureCount = 0;
+            this.reconnectDelay = 1000;
+            this.setFailure(null);
             if (!this.connected) {
               this.setConnected(true);
               this.resubscribeAll();
               this.drainPendingMessages();
             }
           } else {
-            // Auth failure — close the socket so the reconnect cycle kicks in.
-            // This prevents the service from hanging in an unauthenticated state.
-            console.warn("[WS] Auth failed:", msg["message"] ?? "unknown reason");
+            // Auth failure — a bad key is not a transient network fault, so
+            // it is counted separately and stops retrying after a few
+            // attempts instead of looping the reconnect cycle forever.
+            this.authFailureCount += 1;
+            const serverMessage = msg["message"];
+            const reason =
+              typeof serverMessage === "string" && serverMessage.trim() !== ""
+                ? serverMessage
+                : "Authentication failed";
+            const fatal = this.authFailureCount >= WebSocketService.MAX_AUTH_ATTEMPTS;
+            if (fatal) this.authLocked = true;
+            this.setFailure({ kind: "auth", reason, attempts: this.authFailureCount, fatal });
+            console.warn(
+              `[WS] Auth failed (attempt ${this.authFailureCount}/${WebSocketService.MAX_AUTH_ATTEMPTS}):`,
+              reason,
+              fatal ? "— giving up until credentials change" : "",
+            );
+            // Close the socket; the onclose handler schedules the (backed-off)
+            // reconnect, or nothing at all once the auth lock is latched.
             this.ws?.close();
           }
           return;
@@ -587,7 +670,24 @@ export class WebSocketService {
 
   private scheduleReconnect(): void {
     if (!this.shouldConnect) return;
+    if (this.authLocked) {
+      // Fatal auth failure — do not restart the loop. The latched WsFailure
+      // stays visible to the UI; updateCredentials() re-arms reconnection.
+      console.warn("[WS] Not reconnecting — authentication failed; update credentials to retry");
+      return;
+    }
     this.reconnectCount++;
+    // A transport drop is transient — record it (non-fatal) so the UI can say
+    // "reconnecting", but never overwrite a pending auth failure, whose reason
+    // must stay visible between backed-off auth retries.
+    if (this.lastFailure?.kind !== "auth") {
+      this.setFailure({
+        kind: "network",
+        reason: "Connection lost — reconnecting",
+        attempts: this.reconnectCount,
+        fatal: false,
+      });
+    }
     // Exponential backoff with jitter: base 1s, multiplier 2, max 30s, jitter +/-500ms
     const jitter = Math.round((Math.random() - 0.5) * 1000); // -500ms to +500ms
     const delay = Math.max(0, Math.min(this.reconnectDelay + jitter, this.maxDelay));
@@ -615,6 +715,14 @@ export class WebSocketService {
     this.statusCallbacks.forEach((cb) => cb(value));
   }
 
+  private setFailure(failure: WsFailure | null): void {
+    // No-op when already clear — avoids spurious store writes on every
+    // healthy handshake.
+    if (failure === null && this.lastFailure === null) return;
+    this.lastFailure = failure;
+    this.failureCallbacks.forEach((cb) => cb(failure));
+  }
+
   /**
    * Update the WS URL and API key without losing existing subscriptions.
    * If the service is currently connected, it disconnects and reconnects
@@ -625,6 +733,12 @@ export class WebSocketService {
     if (!credentialsChanged) return;
     this.url = url;
     this.apiKey = apiKey;
+    // New credentials clear a fatal auth latch — the key may have been fixed,
+    // so the retry budget starts fresh.
+    this.authLocked = false;
+    this.authFailureCount = 0;
+    this.reconnectDelay = 1000;
+    this.setFailure(null);
     if (this.shouldConnect) {
       // Tear down the existing connection — doConnect will be called by
       // scheduleReconnect → but we want immediate reconnection, so call

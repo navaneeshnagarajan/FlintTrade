@@ -15,6 +15,25 @@ import type { GreeksSurfaceExpiry, GreeksSurfacePoint } from "./sampleData";
 const MONEYNESS_RANGE = 0.05; // ±5% from ATM
 const MONEYNESS_STEPS = 11;   // -5% to +5% in 1% increments
 
+/** Result shape: the derived surface plus the source payload's honesty flag. */
+export interface GreeksSurfaceResult {
+  expiries: GreeksSurfaceExpiry[];
+  /** True when the source IV smile payload was flagged `is_sample_data`. */
+  isSampleData: boolean;
+}
+
+/**
+ * True when the payload carries the backend's `is_sample_data: true` honesty
+ * flag (propagated onto object payloads by the ftApi response unwrapper).
+ */
+function carriesSampleFlag(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { is_sample_data?: unknown }).is_sample_data === true
+  );
+}
+
 function buildSurfaceFromIVSmile(
   ivData: Awaited<ReturnType<typeof getFtIVSmile>>,
 ): GreeksSurfaceExpiry[] {
@@ -82,13 +101,18 @@ export function useGreeksSurface(
 ) {
   return useQuery({
     queryKey: ["greekssurface", symbol, exchange, expiryDates],
-    queryFn: async () => {
+    queryFn: async (): Promise<GreeksSurfaceResult> => {
       const [ivData] = await Promise.all([
         getFtIVSmile(symbol, exchange, expiryDates),
         // Option chain can be used later for more precise greeks
         getOptionChain(symbol, exchange),
       ]);
-      return buildSurfaceFromIVSmile(ivData);
+      return {
+        expiries: buildSurfaceFromIVSmile(ivData),
+        // Carry the source payload's honesty flag through the derivation so
+        // the widget can badge a surface built from fabricated sample IVs.
+        isSampleData: carriesSampleFlag(ivData),
+      };
     },
     enabled: isConnected && Boolean(symbol && exchange),
     refetchInterval: isConnected && isMarketHours() ? 30_000 : false,

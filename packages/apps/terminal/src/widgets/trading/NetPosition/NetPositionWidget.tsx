@@ -12,7 +12,8 @@
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Layers, ChevronDown, ChevronRight } from "lucide-react";
+import { Layers, ChevronDown, ChevronRight, AlertTriangle, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getPositionbook } from "@/services/api";
@@ -161,6 +162,18 @@ function fmtExposure(v: number): string {
   return `₹${v.toFixed(0)}`;
 }
 
+/**
+ * Staleness threshold relative to the poll cadence (5s market / 60s off-hours).
+ * A frozen P&L figure without a warning is worse than an error banner.
+ */
+function staleThresholdMs(): number {
+  return isMarketHours() ? 30_000 : 150_000;
+}
+
+function fmtUpdatedAt(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+}
+
 // ---------------------------------------------------------------------------
 // Underlying group
 // ---------------------------------------------------------------------------
@@ -273,13 +286,30 @@ function NetPositionWidget() {
 
   // Connected → real broker positionbook (netted, live LTP/P&L); disconnected
   // → labelled sample data. Never show fabricated positions to a live user.
-  const { data: livePositions } = useQuery<Position[]>({
+  const {
+    data: livePositions,
+    isError,
+    error,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useQuery<Position[]>({
     queryKey: queryKeys.positions.all,
     queryFn: getPositionbook,
     enabled: isConnected,
     staleTime: 3_000,
     refetchInterval: isConnected ? () => (isMarketHours() ? 5_000 : 60_000) : false,
   });
+
+  // Ticks every 10s so the last-updated chip can flag staleness between polls.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 10_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const hasUpdate = isConnected && dataUpdatedAt > 0;
+  const isStale = hasUpdate && nowMs - dataUpdatedAt > staleThresholdMs();
 
   const netRows = useMemo(
     () =>
@@ -327,12 +357,58 @@ function NetPositionWidget() {
           {fmtPnl(totalPnl)}
         </span>
 
+        {hasUpdate && (
+          <span
+            className={cn(
+              "text-xxs font-mono tabular-nums flex items-center gap-0.5",
+              isStale ? "text-warning" : "text-text-muted",
+            )}
+            role="status"
+            aria-label={`Positions last updated ${fmtUpdatedAt(dataUpdatedAt)}${isStale ? " — stale" : ""}`}
+            title={
+              isStale
+                ? "Position data has not refreshed recently — P&L may be stale."
+                : "Time of the last successful position refresh."
+            }
+          >
+            <Clock size={8} aria-hidden="true" />
+            {isStale ? "Stale since " : "Updated "}
+            {fmtUpdatedAt(dataUpdatedAt)}
+          </span>
+        )}
+
         {!isConnected && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
             Sample
           </span>
         )}
       </div>
+
+      {/* Position-feed failure banner — the table keeps the last good data,
+          so say so instead of silently freezing the P&L. */}
+      {isConnected && isError && (
+        <div
+          role="alert"
+          className="flex-none flex items-center gap-2 px-3 py-1.5 border-b border-loss/20 bg-loss/10"
+        >
+          <AlertTriangle size={12} className="text-loss shrink-0" aria-hidden="true" />
+          <span className="flex-1 text-xs text-loss leading-tight">
+            Position feed failed — figures are frozen
+            {hasUpdate ? ` at ${fmtUpdatedAt(dataUpdatedAt)}` : ""}
+            {error instanceof Error && error.message ? `: ${error.message}` : "."}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="h-5 px-2 text-xxs border-loss/30 text-loss hover:bg-loss/10 hover:text-loss shrink-0"
+            aria-label="Retry position fetch"
+          >
+            {isFetching ? "Retrying…" : "Retry"}
+          </Button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="flex-1 min-h-0 overflow-auto">

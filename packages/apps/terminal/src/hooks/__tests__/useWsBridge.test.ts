@@ -30,6 +30,7 @@ import { createStore, Provider } from "jotai";
 import React from "react";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import type { WsTick, WsInstrument } from "@/types/api";
+import type { WsFailure } from "@/services/websocket";
 
 // ---------------------------------------------------------------------------
 // Fake WebSocketService — thin record/replay stand-in for the real class.
@@ -37,29 +38,38 @@ import type { WsTick, WsInstrument } from "@/types/api";
 
 type TickCb = (tick: WsTick) => void;
 type StatusCb = (connected: boolean) => void;
+type FailureCb = (failure: WsFailure | null) => void;
 
 interface FakeWsService {
   connect: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
+  unsubscribe: ReturnType<typeof vi.fn>;
   onTick: ReturnType<typeof vi.fn>;
   onStatus: ReturnType<typeof vi.fn>;
+  onFailure: ReturnType<typeof vi.fn>;
+  failure: WsFailure | null;
   // Test helpers — fire registered callbacks
   _fireTick: (tick: WsTick) => void;
   _fireStatus: (connected: boolean) => void;
-  // Registered unsub functions returned by onTick/onStatus
+  _fireFailure: (failure: WsFailure | null) => void;
+  // Registered unsub functions returned by onTick/onStatus/onFailure
   _tickUnsub: ReturnType<typeof vi.fn>;
   _statusUnsub: ReturnType<typeof vi.fn>;
+  _failureUnsub: ReturnType<typeof vi.fn>;
 }
 
 function makeFakeWsService(): FakeWsService {
   const tickCallbacks = new Set<TickCb>();
   const statusCallbacks = new Set<StatusCb>();
+  const failureCallbacks = new Set<FailureCb>();
   const tickUnsub = vi.fn(() => { tickCallbacks.clear(); });
   const statusUnsub = vi.fn(() => { statusCallbacks.clear(); });
+  const failureUnsub = vi.fn(() => { failureCallbacks.clear(); });
 
   return {
     connect: vi.fn(),
     subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
     onTick: vi.fn((cb: TickCb) => {
       tickCallbacks.add(cb);
       return tickUnsub;
@@ -68,10 +78,17 @@ function makeFakeWsService(): FakeWsService {
       statusCallbacks.add(cb);
       return statusUnsub;
     }),
+    onFailure: vi.fn((cb: FailureCb) => {
+      failureCallbacks.add(cb);
+      return failureUnsub;
+    }),
+    failure: null,
     _fireTick: (tick: WsTick) => tickCallbacks.forEach((cb) => cb(tick)),
     _fireStatus: (connected: boolean) => statusCallbacks.forEach((cb) => cb(connected)),
+    _fireFailure: (failure: WsFailure | null) => failureCallbacks.forEach((cb) => cb(failure)),
     _tickUnsub: tickUnsub,
     _statusUnsub: statusUnsub,
+    _failureUnsub: failureUnsub,
   };
 }
 
@@ -94,14 +111,21 @@ vi.mock("@/services/websocket", () => ({
 
 // connectionStore — module-level variables simulate Zustand state
 let _setWsConnectedFn = vi.fn<(connected: boolean) => void>();
+let _setWsFailureFn = vi.fn<(failure: unknown) => void>();
 
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: (selector: (s: {
     setWsConnected: typeof _setWsConnectedFn;
+    setWsFailure: typeof _setWsFailureFn;
     apiKey: string;
     wsUrl: string;
   }) => unknown) =>
-    selector({ setWsConnected: _setWsConnectedFn, apiKey: _apiKey, wsUrl: _wsUrl }),
+    selector({
+      setWsConnected: _setWsConnectedFn,
+      setWsFailure: _setWsFailureFn,
+      apiKey: _apiKey,
+      wsUrl: _wsUrl,
+    }),
 }));
 
 // getExpiry — used for MCX futures resolution
@@ -127,7 +151,8 @@ vi.mock("jotai", async (importOriginal) => {
 // Hook import — after mocks.
 // ---------------------------------------------------------------------------
 
-import { useWsBridge } from "../useWsBridge";
+import { useWsBridge, useTickSubscription } from "../useWsBridge";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 
 // ---------------------------------------------------------------------------
 // rAF stub — synchronous flush for deterministic tests
@@ -179,6 +204,7 @@ beforeEach(() => {
   _wsUrl = "ws://127.0.0.1:8765";
   _apiKey = "test-api-key";
   _setWsConnectedFn = vi.fn();
+  _setWsFailureFn = vi.fn();
   rafCallbacks = [];
   rafIdCounter = 1;
   mockGetExpiry.mockReset();
@@ -250,6 +276,69 @@ describe("useWsBridge — connection lifecycle", () => {
 
     // Assert
     expect(_setWsConnectedFn).toHaveBeenCalledWith(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Failure pipe — WS failure state mirrored into the connection store
+// ---------------------------------------------------------------------------
+
+describe("useWsBridge — failure pipe to connection store", () => {
+  const AUTH_FAILURE: WsFailure = {
+    kind: "auth",
+    reason: "Invalid API key",
+    attempts: 3,
+    fatal: true,
+  };
+
+  it("registers an onFailure handler and seeds the store with the current failure", () => {
+    // Arrange — the service latched an auth failure BEFORE the hook mounted
+    fakeWs!.failure = AUTH_FAILURE;
+
+    // Act
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+
+    // Assert — handler registered, and the pre-existing failure was seeded
+    expect(fakeWs!.onFailure).toHaveBeenCalledOnce();
+    expect(_setWsFailureFn).toHaveBeenCalledWith(AUTH_FAILURE);
+  });
+
+  it("pipes a failure event into setWsFailure", () => {
+    // Arrange
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+    _setWsFailureFn.mockClear();
+
+    // Act
+    act(() => { fakeWs!._fireFailure(AUTH_FAILURE); });
+
+    // Assert
+    expect(_setWsFailureFn).toHaveBeenCalledWith(AUTH_FAILURE);
+  });
+
+  it("pipes the null (cleared) failure state into setWsFailure", () => {
+    // Arrange
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+    act(() => { fakeWs!._fireFailure(AUTH_FAILURE); });
+    _setWsFailureFn.mockClear();
+
+    // Act — auth succeeds, service clears the failure
+    act(() => { fakeWs!._fireFailure(null); });
+
+    // Assert
+    expect(_setWsFailureFn).toHaveBeenCalledWith(null);
+  });
+
+  it("unsubscribes the failure handler on unmount", () => {
+    // Arrange
+    const { unmount } = renderHook(() => useWsBridge(), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+
+    // Act
+    unmount();
+
+    // Assert
+    expect(fakeWs!._failureUnsub).toHaveBeenCalledOnce();
   });
 });
 
@@ -814,5 +903,218 @@ describe("useWsBridge — wsUrl guard", () => {
     _wsUrl = "ws://127.0.0.1:8765";
 
     expect(() => rerender()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Selected-instrument subscription — feeds tickAtomFamily for the active
+// instrument (OrderPad fund-mode sizing, OrderLadder atom fallback).
+// ---------------------------------------------------------------------------
+
+describe("useWsBridge — selected-instrument subscription", () => {
+  it("subscribes to a selection that existed before the bridge mounted", () => {
+    // Arrange — a watchlist click happened before the bridge (re)mounted
+    _jotaiStore.set(selectedSymbolAtom, { symbol: "RELIANCE", exchange: "NSE" });
+
+    // Act
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+
+    // Assert
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith(
+      [{ symbol: "RELIANCE", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("subscribes when the selection atom is set after mount", () => {
+    // Arrange
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+    expect(fakeWs!.subscribe).not.toHaveBeenCalled();
+
+    // Act — watchlist row click
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // Assert
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith(
+      [{ symbol: "TCS", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("moves the subscription when the selection changes", () => {
+    // Arrange
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // Act — select a different instrument
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "INFY", exchange: "NSE" });
+    });
+
+    // Assert — old released, new acquired
+    expect(fakeWs!.unsubscribe).toHaveBeenCalledWith(
+      [{ symbol: "TCS", exchange: "NSE" }],
+      "ltp",
+    );
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith(
+      [{ symbol: "INFY", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("does not resubscribe when the same instrument is selected again", () => {
+    // Arrange
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // Act — same instrument, new object identity (fresh click on the same row)
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // Assert — exactly one subscribe, zero unsubscribes
+    expect(fakeWs!.subscribe).toHaveBeenCalledTimes(1);
+    expect(fakeWs!.unsubscribe).not.toHaveBeenCalled();
+  });
+
+  it("releases the selected-instrument subscription on unmount", () => {
+    // Arrange
+    const { unmount } = renderHook(() => useWsBridge(), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // Act
+    unmount();
+
+    // Assert
+    expect(fakeWs!.unsubscribe).toHaveBeenCalledWith(
+      [{ symbol: "TCS", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("releases the subscription when the selection is cleared", () => {
+    // Arrange
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    // Act
+    act(() => {
+      _jotaiStore.set(selectedSymbolAtom, null);
+    });
+
+    // Assert — released, and nothing new subscribed
+    expect(fakeWs!.unsubscribe).toHaveBeenCalledWith(
+      [{ symbol: "TCS", exchange: "NSE" }],
+      "ltp",
+    );
+    expect(fakeWs!.subscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useTickSubscription — declarative per-widget tick interest
+// ---------------------------------------------------------------------------
+
+describe("useTickSubscription", () => {
+  it("subscribes to the instrument on mount (ltp by default)", () => {
+    // Act
+    renderHook(() => useTickSubscription("RELIANCE", "NSE"), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+
+    // Assert
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith(
+      [{ symbol: "RELIANCE", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("passes an explicit mode through to the service", () => {
+    // Act
+    renderHook(() => useTickSubscription("NIFTY24JULFUT", "NFO", "quote"), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+
+    // Assert
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith(
+      [{ symbol: "NIFTY24JULFUT", exchange: "NFO" }],
+      "quote",
+    );
+  });
+
+  it("unsubscribes on unmount (balanced ref-count release)", () => {
+    // Arrange
+    const { unmount } = renderHook(() => useTickSubscription("RELIANCE", "NSE"), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+
+    // Act
+    unmount();
+
+    // Assert
+    expect(fakeWs!.unsubscribe).toHaveBeenCalledWith(
+      [{ symbol: "RELIANCE", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("re-subscribes when the instrument changes", () => {
+    // Arrange
+    const { rerender } = renderHook(
+      ({ symbol }: { symbol: string }) => useTickSubscription(symbol, "NSE"),
+      { wrapper: makeWrapper(_jotaiStore), initialProps: { symbol: "TCS" } },
+    );
+
+    // Act
+    rerender({ symbol: "INFY" });
+
+    // Assert — old released, new acquired
+    expect(fakeWs!.unsubscribe).toHaveBeenCalledWith(
+      [{ symbol: "TCS", exchange: "NSE" }],
+      "ltp",
+    );
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith(
+      [{ symbol: "INFY", exchange: "NSE" }],
+      "ltp",
+    );
+  });
+
+  it("is a no-op when symbol or exchange is missing", () => {
+    // Act
+    renderHook(() => useTickSubscription(null, "NSE"), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+    renderHook(() => useTickSubscription("TCS", ""), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+
+    // Assert
+    expect(fakeWs!.subscribe).not.toHaveBeenCalled();
+    expect(fakeWs!.unsubscribe).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when wsUrl is empty (no service yet)", () => {
+    // Arrange
+    _wsUrl = "";
+
+    // Act
+    renderHook(() => useTickSubscription("TCS", "NSE"), {
+      wrapper: makeWrapper(_jotaiStore),
+    });
+
+    // Assert
+    expect(fakeWs!.subscribe).not.toHaveBeenCalled();
   });
 });

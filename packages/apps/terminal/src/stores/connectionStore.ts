@@ -3,6 +3,7 @@ import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
 import type { PersistStorage, StorageValue } from "zustand/middleware";
 import type { ConnectionStatus } from "@/types/stores";
+import type { WsFailure } from "@/services/websocket";
 import { obfuscate, deobfuscate } from "@/lib/keyVault";
 
 interface ConnectionStore {
@@ -11,10 +12,17 @@ interface ConnectionStore {
   wsUrl: string;
   status: ConnectionStatus;
   wsConnected: boolean;
+  /**
+   * Most recent WebSocket failure surfaced by the WS service — null when
+   * healthy. `kind: "auth"` lets the connection chrome show "Authentication
+   * failed" (with the server's reason) instead of a bare "Disconnected".
+   */
+  wsFailure: WsFailure | null;
   lastPing: number | null;
   demo: boolean;
   setStatus: (status: ConnectionStatus) => void;
   setWsConnected: (connected: boolean) => void;
+  setWsFailure: (failure: WsFailure | null) => void;
   setConfig: (config: { host?: string; apiKey?: string; wsUrl?: string }) => void;
   setLastPing: (timestamp: number) => void;
   setDemo: (v: boolean) => void;
@@ -34,10 +42,12 @@ const storeImpl: StateCreator<ConnectionStore, [["zustand/persist", unknown]]> =
   wsUrl: "",
   status: "disconnected",
   wsConnected: false,
+  wsFailure: null,
   lastPing: null,
   demo: false,
   setStatus: (status) => set({ status }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
+  setWsFailure: (wsFailure) => set({ wsFailure }),
   setConfig: (config) => set((state) => ({ ...state, ...config })),
   setLastPing: (lastPing) => set({ lastPing }),
   setDemo: (demo) => set({ demo }),

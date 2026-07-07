@@ -26,6 +26,15 @@ import { SAMPLE_ARBITRAGE_SCAN } from "../sampleData";
 const mockHook = useArbitrageScanner as ReturnType<typeof vi.fn>;
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
+const IDLE_QUERY = {
+  data: undefined,
+  isLoading: false,
+  isFetching: false,
+  isError: false,
+  error: null,
+  refetch: vi.fn(),
+};
+
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
@@ -34,7 +43,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 describe("ArbitrageScannerWidget", () => {
   it("renders sample scan with demo affordance when disconnected", () => {
     mockConnected.mockReturnValue(false);
-    mockHook.mockReturnValue({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() });
+    mockHook.mockReturnValue({ ...IDLE_QUERY });
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
@@ -47,9 +56,25 @@ describe("ArbitrageScannerWidget", () => {
     expect(screen.getByText(SAMPLE_ARBITRAGE_SCAN.cash_future[0].underlying)).toBeInTheDocument();
   });
 
+  it("passes the collected universe and edge threshold to the scanner hook", () => {
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({ ...IDLE_QUERY });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(mockHook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        universe: expect.arrayContaining(["NIFTY", "RELIANCE"]),
+        edgeThresholdPct: 1.0,
+      }),
+      true,
+    );
+  });
+
   it("renders live scan without demo affordance when connected and not sample", () => {
     mockConnected.mockReturnValue(true);
     mockHook.mockReturnValue({
+      ...IDLE_QUERY,
       data: {
         is_sample_data: false,
         scan: {
@@ -61,9 +86,6 @@ describe("ArbitrageScannerWidget", () => {
           cross_exchange: [],
         },
       },
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
     });
 
     render(<ArbitrageScannerWidget />, { wrapper });
@@ -71,5 +93,54 @@ describe("ArbitrageScannerWidget", () => {
     expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
     expect(screen.getByText("INFY")).toBeInTheDocument();
+    // The empty cross-exchange table shows its honest per-section empty state.
+    expect(screen.getByText(/No cross-exchange gaps found/i)).toBeInTheDocument();
+  });
+
+  it("keeps the demo affordance when a connected response is flagged is_sample_data", () => {
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({
+      ...IDLE_QUERY,
+      data: { is_sample_data: true, scan: SAMPLE_ARBITRAGE_SCAN },
+    });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
+  });
+
+  it("shows an honest empty state for a real scan with no opportunities", () => {
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({
+      ...IDLE_QUERY,
+      data: {
+        is_sample_data: false,
+        scan: { risk_free_rate: 0.07, edge_threshold_pct: 1, cash_future: [], cross_exchange: [] },
+      },
+    });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.getByText(/No arbitrage opportunities found/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+  });
+
+  it("shows an error state instead of fabricated tables when the scan fails", () => {
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({
+      ...IDLE_QUERY,
+      isError: true,
+      error: new Error("No live quotes available for the scan universe — scan not performed."),
+    });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.getByText(/No live quotes available/i)).toBeInTheDocument();
+    // No sample tables leak into the connected error state.
+    expect(
+      screen.queryByText(SAMPLE_ARBITRAGE_SCAN.cash_future[0].underlying),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
   });
 });

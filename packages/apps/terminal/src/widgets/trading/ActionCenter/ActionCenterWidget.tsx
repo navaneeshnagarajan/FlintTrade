@@ -18,7 +18,7 @@
  */
 
 import { useState, useCallback, memo } from "react";
-import { CheckCircle2, XCircle, CheckCheck, Loader2, ShieldCheck } from "lucide-react";
+import { CheckCircle2, XCircle, CheckCheck, Loader2, ShieldCheck, AlertCircle, X } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -147,9 +147,19 @@ function OrderRow({ order, onApprove, onReject, disabled }: OrderRowProps) {
 // Widget
 // ---------------------------------------------------------------------------
 
+/** A failed approve/reject action, surfaced with a one-click retry. */
+interface ActionFailure {
+  message: string;
+  retry: () => void;
+}
+
 function ActionCenterWidget(_props: WidgetProps) {
   const queryClient = useQueryClient();
   const [approveAllOpen, setApproveAllOpen] = useState(false);
+  // A failed approval/rejection must never snap back silently — the operator
+  // believes the order was actioned when it is still pending. Surface the
+  // server message with a retry affordance instead.
+  const [actionFailure, setActionFailure] = useState<ActionFailure | null>(null);
 
   const { data: orders, isLoading, isError } = useQuery({
     queryKey: ["actionCenterPending"],
@@ -163,18 +173,39 @@ function ActionCenterWidget(_props: WidgetProps) {
     void queryClient.invalidateQueries({ queryKey: ["actionCenterPending"] });
   }, [queryClient]);
 
+  const failureMessage = (prefix: string, err: unknown): string =>
+    `${prefix}: ${err instanceof Error && err.message ? err.message : "backend request failed."}`;
+
   const approveMutation = useMutation({
     mutationFn: (id: string) => approveOrder(id),
+    onMutate: () => setActionFailure(null),
+    onError: (err, id) =>
+      setActionFailure({
+        message: failureMessage("Approval failed — the order is still pending", err),
+        retry: () => approveMutation.mutate(id),
+      }),
     onSettled: invalidate,
   });
 
   const rejectMutation = useMutation({
     mutationFn: (id: string) => rejectOrder(id),
+    onMutate: () => setActionFailure(null),
+    onError: (err, id) =>
+      setActionFailure({
+        message: failureMessage("Rejection failed — the order is still pending", err),
+        retry: () => rejectMutation.mutate(id),
+      }),
     onSettled: invalidate,
   });
 
   const approveAllMutation = useMutation({
     mutationFn: () => approveAllOrders(),
+    onMutate: () => setActionFailure(null),
+    onError: (err) =>
+      setActionFailure({
+        message: failureMessage("Approve-all failed — orders are still pending", err),
+        retry: () => approveAllMutation.mutate(),
+      }),
     onSettled: invalidate,
   });
 
@@ -220,6 +251,38 @@ function ActionCenterWidget(_props: WidgetProps) {
           </Button>
         )}
       </div>
+
+      {/* Mutation failure banner — server message + retry affordance */}
+      {actionFailure && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 px-3 py-1.5 border-b border-loss/20 bg-loss/10 shrink-0"
+        >
+          <AlertCircle size={12} className="text-loss shrink-0" aria-hidden="true" />
+          <span className="flex-1 text-xs text-loss leading-tight" title={actionFailure.message}>
+            {actionFailure.message}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={anyPending}
+            onClick={() => actionFailure.retry()}
+            className="h-5 px-2 text-xxs border-loss/30 text-loss hover:bg-loss/10 hover:text-loss shrink-0"
+            aria-label="Retry failed action"
+          >
+            Retry
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setActionFailure(null)}
+            className="h-5 w-5 p-0 text-loss hover:bg-loss/10 hover:text-loss shrink-0"
+            aria-label="Dismiss error"
+          >
+            <X size={11} aria-hidden="true" />
+          </Button>
+        </div>
+      )}
 
       {/* Body */}
       {isLoading && (

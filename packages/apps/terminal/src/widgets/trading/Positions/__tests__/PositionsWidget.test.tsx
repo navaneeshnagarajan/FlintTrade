@@ -83,6 +83,13 @@ vi.mock("@/services/ftApi.data", () => ({
   downloadExcel: (...args: unknown[]) => mockDownloadExcel(...args),
 }));
 
+// Square-off goes through the existing gated placeOrder path (services/api →
+// /ft-api/api/v1/orders/place → SafetySystem → gate_order → BrokerRouter).
+const mockPlaceOrder = vi.fn();
+vi.mock("@/services/api", () => ({
+  placeOrder: (...args: unknown[]) => mockPlaceOrder(...args),
+}));
+
 const mockEmitNotification = vi.fn();
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
   emitNotification: (...args: unknown[]) => mockEmitNotification(...args),
@@ -150,6 +157,7 @@ function queryResult(overrides = {}) {
 describe("PositionsWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockPlaceOrder.mockReset();
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";
     mockUseBrokerConnected.mockReturnValue(true);
@@ -217,6 +225,7 @@ describe("PositionsWidget", () => {
     expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
     expect(screen.getByText("Read-only")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
   });
@@ -532,6 +541,111 @@ describe("PositionsWidget", () => {
         await screen.findByText("Live mode is locked — verify your PIN to unlock live trading"),
       ).toBeInTheDocument();
       expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
+    });
+
+    // ── Per-position square-off (existing gated placeOrder path) ────────────
+
+    it("squares off a long position with an opposite-side market order via placeOrder", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "SQ1" });
+      const mockRefetch = vi.fn();
+      mockUsePositions.mockReturnValue(queryResult({ data: positions, refetch: mockRefetch }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+
+      // Confirm dialog spells out symbol, quantity and side before anything fires.
+      expect(screen.getByText("Square off position?")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) =>
+          (el?.textContent ?? "").includes("SELL market order for 75 NIFTY24APR24000CE") &&
+          el?.tagName === "P",
+        ),
+      ).toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith({
+        symbol: "NIFTY24APR24000CE",
+        exchange: "NFO",
+        action: "SELL",
+        product: "NRML",
+        orderType: "MARKET",
+        quantity: 75,
+        price: 0,
+        triggerPrice: 0,
+        strategy: "FlintPositions",
+      });
+      await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
+      expect(mockEmitNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ category: "order", title: "Square-off submitted" }),
+      );
+    });
+
+    it("squares off a short position with a BUY market order for the absolute quantity", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "SQ2" });
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          action: "BUY",
+          product: "MIS",
+          orderType: "MARKET",
+          quantity: 10,
+        }),
+      );
+    });
+
+    it("surfaces the backend rejection honestly inside the square-off dialog", async () => {
+      mockPlaceOrder.mockRejectedValue(
+        new Error("Live orders are allowed in live mode only — switch mode first"),
+      );
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+      expect(
+        await screen.findByText("Live orders are allowed in live mode only — switch mode first"),
+      ).toBeInTheDocument();
+      // The dialog stays open so the operator can read what blocked it.
+      expect(screen.getByText("Square off position?")).toBeInTheDocument();
+    });
+
+    it("fails closed on an unrecognised product instead of guessing one", async () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            {
+              symbol: "NIFTY24APR24000CE",
+              pnl: 100,
+              quantity: 75,
+              ltp: 150,
+              average_price: 134,
+              exchange: "NFO",
+              product: "BO", // bracket order — not a convertible/square-off product here
+            },
+          ],
+        }),
+      );
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      expect(screen.getByText(/unrecognised product/i)).toBeInTheDocument();
+
+      const confirmBtn = screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" });
+      expect(confirmBtn).toBeDisabled();
+      fireEvent.click(confirmBtn);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
     });
 
     // ── Broker-target selector (HONESTY: convert/exit-all are native-only verbs) ──

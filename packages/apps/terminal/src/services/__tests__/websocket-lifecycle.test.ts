@@ -6,7 +6,7 @@
  * WebSocket constructor and simulating server messages.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WebSocketService } from "../websocket";
+import { WebSocketService, type WsFailure } from "../websocket";
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket
@@ -421,6 +421,158 @@ describe("WebSocketService — lifecycle", () => {
 
     // No new WebSocket should have been created
     expect(MockWebSocket._lastInstance).toBeNull();
+  });
+
+  // -----------------------------------------------------------------------
+  // Auth failure handling — backoff, fatal latch, failure surfacing
+  // -----------------------------------------------------------------------
+
+  describe("auth failure handling", () => {
+    /** Drive one full failed-auth cycle on the current socket. */
+    function failAuthCycle(message = "Invalid API key"): MockWebSocket {
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "error", message });
+      // The service closes the socket; simulate the browser's close event.
+      ws._close();
+      return ws;
+    }
+
+    it("backs off between auth retries instead of looping every ~1s", () => {
+      const svc = createService();
+      svc.connect();
+
+      const ws1 = failAuthCycle();
+      expect(ws1.close).toHaveBeenCalled();
+
+      // First retry after 1000ms
+      vi.advanceTimersByTime(999);
+      expect(lastWs()).toBe(ws1);
+      vi.advanceTimersByTime(1);
+      const ws2 = lastWs();
+      expect(ws2).not.toBe(ws1);
+
+      // Second retry after 2000ms — the backoff must GROW across failed
+      // handshakes (the old bug reset it to 1s on every socket open).
+      failAuthCycle();
+      vi.advanceTimersByTime(1999);
+      expect(lastWs()).toBe(ws2);
+      vi.advanceTimersByTime(1);
+      expect(lastWs()).not.toBe(ws2);
+    });
+
+    it("stops retrying after 3 consecutive auth failures and surfaces a fatal failure", () => {
+      const svc = createService();
+      const failures: Array<WsFailure | null> = [];
+      svc.onFailure((f) => failures.push(f));
+      svc.connect();
+
+      failAuthCycle();
+      vi.advanceTimersByTime(1000);
+      failAuthCycle();
+      vi.advanceTimersByTime(2000);
+      const ws3 = failAuthCycle();
+
+      // The fatal auth failure is surfaced with the server's reason.
+      expect(svc.failure).toEqual({
+        kind: "auth",
+        reason: "Invalid API key",
+        attempts: 3,
+        fatal: true,
+      });
+      const authFailures = failures.filter((f) => f?.kind === "auth") as WsFailure[];
+      expect(authFailures).toHaveLength(3);
+      expect(authFailures[0].fatal).toBe(false);
+      expect(authFailures[2].fatal).toBe(true);
+
+      // No further reconnects — the loop is stopped, not backed off.
+      vi.advanceTimersByTime(300_000);
+      expect(lastWs()).toBe(ws3);
+
+      // connect() is latched too (widgets calling connect() must not restart
+      // the doomed loop with the same rejected key).
+      svc.connect();
+      expect(lastWs()).toBe(ws3);
+    });
+
+    it("clears the fatal latch when credentials change and authenticates with the new key", () => {
+      const svc = createService();
+      svc.connect();
+
+      failAuthCycle();
+      vi.advanceTimersByTime(1000);
+      failAuthCycle();
+      vi.advanceTimersByTime(2000);
+      const ws3 = failAuthCycle();
+      expect(svc.failure?.fatal).toBe(true);
+
+      // User fixes the API key in Settings.
+      svc.updateCredentials("ws://localhost:8765", "fresh-key");
+
+      // Failure cleared, reconnect immediate.
+      expect(svc.failure).toBeNull();
+      const ws4 = lastWs();
+      expect(ws4).not.toBe(ws3);
+
+      ws4._open();
+      const payload = JSON.parse(ws4.send.mock.calls[0][0] as string);
+      expect(payload).toEqual({ action: "authenticate", api_key: "fresh-key" });
+
+      ws4._receive({ type: "auth", status: "success" });
+      expect(svc.isConnected).toBe(true);
+    });
+
+    it("resets the backoff and clears the failure after a successful authentication", () => {
+      const svc = createService();
+      svc.connect();
+
+      failAuthCycle("transient auth hiccup");
+      vi.advanceTimersByTime(1000); // backoff base is now 2000
+
+      const ws2 = lastWs();
+      ws2._open();
+      ws2._receive({ type: "auth", status: "success" });
+      expect(svc.isConnected).toBe(true);
+      expect(svc.failure).toBeNull();
+
+      // A transport drop after a healthy handshake retries at the RESET base
+      // delay (1s), not the grown one.
+      ws2._close();
+      vi.advanceTimersByTime(1000);
+      expect(lastWs()).not.toBe(ws2);
+    });
+
+    it("records a non-fatal network failure while reconnecting after a transport drop", () => {
+      const svc = createService();
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+      ws._close();
+
+      expect(svc.failure).toMatchObject({ kind: "network", fatal: false });
+    });
+
+    it("does not overwrite a pending auth failure with a network failure between retries", () => {
+      const svc = createService();
+      svc.connect();
+
+      failAuthCycle(); // close → scheduleReconnect runs with an auth failure pending
+
+      expect(svc.failure).toMatchObject({ kind: "auth", reason: "Invalid API key", fatal: false });
+    });
+
+    it("uses a fallback reason when the server sends no auth failure message", () => {
+      const svc = createService();
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "error" });
+
+      expect(svc.failure).toMatchObject({ kind: "auth", reason: "Authentication failed" });
+    });
   });
 
   // -----------------------------------------------------------------------

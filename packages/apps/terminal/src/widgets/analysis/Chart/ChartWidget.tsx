@@ -60,6 +60,8 @@ import {
   FLINT_CHART_INDICATOR_PANE_SIZE_SHORT_LABELS,
   FLINT_CHART_INDICATOR_PANE_STRETCH_FACTORS,
 } from "@flinttrade/design-system";
+import { useAtomValue } from "jotai";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { safeParse, ohlcvCacheSchema } from "@/lib/safeParse";
 import { isMarketHours } from "@/lib/market";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -948,6 +950,24 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     setVisibleLogicalRange(null);
     setInterval(v);
   }, []);
+
+  // Standard terminal UX: a watchlist row click (or any widget that writes
+  // selectedSymbolAtom) drives the default chart. A pinned chart — one whose
+  // Dockview panel params carry an explicit symbol — keeps its instrument and
+  // ignores the selection, so multi-chart preset layouts are never clobbered.
+  // The current symbol/exchange are deliberately NOT in the deps: the effect
+  // reacts only to selection changes, so a symbol picked locally through the
+  // chart's own search sticks until the next watchlist click.
+  const selectedInstrument = useAtomValue(selectedSymbolAtom);
+  useEffect(() => {
+    if (isPinned || !selectedInstrument) return;
+    if (selectedInstrument.symbol === symbol && selectedInstrument.exchange === exchange) return;
+    handleSymbolSelect({
+      symbol: selectedInstrument.symbol,
+      exchange: selectedInstrument.exchange,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInstrument, isPinned, handleSymbolSelect]);
 
   const handleTextConfirm = useCallback((text: string) => {
     if (!awaitingText) return;

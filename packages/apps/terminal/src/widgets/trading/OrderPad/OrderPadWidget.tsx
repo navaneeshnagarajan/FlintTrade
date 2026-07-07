@@ -65,6 +65,14 @@ const DEBOUNCE_MS = 300;
 /** Exchanges that have option strikes (NFO = NSE F&O, BFO = BSE F&O). */
 const OPTIONS_EXCHANGES = new Set(["NFO", "BFO"]);
 
+/**
+ * Derivative exchanges where quantity MUST be a positive multiple of the
+ * instrument's lot size. Submissions fail closed when the lot size is
+ * unknown — a wrong F&O quantity is a broker rejection at best and an
+ * unintended position size at worst.
+ */
+const DERIVATIVE_EXCHANGES = new Set(["NFO", "BFO", "MCX", "CDS"]);
+
 // NOTE: A "strike offset" selector (ATM/ITMn/OTMn) previously lived here. It
 // computed a strike from the OPTION CONTRACT'S OWN PREMIUM (mistaking it for
 // the underlying spot) and wrote that strike-like number into the order's
@@ -346,13 +354,16 @@ function OrderPadWidget(props: WidgetProps) {
   // Lot size for the current symbol (0 = no lot constraint, e.g. equities).
   // Populated automatically via getSymbol when the symbol or exchange changes.
   const [lotSize, setLotSize] = useState(0);
+  // Whether the lot size was actually confirmed by a symbol lookup. Derivative
+  // exchanges (NFO/BFO/MCX/CDS) refuse to submit while this is false.
+  const [lotSizeKnown, setLotSizeKnown] = useState(false);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastParamsRef = useRef<PlaceOrderParams | null>(null);
 
-  const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<OrderFormValues>({
+  const { control, handleSubmit, watch, setValue, setError, clearErrors, formState: { errors } } = useForm<OrderFormValues>({
     // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
     resolver: zodResolver(orderSchema) as unknown as Resolver<OrderFormValues>,
     defaultValues: {
@@ -392,22 +403,29 @@ function OrderPadWidget(props: WidgetProps) {
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
   // On match, qty is set to the instrument's lotsize so the first order is valid.
-  // On no match (symbol not found) the error is swallowed — lot constraint stays 0.
+  // The lot constraint is reset BEFORE the lookup so a failed fetch never leaves
+  // a stale lot size from the previous instrument — derivative submissions fail
+  // closed on an unknown lot size.
   useEffect(() => {
     if (!symbol || !exchange) return;
     let cancelled = false;
+    setLotSize(0);
+    setLotSizeKnown(false);
     const result = getSymbol(symbol, exchange);
     if (!result || typeof result.then !== "function") return;
     result.then((info) => {
         if (cancelled) return;
-        const ls = info.lotsize ?? 0;
-        setLotSize(ls);
-        if (ls > 0) {
+        // Coerce defensively — some adapters send numerics as strings.
+        const ls = Number(info.lotsize ?? 0);
+        if (Number.isFinite(ls) && ls > 0) {
+          setLotSize(ls);
+          setLotSizeKnown(true);
           setValue("qty", ls, { shouldValidate: true });
         }
       })
       .catch(() => {
-        // Symbol not found or API unavailable — leave lot size unchanged
+        // Symbol not found or API unavailable — lot size stays unknown, and
+        // derivative-exchange submissions are blocked until a lookup succeeds.
       });
     return () => {
       cancelled = true;
@@ -592,6 +610,26 @@ function OrderPadWidget(props: WidgetProps) {
   }, [showToast]);
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
+    // F&O lot-multiple validation. Quantity on a derivative exchange must be a
+    // positive multiple of the instrument's lot size; when the lot size is
+    // unknown (symbol lookup failed) the submission fails closed rather than
+    // sending a quantity the broker may reject — or worse, partially accept.
+    clearErrors("qty");
+    if (DERIVATIVE_EXCHANGES.has(values.exchange)) {
+      if (!lotSizeKnown || lotSize <= 0) {
+        const msg = `Lot size unknown for ${values.symbol} (${values.exchange}) — cannot validate the F&O quantity. Reselect the symbol and try again.`;
+        setError("qty", { type: "validate", message: msg });
+        showToast("error", msg, 6000);
+        return;
+      }
+      if (values.qty <= 0 || values.qty % lotSize !== 0) {
+        const msg = `Quantity must be a positive multiple of the lot size (${lotSize}) for ${values.exchange}.`;
+        setError("qty", { type: "validate", message: msg });
+        showToast("error", msg, 6000);
+        return;
+      }
+    }
+
     const params: PlaceOrderParams = {
       symbol: values.symbol,
       exchange: values.exchange,
@@ -639,7 +677,13 @@ function OrderPadWidget(props: WidgetProps) {
       </div>
 
       {/* Form body */}
+      {/* noValidate: validation is owned by zod + the custom F&O lot check in
+          onSubmit. Native constraint validation must stay off — the number
+          input's step base is its min, so with min=1 and step=lotSize the
+          browser flags exact lot multiples (e.g. 150 with lot 75) as a
+          stepMismatch and silently blocks submission before handleSubmit runs. */}
       <form
+        noValidate
         onSubmit={(e) => void handleSubmit(onSubmit)(e)}
         className="flex-1 flex flex-col gap-3 px-3 py-3 overflow-y-auto"
       >
@@ -875,7 +919,9 @@ function OrderPadWidget(props: WidgetProps) {
                     label="Quantity"
                     value={field.value}
                     onChange={(v) => handleQtyChange(v, field.onChange)}
-                    min={1}
+                    // One lot is the floor when the lot size is known, keeping the
+                    // stepper (and the native spinner's step base) lot-aligned.
+                    min={lotSize > 0 ? lotSize : 1}
                     step={lotSize > 0 ? lotSize : 1}
                     invalid={!!errors.qty}
                     errorId={errors.qty ? "orderpad-qty-error" : undefined}

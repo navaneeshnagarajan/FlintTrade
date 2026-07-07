@@ -51,7 +51,11 @@ vi.mock("jotai", async () => {
 // ---------------------------------------------------------------------------
 
 import OrderPadWidget from "../OrderPadWidget";
+import { placeOrder, getSymbol } from "@/services/api";
 import * as jotai from "jotai";
+
+const mockPlaceOrder = vi.mocked(placeOrder);
+const mockGetSymbol = vi.mocked(getSymbol);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -322,5 +326,92 @@ describe("OrderPadWidget options premium prefill", () => {
     renderOptionsPad();
 
     expect(screen.queryByText("Strike Offset")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F&O lot-multiple validation — quantity on derivative exchanges (NFO/BFO/
+// MCX/CDS) must be a positive multiple of the instrument's lot size, and
+// submission fails closed when the lot size is unknown for a derivative.
+// ---------------------------------------------------------------------------
+
+describe("OrderPadWidget F&O lot-size validation", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
+    mockPlaceOrder.mockReset();
+    mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
+    mockGetSymbol.mockReset();
+  });
+
+  function renderNfoPad(): void {
+    render(
+      <OrderPadWidget
+        {...makeDockviewPanelProps({
+          params: { symbol: "NIFTY28MAR2422000CE", exchange: "NFO" },
+        })}
+      />,
+    );
+  }
+
+  it("blocks submission when the quantity is not a lot multiple on NFO", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+
+    // Lot size loads asynchronously; qty auto-fills to one lot.
+    await screen.findByText("Lot: 75");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const messages = await screen.findAllByText(/positive multiple of the lot size \(75\)/i);
+    expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the lot size is unknown for a derivative exchange", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol not found"));
+    renderNfoPad();
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const messages = await screen.findAllByText(/lot size unknown/i);
+    expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("submits when the quantity is an exact lot multiple", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot: 75");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "150" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY28MAR2422000CE", exchange: "NFO", quantity: 150 }),
+    );
+  });
+
+  it("does not apply the lot constraint to equity exchanges", async () => {
+    // Equity NSE with a failed symbol lookup — no lot constraint applies.
+    mockGetSymbol.mockRejectedValue(new Error("lookup unavailable"));
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ exchange: "NSE", quantity: 1 }),
+    );
   });
 });

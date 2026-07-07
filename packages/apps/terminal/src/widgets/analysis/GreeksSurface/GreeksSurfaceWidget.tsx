@@ -393,7 +393,11 @@ function GreeksSurfaceWidget() {
     isConnected,
   );
 
-  const data = isConnected ? liveData : SAMPLE_GREEKS_SURFACE_DATA;
+  const data = isConnected ? liveData?.expiries : SAMPLE_GREEKS_SURFACE_DATA;
+  // Badge keys off the payload FLAG, not connection state alone: the backend
+  // serves clearly-flagged sample IVs (is_sample_data) when it has no live
+  // chain, even while a broker is connected — the derived surface inherits it.
+  const isSample = !isConnected || liveData?.isSampleData === true;
 
   // Range for legend
   const { minVal, maxVal } = useMemo(() => {
@@ -420,17 +424,18 @@ function GreeksSurfaceWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        {/* Honest disclosure — when disconnected the surface is
-            SAMPLE_GREEKS_SURFACE_DATA (data = isConnected ? liveData : SAMPLE).
-            Permanent (non-dismissible) badge, unlike the dismissible PreviewBanner. */}
-        {!isConnected && (
+        {/* Honest disclosure — shows whenever the surface on screen is
+            fabricated: the local SAMPLE constant (disconnected) OR a surface
+            derived from a backend payload flagged is_sample_data. Permanent
+            (non-dismissible) badge, unlike the dismissible PreviewBanner. */}
+        {isSample && (
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample data; connect a broker for a live greeks surface"
-            title="Not connected — showing a sample greeks surface so the widget is usable in explore mode."
+            aria-label="Showing demo data, not a live greeks surface"
+            title="Demo data — fabricated sample values, not a live option chain."
           >
-            Sample data
+            Demo data
           </span>
         )}
         <Select value={symbol} onValueChange={setSymbol}>
@@ -550,7 +555,7 @@ function GreeksSurfaceWidget() {
       )}
 
       {/* Empty state */}
-      {isConnected && !isLoading && !liveData && !isError && (
+      {isConnected && !isLoading && !isError && (!liveData || liveData.expiries.length === 0) && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
           Select symbol to view Greeks surface
         </div>

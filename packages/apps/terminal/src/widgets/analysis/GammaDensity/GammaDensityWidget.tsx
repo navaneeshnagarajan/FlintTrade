@@ -28,6 +28,18 @@ const SYMBOL_EXCHANGE: Record<string, string> = {
 
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
+/**
+ * True when the payload carries the backend's `is_sample_data: true` honesty
+ * flag (propagated onto object payloads by the ftApi response unwrapper).
+ */
+function carriesSampleFlag(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { is_sample_data?: unknown }).is_sample_data === true
+  );
+}
+
 function Selector({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
@@ -75,7 +87,10 @@ function GammaDensityWidget() {
 
   const { data: liveData, isLoading, isFetching, refetch } = useGammaDensity(symbol, exchange, "", isConnected);
   const data = isConnected && liveData ? liveData : SAMPLE_GAMMA_DENSITY;
-  const isSample = !(isConnected && liveData);
+  // Badge keys off the payload FLAG, not connection state alone: the backend
+  // serves a clearly-flagged sample surface (is_sample_data) when it has no
+  // live chain, even while a broker is connected.
+  const isSample = !isConnected || !liveData || carriesSampleFlag(liveData);
 
   const chartState = useMemo(() => {
     const rows = data.strikes;
