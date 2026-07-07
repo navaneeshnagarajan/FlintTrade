@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ShimmerButton } from "@/components/magicui/shimmer-button";
 import { useConnectionStore } from "@/stores/connectionStore";
+import type { WsFailure } from "@/services/websocket";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { motionConfig } from "@/lib/motion";
@@ -130,35 +131,53 @@ const ModeButton = forwardRef<HTMLButtonElement, ModeButtonProps>(
 interface ConnectionCardProps {
   connected: boolean;
   practiceMode: boolean;
+  /** Latest WebSocket failure from the connection store — null when healthy. */
+  wsFailure: WsFailure | null;
 }
 
-function ConnectionCard({ connected, practiceMode }: ConnectionCardProps) {
+function ConnectionCard({ connected, practiceMode, wsFailure }: ConnectionCardProps) {
+  // An auth rejection is more actionable than a bare "Disconnected" — name it,
+  // and show the server's reason so the operator knows which key to fix.
+  const authFailed = !connected && wsFailure?.kind === "auth";
+  const label = connected
+    ? "Connected"
+    : authFailed
+      ? "Authentication failed"
+      : "Disconnected";
   return (
     <div
-      className="flex items-center justify-between p-2.5 rounded-lg border border-border-default"
+      className="p-2.5 rounded-lg border border-border-default"
       style={{ backgroundColor: "var(--glass-l2-bg, var(--color-surface-elevated))" }}
     >
-      <div className="flex items-center gap-2">
-        <div
-          className={cn(
-            "w-2 h-2 rounded-full shrink-0 transition-colors",
-            connected
-              ? "bg-profit ring-2 ring-profit/20 animate-[pulse-glow_2s_ease-in-out_infinite]"
-              : "bg-loss",
-          )}
-          aria-hidden="true"
-        />
-        <span className={cn("text-xs font-medium", connected ? "text-profit" : "text-loss")}>
-          {connected ? "Connected" : "Disconnected"}
-        </span>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              "w-2 h-2 rounded-full shrink-0 transition-colors",
+              connected
+                ? "bg-profit ring-2 ring-profit/20 animate-[pulse-glow_2s_ease-in-out_infinite]"
+                : "bg-loss",
+            )}
+            aria-hidden="true"
+          />
+          <span className={cn("text-xs font-medium", connected ? "text-profit" : "text-loss")}>
+            {label}
+          </span>
+        </div>
+        {practiceMode && (
+          <Badge
+            variant="outline"
+            className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
+          >
+            PRACTICE
+          </Badge>
+        )}
       </div>
-      {practiceMode && (
-        <Badge
-          variant="outline"
-          className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
-        >
-          PRACTICE
-        </Badge>
+      {authFailed && wsFailure && (
+        <p className="mt-1 pl-4 text-xxs text-text-muted" role="status">
+          {wsFailure.reason}
+          {wsFailure.fatal ? " — update the API key in Settings to retry" : ""}
+        </p>
       )}
     </div>
   );
@@ -185,6 +204,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
 
   // Connection state
   const status = useConnectionStore((s) => s.status);
+  const wsFailure = useConnectionStore((s) => s.wsFailure);
   const connected = status === "connected";
 
   // Settings store — density only; mode is owned by modeStore
@@ -355,7 +375,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         {/* ------------------------------------------------------------------ */}
         {/* Connection status card                                               */}
         {/* ------------------------------------------------------------------ */}
-        <ConnectionCard connected={connected} practiceMode={isPractice} />
+        <ConnectionCard connected={connected} practiceMode={isPractice} wsFailure={wsFailure ?? null} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Dark / Light / System mode segment                                   */}

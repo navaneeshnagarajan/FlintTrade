@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -193,19 +193,48 @@ import { APP_VERSION_TAG } from "@/lib/appVersion";
 // ---------------------------------------------------------------------------
 
 describe("ConnectionSection", () => {
-  it("renders with host input and section title", () => {
-    render(
+  function renderConnectionSection() {
+    return render(
       <ConnectionSection
         settings={{ host: "http://127.0.0.1:5000", port: "5000", apiKey: "", wsPort: "8765" }}
         onChange={vi.fn()}
       />,
     );
+  }
+
+  it("renders with host input and section title", () => {
+    renderConnectionSection();
 
     expect(screen.getByText("Broker Gateway")).toBeInTheDocument();
     expect(screen.getByLabelText("Broker gateway URL")).toBeInTheDocument();
     expect(screen.getByLabelText("REST port")).toBeInTheDocument();
     expect(screen.getByLabelText("WebSocket port")).toBeInTheDocument();
     expect(screen.getByText("Test Connection")).toBeInTheDocument();
+  });
+
+  it("suggests OpenAlgo's port 5000 in the gateway URL placeholder, never FlintTrade's 5100", () => {
+    // 5100 is FlintTrade's own backend — pointing the OpenAlgo bridge at it
+    // guarantees a broken connection (item 1).
+    renderConnectionSection();
+
+    expect(screen.getByLabelText("Broker gateway URL")).toHaveAttribute(
+      "placeholder",
+      "http://127.0.0.1:5000",
+    );
+  });
+
+  it("offers a setup wizard entry point that navigates to /setup", () => {
+    renderConnectionSection();
+
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:navigate", listener);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /open setup wizard/i }));
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect((listener.mock.calls[0][0] as CustomEvent<string>).detail).toBe("/setup");
+    } finally {
+      window.removeEventListener("flinttrade:navigate", listener);
+    }
   });
 });
 

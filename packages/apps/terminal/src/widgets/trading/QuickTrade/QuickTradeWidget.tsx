@@ -18,7 +18,7 @@
 
 import { useState, useCallback, useEffect, memo } from "react";
 import { useAtomValue } from "jotai";
-import { Zap, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Zap, CheckCircle2, AlertCircle, Loader2, MousePointerClick } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { placeOrder, getSymbol } from "@/services/api";
@@ -176,12 +176,15 @@ function QuickTradeWidget(props: WidgetProps) {
   // top-level props silently dropped every prefill (the old hardcoded-NIFTY
   // bug). When no params are given, follow the workspace's selected
   // instrument (e.g. the active Watchlist row) so the ticket targets what the
-  // trader is actually looking at.
+  // trader is actually looking at. With neither, fail closed: render an
+  // explicit "select an instrument" state — never silently default to
+  // NIFTY/NSE and let a click place an order the trader did not target.
   const prefill = (props.params ?? {}) as QuickTradePrefill;
   const selectedInstrument = useAtomValue(selectedSymbolAtom);
-  const symbol = prefill.symbol ?? selectedInstrument?.symbol ?? "NIFTY";
+  const symbol = prefill.symbol ?? selectedInstrument?.symbol ?? "";
   const exchange =
-    prefill.exchange ?? (prefill.symbol ? "NSE" : selectedInstrument?.exchange ?? "NSE");
+    prefill.exchange ?? (prefill.symbol ? "NSE" : selectedInstrument?.exchange ?? "");
+  const hasInstrument = symbol !== "" && exchange !== "";
 
   const [lots, setLots] = useState<LotPreset>(1);
   const [product, setProduct] = useState<ProductType>("MIS");
@@ -267,6 +270,12 @@ function QuickTradeWidget(props: WidgetProps) {
 
   const handleAction = useCallback(
     (action: "BUY" | "SELL") => {
+      // Belt-and-braces — the buttons are unreachable without an instrument,
+      // but no order may ever leave this widget with an empty symbol.
+      if (!hasInstrument) {
+        setStatus({ type: "error", message: "Select an instrument first — order not sent" });
+        return;
+      }
       if (mode === "explore") {
         setStatus({ type: "error", message: "Connect a broker to place orders" });
         return;
@@ -285,7 +294,7 @@ function QuickTradeWidget(props: WidgetProps) {
       }
       void executeOrder(action);
     },
-    [lots, mode, executeOrder, resolveQuantity, symbol],
+    [hasInstrument, lots, mode, executeOrder, resolveQuantity, symbol],
   );
 
   const handleConfirm = useCallback(() => {
@@ -300,6 +309,30 @@ function QuickTradeWidget(props: WidgetProps) {
   }, []);
 
   const displayQuantity = resolveQuantity();
+
+  // Fail-closed empty state — no panel params and no workspace selection means
+  // there is nothing safe to trade. Rendered after all hooks (hook-order rule).
+  if (!hasInstrument) {
+    return (
+      <div className="relative h-full flex flex-col bg-surface-base overflow-hidden">
+        <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+          <Zap size={13} className="text-accent shrink-0" aria-hidden="true" />
+          <span className="text-xs font-semibold text-text-primary">Quick Trade</span>
+        </div>
+        <div
+          role="status"
+          className="flex-1 flex flex-col items-center justify-center gap-2 p-4 text-center"
+        >
+          <MousePointerClick size={20} className="text-text-muted" aria-hidden="true" />
+          <p className="text-xs font-medium text-text-primary">Select an instrument</p>
+          <p className="text-xxs text-text-muted max-w-52">
+            Pick a scrip in the Watchlist, or open Quick Trade from a chart, to enable
+            one-click orders. No default instrument is assumed.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-full flex flex-col bg-surface-base overflow-hidden">

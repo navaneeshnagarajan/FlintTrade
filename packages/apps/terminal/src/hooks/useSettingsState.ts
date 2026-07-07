@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { resetWsService } from "@/services/websocket";
+import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import {
   persistOpenAlgoConfigPatch,
   readOpenAlgoConfig,
@@ -260,7 +261,9 @@ export function useSettingsState(): SettingsState {
     useSettingsStore.getState().setDataPaths({ [field]: value });
   }, []);
 
-  const updateConnection = useCallback((field: keyof ConnectionData, value: string) => {
+  const updateConnection = useCallback((field: keyof ConnectionData, rawValue: string) => {
+    // Ports are numeric-or-empty; a whitespace-only value means "cleared".
+    const value = field === "port" || field === "wsPort" ? rawValue.trim() : rawValue;
     pendingConnectionPatchRef.current = { ...pendingConnectionPatchRef.current, [field]: value };
     const current = useConnectionStore.getState();
     let host = current.host;
@@ -282,9 +285,24 @@ export function useSettingsState(): SettingsState {
     }
     const wsUrl = deriveWsUrl(host, wsPort);
     useConnectionStore.getState().setConfig({ host, apiKey, wsUrl });
+
+    // Backend contract (/v1/config/openalgo): port and ws_port must be
+    // integers 1–65535 when present — {"port": ""} 400s. A cleared port field
+    // means "no explicit override" (fall back to the host's port / defaults),
+    // so omit the key from the persisted patch instead of sending "".
+    if ((field === "port" || field === "wsPort") && value === "") {
+      return;
+    }
     const save = persistOpenAlgoPatch({ [field]: value });
-    void save.catch((err) => {
+    void save.catch((err: unknown) => {
       console.warn("[settings] failed to persist OpenAlgo config:", err);
+      // A silent 400/500 here means the operator believes the gateway settings
+      // are saved when they are not — surface it (item 6).
+      emitNotification({
+        category: "system",
+        title: "Connection settings not saved",
+        body: err instanceof Error ? err.message : "The broker gateway settings could not be saved.",
+      });
     });
   }, [connRestPort]);
 

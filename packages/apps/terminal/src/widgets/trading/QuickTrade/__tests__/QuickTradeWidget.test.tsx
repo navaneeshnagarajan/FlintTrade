@@ -28,6 +28,8 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { createStore, Provider } from "jotai";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import QuickTradeWidget from "../QuickTradeWidget";
 
 function renderQuickTrade(params: Record<string, unknown> = {}) {
@@ -54,8 +56,37 @@ describe("QuickTradeWidget", () => {
     expect(screen.getByText("NSE")).toBeTruthy();
   });
 
-  it("renders lot preset buttons", () => {
+  it("fails closed with a select-an-instrument state when there are no params and no selection", () => {
+    // Item 7: no panel params + no workspace selection must NOT default to
+    // NIFTY/NSE — a one-click widget silently targeting an instrument the
+    // trader never chose is an order-safety bug.
     renderQuickTrade();
+
+    expect(screen.getByText("Select an instrument")).toBeInTheDocument();
+    expect(screen.queryByText("NIFTY")).toBeNull();
+    expect(screen.queryByRole("button", { name: /buy/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /sell/i })).toBeNull();
+    expect(mockGetSymbol).not.toHaveBeenCalled();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("follows the workspace's selected instrument when no panel params are given", async () => {
+    const store = createStore();
+    store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+
+    render(
+      <Provider store={store}>
+        <QuickTradeWidget {...makeDockviewPanelProps({ params: {} })} />
+      </Provider>,
+    );
+
+    expect(screen.getByText("TCS")).toBeInTheDocument();
+    expect(screen.queryByText("Select an instrument")).toBeNull();
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+  });
+
+  it("renders lot preset buttons", () => {
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     // LOT_PRESETS: 1, 2, 5, 10
     const group = screen.getByRole("group", { name: "Lot size presets" });
     expect(group).toBeTruthy();
@@ -69,14 +100,14 @@ describe("QuickTradeWidget", () => {
   });
 
   it("shows limit price input when LIMIT order type is selected", () => {
-    renderQuickTrade();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     const limitBtn = screen.getByRole("button", { name: /LIMIT/i });
     fireEvent.click(limitBtn);
     expect(screen.getByLabelText("Limit price")).toBeTruthy();
   });
 
   it("does not show limit price input when MARKET is selected", () => {
-    renderQuickTrade();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     expect(screen.queryByLabelText("Limit price")).toBeNull();
   });
 

@@ -23,6 +23,19 @@ describe("ModeSelectRoute", () => {
     fireEvent.click(liveButton as HTMLButtonElement);
   }
 
+  it("does not claim Practice needs a broker — it is the broker-free native sandbox", () => {
+    render(<ModeSelectRoute onSelect={vi.fn()} />);
+
+    const practiceButton = screen.getByText("Practice").closest("button") as HTMLButtonElement;
+    expect(practiceButton).not.toBeNull();
+    expect(practiceButton).toHaveTextContent(/no broker needed/i);
+    expect(practiceButton).not.toHaveTextContent(/broker required/i);
+
+    // Live genuinely requires a broker + PIN — that copy must stay.
+    const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
+    expect(liveButton).toHaveTextContent(/broker required/i);
+  });
+
   it("verifies the Live PIN and passes the live-unlocked session token upward", async () => {
     const onSelect = vi.fn();
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

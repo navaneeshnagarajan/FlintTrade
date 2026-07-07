@@ -365,8 +365,15 @@ export default function AppLayout() {
     [navigate],
   );
 
-  // Global keyboard shortcuts listener.
+  // Global keyboard shortcuts listener — the SINGLE useGlobalKeys mount for
+  // the whole app (destructive trading hotkeys must never register twice).
+  // Escape is forwarded on the event bus so route-local overlays (e.g. the
+  // /trade tool/picker overlays in TerminalRoute) can close themselves
+  // without mounting the hook a second time.
   useGlobalKeys({
+    onEscape: useCallback(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:escape"));
+    }, []),
     onCommandPalette: handleToggleCommandPalette,
     onShowShortcuts: handleShowShortcuts,
   });

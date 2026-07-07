@@ -2,7 +2,8 @@
  * ConnectionSection — broker gateway URL, API key, and WebSocket port settings.
  */
 
-import { Loader2, Wifi, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, Wifi, CheckCircle2, XCircle, Wand2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { FieldRow, TextInput, SectionTitle } from "./shared";
 import { useTestConnection } from "@/hooks/useTestConnection";
 import { applyOpenAlgoRestPort } from "@/services/ftApi.openalgo";
@@ -34,12 +35,12 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
 
       <FieldRow
         label="Gateway URL"
-        hint="Base URL for the OpenAlgo-compatible bridge. Native broker connections are managed from Brokers."
+        hint="Base URL for the OpenAlgo-compatible bridge — OpenAlgo serves on port 5000 by default (5100 is FlintTrade's own backend, not the bridge). Native broker connections are managed from Brokers."
       >
         <TextInput
           value={settings.host}
           onChange={(v) => onChange("host", v)}
-          placeholder="http://127.0.0.1:5100"
+          placeholder="http://127.0.0.1:5000"
           aria-label="Broker gateway URL"
         />
       </FieldRow>
@@ -110,6 +111,30 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
             <span>{connMessage}</span>
           </div>
         )}
+      </div>
+
+      {/* Setup wizard entry point — the guided /setup flow configures the
+          connection, trading defaults and risk limits in one pass. Navigation
+          goes through the flinttrade:navigate event bus (handled by AppLayout)
+          so this section stays usable outside a Router context. */}
+      <div className="pt-4 border-t border-border-default space-y-2">
+        <p className="text-xs text-text-muted">
+          Prefer a guided flow? The setup wizard walks through connection, trading defaults and risk limits.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("flinttrade:navigate", { detail: "/setup" }),
+            )
+          }
+          className="border-border-default text-text-secondary hover:text-text-primary"
+        >
+          <Wand2 size={12} className="mr-1.5" aria-hidden="true" />
+          Open setup wizard
+        </Button>
       </div>
     </div>
   );

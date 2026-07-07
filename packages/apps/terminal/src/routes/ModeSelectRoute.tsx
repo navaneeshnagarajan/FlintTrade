@@ -53,7 +53,9 @@ const MODE_CARDS: ModeCardConfig[] = [
     id: "practice",
     label: "Practice",
     description: "Practice trading with live data",
-    brokerNote: "Broker required",
+    // Practice orders run against the native SandboxEngine, never a broker —
+    // claiming "Broker required" here scared off broker-less users (item 2).
+    brokerNote: "No broker needed · Native sandbox",
     icon: <FlaskConical size={22} aria-hidden="true" />,
     pillClass: "bg-amber-500/20 text-amber-400",
     borderClass: "border-border-default/70 hover:border-amber-500/50",

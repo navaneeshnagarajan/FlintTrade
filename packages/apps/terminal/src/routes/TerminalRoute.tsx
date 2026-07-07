@@ -21,7 +21,6 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
-import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import PresetPicker from "@/chrome/PresetPicker";
 import { widgetCatalog, widgetComponents } from "@/layout/widgetFactory";
@@ -376,14 +375,18 @@ export default function TerminalRoute() {
   const presetPickerOpen = useLayoutStore((s) => s.presetPickerOpen);
   const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
-  // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
-  useGlobalKeys({
-    onEscape: useCallback(() => {
+  // Escape handling — useGlobalKeys is mounted ONCE, in AppLayout (destructive
+  // trading hotkeys must never register twice). AppLayout forwards Escape as a
+  // flinttrade:escape event; this route closes its local overlays in response.
+  useEffect(() => {
+    function onEscapeSignal() {
       if (activeTool) { setActiveTool(null); return; }
       if (presetPickerOpen) { setPresetPickerOpen(false); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
-    }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]),
-  });
+    }
+    window.addEventListener("flinttrade:escape", onEscapeSignal);
+    return () => window.removeEventListener("flinttrade:escape", onEscapeSignal);
+  }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]);
 
   // ---------------------------------------------------------------------------
   // ARIA injection for Dockview panels (Issue #46)

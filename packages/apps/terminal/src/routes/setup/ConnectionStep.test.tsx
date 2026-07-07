@@ -1,8 +1,9 @@
 import { act } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { useBrokerStore } from "@/stores/brokerStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { ConnectionStep } from "./ConnectionStep";
 
 vi.mock("@/hooks/useBrokerAccounts", () => ({
@@ -17,7 +18,12 @@ describe("ConnectionStep", () => {
   beforeEach(() => {
     act(() => {
       useBrokerStore.setState({ accounts: [], activeAccountId: null });
+      useConnectionStore.setState({ host: "", apiKey: "", wsUrl: "" });
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("defaults to the OpenAlgo (primary) connect tab", () => {
@@ -39,6 +45,38 @@ describe("ConnectionStep", () => {
     expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
   });
 
+  it("does not commit untested values to the connection store when Test Connection runs", async () => {
+    // Item 4: the old handleTest wrote host/apiKey into connectionStore BEFORE
+    // the test ran, so a failed test still repointed the app at an unverified
+    // host. The test must exercise the candidate values only; the store is
+    // written on explicit Continue (persistSetupChoices).
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ status: "error", message: "unreachable" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ConnectionStep onComplete={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText(/openalgo-compatible url/i), {
+      target: { value: "http://unverified-host:5000" },
+    });
+    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
+      target: { value: "candidate-api-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // The candidate values went to the backend test endpoint...
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/ft-api/v1/test-connection");
+    // ...but the live connection store was NOT touched.
+    expect(useConnectionStore.getState().host).toBe("");
+    expect(useConnectionStore.getState().apiKey).toBe("");
+  });
+
   it("shows the native connect (with the risk note) after selecting the FlintTrade Native tab", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
@@ -48,6 +86,8 @@ describe("ConnectionStep", () => {
     expect(screen.getByText(/use at your own risk/i)).toBeInTheDocument();
     expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /connect a write-capable broker/i })).toBeDisabled();
+    // No connected accounts at all — the read-only demotion reason must not show.
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
   });
 
   it("allows continuing when a native broker has a live session", () => {
@@ -104,6 +144,13 @@ describe("ConnectionStep", () => {
     expect(continueButton).toBeDisabled();
     fireEvent.click(continueButton);
     expect(onComplete).not.toHaveBeenCalled();
+
+    // Item 5: the gate must explain WHY — the account came back read-only
+    // (demoted from write routing), not just sit disabled with no reason.
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent(/read-only/i);
+    expect(note).toHaveTextContent(/demoted from write routing/i);
+    expect(note).toHaveTextContent(/re-authenticate/i);
   });
 
   it("allows continuing when a gateway broker account is connected", () => {

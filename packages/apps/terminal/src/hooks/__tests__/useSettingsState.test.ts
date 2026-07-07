@@ -21,6 +21,12 @@ vi.mock("@/services/websocket", () => ({
   resetWsService: vi.fn(),
 }));
 
+// Notification bus — failed connection saves must surface to the operator.
+const mockEmitNotification = vi.hoisted(() => vi.fn());
+vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
+  emitNotification: mockEmitNotification,
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -77,6 +83,7 @@ describe("useSettingsState", () => {
   beforeEach(() => {
     resetStores();
     mockFetchWithOpenAlgoConfig();
+    mockEmitNotification.mockClear();
   });
 
   it("accepts backend OpenAlgo config save status variants", () => {
@@ -214,6 +221,75 @@ describe("useSettingsState", () => {
       );
       expect(result.current.connection.port).toBe("5010");
     });
+  });
+
+  it("treats a cleared REST port as clearing the override — never POSTs an empty port", async () => {
+    // Backend contract (/v1/config/openalgo): port must be an int 1-65535 when
+    // present, so {"port": ""} silently 400s (item 6). Clearing the field must
+    // omit the key instead, and locally fall back to host-derived/default.
+    const fetchMock = mockFetchWithOpenAlgoConfig({
+      api_key_configured: true,
+      api_key_last4: "-key",
+      host: "http://192.168.1.20",
+      port: 5001,
+      ws_port: 8770,
+    });
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.port).toBe("5001");
+    });
+    const postCallsBefore = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "POST",
+    ).length;
+
+    act(() => {
+      result.current.updateConnection("port", "");
+    });
+    act(() => {
+      result.current.updateConnection("wsPort", "  ");
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const postCallsAfter = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(postCallsAfter.length).toBe(postCallsBefore);
+    // Local override cleared — the effective default is shown, not "".
+    expect(result.current.connection.port).toBe("5000");
+  });
+
+  it("surfaces a failed connection save as a notification (item 6)", async () => {
+    mockFetchWithFailedPost({
+      api_key_configured: true,
+      api_key_last4: "-key",
+      host: "http://192.168.1.20:5000",
+      port: 5000,
+      ws_port: 8770,
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.connection.wsPort).toBe("8770");
+    });
+
+    act(() => {
+      result.current.updateConnection("apiKey", "next-key");
+    });
+
+    await waitFor(() => {
+      expect(mockEmitNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: "system",
+          title: "Connection settings not saved",
+          body: "workspace locked",
+        }),
+      );
+    });
+    warnSpy.mockRestore();
   });
 
   it("merges late hydration data around a pre-hydration edit", async () => {

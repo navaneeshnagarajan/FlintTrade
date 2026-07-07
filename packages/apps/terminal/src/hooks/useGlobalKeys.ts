@@ -11,11 +11,14 @@ interface GlobalKeyHandlers {
 
 /**
  * Destructive trading hotkeys (exit-all / cancel-all) must run exactly once per
- * keypress. The hook is mounted by more than one layout level (AppLayout wraps
- * TerminalRoute on /trade), so each keydown reaches multiple listeners. Each
- * listener marks the event here before acting; later listeners skip it. The
- * callback keys (Escape, Ctrl+K, ?) are NOT deduplicated — each mount point
- * passes its own handlers and expects them to fire.
+ * keypress. The hook has a SINGLE guaranteed mount — AppLayout, the shared
+ * chrome for every app route (TerminalRoute no longer mounts it; it listens
+ * for the forwarded flinttrade:escape event instead). This WeakSet stays as a
+ * belt-and-braces guard: if a second mount ever sneaks back in, each listener
+ * marks the event here before acting and later listeners skip it, so the
+ * destructive action still fires exactly once. The callback keys (Escape,
+ * Ctrl+K, ?) are NOT deduplicated — a mount passes its own handlers and
+ * expects them to fire.
  */
 const handledTradingKeyEvents = new WeakSet<KeyboardEvent>();
 

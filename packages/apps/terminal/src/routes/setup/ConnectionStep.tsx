@@ -13,7 +13,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   connectionSchema,
-  deriveWsUrl,
   type ConnectionFormValues,
 } from "./connectionForm";
 import {
@@ -23,11 +22,11 @@ import {
   Wifi,
   ArrowRight,
   CheckCheck,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useConnectionStore } from "@/stores/connectionStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { useTestConnection } from "@/hooks/useTestConnection";
@@ -103,9 +102,11 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
   const { status: testState, message: testMessage, testConnection } = useTestConnection();
 
   async function handleTest() {
+    // Test the CANDIDATE form values only — never commit them to the live
+    // connection store here. Committing before the test ran meant a failed
+    // test still repointed the app at an unverified host/key (item 4); the
+    // values are committed on explicit Continue via persistSetupChoices.
     const vals = getValues();
-    const wsUrl = deriveWsUrl(vals.host, vals.wsPort);
-    useConnectionStore.getState().setConfig({ host: vals.host, apiKey: vals.apiKey, wsUrl });
     await testConnection(applyOpenAlgoRestPort(vals.host, vals.port), vals.apiKey);
   }
 
@@ -246,6 +247,10 @@ function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
   return account.status === "connected" && account.read_only !== true;
 }
 
+function isReadOnlyConnectedBrokerAccount(account: BrokerAccount): boolean {
+  return account.status === "connected" && account.read_only === true;
+}
+
 interface DirectConnectPanelProps {
   onComplete: (values: ConnectionFormValues) => void;
 }
@@ -253,10 +258,31 @@ interface DirectConnectPanelProps {
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
   useBrokerAccounts();
   const hasWriteCapableBroker = useBrokerStore((s) => s.accounts.some(isWriteCapableBrokerAccount));
+  const hasReadOnlyConnectedBroker = useBrokerStore((s) =>
+    s.accounts.some(isReadOnlyConnectedBrokerAccount),
+  );
 
   return (
     <div className="space-y-4">
       <BrokerConnect />
+
+      {/* Demotion reason — a freshly connected account can come back read-only
+          (the backend demotes sessions without order-placement authorisation
+          from write routing, fail-closed). Without this note the disabled gate
+          below gives no reason (item 5). */}
+      {!hasWriteCapableBroker && hasReadOnlyConnectedBroker && (
+        <div
+          role="note"
+          className="flex items-start gap-2 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400"
+        >
+          <Info className="size-3.5 mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            A connected account is read-only: its broker session lacks order-placement
+            authorisation, so it was demoted from write routing and cannot place orders.
+            Re-authenticate it with trading permissions enabled, or connect a different broker.
+          </span>
+        </div>
+      )}
 
       <Button
         type="button"
