@@ -12,6 +12,8 @@ existing :class:`flinttrade_core.chart_prefs.ChartPreferences` store.
 
 from __future__ import annotations
 
+import re
+
 import logging
 from typing import Any
 
@@ -41,14 +43,23 @@ def _store() -> ChartPreferences:
 
 
 def _user_id() -> str:
-    """Resolve the preference namespace from the request."""
+    """Resolve the preference namespace from the request.
+
+    The value is caller-supplied and is reflected in responses and used as a
+    storage namespace, so it is constrained to a safe identifier charset —
+    anything else falls back to ``default`` (single-operator install; the
+    namespace is a convenience, not an auth boundary).
+    """
     raw = (
         request.headers.get("X-User-Id")
         or request.headers.get("X-User-ID")
         or request.args.get("user_id")
         or "default"
     )
-    return str(raw).strip() or "default"
+    candidate = str(raw).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", candidate):
+        return "default"
+    return candidate
 
 
 def _load_payload(user_id: str) -> dict[str, Any]:
