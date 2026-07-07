@@ -581,16 +581,26 @@ class TestCancelBracket:
         assert resp.status_code == 409
 
     def test_cancel_gated_path_unavailable_returns_503(self) -> None:
-        """A BracketOrderError from the service (fail-closed cancel) → HTTP 503."""
+        """A BracketOrderError from the service (fail-closed cancel) → HTTP 503.
+
+        The 503 body must carry a FIXED, actionable operator message — never the
+        raw exception text, which can embed broker/dispatcher internals
+        (CodeQL py/stack-trace-exposure). The underlying detail is logged
+        server-side instead.
+        """
         svc = MagicMock()
         svc.get_bracket.return_value = MagicMock()
         svc.cancel_bracket.side_effect = BracketOrderError(
-            "No gated cancel dispatcher is configured"
+            "No gated cancel dispatcher is configured — leg OID-1: <internal broker trace>"
         )
         with _make_app(svc).test_client() as c:
             resp = c.delete("/api/v1/orders/bracket/br-001")
         assert resp.status_code == 503
-        assert "gated cancel" in resp.get_json()["message"]
+        message = resp.get_json()["message"]
+        assert "may still rest live at the broker" in message
+        # The raw exception text (and any internal trace it embeds) must NOT leak.
+        assert "internal broker trace" not in message
+        assert "dispatcher" not in message
 
     def test_no_service_returns_503(self, client_no_service) -> None:
         """Missing BRACKET_SERVICE returns HTTP 503 on cancel.

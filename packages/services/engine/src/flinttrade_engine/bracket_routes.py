@@ -360,8 +360,20 @@ def cancel_bracket(bracket_id: str) -> Response:
     try:
         cancelled = svc.cancel_bracket(bracket_id, principal=principal)
     except BracketOrderError as exc:
+        # Fail-closed cancel path. Log the underlying detail server-side (it may
+        # embed raw broker/dispatcher exception text); return a FIXED, still
+        # actionable operator message so no internal detail is reflected to the
+        # caller (CodeQL py/stack-trace-exposure — same treatment as the other
+        # routes). The operator still learns the legs may be live and what to do.
         logger.error("Bracket cancel unavailable for '%s': %s", bracket_id, exc)
-        return jsonify({"status": "error", "message": str(exc)}), 503
+        return jsonify({
+            "status": "error",
+            "message": (
+                "The bracket could not be cancelled and its legs may still rest "
+                "live at the broker. Retry, or square off the position directly "
+                "at your broker."
+            ),
+        }), 503
 
     if not cancelled:
         return (
