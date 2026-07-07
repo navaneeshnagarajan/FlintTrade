@@ -414,3 +414,94 @@ class TestClientProvider:
         client.optionchain.return_value = self._CHAIN
         tracker = ExpiryTracker(client=client, db_path=":memory:")
         assert tracker.capture_snapshot("NIFTY", "260326") == 2
+
+
+# ---------------------------------------------------------------------------
+# Default DB path — workspace-resolved, with one-shot legacy migration
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultDbPathMigration:
+    """The default DB path resolves via ``workspace_dir()`` and copies a
+    legacy ``~/.flinttrade/data/expiry_tracker.duckdb`` into the workspace
+    (copy — never move; existing workspace files are never clobbered)."""
+
+    _CHAIN = [
+        {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
+         "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
+         "put_ltp": 120, "put_iv": 13},
+    ]
+
+    def _seed(self, db_path, expiry):
+        """Create a tracker DB at ``db_path`` holding one snapshot."""
+        from flinttrade_historical.expiry_tracker import ExpiryTracker
+
+        client = MagicMock(spec=["optionchain"])
+        client.optionchain.return_value = self._CHAIN
+        tracker = ExpiryTracker(client=client, db_path=str(db_path))
+        assert tracker.capture_snapshot("NIFTY", expiry) == 2
+        tracker.close()
+
+    def test_default_path_migrates_legacy_home_db(self, monkeypatch, tmp_path):
+        import flinttrade_historical.expiry_tracker as et
+
+        legacy_home = tmp_path / "legacy-home" / ".flinttrade" / "data"
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        monkeypatch.setattr(
+            et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb"
+        )
+
+        legacy_home.mkdir(parents=True)
+        self._seed(legacy_home / "expiry_tracker.duckdb", "260326")
+
+        tracker = et.ExpiryTracker()  # no db_path — the workspace default
+        try:
+            assert tracker._db_path == str(workspace / "data" / "expiry_tracker.duckdb")
+            assert (workspace / "data" / "expiry_tracker.duckdb").exists()
+            # Copy, not move — the legacy file stays behind as a backup.
+            assert (legacy_home / "expiry_tracker.duckdb").exists()
+            assert tracker.list_expiries("NIFTY") == ["260326"]
+        finally:
+            tracker.close()
+
+    def test_default_path_prefers_existing_workspace_db(self, monkeypatch, tmp_path):
+        """No clobbering: an existing workspace DB wins over the legacy one."""
+        import flinttrade_historical.expiry_tracker as et
+
+        legacy_home = tmp_path / "legacy-home" / ".flinttrade" / "data"
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        monkeypatch.setattr(
+            et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb"
+        )
+
+        legacy_home.mkdir(parents=True)
+        self._seed(legacy_home / "expiry_tracker.duckdb", "260326")
+        (workspace / "data").mkdir(parents=True)
+        self._seed(workspace / "data" / "expiry_tracker.duckdb", "260402")
+
+        tracker = et.ExpiryTracker()
+        try:
+            # The workspace snapshot, NOT the legacy one.
+            assert tracker.list_expiries("NIFTY") == ["260402"]
+        finally:
+            tracker.close()
+
+    def test_default_path_noop_when_paths_coincide(self, monkeypatch, tmp_path):
+        """Linux: legacy and workspace paths are the same file — no self-copy."""
+        import flinttrade_historical.expiry_tracker as et
+
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        (workspace / "data").mkdir(parents=True)
+        self._seed(workspace / "data" / "expiry_tracker.duckdb", "260326")
+        monkeypatch.setattr(
+            et, "_legacy_db_path", lambda: workspace / "data" / "expiry_tracker.duckdb"
+        )
+
+        tracker = et.ExpiryTracker()
+        try:
+            assert tracker.list_expiries("NIFTY") == ["260326"]
+        finally:
+            tracker.close()

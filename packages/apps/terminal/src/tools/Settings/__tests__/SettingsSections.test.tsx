@@ -84,6 +84,8 @@ vi.mock("@tanstack/react-query", () => ({
 
 // ftApi services (SecuritySection + RiskSection + MonitoringSection)
 vi.mock("@/services/ftApi", () => ({
+  getAuthStatus: vi.fn(),
+  setAuthPin: vi.fn(),
   getSecurityStats: vi.fn(),
   getBannedIPs: vi.fn(),
   banIP: vi.fn(),
@@ -234,6 +236,9 @@ describe("SecuritySection", () => {
     expect(screen.getByText("Security")).toBeInTheDocument();
     expect(screen.getByLabelText("IP address to ban")).toBeInTheDocument();
     expect(screen.getByText("Threat Statistics")).toBeInTheDocument();
+    // Quick-unlock PIN block (full behaviour covered in SecuritySection.test.tsx).
+    expect(screen.getByText("Quick-unlock PIN")).toBeInTheDocument();
+    expect(screen.getByLabelText("New 6-digit PIN")).toBeInTheDocument();
   });
 });
 

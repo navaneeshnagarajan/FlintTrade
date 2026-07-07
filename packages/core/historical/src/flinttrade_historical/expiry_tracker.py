@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import inspect
+import shutil
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -35,6 +36,50 @@ import duckdb
 from flinttrade_core.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.historical.expiry_tracker")
+
+
+def _legacy_db_path() -> Path:
+    """Pre-``workspace_dir()`` location (a fixed ``~/.flinttrade`` on every OS)."""
+    return Path.home() / ".flinttrade" / "data" / "expiry_tracker.duckdb"
+
+
+def _migrate_legacy_expiry_db(legacy: Path, new: Path) -> None:
+    """One-shot copy of a pre-``workspace_dir()`` tracker DB into the workspace.
+
+    The default DB path moves from the hardcoded
+    ``~/.flinttrade/data/expiry_tracker.duckdb`` to
+    ``workspace_dir()/data/expiry_tracker.duckdb`` (macOS: ``~/Library/
+    Application Support/flinttrade``; Windows: ``%APPDATA%/flinttrade``).
+    Copy — never move; the legacy file stays behind as a backup — when the new
+    path is absent and the legacy one exists. No-op on Linux where the two
+    paths coincide. Best-effort: a failed copy degrades to an empty tracker,
+    never an exception. (Sibling migration:
+    ``flinttrade_historical.watchlist_routes._migrate_legacy_watchlist_db``.)
+    """
+    try:
+        if new.exists() or not legacy.exists():
+            return
+        if legacy.resolve() == new.resolve():
+            return
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy, new)
+        logger.info("Migrated legacy expiry tracker DB from %s to %s", legacy, new)
+    except OSError as exc:
+        logger.warning("Could not migrate legacy expiry tracker DB %s -> %s: %s", legacy, new, exc)
+
+
+def _default_db_path() -> Path:
+    """Resolve the workspace-scoped default DB path, migrating any legacy file.
+
+    Uses :func:`flinttrade_core.workspace.workspace_dir` so the tracker honours
+    ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` and the platform-specific
+    workspace root instead of the old hardcoded ``~/.flinttrade``.
+    """
+    from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
+
+    new = workspace_dir() / "data" / "expiry_tracker.duckdb"
+    _migrate_legacy_expiry_db(_legacy_db_path(), new)
+    return new
 
 # Any object exposing one of these is treated as a client, not a provider.
 _CHAIN_METHOD_NAMES = ("get_option_chain", "option_chain", "optionchain")
@@ -186,7 +231,7 @@ class ExpiryTracker:
     ) -> None:
         self._client = client
         if not db_path:
-            db_path = str(Path.home() / ".flinttrade" / "data" / "expiry_tracker.duckdb")
+            db_path = str(_default_db_path())
         self._db_path = db_path
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._rate_limiter = rate_limiter or SnapshotRateLimiter()

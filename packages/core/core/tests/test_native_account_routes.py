@@ -186,9 +186,10 @@ def test_list_and_remove_native_account(client):
         app.config["REGISTRY"].get_session_for("upstox", "UPXTEST02")
 
 
-def test_remove_primary_native_account_falls_back_to_registered_default(client):
-    """Deleting the active primary must not leave brokers.execution.default blank."""
+def test_remove_primary_native_account_falls_back_to_configured_bridge(client):
+    """Deleting the active primary falls back to a CONFIGURED OpenAlgo bridge."""
     c, app, tmp_path = client
+    _configure_openalgo_bridge()
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -208,10 +209,87 @@ def test_remove_primary_native_account_falls_back_to_registered_default(client):
     brokers = _workspace_brokers(tmp_path)
     assert "upstox:UPXPRIMARYDEL" not in brokers.get("registered", [])
     assert brokers["execution"]["default"] == "openalgo:default"
+    # The write-default change is surfaced to the operator, not just a
+    # silent workspace.json diff.
+    notice = str(removed.get_json().get("data", {}).get("notice") or "")
+    assert "openalgo" in notice.lower()
     from flinttrade_gateway.routing_config import RoutingConfig
 
     RoutingConfig.from_workspace(brokers)
     assert app.config["BROKER_ROUTER"] is not None
+
+
+def test_remove_default_without_configured_bridge_clears_default(client):
+    """Repo rule: native write-target fail-closed (remove flow).
+
+    Removing the execution-default account while ANOTHER native account is
+    still registered and no CONFIGURED OpenAlgo bridge exists must CLEAR the
+    default — never silently adopt the sibling account. Default-routed writes
+    must fail loudly until the operator picks a new default in Settings →
+    Brokers.
+    """
+    c, _app, tmp_path = client
+    # Deliberately NO _configure_openalgo_bridge(): openalgo:default is
+    # registered in the default workspace but has no API key.
+    first = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXREMOVEDEFA",
+            "credentials": {"access_token": "tok-remove-a"},
+            "is_primary": True,
+        },
+    )
+    assert first.status_code == 200, first.get_json()
+    second = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXREMOVEDEFB",
+            "credentials": {"access_token": "tok-remove-b"},
+        },
+    )
+    assert second.status_code == 200, second.get_json()
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:UPXREMOVEDEFA"
+
+    removed = c.delete("/api/v1/native/accounts/upstox/UPXREMOVEDEFA", headers=_h())
+    assert removed.status_code == 200
+
+    brokers = _workspace_brokers(tmp_path)
+    # Cleared — NOT the sibling account, NOT the unconfigured bridge.
+    assert brokers["execution"]["default"] == ""
+    assert "upstox:UPXREMOVEDEFA" not in brokers["registered"]
+    assert "upstox:UPXREMOVEDEFB" in brokers["registered"]
+
+    # The operator is told the write default was cleared and where to fix it.
+    notice = str(removed.get_json().get("data", {}).get("notice") or "")
+    assert "no write default" in notice.lower()
+    assert "settings" in notice.lower()
+
+
+def test_remove_non_default_account_carries_no_default_notice(client):
+    """Removing an account that was never the write default changes nothing."""
+    c, _app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXNONDEFAULT",
+            "credentials": {"access_token": "tok-non-default"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+    # The fresh workspace already carries openalgo:default as the execution
+    # default, so a non-primary connect never becomes the default.
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "openalgo:default"
+
+    removed = c.delete("/api/v1/native/accounts/upstox/UPXNONDEFAULT", headers=_h())
+    assert removed.status_code == 200
+    assert "notice" not in (removed.get_json().get("data") or {})
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "openalgo:default"
 
 
 def test_remove_native_account_is_selector_scoped(client):

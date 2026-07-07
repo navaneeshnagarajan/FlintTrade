@@ -1,4 +1,4 @@
-import { get, getV1, isDemoAuthSession, post } from "./ftApi.helpers";
+import { get, getV1, isDemoAuthSession, post, postV1 } from "./ftApi.helpers";
 
 export interface AuditLog {
   timestamp: string;
@@ -111,6 +111,32 @@ export const getAuditLogs = (
     "audit/events" + (qs ? "?" + qs : ""),
   );
 };
+
+export interface AuthStatusData {
+  is_setup: boolean;
+  is_locked: boolean;
+  has_pin: boolean;
+}
+
+/**
+ * Auth account status — public read (no session required).
+ *
+ * GET /ft-api/v1/auth/status → ``{ is_setup, is_locked, has_pin }``.
+ * ``has_pin`` drives the Settings → Security quick-unlock PIN block (set vs
+ * change) and lets the UI explain why Live mode cannot be armed yet.
+ */
+export const getAuthStatus = () => getV1<AuthStatusData>("auth/status");
+
+/**
+ * Set or change the quick-unlock PIN over the live operator session.
+ *
+ * POST /ft-api/v1/auth/pin/set — the session Bearer JWT is attached by
+ * ``buildHeaders`` (the endpoint is session-bound, G9-style) and the account
+ * password is an explicit re-confirmation. Throws with the backend's
+ * actionable message on failure (bad password, malformed PIN, no session).
+ */
+export const setAuthPin = (password: string, pin: string) =>
+  postV1<{ has_pin: boolean }>("auth/pin/set", { password, pin });
 
 const DEMO_SECURITY_SETTINGS: SecuritySettings = {
   auto_ban_enabled: false,

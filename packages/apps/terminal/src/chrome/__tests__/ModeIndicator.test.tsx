@@ -254,6 +254,48 @@ describe("ModeIndicator", () => {
       expect(useModeStore.getState().mode).toBe("practice");
     });
 
+    it("surfaces the server's error message on PIN failure (pin_not_set guidance)", async () => {
+      // The backend distinguishes "wrong PIN" from "no PIN set" — the
+      // pin_not_set message points the operator at Settings → Security. The
+      // dialog must show THAT message, not a hardcoded "Incorrect PIN.".
+      const serverMessage =
+        "No PIN is set for this account — the optional PIN was skipped at " +
+        "setup. Create one in Settings → Security (POST /v1/auth/pin/set), " +
+        "then retry.";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        jsonResponse({ status: "error", code: "pin_not_set", message: serverMessage }, 409),
+      );
+
+      resetStore("practice");
+      render(<ModeIndicator />);
+
+      fireEvent.click(screen.getByRole("button", { name: /practice mode/i }));
+      fireEvent.change(screen.getByPlaceholderText("6-digit PIN"), {
+        target: { value: "123456" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /switch to live/i }));
+
+      expect(await screen.findByText(serverMessage)).toBeInTheDocument();
+      expect(useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("falls back to the hardcoded PIN error only when no message is available", async () => {
+      // A non-Error rejection carries no message — the last-resort fallback.
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce("boom");
+
+      resetStore("practice");
+      render(<ModeIndicator />);
+
+      fireEvent.click(screen.getByRole("button", { name: /practice mode/i }));
+      fireEvent.change(screen.getByPlaceholderText("6-digit PIN"), {
+        target: { value: "123456" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /switch to live/i }));
+
+      expect(await screen.findByText("Incorrect PIN. Try again.")).toBeInTheDocument();
+      expect(useModeStore.getState().mode).toBe("practice");
+    });
+
     it("does not switch to live on network error", async () => {
       vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
         new Error("Network error"),

@@ -83,8 +83,13 @@ export default function ModeIndicator() {
       // order. (Fixed 2026-05-19 per Codex audit; centralised in Phase 1.)
       const { token: newToken } = await unlockWithPin(pin, "live");
       updateToken(newToken);
-    } catch {
-      setPinError("Incorrect PIN. Try again.");
+    } catch (err) {
+      // Surface the server's message — the backend distinguishes a wrong PIN
+      // from no-PIN-set (code `pin_not_set` points the operator at Settings →
+      // Security to create one). The hardcoded string is a last-resort
+      // fallback only.
+      const message = err instanceof Error ? err.message.trim() : "";
+      setPinError(message || "Incorrect PIN. Try again.");
       return;
     }
     setPinError("");
@@ -205,7 +210,14 @@ export default function ModeIndicator() {
             <AlertDialogFooter>
               <AlertDialogCancel onClick={handleCancel}>Cancel</AlertDialogCancel>
               <AlertDialogAction
-                onClick={handleConfirmLive}
+                onClick={(e) => {
+                  // Radix's Action closes the dialog on click by default,
+                  // which hid every PIN error. Prevent that so a failed PIN
+                  // keeps the dialog open with the server's message visible;
+                  // handleConfirmLive closes it explicitly on success.
+                  e.preventDefault();
+                  void handleConfirmLive();
+                }}
                 disabled={pin.length !== 6}
                 className="bg-profit hover:bg-profit/90 text-white"
               >

@@ -487,18 +487,35 @@ def _restore_workspace(snapshot: str | None) -> None:
     tmp.replace(path)
 
 
-def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> None:
+def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> str | None:
     """Remove the native selector from brokers.registered / account_acls / default.
 
     The inverse of :func:`_register_selector_in_workspace`; used by the remove
     route to drop a disconnected account (the failed-connect rollback instead
     restores the whole workspace snapshot via :func:`_restore_workspace`). No-op
     if there is no workspace.json.
+
+    When the removed selector was ``brokers.execution.default``, the
+    replacement follows the SAME fail-closed policy as
+    :func:`_demote_selector_as_execution_default` (repo rule: native
+    write-target fail-closed): fall back to ``openalgo:default`` ONLY when the
+    bridge is both registered and actually configured; otherwise CLEAR the
+    default (``""``). NEVER promote an arbitrary other registered selector —
+    a silently retargeted live write default would send default-routed orders
+    (webhook / agent / basket paths without an explicit selector) through an
+    account the operator never chose. An empty default makes those writes
+    fail loudly until the operator picks a new one in Settings → Brokers.
+
+    Returns:
+        An operator-facing notice describing the write-default change, or
+        ``None`` when the removed selector was not the execution default
+        (nothing changed). The notice deliberately names no selectors or
+        account ids — remove responses must never echo operator identifiers.
     """
     selector = f"{adapter_id}:{account_id}"
     path = workspace_dir() / "workspace.json"
     if not path.exists():
-        return
+        return None
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     brokers = data.get("brokers", {})
@@ -507,17 +524,25 @@ def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> None:
     brokers.get("account_acls", {}).get(adapter_id, {}).pop(account_id, None)
     execution = brokers.setdefault("execution", {})
     registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
+    notice: str | None = None
     if execution.get("default") == selector:
-        if "openalgo:default" in registered:
+        if "openalgo:default" in registered and _openalgo_bridge_configured():
             execution["default"] = "openalgo:default"
-        elif registered:
-            execution["default"] = registered[0]
+            notice = (
+                "The removed account was the live write default, so the "
+                "default was moved to the OpenAlgo bridge."
+            )
         else:
             execution["default"] = ""
+            notice = (
+                "The removed account was the live write default. No write "
+                "default is set — choose one in Settings → Brokers."
+            )
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     tmp.replace(path)
+    return notice
 
 
 def _schedule_refresh_job(adapter_id: str, *, remove: bool = False) -> None:
@@ -1784,8 +1809,9 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         logger.warning("Credential delete failed for %s: %s", selector_ref(adapter_id, account_id), exc)
 
     # Deregister the selector from workspace.json.
+    default_notice: str | None = None
     try:
-        _deregister_selector_in_workspace(adapter_id, account_id)
+        default_notice = _deregister_selector_in_workspace(adapter_id, account_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Selector deregister failed for %s: %s", selector_ref(adapter_id, account_id), exc)
 
@@ -1812,4 +1838,14 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
 
     app = current_app._get_current_object()  # type: ignore[attr-defined]
     configure_broker_router(app, registry, store, app.config.get("CLIENT"))
-    return jsonify({"status": "success", "message": f"{adapter_id} account {account_id} removed."})
+    body: dict[str, Any] = {
+        "status": "success",
+        "message": f"{adapter_id} account {account_id} removed.",
+        "data": {},
+    }
+    if default_notice:
+        # Surface the write-default change so the UI can tell the operator —
+        # a silent workspace.json diff is exactly the failure mode the
+        # fail-closed replacement policy exists to prevent.
+        body["data"]["notice"] = default_notice
+    return jsonify(body)

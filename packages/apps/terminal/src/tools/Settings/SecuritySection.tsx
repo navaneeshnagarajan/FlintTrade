@@ -1,7 +1,9 @@
 /**
- * SecuritySection — banned IP management and threat statistics.
+ * SecuritySection — quick-unlock PIN, banned IP management, threat statistics.
  *
  * APIs:
+ *   GET  /ft-api/v1/auth/status         → account status incl. has_pin
+ *   POST /ft-api/v1/auth/pin/set        → set/change the quick-unlock PIN
  *   GET  /ft-api/api/v1/security/stats  → threat overview counters
  *   GET  /ft-api/api/v1/security/bans   → list of banned IPs
  *   POST /ft-api/api/v1/security/ban    → ban an IP
@@ -16,17 +18,21 @@ import {
   RefreshCw,
   AlertTriangle,
   Ban,
+  KeyRound,
 } from "lucide-react";
 import { SectionTitle, TextInput, Toggle } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  getAuthStatus,
+  setAuthPin,
   getSecurityStats,
   getBannedIPs,
   banIP,
   unbanIP,
   getSecuritySettings,
   updateSecuritySettings,
+  type AuthStatusData,
   type SecurityStats,
   type BannedIP,
   type SecuritySettings,
@@ -57,6 +63,164 @@ function StatTile({
       <span className={`font-mono tabular-nums font-bold text-lg leading-tight ${color}`}>
         {value.toLocaleString("en-IN")}
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Quick-unlock PIN block
+// ---------------------------------------------------------------------------
+
+/**
+ * Set/change the quick-unlock PIN (the Live-arming re-auth factor).
+ *
+ * The PIN is optional at account setup, but Live mode is armed exclusively
+ * via the PIN — an operator who skipped it needs this block to create one.
+ * The backend re-confirms the account password and requires the session
+ * Bearer JWT (attached by the ftApi helpers).
+ */
+function QuickUnlockPinBlock() {
+  const qc = useQueryClient();
+  const [password, setPassword]     = useState("");
+  const [newPin, setNewPin]         = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinFormError, setPinFormError] = useState<string | null>(null);
+  const [pinSaved, setPinSaved]     = useState<string | null>(null);
+
+  const authStatusQuery = useQuery<AuthStatusData>({
+    queryKey: ["ft", "auth", "status"],
+    queryFn: getAuthStatus,
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const hasPin = authStatusQuery.data?.has_pin === true;
+
+  const pinMutation = useMutation({
+    mutationFn: (vars: { password: string; pin: string }) =>
+      setAuthPin(vars.password, vars.pin),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["ft", "auth", "status"] });
+      setPassword("");
+      setNewPin("");
+      setConfirmPin("");
+      setPinFormError(null);
+      setPinSaved(
+        hasPin
+          ? "PIN changed."
+          : "PIN set — you can now arm Live mode and unlock an idle session with it.",
+      );
+    },
+    onError: (err) => {
+      setPinSaved(null);
+      setPinFormError(
+        err instanceof Error && err.message ? err.message : "Could not save the PIN.",
+      );
+    },
+  });
+
+  const handleSavePin = useCallback(() => {
+    setPinSaved(null);
+    if (!password) {
+      setPinFormError("Account password is required.");
+      return;
+    }
+    if (!/^\d{6}$/.test(newPin)) {
+      setPinFormError("PIN must be exactly 6 digits.");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinFormError("PINs do not match.");
+      return;
+    }
+    setPinFormError(null);
+    pinMutation.mutate({ password, pin: newPin });
+  }, [password, newPin, confirmPin, pinMutation]);
+
+  const digitsOnly = (val: string) => val.replace(/\D/g, "").slice(0, 6);
+
+  return (
+    <div className="rounded border border-border-default bg-surface-card p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+          Quick-unlock PIN
+        </p>
+        {authStatusQuery.isSuccess && (
+          <Badge
+            variant="outline"
+            className={`text-xxs px-1.5 py-0 ${
+              hasPin
+                ? "border-profit/40 text-profit"
+                : "border-warning/40 text-warning"
+            }`}
+          >
+            {hasPin ? "PIN set" : "No PIN set"}
+          </Badge>
+        )}
+      </div>
+
+      {authStatusQuery.isLoading && (
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          <RefreshCw size={12} className="animate-spin" />
+          Checking PIN status…
+        </div>
+      )}
+      {authStatusQuery.isError && (
+        <div className="flex items-center gap-2 text-xs text-warning">
+          <AlertTriangle size={12} />
+          Backend unreachable — PIN status unavailable
+        </div>
+      )}
+      {authStatusQuery.isSuccess && (
+        <p className="text-xxs text-text-muted">
+          {hasPin
+            ? "A 6-digit PIN is set. It arms Live mode and unlocks an idle session. Change it below — your account password is required."
+            : "No PIN is set — Live mode cannot be armed until you create one. Set a 6-digit PIN below — your account password is required."}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        <TextInput
+          type="password"
+          value={password}
+          onChange={setPassword}
+          placeholder="Account password"
+          aria-label="Account password"
+        />
+        <TextInput
+          type="password"
+          value={newPin}
+          onChange={(val) => setNewPin(digitsOnly(val))}
+          placeholder="New 6-digit PIN"
+          aria-label="New 6-digit PIN"
+        />
+        <TextInput
+          type="password"
+          value={confirmPin}
+          onChange={(val) => setConfirmPin(digitsOnly(val))}
+          placeholder="Confirm new PIN"
+          aria-label="Confirm new PIN"
+        />
+        {pinFormError && (
+          <p className="text-xxs text-loss" role="alert">{pinFormError}</p>
+        )}
+        {pinSaved && (
+          <p className="text-xxs text-profit" role="status">{pinSaved}</p>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleSavePin}
+          disabled={pinMutation.isPending}
+          className="flex items-center gap-1.5 text-xs h-7"
+        >
+          {pinMutation.isPending ? (
+            <RefreshCw size={11} className="animate-spin" />
+          ) : (
+            <KeyRound size={11} />
+          )}
+          {pinMutation.isPending ? "Saving…" : hasPin ? "Change PIN" : "Set PIN"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -162,6 +326,9 @@ export function SecuritySection() {
   return (
     <div className="space-y-6">
       <SectionTitle>Security</SectionTitle>
+
+      {/* Quick-unlock PIN */}
+      <QuickUnlockPinBlock />
 
       {/* Stats grid */}
       <div>

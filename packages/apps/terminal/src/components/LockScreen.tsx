@@ -91,8 +91,13 @@ export function LockScreen() {
       // leaving the next "practice" order to dispatch down the live path).
       const result = await unlockWithPin(value, mode);
       setLoggedIn(result.token, username ?? "", "");
-    } catch {
-      setError("Incorrect PIN. Try again.");
+    } catch (err) {
+      // Surface the server's message — the backend distinguishes a wrong PIN
+      // from no-PIN-set (code `pin_not_set` points the operator at Settings →
+      // Security to create one). The hardcoded string is a last-resort
+      // fallback only.
+      const message = err instanceof Error ? err.message.trim() : "";
+      setError(message || "Incorrect PIN. Try again.");
       setPin("");
       inputRef.current?.focus();
     } finally {

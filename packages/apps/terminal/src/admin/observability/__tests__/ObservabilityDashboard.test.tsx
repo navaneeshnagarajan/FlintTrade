@@ -37,6 +37,8 @@ vi.mock("@/services/api", () => ({
 
 // The shared admin/data client used by every composed surface.
 vi.mock("@/services/ftApi", () => ({
+  getAuthStatus: vi.fn().mockResolvedValue({ has_pin: false }),
+  setAuthPin: vi.fn().mockResolvedValue({}),
   getHealth: vi.fn().mockResolvedValue({
     status: "ok",
     broker: { status: "ok" },
