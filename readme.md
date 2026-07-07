@@ -141,7 +141,7 @@ and 1 Rust/PyO3 tick engine.
 | `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |
 | `packages/core/historical` | Python | OHLCV downloader, free-data sources, DuckDB/Parquet pipeline, expiry manager |
-| `packages/core/indicators` | Python + Numba | TA-Lib batch indicators, Numba streaming variants, Pine conversion |
+| `packages/core/indicators` | Python | Pure-NumPy batch indicators (110 exports), streaming classes, Pine conversion |
 | `packages/core/ticks` | Rust + PyO3 | High-performance tick processing for tick-level backtests |
 | `packages/integrations/gateway` | Python | Native broker gateway, adapter pattern, credential vault, WebSocket bridge |
 | `packages/integrations/webhooks` | Python | TradingView, ChartInk, GoCharting, custom webhooks, visual flow builder |
@@ -159,7 +159,7 @@ and 1 Rust/PyO3 tick engine.
 |---|---|
 | Frontend | React 19, TypeScript 5 (strict), Tailwind CSS v4, Dockview v5, shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
 | Backend | Python 3.12, Flask, httpx (async), pydantic, DuckDB, structlog |
-| Data | TA-Lib (batch indicators), Numba (streaming), Rust/PyO3 (tick engine), QuestDB (future) |
+| Data | NumPy (batch indicators; optional Numba on 3 kernels), Rust/PyO3 (tick engine), QuestDB (future) |
 | AI | LM Studio (local LLM), optional ChromaDB vector store, LightGBM (signals), MCP bridge |
 
 ### Three ways in

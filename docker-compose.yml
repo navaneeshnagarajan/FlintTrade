@@ -89,7 +89,7 @@ services:
     env_file: .env
     environment:
       - FLINTTRADE_DEV=0
-      - FLINTTRADE_PORT=5100
+      - FLINTTRADE_BACKEND_PORT=5100
       # OpenAlgo is external — set this to your OpenAlgo host. If you
       # uncomment the local-dev openalgo service above, use http://openalgo.
       - OPENALGO_HOST=${OPENALGO_HOST:-http://host.docker.internal}

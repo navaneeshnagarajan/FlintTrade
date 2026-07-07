@@ -15,16 +15,16 @@
   2026-07-06 INDstocks follow-up: a fresh dashboard-token probe verified login/profile/funds/positions/holdings/orders/trades and confirmed broker-side option-chain is still "Coming Soon"; quotes/depth/margin/history exposed a missing non-numeric symbol resolver, now fixed by caching the documented instruments-master CSV as the native fallback while preserving injected resolvers and numeric `security_id` pass-through. Live market-data re-probe remains pending a fresh dashboard token; the logged-in access-token page currently exposes only the `New Token` action, says live tokens reset daily at 06:00, and says live algo orders must originate from a fixed approved IP. The adapter now expires local INDstocks sessions at the next 06:00 IST reset so reconnect status follows the broker's dashboard cycle.
 - **Modes:** Explore/Practice/Live are enforced server-side via JWT claims; PIN/live-unlock and downgrade paths are wired through the app-auth flow, and Practice order placement has been proven through the sandbox path.
 
-## Phase tracker (standing goal, 2026-07-03; tracker refreshed 2026-07-06)
+## Phase tracker (standing goal, 2026-07-03; tracker refreshed 2026-07-07)
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Ground-truth audit, docs corrected, PLAN rewritten | **CLOSED 2026-07-03** (see Phase 0 exit evidence) |
 | 1 | Auth end-to-end (app + broker), SEBI-correct | in progress — core shipped; Kotak live check + next-day/restart exit evidence remain |
-| 2 | Stabilise everything that exists | in progress — broker-connect consolidation and safety/honesty fixes underway |
+| 2 | Stabilise everything that exists | in progress — 2026-07-07 deferred-ledger clearance wave landed every open daily-driver item (trade-loop wiring, honesty badges, error surfacing, gated bracket orders, per-position square-off, OrderPad lot validation incl. the native-stepMismatch bug that blocked all NFO orders, WS backoff, TrafficLogger lock/retention, desktop watchdog + OAuth opener); consolidation backlog (BACKLOG.md) remains |
 | 3 | Build the unmapped reference backlog | **exit criterion met 2026-07-06** — waves 1–2 shipped (16 items); W5/W6/B3 deferred (RD5–RD7); phase closes after the standing audit + re-audit; Groww/Zerodha stay evidence/contribution-gated |
 | 4 | Autonomous loop proven in Practice | not started |
-| 5 | Distribution + public surfaces | in progress — desktop background runtime shipped 2026-07-06; updater, bug reporting, site truth pass, desktop-build verification remain |
+| 5 | Distribution + public surfaces | in progress — desktop background runtime shipped 2026-07-06; **build-on-device one-command installer (site `/download` + `scripts/install/`) and in-app update-by-rebuild shipped 2026-07-07**; bug reporting, site truth pass, desktop-build verification remain |
 | 6 | Release + continuous loop | not started |
 
 A phase closes only after: full multi-agent audit → fix everything → clean re-audit, evidence recorded here.

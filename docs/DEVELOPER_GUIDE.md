@@ -25,7 +25,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
-| `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
+| `indicators` | Python | Pure-NumPy batch indicators (110 exports; TA-Lib stays an unused optional extra) + streaming classes (optional Numba on 3 kernels) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
 | `gateway` | Python | OpenAlgo-compatible bridge support, native broker adapter contract/routing, founder-broker adapter code (Dhan, Upstox, and INDmoney connectable; Kotak Neo and Groww built but coming soon), credential store, and WebSocket bridge | `packages/integrations/gateway/tests/` |
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |

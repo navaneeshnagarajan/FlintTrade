@@ -8,6 +8,60 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **One-command install (build on your machine)** — `curl -fsSL
+  https://flinttrade.vercel.app/install.sh | bash` (macOS/Linux) and
+  `irm https://flinttrade.vercel.app/install.ps1 | iex` (Windows) fetch the
+  newest release tag from GitHub and build + install the desktop app locally
+  (no unsigned-installer warnings; updating later is the same command). The
+  scripts live in `scripts/install/`; the site serves them via always-current
+  redirects and a new `/download` page.
+- **Gated bracket orders** — `POST /api/v1/orders/bracket` (entry + stop-loss
+  or target exit) is now live: every leg traverses SafetySystem L1–L5 →
+  `gate_order` → `BrokerRouter` via injected dispatchers (the service holds no
+  broker client), cancel is mode-guarded and fails closed when every leg
+  cancel fails, and honest warnings call out unconfirmed legs and a filled
+  MARKET entry position that cancelling does not close. OCO pairs and trailing
+  are refused at placement rather than silently accepted.
+- **Per-position square-off** — the Positions widget gained a per-row
+  Square-off (opposite-side market order through the existing gated path, with
+  confirm), alongside Convert and Exit-all.
+- **Scalper SL/Target legs, honestly this time** — the inputs removed earlier
+  (they silently never sent) are back, wired to the gated bracket endpoint:
+  one exit leg per order (the backend refuses OCO pairs it cannot monitor),
+  absolute leg prices anchored to the limit price or live LTP (fail-closed
+  without an anchor), and "bracket placed — legs pending", never "filled".
+  The Scalper also resolves lot sizes at runtime from the symbol master
+  (its hardcoded table is now an explicitly-marked display-only fallback).
+- **In-app updater (build-on-device)** — Settings → Updates (desktop builds
+  only) compares the running version against the newest GitHub tag and
+  "Update & rebuild" runs the local bootstrap installer detached: the app
+  closes while the ~10–20 minute rebuild runs and relaunches itself on the
+  new version. Installed from a pre-built release with no source workspace?
+  The section shows the one-command installer to copy instead.
+- **One lot-size table** — the screener's contract-size table (with a
+  provenance-aware resolver over the live symbol master) is now the single
+  source: the mirror engine (BANKNIFTY was 15 — badly stale, mis-sizing
+  mirrored quantities), the MCP order parser (FINNIFTY 40 vs the current 65),
+  two backtest strategy registries, and the demo fallback all derive from it,
+  and underlying matching prefers the longest match ("NIFTY" no longer
+  shadows BANKNIFTY contracts).
+- **Watchlist drives the chart** — clicking a watchlist row now retargets the
+  default chart panel; charts pinned to an explicit symbol keep it.
+- **Live tick wiring for order widgets** — OrderPad and OrderLadder now
+  actually subscribe to the ticks they render (Fund-mode sizing and ladder
+  pricing were dead for unsubscribed symbols), and the OrderLadder reconciles
+  its rows against the live order book so fills/rejections clear stale rows.
+- **Demo-data badges everywhere** — the eight option-analytics widgets (GEX,
+  Gamma Density, Vol Surface, OI Profile, Straddle P&L, IV Smile, Greeks
+  Surface, Historical Chain) and the economic calendar now surface the
+  `is_sample_data` flag visibly; the Arbitrage Scanner sends real scan
+  parameters and shows honest empty/error states instead of refetching a
+  canned sample.
+- **Desktop self-healing** — the Tauri shell detects and terminates a stale
+  sidecar from a crashed run (identity-checked PID file) and the sidecar
+  carries a parent-liveness watchdog, so force-quits no longer orphan
+  backends; broker OAuth pages open in the system browser through a scoped
+  opener capability (the webview's `window.open` was a dead button).
 - **Set-PIN-later path** — `POST /v1/auth/pin/set` lets an operator who skipped
   the optional PIN at account setup create (or change) the 6-digit quick-unlock
   PIN over a live session, with the account password as a re-confirmation
@@ -176,6 +230,42 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **OrderPad could never place an NFO order in a real browser** — the quantity
+  input's `min=1 step=<lot>` made every exact lot multiple a native
+  `stepMismatch`, silently blocking form submission before validation ran.
+  The form now opts out of native constraint validation (zod + an explicit
+  fail-closed lot-multiple check own it, with clear messages) and the stepper
+  is lot-aligned.
+- **Order flow honesty** — the order book refetches on placement and keeps a
+  session-aware refresh across NSE/BSE day and MCX/CDS evening hours (it
+  previously froze outside NSE hours); Intraday P&L coerces string-typed
+  broker `pnl`/`quantity` and computes P&L locally where possible; MTM
+  Monitor/Net Position show error banners + staleness instead of silently
+  freezing; Action Centre approve/reject failures surface the server message
+  with a retry.
+- **WebSocket failure modes** — reconnects now back off exponentially and an
+  authentication failure stops retrying after a bounded number of attempts and
+  surfaces "authentication failed" to the connection UI (previously a ~1 s
+  silent reconnect loop, forever); the per-instrument tick-atom cache is
+  bounded instead of retaining every symbol for the tab's lifetime.
+- **Settings/setup traps** — the Broker Gateway placeholder no longer points
+  the OpenAlgo URL at FlintTrade's own backend port; clearing the REST Port
+  field now clears the override instead of silently failing the save; Test
+  Connection exercises the candidate values without committing them to the
+  live connection store first; the Practice-mode card no longer claims a
+  broker is required; QuickTrade requires an explicit instrument instead of
+  defaulting to NIFTY; the orphaned /setup wizard is reachable again; a
+  freshly-demoted read-only connect now says why.
+- **Backend hygiene** — the request traffic logger serialises its DuckDB
+  writes behind a lock and prunes by age/row cap (it previously wrote from all
+  request threads unlocked and grew forever); the duplicated SDK-attestation
+  helper collapsed into a single gateway implementation; Upstox session
+  read-only classification is derived server-side (fail-closed) instead of
+  client-declared; the live-probe script derives Upstox analytics-token
+  defaults from `BROKER_CATALOG` so they cannot drift.
+- **`FLINTTRADE_PORT` unified** — Docker/compose/entrypoint used a variable
+  the backend never read; everything now uses `FLINTTRADE_BACKEND_PORT` (the
+  container entrypoint still honours the legacy name).
 - **Legacy state migrated to the platform workspace directory** — the
   download watchlist (`watchlist.db`) and trained AI signal model
   (`signal_model.joblib`) moved from `~/.flinttrade` to the cross-platform

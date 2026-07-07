@@ -38,15 +38,16 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
 - **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + OpenAlgo-parity observability apply.
 
-## Current handoff (2026-07-06)
+## Current handoff (2026-07-07)
 
-State at handoff: Phase 3 ("build the unmapped") exit criterion is met — waves 1–2 shipped 16 features (six analysis widgets, watchlist formula builder + gated quick Buy/Sell, hide-values toggle, GoCharting webhook, tick-capture API/config/UI, bhavcopy + local-store browse, EOD auto-sync cron); CI is green on `main` (Test, Supply Chain, Site, CodeQL); every doc count matches code (101 widgets, 35 brokers, 18 packages). `PLAN.md` is the roadmap of record — resume from its phase tracker, never restart planning.
+State at handoff: Phase 3 exit criterion met (waves 1–2: 16 features), the Codex broker wave is audited/landed, and the **deferred-ledger clearance wave** has cleared every open item from `.local/specs/consolidation/DEFERRED-LEDGER.md` — daily-driver trade-loop wiring (watchlist→chart, live tick subscriptions, session-aware order refresh), honesty passes (Demo badges ×8, arbitrage scanner, economic calendar), error surfacing (WS auth backoff, Action Centre, MTM/NetPosition), per-position square-off, OrderPad lot validation (incl. the native-stepMismatch bug that blocked ALL NFO orders), **gated bracket orders** (`/api/v1/orders/bracket`; legs traverse gate_order → BrokerRouter via injected dispatchers; fail-closed cancel), desktop sidecar watchdog + OAuth opener, one-command build-on-device installers (`scripts/install/` + site `/download`), and the in-app update-by-rebuild flow. CI green on `main`; count pins: 101 widgets, 35 brokers, 18 packages. `PLAN.md` is the roadmap of record — resume from its phase tracker, never restart planning.
 
 **Next-work queue (in order):**
-1. **Phase 2 stabilisation** — `PLAN.md` Phase 2 open items; the consolidation backlog of record is `.local/specs/consolidation/BACKLOG.md` (21 units, U1/U2 safety fixes landed). Biggest units: G40 broker-connect merge, honesty passes (G25 remainder), journal FTS5 migration (G31), CI shard generation (G32).
+1. **Phase 2 stabilisation** — `PLAN.md` Phase 2 open items; the consolidation backlog of record is `.local/specs/consolidation/BACKLOG.md`. Biggest units: G40 broker-connect merge, journal FTS5 migration (G31), CI shard generation (G32), U18 notification/LLM secrets persist route (highest value: AI from the UI).
 2. **Phase 4 learning loop** — AI1–AI3 (skill creation write path, FTS5 session search, read-only tool scripting) + the full-day Practice run; spec first in `.local/specs/`.
-3. **Phase 5 distribution** — desktop updater (Tauri updater, not git-pull), in-app bug reporting, `make desktop-build` end-to-end verification.
-4. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
+3. **Phase 5 distribution remainder** — in-app bug reporting; signed-release pipeline when certs exist (the build-on-device installer + in-app rebuild updater shipped 2026-07-07; see `.local/specs/desktop-updater/DESIGN_LOG.md`).
+4. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused-at-placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
+5. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
 
 **Non-negotiables (verify before claiming done):**
 - Every reachable live order mints a `SafetyContext` via `gate_order`/`gate_broker_write` → `BrokerRouter`; `gateway/tests/test_no_legacy_order_path.py` is the guard — run it after touching anything order-adjacent.

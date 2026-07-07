@@ -1,10 +1,10 @@
 # Indicators
 
-> 43 indicator functions across 7 modules — TA-Lib batch indicators, Numba-accelerated streaming variants, and Pine Script conversion.
+> 110 exported indicator functions and streaming classes — pure-NumPy batch indicators, pure-Python streaming variants (optional Numba acceleration on 3 batch kernels), and Pine Script conversion.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
-**Language:** Python + Numba
+**Language:** Python (optional Numba)
 
 ## Public surface
 

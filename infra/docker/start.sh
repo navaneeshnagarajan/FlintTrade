@@ -26,7 +26,9 @@ OPENALGO_API_KEY=${OPENALGO_API_KEY:-}
 OPENALGO_WS_PORT=${OPENALGO_WS_PORT:-8765}
 
 # --- FlintTrade backend ---
-FLINTTRADE_PORT=${FLINTTRADE_PORT:-5100}
+# Canonical name is FLINTTRADE_BACKEND_PORT (what the backend reads);
+# FLINTTRADE_PORT is honoured as a legacy fallback for existing deployments.
+FLINTTRADE_BACKEND_PORT=${FLINTTRADE_BACKEND_PORT:-${FLINTTRADE_PORT:-5100}}
 FLINTTRADE_DEV=${FLINTTRADE_DEV:-0}
 
 # --- CORS ---
@@ -82,12 +84,13 @@ fi
 # ---------------------------------------------------------------------------
 # Start gunicorn
 # ---------------------------------------------------------------------------
-echo "[start.sh] Starting FlintTrade on port ${FLINTTRADE_PORT:-5100} ..."
+BACKEND_PORT="${FLINTTRADE_BACKEND_PORT:-${FLINTTRADE_PORT:-5100}}"
+echo "[start.sh] Starting FlintTrade on port ${BACKEND_PORT} ..."
 
 exec gunicorn \
     --worker-class eventlet \
     -w "${GUNICORN_WORKERS:-1}" \
-    --bind "0.0.0.0:${FLINTTRADE_PORT:-5100}" \
+    --bind "0.0.0.0:${BACKEND_PORT}" \
     --timeout "${GUNICORN_TIMEOUT:-120}" \
     --graceful-timeout 30 \
     --keep-alive 5 \
