@@ -23,6 +23,11 @@ The eight endpoints are (full URL after WSGI prefix strip):
 - ``GET /api/v1/screener/sector-constituents?sector=<sec>``
 - ``GET /api/v1/screener/lot-size?symbol=<sym>&exchange=<exch>``
 
+Exception: the lot-size route is no longer a pure stub — it resolves via
+``flinttrade_screener.lot_sizes.LotSizeResolver`` (broker symbol master →
+built-in fallback) and only flags ``is_sample_data: true`` when the value did
+NOT come from the live symbol master.
+
 Response shapes mirror the corresponding TypeScript interfaces in
 ``packages/apps/terminal/src/services/ftApi.{analysis,screener}.ts``.
 """
@@ -33,7 +38,9 @@ import datetime as _dt
 import logging
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
+
+from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver
 
 logger = logging.getLogger("flinttrade.screener.sample_data")
 
@@ -409,68 +416,116 @@ def get_sector_constituents() -> Any:
 # ---------------------------------------------------------------------------
 
 
-# Common F&O lot sizes — pulled from typical NSE/MCX values. Built-in
-# fallback for the most-requested symbols; everything else returns the
-# generic ``50`` default (NIFTY lot size) — the ScalperWidget already
-# falls back to its built-in config table when this returns 0 or fails,
-# so an approximate answer is better than 404.
-_LOT_SIZE_TABLE: dict[str, int] = {
-    "NIFTY": 75,
-    "BANKNIFTY": 30,
-    "FINNIFTY": 65,
-    "MIDCPNIFTY": 120,
-    "SENSEX": 20,
-    "BANKEX": 30,
-    "CRUDEOIL": 100,
-    "NATURALGAS": 1250,
-    "GOLD": 100,
-    "SILVER": 30,
-    "COPPER": 2500,
-    "USDINR": 1000,
-    "EURINR": 1000,
-    "GBPINR": 1000,
-    "JPYINR": 1000,
-}
+# The route's lot-size table now DELEGATES to the resolver's built-in
+# fallback (``flinttrade_screener.lot_sizes.FALLBACK_LOT_SIZES``) instead of
+# keeping its own diverging copy — the two tables drifted (FINNIFTY 40 vs 65,
+# MIDCPNIFTY 50 vs 120) and this route sizes REAL orders in the Scalper. The
+# name is kept as an alias so existing importers keep working.
+_LOT_SIZE_TABLE: dict[str, int] = FALLBACK_LOT_SIZES
+
+# Rank the resolver's provenance values: the base-symbol lookup only wins
+# over the full-symbol lookup when it comes from a strictly better source.
+_SOURCE_RANK: dict[str, int] = {"default": 0, "fallback": 1, "live": 2}
+
+# Shared resolver instance, rebuilt only if the app's OpenAlgo client is
+# swapped (e.g. a settings hot-reload constructs a fresh client).
+_resolver: LotSizeResolver | None = None
+_resolver_client_id: int | None = None
+
+
+def _get_resolver() -> LotSizeResolver | None:
+    """Return a shared LotSizeResolver bound to the app's OpenAlgo client.
+
+    Returns:
+        The resolver, or ``None`` when the app has no ``OPENALGO_CLIENT``
+        configured (e.g. bare test apps) — callers then use the built-in
+        fallback table directly.
+    """
+    global _resolver, _resolver_client_id  # noqa: PLW0603
+    client = current_app.config.get("OPENALGO_CLIENT")
+    if client is None:
+        return None
+    if _resolver is None or _resolver_client_id != id(client):
+        _resolver = LotSizeResolver(client)
+        _resolver_client_id = id(client)
+    return _resolver
+
+
+_MONTH_ABBREVS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+
+def _strip_expiry_suffix(symbol: str) -> str:
+    """Strip a derivative expiry/strike suffix down to the base underlying.
+
+    Handles the common contract shapes, e.g. ``NIFTY29MAY2524800CE`` →
+    ``NIFTY`` and ``NIFTY25MAYFUT`` → ``NIFTY``, by peeling trailing digit
+    runs and month abbreviations after removing the FUT/CE/PE marker.
+    Symbols WITHOUT a derivative suffix are returned unchanged, so
+    underlyings that legitimately end in digits (``NIFTYNXT50``,
+    ``SENSEX50``) are not mangled — the old heuristic rstripped digits
+    unconditionally and clipped them to the wrong underlying.
+    """
+    base = symbol
+    stripped = False
+    for suffix in ("FUT", "CE", "PE"):
+        if base.endswith(suffix) and len(base) > len(suffix):
+            base = base[: -len(suffix)]
+            stripped = True
+            break
+    if not stripped:
+        return base
+    # Peel trailing strike digits and expiry tokens until neither matches.
+    while True:
+        trimmed = base.rstrip("0123456789")
+        if len(trimmed) > 3 and trimmed[-3:].upper() in _MONTH_ABBREVS:
+            trimmed = trimmed[:-3]
+        if trimmed == base:
+            break
+        base = trimmed
+    return base
 
 
 @sample_data_bp.route("/screener/lot-size", methods=["GET"])
 def get_lot_size() -> Any:
     """Return the lot size for a derivatives symbol.
 
-    Looks the symbol up in a built-in table of common F&O lot sizes
-    (NSE / BSE / MCX / CDS). Falls back to ``0`` for unknown symbols,
-    which the frontend ``ScalperWidget`` interprets as "use the
-    widget's built-in config" rather than a hard error.
+    Resolution order (via :class:`flinttrade_screener.lot_sizes.LotSizeResolver`
+    when the app has an OpenAlgo client configured):
 
-    ``is_sample_data`` is always ``True``: the table is hardcoded, not
-    resolved from the broker symbol master, and this value multiplies REAL
-    order quantities in the Scalper. Consumers must treat a flagged lot
-    size as unverified — never silently prefer it over an audited source.
-    (This was the only route in this blueprint without the flag, in
-    contradiction of the module docstring — a live-order honesty bug.)
+    1. Broker symbol master (OpenAlgo ``instruments``, 24-hour cache) for the
+       full symbol — an exact option/future contract resolves directly.
+    2. Symbol master for the base underlying (expiry suffix stripped).
+    3. The resolver's built-in fallback table (shared with
+       ``FALLBACK_LOT_SIZES`` — this route no longer keeps its own copy).
+    4. ``0`` for unknown symbols, which the frontend ``ScalperWidget``
+       interprets as "unresolved — fail closed", never a tradable quantity.
+
+    ``is_sample_data`` is ``True`` UNLESS the value was resolved live from
+    the broker symbol master: this value multiplies REAL order quantities in
+    the Scalper, so consumers must treat a flagged lot size as unverified —
+    never silently prefer it over an audited source.
     """
     symbol = (request.args.get("symbol") or "").upper().strip()
     exchange = (request.args.get("exchange") or "NFO").upper().strip()
+    base = _strip_expiry_suffix(symbol)
 
-    # Strip expiry suffix (e.g. NIFTY25MAYFUT → NIFTY) for the lookup.
-    base = symbol
-    for suffix in ("FUT", "CE", "PE"):
-        if base.endswith(suffix):
-            # Trim digits + month chars before the suffix.
-            base = base[: -len(suffix)]
-            # Keep stripping digits and short month abbrevs.
-            while base and (base[-1].isdigit() or base[-3:].isalpha() and len(base) > 3):
-                if base[-1].isdigit():
-                    base = base[:-1]
-                else:
-                    break
-            break
-    base = base.rstrip("0123456789").rstrip("JFMASONDjfmasond")
+    resolver = _get_resolver()
+    if resolver is not None:
+        resolution = resolver.resolve(symbol, exchange)
+        if base != symbol:
+            base_resolution = resolver.resolve(base, exchange)
+            if _SOURCE_RANK.get(base_resolution.source, 0) > _SOURCE_RANK.get(resolution.source, 0):
+                resolution = base_resolution
+        lot_size = resolution.lot_size if resolution.source != "default" else 0
+        is_sample = resolution.source != "live"
+    else:
+        # No OpenAlgo client configured — built-in fallback table only.
+        lot_size = _LOT_SIZE_TABLE.get(base, 0)
+        is_sample = True
 
-    lot_size = _LOT_SIZE_TABLE.get(base, 0)
     return jsonify({
         "symbol": symbol,
         "exchange": exchange,
         "lot_size": lot_size,
-        "is_sample_data": True,
+        "is_sample_data": is_sample,
     })

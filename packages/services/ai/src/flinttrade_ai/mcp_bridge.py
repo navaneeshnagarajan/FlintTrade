@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
 from .llm_client import LLMClient, LLMMessage
 
 logger = logging.getLogger("flinttrade.ai.mcp_bridge")
@@ -162,11 +164,10 @@ _ORDER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Lot sizes for quick parsing
-_LOT_MAP = {
-    "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 40, "MIDCPNIFTY": 50,
-    "SENSEX": 20, "BANKEX": 30,
-}
+# Lot sizes for quick parsing — sourced from the screener's contract-size
+# table (this module's stale private copy sized FINNIFTY at 40 vs the current
+# 65, so "buy 1 lot" commands produced wrong quantities).
+_LOT_MAP = FALLBACK_LOT_SIZES
 
 
 def parse_order_command(text: str) -> MCPToolCall | None:
@@ -198,12 +199,11 @@ def parse_order_command(text: str) -> MCPToolCall | None:
     quantity = "1"
     if quantity_raw:
         if "lot" in unit:
-            # Resolve lot size — check if underlying is in the symbol
-            lot_size = 1
-            for underlying, ls in _LOT_MAP.items():
-                if underlying in symbol:
-                    lot_size = ls
-                    break
+            # Resolve lot size from the LONGEST matching underlying — a plain
+            # first-match walk resolved BANKNIFTY commands to NIFTY's lot
+            # ("NIFTY" is a substring of every *NIFTY symbol).
+            matches = [u for u in _LOT_MAP if u in symbol]
+            lot_size = _LOT_MAP[max(matches, key=len)] if matches else 1
             quantity = str(int(quantity_raw) * lot_size)
         else:
             quantity = quantity_raw

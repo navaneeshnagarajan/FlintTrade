@@ -102,6 +102,8 @@ export interface NumberInputProps {
   onChange: (v: string) => void;
   min?: number;
   placeholder?: string;
+  /** Accessible name for the input — defaults to the visible label. */
+  ariaLabel?: string;
   className?: string;
 }
 
@@ -111,6 +113,7 @@ export function NumberInput({
   onChange,
   min = 0,
   placeholder,
+  ariaLabel,
   className = "",
 }: NumberInputProps) {
   return (
@@ -124,6 +127,7 @@ export function NumberInput({
         onChange={(e) => onChange(e.target.value)}
         min={min}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? label}
         className="w-16 h-8 text-sm font-mono"
       />
     </div>

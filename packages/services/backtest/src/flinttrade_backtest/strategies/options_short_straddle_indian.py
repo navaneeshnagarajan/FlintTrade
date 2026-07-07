@@ -78,6 +78,7 @@ from typing import Any, Literal
 
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
 
 from ._mixin import _BacktestStrategyMixin
 
@@ -88,13 +89,11 @@ logger = logging.getLogger("flinttrade.backtest.strategies.options_short_straddl
 # Registry tables
 # ---------------------------------------------------------------------------
 
-LOT_SIZES: dict[str, int] = {
-    "NIFTY": 75,
-    "BANKNIFTY": 15,
-    "FINNIFTY": 25,
-    "SENSEX": 10,
-    "MIDCPNIFTY": 50,
-}
+# Contract sizes come from the screener's unified table (this file's private
+# copy had stale BANKNIFTY 15 / FINNIFTY 25 / SENSEX 10 values). Historical
+# backtests over pre-revision periods should override per run — the registry
+# reflects CURRENT contract sizes.
+LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
 
 STRIKE_INTERVALS: dict[str, int] = {
     "NIFTY": 50,
@@ -312,10 +311,13 @@ class IndianShortStraddle(BaseStrategy, _BacktestStrategyMixin):
         **kwargs: Any,
     ) -> None:
         underlying_upper = underlying.strip().upper()
-        if underlying_upper not in LOT_SIZES:
+        # Gate on STRIKE_INTERVALS — the strategy's true capability set. The
+        # unified LOT_SIZES table now also covers commodities/currencies this
+        # index-straddle strategy cannot trade.
+        if underlying_upper not in STRIKE_INTERVALS:
             raise ValueError(
                 f"Unknown underlying '{underlying}'. "
-                f"Supported: {sorted(LOT_SIZES.keys())}"
+                f"Supported: {sorted(STRIKE_INTERVALS.keys())}"
             )
 
         resolved_exchange = exchange or UNDERLYING_EXCHANGE.get(underlying_upper, "NFO")

@@ -36,18 +36,22 @@ export interface IndexConfig {
 }
 
 /**
- * Default lot sizes used as fallback when the backend is unreachable.
- * The Scalper widget fetches live lot sizes from
- * ``/ft-api/v1/screener/lot-size`` on symbol change and overrides
- * these values dynamically.
+ * LAST-RESORT lot-size fallback — DISPLAY ONLY, never order-sizing.
+ *
+ * The Scalper resolves the real lot size at runtime from the broker symbol
+ * master (`getSymbol` — the same symbol-info API QuickTrade uses), then from
+ * the backend lot-size resolver route. Until one of those confirms, these
+ * built-in values are shown with an "(unverified)" marker and order
+ * placement FAILS CLOSED — a stale hardcoded lot size mis-sizes every order.
+ * Values mirror `flinttrade_screener.lot_sizes.FALLBACK_LOT_SIZES`.
  */
 export const INDEX_CONFIG: Record<string, IndexConfig> = {
   NIFTY:      { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 75,  step: 50  },
   BANKNIFTY:  { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 30,  step: 100 },
-  FINNIFTY:   { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 40,  step: 50  },
-  MIDCPNIFTY: { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 50,  step: 25  },
-  SENSEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  lotSize: 10,  step: 100 },
-  BANKEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  lotSize: 15,  step: 100 },
+  FINNIFTY:   { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 65,  step: 50  },
+  MIDCPNIFTY: { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 120, step: 25  },
+  SENSEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  lotSize: 20,  step: 100 },
+  BANKEX:     { exchange: "BSE_INDEX", optExchange: "BFO",  lotSize: 30,  step: 100 },
 };
 
 export const SYMBOLS = Object.keys(INDEX_CONFIG);

@@ -24,6 +24,10 @@ export interface OrderConfirmModalProps {
   orderType: OrderTypeValue;
   /** Limit price actually sent with the order — shown only for LIMIT. */
   limitPrice: string;
+  /** SL distance in points — non-blank means a gated bracket SL leg is sent. */
+  slPoints: string;
+  /** Target distance in points — non-blank means a gated bracket target leg is sent. */
+  targetPoints: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -35,6 +39,8 @@ export function OrderConfirmModal({
   product,
   orderType,
   limitPrice,
+  slPoints,
+  targetPoints,
   onConfirm,
   onCancel,
 }: OrderConfirmModalProps) {
@@ -88,11 +94,25 @@ export function OrderConfirmModal({
           </div>
           {/* Only parameters that are ACTUALLY sent to the broker may appear
               here — the modal previously displayed SL/Target values that were
-              silently discarded, which is worse than showing nothing. */}
+              silently discarded, which is worse than showing nothing. The
+              SL/Target rows below are shown only when a real bracket exit leg
+              will be placed through the gated bracket endpoint. */}
           {orderType === "LIMIT" && (
             <div className="flex justify-between text-xs">
               <span className="text-text-muted font-sans">Limit Price</span>
               <span className="font-mono font-bold text-text-primary">₹{limitPrice || "—"}</span>
+            </div>
+          )}
+          {slPoints.trim() !== "" && (
+            <div className="flex justify-between text-xs">
+              <span className="text-text-muted font-sans">SL (bracket leg)</span>
+              <span className="font-mono font-bold text-loss">{slPoints} pts</span>
+            </div>
+          )}
+          {targetPoints.trim() !== "" && (
+            <div className="flex justify-between text-xs">
+              <span className="text-text-muted font-sans">Target (bracket leg)</span>
+              <span className="font-mono font-bold text-profit">{targetPoints} pts</span>
             </div>
           )}
         </div>

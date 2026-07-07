@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 from flinttrade_screener.lot_sizes import (
     FALLBACK_LOT_SIZES,
+    LotResolution,
     LotSizeResolver,
     get_lot_size_sync,
 )
@@ -31,11 +32,37 @@ class TestFallbackTable:
     def test_banknifty_lot_size_is_30(self):
         assert FALLBACK_LOT_SIZES["BANKNIFTY"] == 30
 
-    def test_finnifty_lot_size_is_40(self):
-        assert FALLBACK_LOT_SIZES["FINNIFTY"] == 40
+    def test_finnifty_lot_size_is_65(self):
+        # Freshest value from the (formerly diverging) route table — the old
+        # 40 here was stale.
+        assert FALLBACK_LOT_SIZES["FINNIFTY"] == 65
+
+    def test_midcpnifty_lot_size_is_120(self):
+        # Freshest value from the (formerly diverging) route table — the old
+        # 50 here was stale.
+        assert FALLBACK_LOT_SIZES["MIDCPNIFTY"] == 120
 
     def test_sensex_lot_size_is_20(self):
         assert FALLBACK_LOT_SIZES["SENSEX"] == 20
+
+    def test_merge_kept_the_union_of_both_tables(self):
+        """The unification merged both tables — nothing was dropped.
+
+        Every symbol the old route table served must still resolve, and the
+        entries that only the fallback table had (NIFTYNXT50, MCX minis,
+        agri) must survive the merge.
+        """
+        old_route_table = {
+            "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 65, "MIDCPNIFTY": 120,
+            "SENSEX": 20, "BANKEX": 30, "CRUDEOIL": 100, "NATURALGAS": 1250,
+            "GOLD": 100, "SILVER": 30, "COPPER": 2500, "USDINR": 1000,
+            "EURINR": 1000, "GBPINR": 1000, "JPYINR": 1000,
+        }
+        for sym, lot in old_route_table.items():
+            assert FALLBACK_LOT_SIZES.get(sym) == lot, f"{sym} lost in merge"
+        for fallback_only in ("NIFTYNXT50", "SENSEX50", "GOLDM", "SILVERMIC",
+                              "CRUDEOILM", "ZINCMINI", "MENTHAOIL", "COTTON"):
+            assert fallback_only in FALLBACK_LOT_SIZES, f"{fallback_only} lost in merge"
 
     def test_gold_mcx_lot_size_is_100(self):
         assert FALLBACK_LOT_SIZES["GOLD"] == 100
@@ -219,6 +246,64 @@ class TestLotSizeResolverInvalidation:
 
 
 # ---------------------------------------------------------------------------
+# LotSizeResolver.resolve — provenance-aware lookup
+# ---------------------------------------------------------------------------
+
+
+class TestLotSizeResolverResolve:
+    def _make_resolver(self, instruments: list[dict]) -> LotSizeResolver:
+        client = MagicMock()
+        client.instruments.return_value = instruments
+        return LotSizeResolver(client, cache_ttl=3600)
+
+    def test_live_fetch_reports_live_source(self):
+        resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": 75}])
+        resolution = resolver.resolve("NIFTY", "NFO")
+        assert resolution == LotResolution(75, "live")
+
+    def test_cache_hit_preserves_live_source(self):
+        resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": 75}])
+        resolver.resolve("NIFTY", "NFO")
+        assert resolver.resolve("NIFTY", "NFO").source == "live"
+        assert resolver._client.instruments.call_count == 1
+
+    def test_fallback_table_reports_fallback_source(self):
+        resolver = self._make_resolver([])
+        resolution = resolver.resolve("BANKNIFTY", "NFO")
+        assert resolution.lot_size == FALLBACK_LOT_SIZES["BANKNIFTY"]
+        assert resolution.source == "fallback"
+
+    def test_unknown_symbol_reports_default_source(self):
+        resolver = self._make_resolver([])
+        resolution = resolver.resolve("NOTAREALSTOCK", "NSE")
+        assert resolution == LotResolution(1, "default")
+
+    def test_get_lot_size_delegates_to_resolve(self):
+        resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": 75}])
+        assert resolver.get_lot_size("NIFTY", "NFO") == resolver.resolve("NIFTY", "NFO").lot_size
+
+    def test_async_client_with_envelope_is_supported(self):
+        """The REAL OpenAlgoClient.instruments is async and returns an
+        envelope dict — the resolver must drive the coroutine and unwrap
+        ``data`` (a sync list-returning fake was the only thing the old code
+        handled, so the live path never worked against the real client)."""
+
+        class FakeAsyncClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def instruments(self, exchange: str = "NSE") -> dict:
+                self.calls += 1
+                return {"status": "success", "data": [{"symbol": "NIFTY", "lotsize": 75}]}
+
+        client = FakeAsyncClient()
+        resolver = LotSizeResolver(client)  # type: ignore[arg-type]
+        resolution = resolver.resolve("NIFTY", "NFO")
+        assert resolution == LotResolution(75, "live")
+        assert client.calls == 1
+
+
+# ---------------------------------------------------------------------------
 # __all__ export check
 # ---------------------------------------------------------------------------
 
@@ -229,3 +314,7 @@ class TestModuleExports:
         assert callable(get_lot_size_sync)
         assert callable(LotSizeResolver)
         assert isinstance(FALLBACK_LOT_SIZES, dict)
+
+    def test_lot_resolution_importable_from_module(self):
+        from flinttrade_screener.lot_sizes import LotResolution as ImportedResolution
+        assert ImportedResolution is LotResolution

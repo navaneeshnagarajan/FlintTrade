@@ -370,10 +370,12 @@ export const getLotSize = (
   exchange: string = "NFO",
 ): Promise<LotSizeResponse> => {
   if (isDemoAuthSession()) {
+    // Mirrors the current NSE contract sizes (unified backend table); always
+    // sample-flagged, so never used for real order sizing.
     const fallbackLotSize = symbol.toUpperCase().includes("BANK")
       ? 30
       : symbol.toUpperCase().includes("FIN")
-        ? 40
+        ? 65
         : 75;
     return Promise.resolve({
       symbol,

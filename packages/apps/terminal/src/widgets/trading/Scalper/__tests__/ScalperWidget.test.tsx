@@ -2,7 +2,9 @@
  * ScalperWidget.test.tsx
  *
  * Tests for the Scalper trading widget.
- * Verifies rendering, CE/PE sections, and quantity controls.
+ * Verifies rendering, CE/PE sections, quantity controls, runtime lot-size
+ * resolution (symbol master → resolver route → fail closed), and the
+ * optional SL/Target bracket legs through the gated bracket endpoint.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -20,7 +22,13 @@ const mockCancelAllOrders = vi.hoisted(() => vi.fn());
 const mockClosePosition = vi.hoisted(() => vi.fn());
 const mockGetExpiry = vi.hoisted(() => vi.fn());
 const mockGetQuotes = vi.hoisted(() => vi.fn());
+const mockGetSymbol = vi.hoisted(() => vi.fn());
 const mockGetLotSize = vi.hoisted(() => vi.fn());
+const mockPlaceBracketOrder = vi.hoisted(() => vi.fn());
+/** Mutable tick map handed to the widget by the mocked useWebSocket hook. */
+const mockTicks = vi.hoisted(() => ({
+  current: {} as Record<string, { ltp?: number; close?: number }>,
+}));
 
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
@@ -28,10 +36,12 @@ vi.mock("@/services/api", () => ({
   closePosition: mockClosePosition,
   getExpiry: mockGetExpiry,
   getQuotes: mockGetQuotes,
+  getSymbol: mockGetSymbol,
 }));
 
 vi.mock("@/services/ftApi", () => ({
   getLotSize: mockGetLotSize,
+  placeBracketOrder: mockPlaceBracketOrder,
 }));
 
 vi.mock("@/hooks/useVoiceAlert", () => ({
@@ -44,7 +54,7 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 
 vi.mock("@/hooks/useWebSocket", () => ({
-  default: () => ({ ticks: {} }),
+  default: () => ({ ticks: mockTicks.current }),
 }));
 
 vi.mock("@/components/Chart", () => ({
@@ -93,15 +103,34 @@ const defaultProps = makeDockviewPanelProps();
 describe("ScalperWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTicks.current = {};
     mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
       selector({ mode: "live" }),
     );
     mockPlaceOrder.mockResolvedValue({});
+    mockPlaceBracketOrder.mockResolvedValue({ message: "Bracket placed", data: null });
     mockCancelAllOrders.mockResolvedValue({});
     mockClosePosition.mockResolvedValue({});
     mockGetExpiry.mockResolvedValue(["2026-04-10", "2026-04-17"]);
     mockGetQuotes.mockResolvedValue({ ltp: 24000 });
-    mockGetLotSize.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", lot_size: 75 });
+    // Primary lot-size source: the broker symbol master (QuickTrade's
+    // getSymbol pattern), probed with the concrete CE contract.
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY10APR2624000CE",
+      name: "NIFTY",
+      exchange: "NFO",
+      instrumenttype: "OPTIDX",
+      lotsize: 75,
+      tick_size: 0.05,
+    });
+    // Secondary source: the backend resolver route. Sample-flagged by
+    // default so tests prove the symbol master is what verifies.
+    mockGetLotSize.mockResolvedValue({
+      symbol: "NIFTY",
+      exchange: "NFO",
+      lot_size: 75,
+      is_sample_data: true,
+    });
   });
 
   it("renders without crashing", () => {
@@ -232,20 +261,29 @@ describe("ScalperWidget", () => {
     fireEvent.click(await screen.findByText("Confirm BUY"));
   }
 
-  it("does not render the unwired SL/Target inputs anywhere", () => {
+  it("renders the SL/Target points inputs (wired to the gated bracket route)", () => {
     render(<ScalperWidget {...defaultProps} />);
 
-    expect(screen.queryByText("SL")).not.toBeInTheDocument();
-    expect(screen.queryByText("Target")).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("pts")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Stop-loss points")).toBeInTheDocument();
+    expect(screen.getByLabelText("Target points")).toBeInTheDocument();
   });
 
-  it("sizes the order from the backend-verified lot size (lots × lot size)", async () => {
-    mockGetLotSize.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", lot_size: 99 });
+  // ── Lot-size resolution (fetch → fallback → fail closed) ─────────────────
+
+  it("sizes the order from the symbol master (getSymbol) — the QuickTrade pattern", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY10APR2624000CE",
+      name: "NIFTY",
+      exchange: "NFO",
+      instrumenttype: "OPTIDX",
+      lotsize: 99,
+      tick_size: 0.05,
+    });
     render(<ScalperWidget {...defaultProps} />);
 
     // Sublabel confirms the dynamic lot size arrived (not the built-in 75)
     await screen.findByText("×99");
+    expect(mockGetSymbol).toHaveBeenCalledWith(expect.stringMatching(/CE$/), "NFO");
 
     await buyCeWithConfirm();
 
@@ -256,7 +294,43 @@ describe("ScalperWidget", () => {
     });
   });
 
-  it("fails closed when the lot size is not confirmed by the backend", async () => {
+  it("falls back to the resolver route when it is NOT sample-flagged", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol master unavailable"));
+    mockGetLotSize.mockResolvedValue({
+      symbol: "NIFTY",
+      exchange: "NFO",
+      lot_size: 80,
+      is_sample_data: false,
+    });
+    render(<ScalperWidget {...defaultProps} />);
+
+    await screen.findByText("×80");
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "BUY", quantity: 80 }),
+      );
+    });
+  });
+
+  it("treats a sample-flagged resolver lot size as unverified and fails closed", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol master unavailable"));
+    // Default mockGetLotSize is sample-flagged 75 — display only.
+    render(<ScalperWidget {...defaultProps} />);
+
+    await screen.findByText("×75 (unverified)");
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/Lot size not confirmed from the backend yet/);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no backend source confirms the lot size", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol master unavailable"));
     mockGetLotSize.mockRejectedValue(new Error("backend down"));
     render(<ScalperWidget {...defaultProps} />);
 
@@ -307,5 +381,177 @@ describe("ScalperWidget", () => {
 
     await screen.findByText(/placed$/);
     expect(screen.queryByText(/filled/)).not.toBeInTheDocument();
+  });
+
+  // ── SL/Target bracket legs (gated bracket endpoint) ───────────────────────
+
+  it("keeps the plain gated order path when SL/Target are blank", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+  });
+
+  it("places a bracket with an SL leg anchored to the LIMIT price", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceBracketOrder).toHaveBeenCalledWith({
+        entry: expect.objectContaining({
+          exchange: "NFO",
+          action: "BUY",
+          quantity: 75,
+          price: 185.5,
+          product: "MIS",
+          strategy: "FlintScalper",
+        }),
+        stoploss: 165.5,
+      });
+    });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("places a bracket with a target leg (and no stoploss key)", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => expect(mockPlaceBracketOrder).toHaveBeenCalledTimes(1));
+    const arg = mockPlaceBracketOrder.mock.calls[0][0] as Record<string, unknown>;
+    expect(arg.target).toBe(195.5);
+    expect(arg).not.toHaveProperty("stoploss");
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("anchors a MARKET bracket to the option's live LTP", async () => {
+    // Every tick key answers with ₹200 — the CE contract included.
+    mockTicks.current = new Proxy(
+      {},
+      { get: () => ({ ltp: 200, close: 200 }) },
+    ) as Record<string, { ltp?: number; close?: number }>;
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceBracketOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ stoploss: 180 }),
+      );
+    });
+    const arg = mockPlaceBracketOrder.mock.calls[0][0] as { entry: { price: number } };
+    expect(arg.entry.price).toBe(0); // MARKET entry
+  });
+
+  it("fails closed on a MARKET bracket when no live price is available", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/Live price unavailable to anchor SL\/Target/);
+    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("refuses SL and Target together (no OCO fill monitor) without sending", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/SL and Target together are not supported yet — enter exactly one/);
+    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("reports a bracket as PLACED (legs pending) — never as filled", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/bracket placed — legs pending, not filled/);
+  });
+
+  it("surfaces the backend Practice-mode refusal and points to Live mode", async () => {
+    mockPlaceBracketOrder.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "Advanced orders (basket, split, options-strategy, bracket) are not yet "
+            + "available in Practice mode. Switch to Live with PIN verified, or use "
+            + "single-leg orders which support practice.",
+        ),
+        { code: "practice_unsupported" },
+      ),
+    );
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/not yet available in Practice mode.*brackets need Live mode/);
+  });
+
+  it("surfaces other backend bracket errors verbatim", async () => {
+    mockPlaceBracketOrder.mockRejectedValue(
+      Object.assign(new Error("Safety layer L1 rejected the entry leg"), { code: "" }),
+    );
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    await screen.findByText("Safety layer L1 rejected the entry leg");
+  });
+
+  it("shows the SL leg in the confirm modal before placing", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await waitFor(() => {
+      const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByText("Buy CE"));
+
+    await screen.findByText("SL (bracket leg)");
+    expect(screen.getByText("20 pts")).toBeInTheDocument();
   });
 });

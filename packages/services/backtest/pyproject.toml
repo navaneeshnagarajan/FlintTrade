@@ -5,6 +5,7 @@ description = "Simulator, performance metrics (Sharpe/Sortino/DD), walk-forward,
 requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
+    "flinttrade-screener",
     "flinttrade-engine",
     "flinttrade-historical",
     "flinttrade-indicators",

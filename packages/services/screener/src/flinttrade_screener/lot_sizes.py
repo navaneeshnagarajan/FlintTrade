@@ -19,9 +19,10 @@ Usage::
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
     from flinttrade_core.openalgo_client import OpenAlgoClient
@@ -32,6 +33,11 @@ logger = logging.getLogger("flinttrade.screener.lot_sizes")
 # Built-in fallback table
 # ---------------------------------------------------------------------------
 
+# Single source of truth for the built-in fallback — the union of the former
+# ``sample_data_routes._LOT_SIZE_TABLE`` (which now delegates here) and this
+# table, keeping the freshest value wherever the two diverged (FINNIFTY 65,
+# MIDCPNIFTY 120 per the current contract specifications).
+#
 # NSE F&O — Index options/futures
 # NIFTY: 75 lots per contract (NSE mandate, last revised Nov 2024)
 # BANKNIFTY: 30 (reduced from 15 in 2024 NSE revision)
@@ -39,8 +45,8 @@ FALLBACK_LOT_SIZES: dict[str, int] = {
     # NFO — Index derivatives
     "NIFTY": 75,
     "BANKNIFTY": 30,
-    "FINNIFTY": 40,
-    "MIDCPNIFTY": 50,
+    "FINNIFTY": 65,
+    "MIDCPNIFTY": 120,
     "NIFTYNXT50": 25,
     # BFO — BSE derivatives
     "SENSEX": 20,
@@ -81,6 +87,23 @@ FALLBACK_LOT_SIZES: dict[str, int] = {
 
 # Cache TTL — lot sizes change infrequently; 24 hours is safe
 _CACHE_TTL_SECONDS: int = 86_400  # 24 hours
+
+
+class LotResolution(NamedTuple):
+    """Outcome of a lot-size lookup, carrying provenance.
+
+    Attributes:
+        lot_size: Resolved lot size (always >= 1).
+        source: Where the value came from — ``"live"`` (broker symbol master
+            via the OpenAlgo ``instruments`` endpoint, possibly cache-served
+            within TTL), ``"fallback"`` (the built-in table), or
+            ``"default"`` (unknown symbol; the safe placeholder ``1``).
+            Consumers that size real orders must treat anything other than
+            ``"live"`` as unverified.
+    """
+
+    lot_size: int
+    source: str
 
 
 def get_lot_size_sync(symbol: str, exchange: str = "") -> int:  # noqa: ARG001
@@ -129,15 +152,15 @@ class LotSizeResolver:
     ) -> None:
         self._client = client
         self._cache_ttl = cache_ttl
-        # Cache entries: (symbol_upper, exchange_upper) -> (lot_size, fetched_at)
-        self._cache: dict[tuple[str, str], tuple[int, float]] = {}
+        # Cache entries: (symbol_upper, exchange_upper) -> (lot_size, fetched_at, source)
+        self._cache: dict[tuple[str, str], tuple[int, float, str]] = {}
 
     def _is_fresh(self, key: tuple[str, str]) -> bool:
         """Return True if the cache entry for *key* is still within TTL."""
         entry = self._cache.get(key)
         if entry is None:
             return False
-        _, fetched_at = entry
+        fetched_at = entry[1]
         return (time.monotonic() - fetched_at) < self._cache_ttl
 
     def _fetch_from_openalgo(self, exchange: str) -> dict[str, int]:
@@ -154,8 +177,20 @@ class LotSizeResolver:
         """
         try:
             # OpenAlgo /api/v1/instruments returns a list of instrument dicts
-            # with fields: symbol, exchange, lot_size (and others).
-            instruments = self._client.instruments(exchange=exchange)
+            # with fields: symbol, exchange, lot_size (and others). The real
+            # OpenAlgoClient is async and wraps the list in a response
+            # envelope; sync duck-typed fakes may return the list directly —
+            # accept both.
+            raw: Any = self._client.instruments(exchange=exchange)
+            if inspect.iscoroutine(raw):
+                # Drive the coroutine on the client's OWNER loop — ad-hoc
+                # asyncio.run() poisons the pooled httpx connections.
+                from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+
+                raw = client_call_sync(self._client, raw)
+            if isinstance(raw, dict):
+                raw = raw.get("data")
+            instruments = raw
             if not isinstance(instruments, list):
                 return {}
             result: dict[str, int] = {}
@@ -181,14 +216,57 @@ class LotSizeResolver:
             )
             return {}
 
+    def resolve(self, symbol: str, exchange: str) -> LotResolution:
+        """Resolve the lot size for a symbol, reporting where it came from.
+
+        Lookup order:
+        1. In-process cache (if within TTL) — keeps the source it was
+           cached with.
+        2. Live fetch from OpenAlgo ``/api/v1/instruments`` for the exchange
+           (``source="live"``).
+        3. Built-in fallback table (``source="fallback"``).
+        4. Default of ``1`` for unknown symbols (``source="default"``).
+
+        Args:
+            symbol: Underlying or contract symbol, e.g. ``"NIFTY"``.
+            exchange: Exchange code, e.g. ``"NFO"``, ``"MCX"``.
+
+        Returns:
+            A :class:`LotResolution` — lot size (always >= 1) plus source.
+        """
+        sym_key = symbol.upper().strip()
+        exc_key = exchange.upper().strip()
+        cache_key = (sym_key, exc_key)
+
+        if self._is_fresh(cache_key):
+            lot, _, source = self._cache[cache_key]
+            return LotResolution(lot, source)
+
+        # Fetch the full instrument list for this exchange and populate cache
+        live_data = self._fetch_from_openalgo(exc_key)
+        now = time.monotonic()
+        for fetched_sym, lot in live_data.items():
+            self._cache[(fetched_sym, exc_key)] = (lot, now, "live")
+
+        if cache_key in self._cache:
+            lot, _, source = self._cache[cache_key]
+            return LotResolution(lot, source)
+
+        # Fall back to built-in table, then the safe default of 1.
+        if sym_key in FALLBACK_LOT_SIZES:
+            lot, source = FALLBACK_LOT_SIZES[sym_key], "fallback"
+        else:
+            lot, source = 1, "default"
+        # Cache the result with the same TTL to avoid repeated fetches
+        self._cache[cache_key] = (lot, now, source)
+        return LotResolution(lot, source)
+
     def get_lot_size(self, symbol: str, exchange: str) -> int:
         """Return the lot size for a symbol, fetching live data if needed.
 
-        Lookup order:
-        1. In-process cache (if within TTL).
-        2. Live fetch from OpenAlgo ``/api/v1/instruments`` for the exchange.
-        3. Built-in fallback table.
-        4. Default of ``1`` for unknown symbols.
+        Thin wrapper over :meth:`resolve` for callers that only need the
+        number. Order-sizing callers should prefer :meth:`resolve` and treat
+        any source other than ``"live"`` as unverified.
 
         Args:
             symbol: Underlying symbol, e.g. ``"NIFTY"`` or ``"BANKNIFTY"``.
@@ -197,27 +275,7 @@ class LotSizeResolver:
         Returns:
             Lot size as an integer, always >= 1.
         """
-        sym_key = symbol.upper().strip()
-        exc_key = exchange.upper().strip()
-        cache_key = (sym_key, exc_key)
-
-        if self._is_fresh(cache_key):
-            return self._cache[cache_key][0]
-
-        # Fetch the full instrument list for this exchange and populate cache
-        live_data = self._fetch_from_openalgo(exc_key)
-        now = time.monotonic()
-        for fetched_sym, lot in live_data.items():
-            self._cache[(fetched_sym, exc_key)] = (lot, now)
-
-        if cache_key in self._cache:
-            return self._cache[cache_key][0]
-
-        # Fall back to built-in table
-        fallback = FALLBACK_LOT_SIZES.get(sym_key, 1)
-        # Cache the fallback result with the same TTL to avoid repeated fetches
-        self._cache[cache_key] = (fallback, now)
-        return fallback
+        return self.resolve(symbol, exchange).lot_size
 
     def invalidate(self, symbol: str | None = None, exchange: str | None = None) -> None:
         """Invalidate cache entries.

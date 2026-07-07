@@ -40,6 +40,7 @@ import numpy as np
 
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
 
 from ..strategies import _BacktestStrategyMixin
 
@@ -50,12 +51,10 @@ logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 # Lot-size registry
 # ---------------------------------------------------------------------------
 
-LOT_SIZES: dict[str, int] = {
-    "NIFTY": 25,
-    "BANKNIFTY": 15,
-    "FINNIFTY": 25,
-    "MIDCPNIFTY": 50,
-}
+# Contract sizes come from the screener's unified table (this file's private
+# copy pre-dated the 2024 SEBI lot revisions — NIFTY 25 vs the current 75).
+# Historical backtests over pre-revision periods should override per run.
+LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
 
 DEFAULT_LOT_SIZE: int = 1
 

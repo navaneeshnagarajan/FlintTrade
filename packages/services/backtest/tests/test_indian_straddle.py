@@ -117,19 +117,26 @@ class TestLotSizeLookup:
 
     def test_banknifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("BANKNIFTY") == 15
+        assert lot_size_for("BANKNIFTY") == 30
 
     def test_finnifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("FINNIFTY") == 25
+        assert lot_size_for("FINNIFTY") == 65
 
     def test_sensex_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("SENSEX") == 10
+        assert lot_size_for("SENSEX") == 20
 
     def test_midcpnifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("MIDCPNIFTY") == 50
+        assert lot_size_for("MIDCPNIFTY") == 120
+
+    def test_lot_sizes_track_the_unified_screener_table(self):
+        """The strategy's registry must BE the screener table, not a copy."""
+        from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+        _, LOT_SIZES, _, _, _, _, _, _, _ = _import_strategy()
+        assert LOT_SIZES is FALLBACK_LOT_SIZES
 
     def test_case_insensitive(self):
         _, _, _, _, _, _, _, lot_size_for, _ = _import_strategy()
@@ -879,14 +886,14 @@ class TestQuantityCalculation:
     def test_quantity_banknifty_2_lots(self):
         IndianShortStraddle, *_ = _import_strategy()
         s = IndianShortStraddle(underlying="BANKNIFTY", lots=2)
-        # BANKNIFTY lot size = 15
-        assert s._quantity == 30
+        # BANKNIFTY lot size = 30 (unified screener table)
+        assert s._quantity == 60
 
     def test_quantity_sensex_3_lots(self):
         IndianShortStraddle, *_ = _import_strategy()
         s = IndianShortStraddle(underlying="SENSEX", lots=3)
-        # SENSEX lot size = 10
-        assert s._quantity == 30
+        # SENSEX lot size = 20 (unified screener table)
+        assert s._quantity == 60
 
     def test_order_quantity_matches_strategy_quantity(self):
         IndianShortStraddle, *_ = _import_strategy()

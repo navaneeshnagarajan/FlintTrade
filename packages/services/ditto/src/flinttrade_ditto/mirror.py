@@ -28,6 +28,7 @@ from typing import Any, Callable
 import httpx
 
 from flinttrade_core.models import Order, OrderResponse
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
 
 from .account_manager import BrokerAccount
 
@@ -44,15 +45,12 @@ class AllocationMode(StrEnum):
     MULTIPLIER = "MULTIPLIER"
 
 
-# Lot sizes for F&O instruments (as of Nov 2024 SEBI revision).
-# TODO: Fetch lot sizes dynamically from OpenAlgo /api/v1/instruments in future.
-LOT_SIZES: dict[str, int] = {
-    "NIFTY": 75, "BANKNIFTY": 15, "FINNIFTY": 25, "MIDCPNIFTY": 50,
-    "SENSEX": 10, "BANKEX": 15, "SENSEX50": 25,
-    "USDINR": 1000, "EURINR": 1000,
-    "CRUDEOIL": 100, "GOLD": 100, "GOLDM": 10,
-    "SILVER": 30, "SILVERM": 5, "NATURALGAS": 1250,
-}
+# Lot sizes for F&O instruments — single source of truth is the screener's
+# contract-size table (union-merged 2026-07-07; live symbol-master values are
+# served by flinttrade_screener.lot_sizes.LotSizeResolver). This module held
+# its own badly stale copy (BANKNIFTY 15, FINNIFTY 25) that mis-sized mirror
+# quantities.
+LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
 
 
 @dataclass
@@ -153,11 +151,16 @@ def compute_allocation(
 
 
 def _get_lot_size(symbol: str) -> int:
-    """Determine lot size from symbol name."""
+    """Determine lot size from symbol name.
+
+    Prefers the LONGEST matching underlying — plain substring iteration
+    resolved ``BANKNIFTY24JULFUT`` to NIFTY's lot (``"NIFTY" in sym`` is true
+    for every *NIFTY contract) depending on dict order.
+    """
     sym = symbol.upper()
-    for key, size in LOT_SIZES.items():
-        if key in sym:
-            return size
+    matches = [key for key in LOT_SIZES if key in sym]
+    if matches:
+        return LOT_SIZES[max(matches, key=len)]
     return 1
 
 

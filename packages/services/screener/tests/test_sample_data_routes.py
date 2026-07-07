@@ -18,9 +18,12 @@ A future PR replacing each stub MUST keep these assertions passing.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from flask import Flask
 
+from flinttrade_screener import sample_data_routes
 from flinttrade_screener.sample_data_routes import sample_data_bp
 
 
@@ -29,14 +32,45 @@ from flinttrade_screener.sample_data_routes import sample_data_bp
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _reset_lot_size_resolver():
+    """Clear the module-level shared LotSizeResolver between tests.
+
+    The route caches one resolver per OpenAlgo client instance; a leaked
+    resolver (with its 24-hour cache) from one test must never serve another.
+    """
+    sample_data_routes._resolver = None
+    sample_data_routes._resolver_client_id = None
+    yield
+    sample_data_routes._resolver = None
+    sample_data_routes._resolver_client_id = None
+
+
+def _make_app(openalgo_client=None) -> Flask:
+    """Build a Flask app with the sample-data blueprint registered."""
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    if openalgo_client is not None:
+        flask_app.config["OPENALGO_CLIENT"] = openalgo_client
+    flask_app.register_blueprint(sample_data_bp)
+    return flask_app
+
+
 @pytest.fixture
 def client():
     """Return a Flask test client with only the sample-data blueprint registered."""
-    flask_app = Flask(__name__)
-    flask_app.config["TESTING"] = True
-    flask_app.register_blueprint(sample_data_bp)
-    with flask_app.test_client() as c:
+    with _make_app().test_client() as c:
         yield c
+
+
+def _client_with_instruments(instruments):
+    """Return a test client whose app carries a mock OpenAlgo client."""
+    openalgo = MagicMock()
+    if isinstance(instruments, Exception):
+        openalgo.instruments.side_effect = instruments
+    else:
+        openalgo.instruments.return_value = instruments
+    return _make_app(openalgo).test_client()
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +268,14 @@ def test_lot_size_known_symbol_returns_real_value(client):
     assert data["lot_size"] == 75  # Current NIFTY lot size (post-2024 reset)
 
 
-def test_lot_size_is_flagged_as_sample_data(client):
-    """The lot-size stub MUST declare ``is_sample_data: true``.
+def test_lot_size_is_flagged_as_sample_data_without_a_live_source(client):
+    """Fallback-served lot sizes MUST declare ``is_sample_data: true``.
 
-    This was the ONLY route in the blueprint without the flag — and its
-    value multiplies real order quantities in the ScalperWidget. An
+    This value multiplies real order quantities in the ScalperWidget. An
     unflagged hardcoded lot size is a live-money honesty bug: the frontend
     needs the flag to refuse to prefer this table over an audited source.
+    Only a value resolved LIVE from the broker symbol master may clear the
+    flag (covered by the resolver-backed tests below).
     """
     for query in ("symbol=NIFTY&exchange=NFO", "symbol=XYZ123", "symbol=USDINR&exchange=CDS"):
         resp = client.get(f"/api/v1/screener/lot-size?{query}")
@@ -256,7 +291,7 @@ def test_lot_size_banknifty_returns_30(client):
 
 
 def test_lot_size_unknown_symbol_returns_zero(client):
-    """Unknown symbols return ``0`` so the frontend falls back to its built-in table."""
+    """Unknown symbols return ``0`` so the frontend fails closed (no order)."""
     resp = client.get("/api/v1/screener/lot-size?symbol=XYZ123")
     assert resp.status_code == 200
     data = resp.get_json()
@@ -269,3 +304,81 @@ def test_lot_size_currency_pair(client):
     data = resp.get_json()
     assert data["lot_size"] == 1000
     assert data["exchange"] == "CDS"
+
+
+def test_lot_size_table_delegates_to_resolver_fallback(client):
+    """The route's private table must BE the resolver fallback, not a copy.
+
+    The two tables diverged (FINNIFTY 40 vs 65, MIDCPNIFTY 50 vs 120) until
+    the unification — pin the delegation so they can never drift again.
+    """
+    from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+    assert sample_data_routes._LOT_SIZE_TABLE is FALLBACK_LOT_SIZES
+
+    resp = client.get("/api/v1/screener/lot-size?symbol=FINNIFTY")
+    assert resp.get_json()["lot_size"] == 65
+    resp = client.get("/api/v1/screener/lot-size?symbol=MIDCPNIFTY")
+    assert resp.get_json()["lot_size"] == 120
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/screener/lot-size — resolver-backed (app has an OpenAlgo client)
+# ---------------------------------------------------------------------------
+
+
+def test_lot_size_resolved_live_clears_sample_flag():
+    """A value from the broker symbol master is real — no sample flag."""
+    c = _client_with_instruments([{"symbol": "NIFTY", "lot_size": 75}])
+    resp = c.get("/api/v1/screener/lot-size?symbol=NIFTY&exchange=NFO")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["lot_size"] == 75
+    assert data["is_sample_data"] is False
+
+
+def test_lot_size_live_value_wins_over_fallback_table():
+    """When the symbol master disagrees with the built-in table, live wins."""
+    c = _client_with_instruments([{"symbol": "NIFTY", "lot_size": 80}])
+    resp = c.get("/api/v1/screener/lot-size?symbol=NIFTY&exchange=NFO")
+    data = resp.get_json()
+    assert data["lot_size"] == 80
+    assert data["is_sample_data"] is False
+
+
+def test_lot_size_full_contract_symbol_resolves_live():
+    """An exact option contract in the symbol master resolves directly."""
+    c = _client_with_instruments([{"symbol": "NIFTY29JUL2524800CE", "lotsize": 75}])
+    resp = c.get("/api/v1/screener/lot-size?symbol=NIFTY29JUL2524800CE&exchange=NFO")
+    data = resp.get_json()
+    assert data["symbol"] == "NIFTY29JUL2524800CE"
+    assert data["lot_size"] == 75
+    assert data["is_sample_data"] is False
+
+
+def test_lot_size_contract_falls_back_to_live_base_symbol():
+    """A contract absent from the master resolves via its live underlying."""
+    c = _client_with_instruments([{"symbol": "BANKNIFTY", "lot_size": 30}])
+    resp = c.get("/api/v1/screener/lot-size?symbol=BANKNIFTY25JUL56000PE&exchange=NFO")
+    data = resp.get_json()
+    assert data["lot_size"] == 30
+    assert data["is_sample_data"] is False
+
+
+def test_lot_size_fetch_failure_falls_back_flagged():
+    """A dead OpenAlgo must not 500 — serve the fallback, honestly flagged."""
+    c = _client_with_instruments(ConnectionError("OpenAlgo down"))
+    resp = c.get("/api/v1/screener/lot-size?symbol=NIFTY&exchange=NFO")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["lot_size"] == 75
+    assert data["is_sample_data"] is True
+
+
+def test_lot_size_unknown_symbol_with_resolver_returns_zero_flagged():
+    """Unknown everywhere → 0 + flagged, so the frontend fails closed."""
+    c = _client_with_instruments([])
+    resp = c.get("/api/v1/screener/lot-size?symbol=XYZ123&exchange=NFO")
+    data = resp.get_json()
+    assert data["lot_size"] == 0
+    assert data["is_sample_data"] is True

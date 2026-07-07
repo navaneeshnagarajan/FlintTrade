@@ -193,3 +193,123 @@ export const listSmartRouteJobs = () => get<SmartRouteJob[]>("orders/smart-route
 /** Request cancellation of a running smart-route job (honoured before the next child). */
 export const cancelSmartRoute = (jobId: string) =>
   post<SmartRouteJob>("orders/smart-route/" + encodeURIComponent(jobId) + "/cancel");
+
+// ---------------------------------------------------------------------------
+// Bracket orders (entry + ONE protective exit leg through the gated path)
+// ---------------------------------------------------------------------------
+
+export interface BracketEntryLeg {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  /** 0 places a MARKET entry; a positive price places a LIMIT entry. */
+  price: number;
+  product: string;
+  strategy: string;
+}
+
+export interface PlaceBracketParams {
+  entry: BracketEntryLeg;
+  /** Absolute stop-loss price — mutually exclusive with `target` (no OCO yet). */
+  stoploss?: number;
+  /** Absolute target price — mutually exclusive with `stoploss` (no OCO yet). */
+  target?: number;
+  broker?: string;
+  account_id?: string;
+}
+
+/** Bracket state as serialised by the backend (`BracketOrder.to_dict`). */
+export interface BracketOrderData {
+  bracket_id: string;
+  entry_order_id: string;
+  sl_order_id: string | null;
+  target_order_id: string | null;
+  symbol: string;
+  exchange: string;
+  action: string;
+  quantity: number;
+  entry_price: number;
+  stoploss: number | null;
+  target: number | null;
+  trailing_sl: number | null;
+  strategy: string;
+  product: string;
+  broker: string;
+  /** "partial" means the entry leg is live but UNPROTECTED — act on it. */
+  status: "active" | "partial" | "completed" | "cancelled";
+  cancel_warnings: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlaceBracketResult {
+  /** Backend outcome message — reports PLACEMENT only, never fills. */
+  message: string;
+  data: BracketOrderData | null;
+}
+
+/**
+ * Error from the bracket endpoint, carrying the backend's machine code
+ * (e.g. `"mode_blocked"`, `"practice_unsupported"`, `"live_locked"`,
+ * `"oco_unsupported"`, `"trailing_unsupported"`) so callers can react —
+ * a Practice-mode JWT is honestly refused because the sandbox cannot
+ * execute multi-leg brackets.
+ */
+export class BracketApiError extends Error {
+  readonly code?: string;
+  /** Partial bracket state (entry live but unprotected) when the exit leg failed. */
+  readonly data?: BracketOrderData;
+
+  constructor(message: string, code?: string, data?: BracketOrderData) {
+    super(message);
+    this.name = "BracketApiError";
+    this.code = code;
+    this.data = data;
+  }
+}
+
+function withBracketBrokerTarget(params: PlaceBracketParams): PlaceBracketParams {
+  if (params.broker || params.account_id) return params;
+
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  const nativeTarget = pickNativeBrokerOrderTarget(mode, apiKey);
+  if (nativeTarget) return { ...params, ...nativeTarget };
+  // Fail closed like postOrder/smart-route: a selected-but-unconfirmed native
+  // account must not fall through to the bare route (which the backend
+  // resolves to brokers.execution.default) and silently retarget these live
+  // legs to a broker the operator did not choose.
+  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  return params;
+}
+
+/**
+ * Place a bracket order (entry + exactly ONE protective exit leg) through the
+ * gated backend route (`POST /api/v1/orders/bracket`) — every leg traverses
+ * SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
+ *
+ * Uses a direct fetch instead of the shared `post` helper so the backend's
+ * actionable refusals reach the operator verbatim — with their machine `code`
+ * on the thrown {@link BracketApiError} — rather than collapsing to
+ * "HTTP 403". A resolved promise means the legs were PLACED, not filled.
+ */
+export async function placeBracketOrder(params: PlaceBracketParams): Promise<PlaceBracketResult> {
+  const resp = await fetch(`${getBase()}/api/v1/orders/bracket`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify(withBracketBrokerTarget(params)),
+  });
+  const json = (await resp.json().catch(() => null)) as
+    | { status?: string; message?: string; code?: string; error?: string; data?: BracketOrderData }
+    | null;
+  if (!resp.ok || json?.status !== "success") {
+    const message = json?.message ?? `Bracket order failed (HTTP ${resp.status})`;
+    throw new BracketApiError(
+      json?.error ? `${message}: ${json.error}` : message,
+      json?.code,
+      json?.data,
+    );
+  }
+  return { message: json.message ?? "Bracket placed", data: json.data ?? null };
+}

@@ -45,6 +45,19 @@ export interface ScalperControlsProps {
   /** Limit price — required (and shown) only when orderType is LIMIT. */
   limitPrice: string;
   onLimitPriceChange: (v: string) => void;
+  /**
+   * Optional stop-loss distance in points. When set, the order goes through
+   * the gated bracket endpoint as entry + a real SL exit leg. Blank = off.
+   */
+  slPoints: string;
+  onSlPointsChange: (v: string) => void;
+  /**
+   * Optional target distance in points. When set, the order goes through
+   * the gated bracket endpoint as entry + a real target exit leg. Blank =
+   * off. Mutually exclusive with SL points (no OCO fill monitor yet).
+   */
+  targetPoints: string;
+  onTargetPointsChange: (v: string) => void;
   interval: IntervalValue;
   onIntervalChange: (v: IntervalValue) => void;
   oneClick: boolean;
@@ -78,6 +91,10 @@ export function ScalperControls({
   onOrderTypeChange,
   limitPrice,
   onLimitPriceChange,
+  slPoints,
+  onSlPointsChange,
+  targetPoints,
+  onTargetPointsChange,
   interval,
   onIntervalChange,
   oneClick,
@@ -164,10 +181,12 @@ export function ScalperControls({
         )}
       </div>
 
-      {/* Row 2: Lots, Product, OrderType, Limit price, Interval, One-click.
-          SL/Target inputs were removed: they were never sent to the broker,
-          so displaying them was silent-risk theatre. Reintroduce only once
-          real SL/target legs go through a gated route. */}
+      {/* Row 2: Lots, Product, OrderType, Limit price, SL/Target points,
+          Interval, One-click. The SL/Target inputs are RESTORED now that
+          they place a real protective exit leg through the gated bracket
+          endpoint (POST /api/v1/orders/bracket) — an earlier incarnation
+          displayed them without sending anything, which was silent-risk
+          theatre and got them removed. */}
       <div className="flex items-end gap-3 px-3 py-2 border-t border-border-subtle flex-wrap">
         {/* Lot spinner — large. Unverified lot sizes block orders (fail closed). */}
         <Stepper
@@ -205,6 +224,27 @@ export function ScalperControls({
             placeholder="0.00"
           />
         )}
+
+        {/* Optional protective exit leg, in points from the entry price.
+            Leave both blank for a plain order; enter EXACTLY ONE to place a
+            gated bracket (entry + SL or target leg). Both together are
+            refused — there is no OCO fill monitor to cancel the sibling. */}
+        <NumberInput
+          label="SL pts"
+          value={slPoints}
+          onChange={onSlPointsChange}
+          min={0}
+          placeholder="off"
+          ariaLabel="Stop-loss points"
+        />
+        <NumberInput
+          label="Target pts"
+          value={targetPoints}
+          onChange={onTargetPointsChange}
+          min={0}
+          placeholder="off"
+          ariaLabel="Target points"
+        />
 
         {/* Timeframe buttons */}
         <ToggleGroup
