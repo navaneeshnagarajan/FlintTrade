@@ -125,11 +125,38 @@ describe("EarningsCalendarWidget — honest data", () => {
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("hides the Sample data badge when connected", () => {
+  it("hides the Sample data badge when connected to a genuinely live source", () => {
+    // is_sample_data: false models a future real earnings feed — only then
+    // may the badge disappear for a connected user.
     mockConnected.mockReturnValue(true);
-    mockEarnings.mockResolvedValue({ entries: [] });
+    mockEarnings.mockResolvedValue({ entries: [], is_sample_data: false });
     render(<EarningsCalendarWidget />, { wrapper });
     expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
+  it("keeps the Sample data badge when connected but the backend flags synthetic rows", async () => {
+    // The earnings backend is currently synthetic-only and says so via
+    // is_sample_data. Fabricated result dates must NEVER render unbadged
+    // just because a broker is connected.
+    const now = new Date();
+    const liveDate = new Date(now.getFullYear(), now.getMonth(), 15).toISOString().slice(0, 10);
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({
+      entries: [
+        // PAYTM is not in the local SAMPLE_EARNINGS constant, so its
+        // presence proves the backend rows rendered, not the local sample.
+        { symbol: "PAYTM", company: "One97 Communications", date: liveDate, sector: "Fintech" },
+      ],
+      is_sample_data: true,
+    });
+
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    // The backend (synthetic) rows render — not the local sample constant —
+    // and the badge stays visible.
+    expect(await screen.findByText("PAYTM")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("INFY")).toBeNull();
   });
 
   it("renders an honest empty state and NO sample rows when connected with an empty response", async () => {

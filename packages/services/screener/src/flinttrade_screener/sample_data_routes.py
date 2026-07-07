@@ -247,15 +247,18 @@ _SAMPLE_FUNDING_RATES: list[dict[str, Any]] = [
 def get_crypto_funding_rates() -> Any:
     """Return a placeholder perp funding-rate payload flagged as sample data.
 
-    The frontend ``FundingRatesResponse`` interface doesn't carry
-    ``is_sample_data``, but a top-level flag is still useful for any
-    future caller that wants to branch on it. The widget already
-    gates ``getCryptoFundingRates`` on ``isConnected`` so it falls
-    back to its own static sample when the user isn't logged in.
+    The ``is_sample_data`` flag is part of the frontend
+    ``FundingRatesResponse`` contract — the FundingRate widget badges on it
+    even when a broker is connected, because these rates are fabricated
+    regardless of connection state.
+
+    Deliberately, NO ``updated_at`` is returned: stamping ``now()`` on a
+    hardcoded payload made stub prices look seconds-fresh on every poll,
+    defeating the user's staleness instincts. Sample data has no honest
+    update time, so the field is omitted until a real source exists.
     """
     return jsonify({
         "rates": _SAMPLE_FUNDING_RATES,
-        "updated_at": _utc_iso(),
         "is_sample_data": True,
     })
 
@@ -286,10 +289,16 @@ def get_global_indices() -> Any:
     ``packages/apps/terminal/src/services/ftApi.analysis.ts:245``
     (``get<...>("market/global_indices")``) — NOT ``/global/indices``,
     which an earlier draft used and Codex caught before ship.
+
+    Deliberately, NO ``updated_at`` is returned: stamping ``now()`` on
+    hardcoded index levels made them look seconds-fresh on every 30s poll —
+    a connected trader saw Dow/Nikkei/HSI at fabricated levels "updated 5
+    seconds ago" every morning. Sample data has no honest update time, so
+    the field is omitted; the GlobalIndices widget badges on
+    ``is_sample_data`` instead.
     """
     return jsonify({
         "indices": _SAMPLE_GLOBAL_INDICES,
-        "updated_at": _utc_iso(),
         "is_sample_data": True,
     })
 
@@ -432,6 +441,13 @@ def get_lot_size() -> Any:
     (NSE / BSE / MCX / CDS). Falls back to ``0`` for unknown symbols,
     which the frontend ``ScalperWidget`` interprets as "use the
     widget's built-in config" rather than a hard error.
+
+    ``is_sample_data`` is always ``True``: the table is hardcoded, not
+    resolved from the broker symbol master, and this value multiplies REAL
+    order quantities in the Scalper. Consumers must treat a flagged lot
+    size as unverified — never silently prefer it over an audited source.
+    (This was the only route in this blueprint without the flag, in
+    contradiction of the module docstring — a live-order honesty bug.)
     """
     symbol = (request.args.get("symbol") or "").upper().strip()
     exchange = (request.args.get("exchange") or "NFO").upper().strip()
@@ -456,4 +472,5 @@ def get_lot_size() -> Any:
         "symbol": symbol,
         "exchange": exchange,
         "lot_size": lot_size,
+        "is_sample_data": True,
     })

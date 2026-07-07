@@ -121,7 +121,18 @@ export interface FundingRateEntry {
 
 export interface FundingRatesResponse {
   rates: FundingRateEntry[];
-  updated_at: string;
+  /**
+   * Absent on sample payloads — the backend stub deliberately stops minting
+   * request-time timestamps on fabricated rates (a fresh ``updated_at`` on
+   * stub data defeats the user's staleness instincts).
+   */
+  updated_at?: string;
+  /**
+   * True when the rates are fabricated. Survives the response unwrap because
+   * this endpoint has no ``data`` envelope. Widgets must badge on THIS, not
+   * on connection state — the backend serves the stub even when connected.
+   */
+  is_sample_data?: boolean;
 }
 
 export interface EarningsCalendarEntry {
@@ -152,6 +163,17 @@ interface BackendEarningsCalendarEntry {
 interface BackendEarningsCalendarResponse {
   entries?: BackendEarningsCalendarEntry[];
   events?: BackendEarningsCalendarEntry[];
+  /**
+   * The earnings backend is synthetic-only (``generate_sample_data``); it
+   * nests this flag inside ``data`` so it survives the response unwrap.
+   */
+  is_sample_data?: boolean;
+}
+
+export interface EarningsCalendarResult {
+  entries: EarningsCalendarEntry[];
+  /** True when the backend fabricated the rows — badge regardless of connection. */
+  is_sample_data: boolean;
 }
 
 function normaliseEarningsResult(result: BackendEarningsResult): EarningsCalendarEntry["result"] | undefined {
@@ -181,6 +203,22 @@ export interface GlobalIndexEntry {
   change: number;
   change_pct: number;
   history: number[];
+}
+
+export interface GlobalIndicesResponse {
+  indices: GlobalIndexEntry[];
+  /**
+   * Absent on sample payloads — the backend stub no longer stamps ``now()``
+   * on hardcoded index levels (fabricated prices "updated 5 seconds ago"
+   * actively misled connected traders).
+   */
+  updated_at?: string;
+  /**
+   * True when the indices are fabricated. Survives the response unwrap
+   * because this endpoint has no ``data`` envelope. Widgets must badge on
+   * THIS, not on connection state.
+   */
+  is_sample_data?: boolean;
 }
 
 export const getGEXData = (
@@ -557,13 +595,21 @@ export const getCorrelationMatrix = () =>
 export const getCryptoFundingRates = () =>
   get<FundingRatesResponse>("crypto/funding_rates");
 
-export const getEarningsCalendar = async (year: number, month: number) => {
+export const getEarningsCalendar = async (
+  year: number,
+  month: number,
+): Promise<EarningsCalendarResult> => {
   const raw = await get<BackendEarningsCalendarResponse>(
     `earnings/calendar?year=${year}&month=${month}`,
   );
   const rows = raw.entries ?? raw.events ?? [];
-  return { entries: rows.map(normaliseEarningsEntry) };
+  return {
+    entries: rows.map(normaliseEarningsEntry),
+    // Propagated so the widget badges fabricated rows even when a broker is
+    // connected — the "live" backend source is currently a sample generator.
+    is_sample_data: raw.is_sample_data === true,
+  };
 };
 
 export const getGlobalIndices = () =>
-  get<{ indices: GlobalIndexEntry[]; updated_at: string }>("market/global_indices");
+  get<GlobalIndicesResponse>("market/global_indices");

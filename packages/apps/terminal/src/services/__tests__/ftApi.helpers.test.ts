@@ -82,6 +82,80 @@ describe("parseResponse — data unwrapping", () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseResponse — sibling is_sample_data propagation (honesty affordance)
+// ---------------------------------------------------------------------------
+
+describe("parseResponse — is_sample_data survives the data-unwrap", () => {
+  it("propagates a sibling is_sample_data: true onto the unwrapped object payload", async () => {
+    // Backend pattern used by option-chain analytics (gex, gammadensity,
+    // volsurface…) and earnings: the flag sits BESIDE data. Discarding it
+    // rendered synthetic spot-24000 chains as live in connected widgets.
+    const res = makeJsonResponse({
+      status: "success",
+      is_sample_data: true,
+      data: { spot: 24000, gamma_flip: 24000 },
+    });
+    const result = await parseResponse<{ spot: number; is_sample_data?: boolean }>(res, "gex");
+    expect(result).toStrictEqual({ spot: 24000, gamma_flip: 24000, is_sample_data: true });
+  });
+
+  it("does not add the flag when the envelope does not declare sample data", async () => {
+    const res = makeJsonResponse({ status: "success", data: { spot: 24000 } });
+    const result = await parseResponse<{ spot: number }>(res, "gex");
+    expect(result).toStrictEqual({ spot: 24000 });
+  });
+
+  it("does not add the flag when the sibling value is false", async () => {
+    const res = makeJsonResponse({
+      status: "success",
+      is_sample_data: false,
+      data: { spot: 24000 },
+    });
+    const result = await parseResponse<{ spot: number }>(res, "gex");
+    expect(result).toStrictEqual({ spot: 24000 });
+  });
+
+  it("fail-closed: an envelope-level true overrides a nested false", async () => {
+    const res = makeJsonResponse({
+      status: "success",
+      is_sample_data: true,
+      data: { spot: 24000, is_sample_data: false },
+    });
+    const result = await parseResponse<{ is_sample_data?: boolean }>(res, "gex");
+    expect(result.is_sample_data).toBe(true);
+  });
+
+  it("preserves a nested true when it is already inside data", async () => {
+    const res = makeJsonResponse({
+      status: "success",
+      is_sample_data: true,
+      data: { entries: [], is_sample_data: true },
+    });
+    const result = await parseResponse<{ is_sample_data?: boolean }>(res, "earnings/calendar");
+    expect(result.is_sample_data).toBe(true);
+  });
+
+  it("leaves array payloads untouched (flag cannot attach without a shape change)", async () => {
+    const res = makeJsonResponse({
+      status: "success",
+      is_sample_data: true,
+      data: [{ symbol: "NIFTY" }],
+    });
+    const result = await parseResponse<Array<{ symbol: string }>>(res, "positions");
+    expect(result).toStrictEqual([{ symbol: "NIFTY" }]);
+  });
+
+  it("leaves unenveloped responses untouched (flag already at top level survives)", async () => {
+    const res = makeJsonResponse({ rates: [], is_sample_data: true });
+    const result = await parseResponse<{ rates: unknown[]; is_sample_data: boolean }>(
+      res,
+      "crypto/funding_rates",
+    );
+    expect(result).toStrictEqual({ rates: [], is_sample_data: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // post
 // ---------------------------------------------------------------------------
 

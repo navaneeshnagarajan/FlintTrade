@@ -215,6 +215,13 @@ function FundingRateWidget() {
 
   const rawData = isConnected ? liveData : SAMPLE_FUNDING_RATES;
 
+  // The badge keys off the response flag, not connection state alone: the
+  // backend endpoint is currently a hardcoded stub that declares
+  // `is_sample_data: true`, so a connected response can still be fabricated.
+  // Badging on `!isConnected` alone rendered stub rates as live the moment a
+  // broker connected.
+  const isSample = !isConnected || liveData?.is_sample_data === true;
+
   const sortedEntries = useMemo(() => {
     if (!rawData?.rates?.length) return [];
     return sortEntries(rawData.rates, sortMode);
@@ -241,15 +248,17 @@ function FundingRateWidget() {
         <span className="text-xxs text-text-muted px-1.5 py-0.5 rounded bg-surface-hover border border-border-subtle">
           Delta Exchange
         </span>
-        {/* Honest disclosure — when disconnected the table is SAMPLE_FUNDING_RATES
-            (rawData = isConnected ? liveData : SAMPLE_FUNDING_RATES). Badge shows
-            exactly when sample data is on screen. */}
-        {!isConnected && (
+        {/* Honest disclosure — shows whenever the rows on screen are
+            fabricated: the local SAMPLE constant (disconnected) OR a backend
+            payload flagged is_sample_data (the endpoint is currently a stub
+            even for connected users). Badge shows exactly when sample data
+            is on screen. */}
+        {isSample && (
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample funding rates; not connected to a live feed"
-            title="Not connected — showing sample funding rates so the widget is usable in explore mode."
+            aria-label="Showing sample funding rates, not a live feed"
+            title="These funding rates are illustrative sample data, not a live feed — do not base trading decisions on them."
           >
             Sample data
           </span>

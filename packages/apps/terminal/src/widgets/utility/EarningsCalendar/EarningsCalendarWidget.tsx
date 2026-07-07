@@ -6,9 +6,11 @@
  *   - Past dates: beat (green dot) / missed (red dot) / inline (grey dot)
  *   - Future dates: highlighted with accent colour
  *   - Filter by sector
- *   - Sample data (with a visible "Sample data" badge) in explore mode only;
- *     live data via ft-api in connected mode. A connected user never sees
- *     fabricated rows — an empty live response shows an honest empty state.
+ *   - Local sample data (with a visible "Sample data" badge) in explore
+ *     mode; ft-api data in connected mode. The backend earnings source is
+ *     currently synthetic-only and flags itself via is_sample_data, so the
+ *     badge derives from the RESPONSE flag as well as connection state — a
+ *     connected user still sees the badge while the rows are fabricated.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
@@ -155,18 +157,23 @@ function EarningsCalendarWidget() {
     staleTime: 60 * 60 * 1000, // 1h
   });
 
-  // Sample data is reserved for the not-connected/explore branch only. A
-  // connected user must NEVER see fabricated rows — when the live response is
-  // empty or undefined we render an honest empty state instead of the sample
-  // constant (see the "No earnings" message below).
+  // The local SAMPLE constant is reserved for the not-connected/explore
+  // branch only — when connected, the widget renders the backend rows (an
+  // empty response shows an honest empty state, never the local constant).
+  // BUT the backend earnings source is itself synthetic-only today and
+  // declares it via is_sample_data, so the "Sample data" badge must key off
+  // the response flag too: badging on `!isConnected` alone rendered
+  // fabricated result dates and EPS estimates as live the moment a broker
+  // connected.
   const liveEntries = (liveData?.entries as EarningsEntry[] | undefined) ?? [];
-  const showingSample = !isConnected;
-  const allEntries: EarningsEntry[] = showingSample ? SAMPLE_EARNINGS : liveEntries;
+  const usingLocalSample = !isConnected;
+  const showingSample = usingLocalSample || liveData?.is_sample_data === true;
+  const allEntries: EarningsEntry[] = usingLocalSample ? SAMPLE_EARNINGS : liveEntries;
   const hasEntries = allEntries.length > 0;
 
   const sectors = useMemo(
-    () => (showingSample ? SAMPLE_SECTORS : [...new Set(allEntries.map((e) => e.sector))].sort()),
-    [allEntries, showingSample],
+    () => (usingLocalSample ? SAMPLE_SECTORS : [...new Set(allEntries.map((e) => e.sector))].sort()),
+    [allEntries, usingLocalSample],
   );
 
   const filtered = useMemo(

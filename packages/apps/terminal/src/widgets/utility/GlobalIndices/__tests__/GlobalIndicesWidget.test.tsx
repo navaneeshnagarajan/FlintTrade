@@ -144,7 +144,25 @@ describe("GlobalIndicesWidget (connected)", () => {
 
     expect(await screen.findByText("NIFTY 50")).toBeTruthy();
     expect(screen.queryByText("(sample data)")).toBeNull();
+    expect(screen.queryByText("Sample data")).toBeNull();
     // A sample-only index must NOT appear alongside the single live row.
     expect(screen.queryByText("S&P 500")).toBeNull();
+  });
+
+  it("badges a connected response flagged is_sample_data — stub prices must never render as live", async () => {
+    // The backend endpoint is currently a hardcoded stub that declares
+    // is_sample_data: true and omits updated_at. A connected user must
+    // still see the sample affordance and no invented freshness timestamp.
+    mockConnected.mockReturnValue(true);
+    mockIndices.mockResolvedValue({ indices: LIVE_INDICES, is_sample_data: true });
+    renderWidget();
+
+    expect(await screen.findByText("NIFTY 50")).toBeTruthy();
+    // Header badge + footer note both visible despite the connection.
+    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.getByText("(sample data)")).toBeTruthy();
+    // No fabricated "Updated: …" freshness claim when the payload has no
+    // honest timestamp.
+    expect(screen.queryByText(/Updated:/)).toBeNull();
   });
 });

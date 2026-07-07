@@ -132,6 +132,36 @@ describe("FundingRateWidget", () => {
     });
   });
 
+  it("badges a connected response flagged is_sample_data — stub rates must never render as live", async () => {
+    // The backend endpoint is currently a hardcoded stub that declares
+    // is_sample_data: true even for connected users. The badge must key off
+    // the response flag, not connection state.
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockGetCryptoFundingRates.mockResolvedValue({
+      ...SAMPLE_FUNDING_RATES,
+      is_sample_data: true,
+    });
+
+    render(<FundingRateWidget />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.queryByText("BTCUSD")).toBeTruthy();
+    });
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("shows no sample badge when a connected response is not flagged", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockGetCryptoFundingRates.mockResolvedValue(SAMPLE_FUNDING_RATES);
+
+    render(<FundingRateWidget />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.queryByText("BTCUSD")).toBeTruthy();
+    });
+    expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
   it("shows summary banner with positive/negative counts", () => {
     mockUseBrokerConnected.mockReturnValue(false);
 
@@ -248,8 +278,11 @@ describe("SAMPLE_FUNDING_RATES", () => {
   });
 
   it("updated_at is a valid ISO timestamp", () => {
-    expect(() => new Date(SAMPLE_FUNDING_RATES.updated_at)).not.toThrow();
-    expect(new Date(SAMPLE_FUNDING_RATES.updated_at).getTime()).toBeGreaterThan(0);
+    // Optional on the response type (backend sample payloads omit it), but
+    // the local widget sample always sets one.
+    const updatedAt = SAMPLE_FUNDING_RATES.updated_at;
+    expect(updatedAt).toBeDefined();
+    expect(new Date(updatedAt ?? "").getTime()).toBeGreaterThan(0);
   });
 
   it("has both positive and negative rate entries", () => {

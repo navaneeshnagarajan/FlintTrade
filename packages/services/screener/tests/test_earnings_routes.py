@@ -40,6 +40,31 @@ def test_calendar_ok(client):
     assert "data" in body
 
 
+def test_calendar_declares_sample_data_inside_payload(client):
+    """The synthetic-only calendar must flag itself INSIDE ``data``.
+
+    Every row is fabricated by ``generate_sample_data`` — there is no live
+    source. The terminal's ``parseResponse`` unwraps the ``data`` member, so
+    a sibling-only ``is_sample_data`` was stripped in transit and connected
+    users saw invented result dates rendered as live. The flag must appear
+    both as a sibling (legacy) AND nested inside ``data`` (survives unwrap).
+    """
+    resp = client.get("/api/v1/earnings/calendar?days=30")
+    body = resp.get_json()
+    assert body["is_sample_data"] is True
+    assert body["data"]["is_sample_data"] is True
+
+
+def test_calendar_month_filter_declares_sample_data_inside_payload(client):
+    """The year/month branch (used by the terminal widget) nests the flag too."""
+    resp = client.get("/api/v1/earnings/calendar?year=2026&month=7")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["is_sample_data"] is True
+    assert body["data"]["is_sample_data"] is True
+    assert "entries" in body["data"]
+
+
 def test_calendar_default_days(client):
     """200 with default days=30."""
     resp = client.get("/api/v1/earnings/calendar")
@@ -66,6 +91,14 @@ def test_by_date_ok(client):
     assert body["status"] == "success"
 
 
+def test_by_date_declares_sample_data_inside_payload(client):
+    """by-date nests ``is_sample_data`` inside ``data`` (survives unwrap)."""
+    resp = client.get("/api/v1/earnings/by-date?date=2026-04-19")
+    body = resp.get_json()
+    assert body["is_sample_data"] is True
+    assert body["data"]["is_sample_data"] is True
+
+
 def test_by_date_invalid_format(client):
     """400 for malformed date string."""
     resp = client.get("/api/v1/earnings/by-date?date=not-a-date")
@@ -89,6 +122,14 @@ def test_by_symbol_ok(client):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
+
+
+def test_by_symbol_declares_sample_data_inside_payload(client):
+    """by-symbol nests ``is_sample_data`` inside ``data`` (survives unwrap)."""
+    resp = client.get("/api/v1/earnings/by-symbol?symbol=RELIANCE")
+    body = resp.get_json()
+    assert body["is_sample_data"] is True
+    assert body["data"]["is_sample_data"] is True
 
 
 def test_by_symbol_missing(client):

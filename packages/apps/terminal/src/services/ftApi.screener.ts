@@ -230,6 +230,14 @@ export interface LotSizeResponse {
   symbol: string;
   exchange: string;
   lot_size: number;
+  /**
+   * True when the lot size came from a hardcoded table rather than the
+   * broker symbol master. The backend stub and the demo-session fallback
+   * both set it. This value multiplies REAL order quantities in the
+   * Scalper, so consumers must treat a flagged lot size as unverified —
+   * never silently prefer it over an audited local config.
+   */
+  is_sample_data?: boolean;
 }
 
 /**
@@ -371,6 +379,10 @@ export const getLotSize = (
       symbol,
       exchange,
       lot_size: fallbackLotSize,
+      // Fabricated on the client for demo sessions — flag it like the
+      // backend stub does, so no consumer can mistake it for the symbol
+      // master.
+      is_sample_data: true,
     });
   }
 

@@ -14,18 +14,26 @@ stripper in app.py rewrites to /v1/earnings/* before Flask dispatch):
 
 Blueprint registered at ``/v1/earnings`` (post-strip form).
 
-All endpoints return sample / synthetic data when no live source is connected.
-The :class:`~flinttrade_screener.earnings_calendar.EarningsCalendar` instance
-is initialised lazily on the first request and cached for the lifetime of the
-Flask application.
+All endpoints return sample / synthetic data — there is NO live earnings
+source yet; :meth:`EarningsCalendar.generate_sample_data` fabricates every
+row. The :class:`~flinttrade_screener.earnings_calendar.EarningsCalendar`
+instance is initialised lazily on the first request and cached for the
+lifetime of the Flask application.
 
 Response shape (all endpoints)::
 
     {
         "status": "success",
         "is_sample_data": true,
-        "data": { ... }
+        "data": { ..., "is_sample_data": true }
     }
+
+``is_sample_data`` appears BOTH as a sibling of ``data`` (legacy consumers)
+AND inside ``data`` itself: the terminal's ``parseResponse`` unwraps the
+``data`` member, so a sibling-only flag was stripped in transit and the
+EarningsCalendar widget rendered fabricated result dates as live whenever a
+broker was connected. The nested copy survives the unwrap (same pattern as
+``breadth_routes.index_contribution_endpoint``).
 """
 
 from __future__ import annotations
@@ -92,6 +100,7 @@ def earnings_calendar() -> tuple[Any, int]:
                 "data": {
                     "days": 30,
                     "count": 12,
+                    "is_sample_data": true,
                     "events": [
                         {
                             "symbol": "RELIANCE",
@@ -134,6 +143,9 @@ def earnings_calendar() -> tuple[Any, int]:
                     "count": len(events),
                     "events": rows,
                     "entries": rows,
+                    # Nested so it survives the frontend data-unwrap — see
+                    # module docstring.
+                    "is_sample_data": True,
                 },
             }), 200
 
@@ -154,6 +166,9 @@ def earnings_calendar() -> tuple[Any, int]:
             "count": len(events),
             "events": rows,
             "entries": rows,
+            # Nested so it survives the frontend data-unwrap — see module
+            # docstring.
+            "is_sample_data": True,
         },
     }), 200
 
@@ -200,6 +215,9 @@ def earnings_by_date() -> tuple[Any, int]:
             "date": target.isoformat(),
             "count": len(events),
             "events": [e.to_dict() for e in events],
+            # Nested so it survives the frontend data-unwrap — see module
+            # docstring.
+            "is_sample_data": True,
         },
     }), 200
 
@@ -238,5 +256,8 @@ def earnings_by_symbol() -> tuple[Any, int]:
             "symbol": symbol,
             "count": len(events),
             "events": [e.to_dict() for e in events],
+            # Nested so it survives the frontend data-unwrap — see module
+            # docstring.
+            "is_sample_data": True,
         },
     }), 200

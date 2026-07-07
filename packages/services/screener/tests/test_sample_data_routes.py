@@ -114,6 +114,19 @@ def test_crypto_funding_rates_returns_sample_data(client):
         assert field in rate, f"funding-rate row missing field {field}"
 
 
+def test_crypto_funding_rates_does_not_mint_fresh_timestamp(client):
+    """Hardcoded funding rates must NOT carry a request-time ``updated_at``.
+
+    Stamping ``now()`` on fabricated prices made them look seconds-fresh on
+    every poll, actively defeating the user's staleness instincts. Sample
+    payloads omit the field entirely; the widget badges on ``is_sample_data``.
+    """
+    resp = client.get("/api/v1/crypto/funding_rates")
+    data = resp.get_json()
+    assert "updated_at" not in data
+    assert data["is_sample_data"] is True
+
+
 # ---------------------------------------------------------------------------
 # /api/v1/global/indices
 # ---------------------------------------------------------------------------
@@ -133,6 +146,20 @@ def test_global_indices_returns_sample_data(client):
     regions = {idx["region"] for idx in data["indices"]}
     assert regions <= {"India", "US", "Europe", "Asia"}
     assert "India" in regions  # NIFTY/SENSEX must be present
+
+
+def test_global_indices_does_not_mint_fresh_timestamp(client):
+    """Hardcoded index levels must NOT carry a request-time ``updated_at``.
+
+    Two requests used to return different seconds-fresh timestamps on
+    identical fabricated prices — a connected trader saw Dow/Nikkei/HSI at
+    stub levels 'updated 5 seconds ago' every morning. Sample payloads omit
+    the field; the GlobalIndices widget badges on ``is_sample_data``.
+    """
+    resp = client.get("/api/v1/market/global_indices")
+    data = resp.get_json()
+    assert "updated_at" not in data
+    assert data["is_sample_data"] is True
 
 
 def test_global_indices_old_path_returns_404(client):
@@ -205,6 +232,20 @@ def test_lot_size_known_symbol_returns_real_value(client):
     assert data["symbol"] == "NIFTY"
     assert data["exchange"] == "NFO"
     assert data["lot_size"] == 75  # Current NIFTY lot size (post-2024 reset)
+
+
+def test_lot_size_is_flagged_as_sample_data(client):
+    """The lot-size stub MUST declare ``is_sample_data: true``.
+
+    This was the ONLY route in the blueprint without the flag — and its
+    value multiplies real order quantities in the ScalperWidget. An
+    unflagged hardcoded lot size is a live-money honesty bug: the frontend
+    needs the flag to refuse to prefer this table over an audited source.
+    """
+    for query in ("symbol=NIFTY&exchange=NFO", "symbol=XYZ123", "symbol=USDINR&exchange=CDS"):
+        resp = client.get(f"/api/v1/screener/lot-size?{query}")
+        assert resp.status_code == 200
+        assert resp.get_json()["is_sample_data"] is True, f"missing flag for {query}"
 
 
 def test_lot_size_banknifty_returns_30(client):

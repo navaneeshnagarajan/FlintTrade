@@ -91,10 +91,25 @@ export async function parseResponse<T>(res: Response, endpoint: string): Promise
         : `FT API ${endpoint} error`;
     throw new Error(msg);
   }
-  const data =
-    json !== null && typeof json === "object" && "data" in json
-      ? (json as { data: unknown }).data
-      : json;
+  const hasEnvelope = json !== null && typeof json === "object" && "data" in json;
+  const data = hasEnvelope ? (json as { data: unknown }).data : json;
+
+  // Honesty affordance: many backend routes (option-chain analytics, earnings,
+  // OI analysis…) emit ``is_sample_data`` as a SIBLING of ``data``. Unwrapping
+  // used to discard it, so widgets rendered synthetic payloads (spot-24000
+  // chains, fabricated earnings dates) as live whenever a broker was
+  // connected. Propagate the flag onto object payloads so consumers can badge
+  // fabricated data. Fail-closed: an envelope-level ``true`` wins over any
+  // nested value — if ANY layer declares the payload synthetic, it is.
+  if (
+    hasEnvelope &&
+    (json as { is_sample_data?: unknown }).is_sample_data === true &&
+    data !== null &&
+    typeof data === "object" &&
+    !Array.isArray(data)
+  ) {
+    return { ...(data as Record<string, unknown>), is_sample_data: true } as T;
+  }
   return data as T;
 }
 

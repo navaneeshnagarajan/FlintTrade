@@ -213,15 +213,15 @@ export class WebSocketService {
    * Release a reference-counted subscription. The WS unsubscribe message is
    * only sent when the ref count drops to zero (i.e. no other caller is still
    * using this subscription).
+   *
+   * Since `unsubscribe()` itself became reference-counted, this is a thin
+   * single-instrument delegate — kept for API compatibility — whose one
+   * difference is that releasing a never-subscribed instrument is a no-op
+   * (a direct `unsubscribe()` would still send the wire message).
    */
   releaseSubscription(instrument: WsInstrument, mode: WsMode): void {
     const key = `${instrument.exchange}:${instrument.symbol}:${mode}`;
-    const info = this.subscriptionMap.get(key);
-    if (!info) return;
-    info.refCount -= 1;
-    if (info.refCount > 0) return;
-    // Last reference dropped — unsubscribe from the server.
-    this.subscriptionMap.delete(key);
+    if (!this.subscriptionMap.has(key)) return;
     this.unsubscribe([instrument], mode);
   }
 
@@ -269,23 +269,46 @@ export class WebSocketService {
     this.setConnected(false);
   }
 
+  /**
+   * Subscribe to instruments in the given mode. Reference-counted: when
+   * another consumer already holds a subscription for the same
+   * instrument+mode, its ref count is incremented and no duplicate wire
+   * message is sent. Every `subscribe()` call must be balanced by exactly
+   * one `unsubscribe()` (or `releaseSubscription()`) so the wire
+   * unsubscribe fires only when the LAST consumer releases — otherwise
+   * closing one widget would silently freeze live prices in another widget
+   * sharing the instrument (the Scalper/Time & Sales bug).
+   */
   subscribe(instruments: WsInstrument[], mode: WsMode = "ltp"): void {
-    const newInsts = instruments.filter(
-      (inst) => !this.subscriptions[mode].some(
-        (s) => s.symbol === inst.symbol && s.exchange === inst.exchange
-      )
-    );
-    if (newInsts.length === 0) return;
-    this.subscriptions[mode] = [...this.subscriptions[mode], ...newInsts];
-    // Mirror into subscriptionMap so reference counting and diagnostics work.
-    for (const inst of newInsts) {
+    const newInsts: WsInstrument[] = [];
+    const seenInCall = new Set<string>();
+    for (const inst of instruments) {
       const key = `${inst.exchange}:${inst.symbol}:${mode}`;
-      if (!this.subscriptionMap.has(key)) {
-        this.subscriptionMap.set(key, { instrument: inst, mode, refCount: 1 });
-      } else {
-        // Already tracked (e.g. via batchSubscribe) — don't reset refCount.
+      // One call = one consumer = one reference per instrument, even if the
+      // caller passed duplicates.
+      if (seenInCall.has(key)) continue;
+      seenInCall.add(key);
+      const existing = this.subscriptionMap.get(key);
+      if (existing) {
+        // Another consumer already holds this subscription — take a
+        // reference instead of sending a duplicate wire message.
+        existing.refCount += 1;
+        continue;
       }
+      this.subscriptionMap.set(key, { instrument: inst, mode, refCount: 1 });
+      newInsts.push(inst);
     }
+    if (newInsts.length === 0) return;
+    // Keep the plain per-mode record (used by resubscribeAll) in sync.
+    this.subscriptions[mode] = [
+      ...this.subscriptions[mode],
+      ...newInsts.filter(
+        (inst) =>
+          !this.subscriptions[mode].some(
+            (s) => s.symbol === inst.symbol && s.exchange === inst.exchange,
+          ),
+      ),
+    ];
     // OpenAlgo v2 WS protocol: { action: "subscribe", symbols: [...], mode: "LTP" }
     this.send({
       action: "subscribe",
@@ -294,21 +317,44 @@ export class WebSocketService {
     });
   }
 
+  /**
+   * Release one reference per instrument in the given mode. Reference-
+   * counted: the wire `unsubscribe` message is sent only for instruments
+   * whose LAST consumer has released. While another consumer still holds a
+   * reference the server subscription stays live, so per-consumer handler
+   * cleanup (via `registerHandler`/`onTick` unregister functions) never
+   * silences the feed for the surviving consumer.
+   *
+   * Instruments not tracked in the ref-count map are hard-unsubscribed
+   * (wire message sent) so desync never leaves a zombie server
+   * subscription.
+   */
   unsubscribe(instruments: WsInstrument[], mode: WsMode = "ltp"): void {
+    const dropped: WsInstrument[] = [];
+    const seenInCall = new Set<string>();
+    for (const inst of instruments) {
+      const key = `${inst.exchange}:${inst.symbol}:${mode}`;
+      if (seenInCall.has(key)) continue;
+      seenInCall.add(key);
+      const info = this.subscriptionMap.get(key);
+      if (info && info.refCount > 1) {
+        // Another consumer still holds this subscription — keep it live.
+        info.refCount -= 1;
+        continue;
+      }
+      // Last reference (or untracked hard unsubscribe) — drop it for real.
+      this.subscriptionMap.delete(key);
+      dropped.push(inst);
+    }
+    if (dropped.length === 0) return;
     this.subscriptions[mode] = this.subscriptions[mode].filter(
-      (s) => !instruments.some(
+      (s) => !dropped.some(
         (inst) => s.symbol === inst.symbol && s.exchange === inst.exchange
       )
     );
-    // Remove from subscriptionMap (unconditional — used by releaseSubscription
-    // which already checked the ref count before calling this method, as well
-    // as direct callers who want a hard unsubscribe).
-    for (const inst of instruments) {
-      this.subscriptionMap.delete(`${inst.exchange}:${inst.symbol}:${mode}`);
-    }
     this.send({
       action: "unsubscribe",
-      symbols: instruments.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
+      symbols: dropped.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
     });
   }
 

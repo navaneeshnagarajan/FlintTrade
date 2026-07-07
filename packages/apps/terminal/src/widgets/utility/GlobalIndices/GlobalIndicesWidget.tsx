@@ -6,7 +6,11 @@
  *   - Columns: name, LTP, change, change%, sparkline
  *   - Positive change highlighted green, negative red
  *   - Auto-refresh every 30s when connected
- *   - Sample data in explore mode; REST polling in live mode
+ *   - Local sample data in explore mode; REST polling in live mode
+ *   - "Sample data" badge derives from the response's is_sample_data flag,
+ *     not from connection state — the backend endpoint is currently a stub
+ *     serving fabricated prices even to connected users, and those rows must
+ *     never render as live
  */
 
 import { useEffect, memo } from "react";
@@ -131,17 +135,20 @@ function GlobalIndicesWidget() {
     staleTime: 25_000,
   });
 
-  // When connected, only ever show the live response — never the SAMPLE
-  // constant. An empty/undefined live response renders an honest empty state
-  // (see below), so a connected (live) user never sees fabricated rows.
-  // The SAMPLE constant is reserved for the not-connected/explore branch and
-  // is always paired with a visible "Sample data" affordance.
+  // When connected, only ever show the live response — never the local
+  // SAMPLE constant. But the backend endpoint is itself a hardcoded stub
+  // that declares `is_sample_data: true`, so a connected response can STILL
+  // be fabricated: the badge must key off the response flag, not off
+  // connection state (badging on `!isConnected` alone rendered stub prices
+  // as live the moment a broker connected).
   const indices: GlobalIndexEntry[] = isConnected
     ? (liveData?.indices ?? [])
     : SAMPLE_INDICES;
 
-  const isSample = !isConnected;
+  const isSample = !isConnected || liveData?.is_sample_data === true;
 
+  // Sample payloads carry no updated_at (the backend no longer stamps now()
+  // on fabricated prices); render the footer time only when one exists.
   const updatedAt: string = isConnected
     ? (liveData?.updated_at ?? "")
     : SAMPLE_UPDATED_AT;
@@ -162,14 +169,16 @@ function GlobalIndicesWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <Globe size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Global Indices</span>
-        {/* Honest disclosure — when disconnected the rows are SAMPLE_INDICES
-            (indices = isConnected ? liveData : SAMPLE_INDICES). */}
-        {!isConnected && (
+        {/* Honest disclosure — shows whenever the rows on screen are
+            fabricated: the local SAMPLE constant (disconnected) OR a backend
+            payload flagged is_sample_data (the endpoint is currently a stub
+            even for connected users). */}
+        {isSample && (
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample data; connect a broker for live global indices"
-            title="Not connected — showing illustrative sample index values so the widget is usable in explore mode."
+            aria-label="Showing sample data, not live global index prices"
+            title="These index values are illustrative sample data, not a live feed — do not base trading decisions on them."
           >
             Sample data
           </span>
@@ -233,16 +242,22 @@ function GlobalIndicesWidget() {
             </tbody>
           </table>
 
-          {/* Footer */}
+          {/* Footer — sample payloads carry no timestamp, so never invent one. */}
           <div className="px-2 py-1.5 text-xxs text-text-muted border-t border-border-subtle">
-            Updated: {new Date(updatedAt).toLocaleTimeString("en-IN", {
-              timeZone: "Asia/Kolkata",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })} IST
+            {updatedAt && (
+              <>
+                Updated: {new Date(updatedAt).toLocaleTimeString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                })} IST
+              </>
+            )}
             {isSample && (
-              <span className="ml-2 text-accent/70">(sample data)</span>
+              <span className={updatedAt ? "ml-2 text-accent/70" : "text-accent/70"}>
+                (sample data)
+              </span>
             )}
           </div>
         </div>
