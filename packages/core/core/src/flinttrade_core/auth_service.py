@@ -56,6 +56,18 @@ _LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
 _KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
 
 
+def _hash_pin(pin: str) -> str:
+    """Hash a 6-digit PIN with PBKDF2-SHA256 as ``salt_hex:hash_hex``.
+
+    The one canonical PIN-hash composition — used by both the initial
+    ``setup_account`` path and the post-setup ``set_pin`` path so the stored
+    format can never drift between them.
+    """
+    pin_salt = os.urandom(16)
+    pin_hash_bytes = hashlib.pbkdf2_hmac("sha256", pin.encode(), pin_salt, 390_000)
+    return pin_salt.hex() + ":" + pin_hash_bytes.hex()
+
+
 def _derive_fernet_key(master: str, salt: bytes) -> Fernet:
     """Derive a Fernet key from the master password and salt via PBKDF2-HMAC-SHA256.
 
@@ -194,13 +206,7 @@ class AuthService:
         password_hash = self._hasher.hash(password)
 
         # Hash PIN with PBKDF2 (or store empty marker if no PIN set)
-        if pin:
-            pin_salt = os.urandom(16)
-            pin_hash_bytes = hashlib.pbkdf2_hmac("sha256", pin.encode(), pin_salt, 390_000)
-            pin_hash = pin_salt.hex() + ":" + pin_hash_bytes.hex()
-        else:
-            pin_salt = os.urandom(16)
-            pin_hash = ""  # Empty = no PIN configured
+        pin_hash = _hash_pin(pin) if pin else ""  # Empty = no PIN configured
 
         # Generate TOTP secret and encrypt it with Fernet
         totp_secret = pyotp.random_base32()
@@ -351,6 +357,39 @@ class AuthService:
         """Check if a PIN was configured during setup."""
         row = self._db.execute("SELECT pin_hash FROM account WHERE id = 1").fetchone()
         return bool(row and row["pin_hash"])
+
+    def set_pin(self, password: str, pin: str) -> bool:
+        """Set or replace the 6-digit quick-unlock PIN after setup.
+
+        The PIN is optional at account creation, but Live mode is armed
+        exclusively via PIN verification — this is the set-PIN-later path so
+        an operator who skipped the optional PIN is not permanently locked
+        out of Live. Requires the account password as an explicit
+        re-confirmation factor (mirrors :meth:`regenerate_totp`). The PIN
+        itself remains a re-auth factor over a live session, never a
+        session-minting one (policy D6) — this method mints nothing.
+
+        Args:
+            password: The account password, verified before any change.
+            pin: The new 6-digit PIN.
+
+        Returns:
+            True on success; False when the password does not verify, the
+            account is locked out, or no account exists.
+
+        Raises:
+            ValueError: If ``pin`` is not exactly 6 digits.
+        """
+        if not (pin.isdigit() and len(pin) == 6):
+            raise ValueError("PIN must be exactly 6 digits")
+        if not self.verify_password(password):
+            return False
+
+        self._execute_locked(
+            "UPDATE account SET pin_hash = ? WHERE id = 1", [_hash_pin(pin)]
+        )
+        logger.info("Quick-unlock PIN set/updated via post-setup path")
+        return True
 
     def verify_pin(self, pin: str) -> bool:
         """Verify 6-digit PIN for quick unlock. Returns False if no PIN configured."""

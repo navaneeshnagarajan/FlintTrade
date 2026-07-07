@@ -354,3 +354,63 @@ class TestBulkCapture:
         results = tracker.capture_multiple("NIFTY", ["260326", "260402"], skip_existing=False)
         assert results["260326"] == 2
         assert results["260402"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Client provider — OpenAlgo settings hot-reload safety
+# ---------------------------------------------------------------------------
+
+
+class TestClientProvider:
+    """ExpiryTracker resolves the client PER CAPTURE when given a provider.
+
+    ``POST /v1/config/openalgo`` swaps and CLOSES the shared app client; a
+    client instance captured at tracker construction would be permanently
+    closed after the first settings change, failing every later capture until
+    a process restart.
+    """
+
+    _CHAIN = [
+        {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
+         "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
+         "put_ltp": 120, "put_iv": 13},
+    ]
+
+    def test_capture_uses_current_provider_client_after_hot_reload(self):
+        from flinttrade_historical.expiry_tracker import ExpiryTracker
+
+        client_one = MagicMock(spec=["optionchain"])
+        client_one.optionchain.return_value = self._CHAIN
+        client_two = MagicMock(spec=["optionchain"])
+        client_two.optionchain.return_value = self._CHAIN
+        current = {"client": client_one}
+
+        tracker = ExpiryTracker(client=lambda: current["client"], db_path=":memory:")
+
+        assert tracker.capture_snapshot("NIFTY", "260326") == 2
+        client_one.optionchain.assert_called_once()
+        client_two.optionchain.assert_not_called()
+
+        # Settings hot-reload: the app swaps (and closes) the shared client.
+        current["client"] = client_two
+        assert tracker.capture_snapshot("NIFTY", "260402") == 2
+        client_two.optionchain.assert_called_once()
+        client_one.optionchain.assert_called_once()  # old client untouched
+
+    def test_provider_failure_degrades_to_no_client(self):
+        from flinttrade_historical.expiry_tracker import ExpiryTracker
+
+        def broken_provider():
+            raise RuntimeError("no app context")
+
+        tracker = ExpiryTracker(client=broken_provider, db_path=":memory:")
+        assert tracker.capture_snapshot("NIFTY", "260326") == 0
+        assert tracker.last_capture_error == "No OpenAlgo client configured"
+
+    def test_client_instance_still_accepted(self):
+        from flinttrade_historical.expiry_tracker import ExpiryTracker
+
+        client = MagicMock(spec=["optionchain"])
+        client.optionchain.return_value = self._CHAIN
+        tracker = ExpiryTracker(client=client, db_path=":memory:")
+        assert tracker.capture_snapshot("NIFTY", "260326") == 2

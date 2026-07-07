@@ -8,6 +8,8 @@ Public endpoints (no API key required):
   - POST /v1/auth/login    — daily password + TOTP login
   - POST /v1/auth/pin      — PIN quick-unlock
   - POST /v1/auth/logout   — invalidate session
+Session-bound endpoints (valid session JWT required):
+  - POST /v1/auth/pin/set  — set/change the quick-unlock PIN (password re-confirm)
 """
 
 from __future__ import annotations
@@ -418,7 +420,13 @@ def require_operator_session() -> tuple[Any, int] | None:
 @auth_bp.route("/status", methods=["GET"])
 @_rate_limit("30 per minute")
 def auth_status() -> tuple[Any, int]:
-    """Check if account is set up and if user is locked out."""
+    """Check if account is set up, if user is locked out, and if a PIN exists.
+
+    ``has_pin`` lets the frontend hide/annotate Live-unlock affordances when
+    the optional PIN was skipped at setup, instead of presenting a PIN prompt
+    that can never succeed. Low-sensitivity boolean for this single-operator
+    tool — it reveals nothing about the PIN's value.
+    """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
@@ -427,6 +435,7 @@ def auth_status() -> tuple[Any, int]:
         "data": {
             "is_setup": svc.is_setup(),
             "is_locked": svc.is_locked(),
+            "has_pin": svc.has_pin(),
         },
     }), 200
 
@@ -654,6 +663,20 @@ def auth_pin_verify() -> tuple[Any, int]:
         }), 400
 
     if not svc.verify_pin(pin):
+        # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN
+        # skipped at setup, verify_pin fails unconditionally and the old
+        # blanket "Invalid PIN." sent operators chasing a PIN they never set,
+        # leaving Live mode unreachable with no hint of the actual fix.
+        if not svc.has_pin():
+            return jsonify({
+                "status": "error",
+                "code": "pin_not_set",
+                "message": (
+                    "No PIN is set for this account — the optional PIN was "
+                    "skipped at setup. Create one in Settings → Security "
+                    "(POST /v1/auth/pin/set), then retry."
+                ),
+            }), 409
         return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
     live_unlocked = target_mode == "live"
@@ -672,6 +695,83 @@ def auth_pin_verify() -> tuple[Any, int]:
             "live_mode_unlocked": live_unlocked,
         },
     }), 200
+
+
+@auth_bp.route("/pin/set", methods=["POST"])
+@_rate_limit("5 per minute")
+def auth_pin_set() -> tuple[Any, int]:
+    """Set or change the quick-unlock PIN over a live operator session.
+
+    The PIN is optional at account setup, but Live mode is armed exclusively
+    via ``POST /v1/auth/pin`` — without this route an operator who skipped
+    the optional PIN could never reach Live except by wiping the account and
+    re-running setup. Guarded like the broker-management writes (G9): the
+    request must carry a valid, unrevoked full-login session JWT, plus the
+    account password as an explicit re-confirmation. The PIN stays a RE-AUTH
+    factor over that live session (policy D6) — this endpoint mints no token
+    and never changes the session's mode; arming Live still requires the
+    separate ``/v1/auth/pin`` verification with the new PIN.
+
+    Request JSON:
+        password (str): The account password (re-confirmation).
+        pin (str): The new 6-digit PIN.
+
+    Returns:
+        200 ``{"status": "success", "data": {"has_pin": true}}`` on success;
+        400 for a malformed PIN; 401 for a bad password or missing/invalid
+        session; 423 when the account is locked out; 503 without an auth
+        service.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    # Session-bound, mirroring auth_pin_verify's D6 plumbing: a reset token
+    # (type "reset") proves only email possession and must never authorise a
+    # PIN change — (reset token + new PIN) would otherwise arm Live.
+    auth_header = request.headers.get("Authorization", "")
+    session_token = auth_header.removeprefix("Bearer ").strip()
+    if not session_token:
+        session_token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not session_token:
+        return jsonify({
+            "status": "error",
+            "message": "Setting a PIN requires an active session — sign in with password and TOTP first.",
+        }), 401
+    try:
+        session_payload = decode_token(session_token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired — sign in with password and TOTP, then set the PIN.",
+        }), 401
+    if session_payload.get("type") != "session":
+        return jsonify({
+            "status": "error",
+            "message": "Setting a PIN requires a full login session — sign in with password and TOTP first.",
+        }), 401
+
+    if svc.is_locked():
+        return jsonify({
+            "status": "error",
+            "message": "Account locked after too many failed attempts. Try again later.",
+        }), 423
+
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password", ""))
+    pin = str(body.get("pin", ""))
+    if not password or not pin:
+        return jsonify({"status": "error", "message": "password and pin are required."}), 400
+
+    try:
+        changed = svc.set_pin(password, pin)
+    except ValueError:
+        return jsonify({"status": "error", "message": "PIN must be exactly 6 digits."}), 400
+    if not changed:
+        return jsonify({"status": "error", "message": "Invalid password."}), 401
+
+    logger.info("Quick-unlock PIN set via /v1/auth/pin/set")
+    return jsonify({"status": "success", "data": {"has_pin": True}}), 200
 
 
 @auth_bp.route("/mode", methods=["POST"])

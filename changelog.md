@@ -8,6 +8,27 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Set-PIN-later path** — `POST /v1/auth/pin/set` lets an operator who skipped
+  the optional PIN at account setup create (or change) the 6-digit quick-unlock
+  PIN over a live session, with the account password as a re-confirmation
+  factor. Previously Live mode was permanently unreachable for PIN-less
+  accounts (every unlock said "Invalid PIN.") and the only escape was wiping
+  the account. `/v1/auth/status` now reports `has_pin`, and a PIN-less Live
+  unlock returns a distinct "No PIN is set" message pointing at the fix
+  instead of masquerading as a wrong PIN.
+- **Native SDK readiness surfaced** — `/api/v1/broker/capabilities`,
+  `/api/v1/broker/mcp`, and the native broker catalogue rows now carry the
+  repo-managed SDK attestation status (pinned vs installed version), so the
+  connect UI can say exactly why a native broker is not ready.
+- **Broker connect blockers in metadata** — native catalogue rows expose
+  `requires_static_ip` and human-readable `native_connect_blockers`, rendered
+  in the shared BrokerConnect surface for the coming-soon brokers.
+- **Workspace-persisted OpenAlgo REST port** — a REST Port field in Settings →
+  Broker Gateway and Setup → OpenAlgo Bridge persists `openalgo.port` to
+  `workspace.json`; every consolidated route resolves the OpenAlgo base URL
+  through the shared `openalgo_rest_base_url` helper, so a non-default REST
+  port no longer needs a `.env` edit.
+
 - **Six new Analysis widgets** — FII Long/Short, Gamma Density, Arbitrage Scanner,
   Index Contribution, Pattern Detection, and Time & Sales, taking the widget
   catalogue from 95 to 101. Backed by new screener routes:
@@ -128,8 +149,47 @@ Versioning: [Semantic Versioning](https://semver.org/).
   regime-appropriate strategy style (momentum / mean-reversion / theta / stand-aside)
   via `select_strategy_for_regime`, surfaced in `GET /ai/regime` as `suggested_strategy`.
 
+### Changed
+
+- **Read-only (analytics-token) broker sessions are demoted from the live
+  write default** — a connect or daily re-login that comes back read-only can
+  no longer become or remain `brokers.execution.default` or the vault primary.
+  The replacement policy fails closed: the prior default is restored, else the
+  configured OpenAlgo bridge, else the default is CLEARED (never an arbitrary
+  other account), and the connect/re-login response carries a `notice` telling
+  the operator the write default changed. A corrupt `workspace.json` defers
+  the demotion with a notice instead of failing the connect with a 500.
+- **Native setup completion requires a write-capable broker** — finishing
+  native broker setup with only read-only sessions connected is refused, so a
+  fresh install cannot end setup with an untradeable write default.
+- **Setup wizard's Practice choice now mints a Practice session** — choosing
+  Practice on the final setup step routes through the server mode transition
+  (`POST /v1/auth/mode`) before the UI flips, so the first sandbox order no
+  longer fails 403 `mode_blocked` under a PRACTICE badge; on failure the
+  wizard shows a notice and keeps UI and JWT in lockstep. The setup wizard's
+  Connected Accounts list also now shares Settings' primary-eligibility rule,
+  so stale or read-only gateway rows no longer offer "Set primary".
+- **INDstocks sessions expire at the daily 06:00 IST token reset** — the
+  INDmoney adapter stamps session expiry to the broker's documented daily
+  token reset so the morning refresh re-authenticates instead of trusting a
+  dead token.
+
 ### Fixed
 
+- **Legacy state migrated to the platform workspace directory** — the
+  download watchlist (`watchlist.db`) and trained AI signal model
+  (`signal_model.joblib`) moved from `~/.flinttrade` to the cross-platform
+  workspace directory without a migration; both are now copied forward
+  one-shot on first use, so existing macOS/Windows installs keep their
+  curated watchlist and trained model (the legacy files remain as backups).
+- **Expiry-tracker capture survives OpenAlgo settings hot-reload** — the
+  tracker now resolves the shared OpenAlgo client per capture instead of
+  capturing (and outliving) a client the Settings hot-reload had closed,
+  which previously broke every capture until a backend restart.
+- **AI signal history honours the configured OpenAlgo REST port** — the
+  signal pipeline's fallback client is built from the full workspace/env
+  settings instead of a partial host+key rebuild that silently reverted to
+  port 5000.
 - NOTICE regeneration — the ML/AI dependency wave changed the lockfiles without
   regenerating `notice.generated`, failing the Supply Chain NOTICE-drift gate;
   the bundle is regenerated against the current lockfiles and the gate is green

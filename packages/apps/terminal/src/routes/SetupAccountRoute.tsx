@@ -51,6 +51,7 @@ import type { ConnectionFormValues } from "@/routes/setup/connectionForm";
 import { TradingStep, type TradingDefaultsFormValues } from "@/routes/setup/TradingStep";
 import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
+import { downgradeMode } from "@/lib/modeAuth";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
@@ -869,6 +870,10 @@ export default function SetupAccountRoute() {
   );
   const [risk, setRisk] = useState<Partial<RiskFormValues> | null>(initialProgress.risk);
   const [displayName, setDisplayName] = useState(initialProgress.displayName);
+  // Mode-step notice: shown when the server refuses to mint a Practice
+  // session, so the user never finishes setup with a UI mode the JWT
+  // doesn't back (Phase 1 G1 divergence class).
+  const [modeSyncError, setModeSyncError] = useState("");
 
   // Persist on every state change so reloads / navigations never lose entries.
   // Keyed off explicit `accountCreated` — never derived from secondary fields
@@ -978,7 +983,31 @@ export default function SetupAccountRoute() {
     setCurrentStep(6);
   }
 
-  function handleModeSelect(mode: AppMode, liveSessionToken?: string) {
+  async function handleModeSelect(mode: AppMode, liveSessionToken?: string) {
+    setModeSyncError("");
+    if (mode === "practice") {
+      // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
+      // the JWT claim (never a client header), so flipping the UI to Practice
+      // without minting a practice token leaves the first sandbox order
+      // rejected 403 mode_blocked — the setup-wizard half of the Phase 1 G1
+      // divergence (LoginRoute already reconciles the login-time half).
+      try {
+        const practiceToken = await downgradeMode(
+          "practice",
+          useAuthStore.getState().token,
+        );
+        useAuthStore.getState().updateToken(practiceToken);
+      } catch {
+        // Do NOT finish setup with a PRACTICE badge over an Explore JWT —
+        // surface the failure and let the user retry Practice or pick
+        // Explore explicitly (both keep UI and JWT in lockstep).
+        setModeSyncError(
+          "Practice mode could not be enabled (the server did not issue a Practice session). " +
+            "Retry Practice, or continue with Explore and switch to Practice later from the TopBar.",
+        );
+        return;
+      }
+    }
     setMode(mode);
     const landingRoute = persistSetupChoices({
       persona: persona ?? "trader",
@@ -1069,6 +1098,15 @@ export default function SetupAccountRoute() {
         {/* Step body — Mode step renders its own full layout */}
         {currentStep === 6 ? (
           <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            {modeSyncError && (
+              <div
+                role="alert"
+                className="mb-4 flex items-start gap-3 rounded-lg border border-loss/30 bg-loss/10 p-3 text-sm text-loss"
+              >
+                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                <span>{modeSyncError}</span>
+              </div>
+            )}
             <ModeSelectRoute onSelect={handleModeSelect} />
           </div>
         ) : (

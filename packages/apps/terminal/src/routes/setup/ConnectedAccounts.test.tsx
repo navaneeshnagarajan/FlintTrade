@@ -85,6 +85,61 @@ describe("ConnectedAccounts", () => {
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
   });
 
+  it("does not offer Set primary on a stale (disconnected) gateway account", () => {
+    // Shared canPromotePrimaryAccount rule: setup must match Settings ›
+    // Brokers — a dead gateway row must never be promotable to the live
+    // write default (execution.default) from the wizard either.
+    mocks.accounts = [{
+      account_id: "GW-1",
+      broker: "zerodha",
+      label: "Zerodha gateway",
+      status: "token_expired",
+      connected_at: null,
+      error_message: "token expired",
+      is_primary: false,
+      source: "gateway",
+    }];
+
+    render(<ConnectedAccounts />);
+
+    expect(screen.queryByLabelText(/Set Zerodha gateway as primary account/i)).not.toBeInTheDocument();
+  });
+
+  it("does not offer Set primary on a read-only gateway account", () => {
+    mocks.accounts = [{
+      account_id: "GW-2",
+      broker: "zerodha",
+      label: "Zerodha analytics",
+      status: "connected",
+      connected_at: null,
+      error_message: null,
+      is_primary: false,
+      source: "gateway",
+      read_only: true,
+    }];
+
+    render(<ConnectedAccounts />);
+
+    expect(screen.queryByLabelText(/Set Zerodha analytics as primary account/i)).not.toBeInTheDocument();
+  });
+
+  it("offers Set primary on a connected write-capable gateway account", () => {
+    mocks.accounts = [{
+      account_id: "GW-3",
+      broker: "zerodha",
+      label: "Zerodha main",
+      status: "connected",
+      connected_at: null,
+      error_message: null,
+      is_primary: false,
+      source: "gateway",
+    }];
+
+    render(<ConnectedAccounts />);
+
+    expect(screen.getByLabelText(/Set Zerodha main as primary account/i)).toBeInTheDocument();
+  });
+
   it("does not promote a read-only native account to primary", () => {
     mocks.accounts = [{
       account_id: "UPX-1",

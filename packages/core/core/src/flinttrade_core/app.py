@@ -754,14 +754,13 @@ def _lazy_dhan_security_resolver() -> Callable[[str, str], str]:
         if resolver is None:
             with lock:
                 if resolver is None:
-                    import csv  # noqa: PLC0415
-                    import io  # noqa: PLC0415
-
-                    from flinttrade_gateway.brokers.dhan import _download_text  # noqa: PLC0415
+                    # Reuse the adapter's canonical public fetch+parse helper —
+                    # no cross-package reach into module-private symbols and no
+                    # second copy of the download+CSV composition to drift.
                     from flinttrade_gateway.brokers import dhan_mapping as dhan_map  # noqa: PLC0415
+                    from flinttrade_gateway.brokers.dhan import load_scrip_master_rows  # noqa: PLC0415
 
-                    text = _download_text(dhan_map.SCRIP_MASTER_URLS["compact"])
-                    rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
+                    rows = load_scrip_master_rows("compact")
                     resolver = dhan_map.build_security_resolver(rows)
                     logger.info("Dhan security resolver loaded from compact scrip master rows=%s", len(rows))
         return resolver(symbol, exchange)

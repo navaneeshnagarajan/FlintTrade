@@ -67,6 +67,21 @@ def _workspace_brokers(tmp_path):
     return json.loads(path.read_text(encoding="utf-8")).get("brokers", {})
 
 
+def _configure_openalgo_bridge():
+    """Give the workspace an OpenAlgo API key so the bridge counts as CONFIGURED.
+
+    The read-only demotion fallback promotes ``openalgo:default`` only when the
+    bridge is registered AND configured — a merely-registered default (present
+    in every fresh workspace) fails closed to ``""`` instead.
+    """
+    from flinttrade_core.workspace import Workspace
+
+    ws = Workspace()
+    if not ws.config_path.exists():
+        ws.initialise()
+    ws.set("openalgo.api_key", "openalgo-bridge-test-key")
+
+
 def test_connect_upstox_stores_registers_and_establishes_session(client):
     c, app, tmp_path = client
     resp = c.post(
@@ -652,6 +667,7 @@ def test_list_native_account_surfaces_read_only_sessions(client):
 
 def test_connect_read_only_session_cannot_become_execution_default(client):
     c, app, tmp_path = client
+    _configure_openalgo_bridge()
     resp = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -667,6 +683,8 @@ def test_connect_read_only_session_cannot_become_execution_default(client):
         },
     )
     assert resp.status_code == 200, resp.get_json()
+    # The demotion is surfaced to the operator, not just a workspace.json diff.
+    assert "read-only" in str(resp.get_json()["data"].get("notice") or "")
 
     brokers = _workspace_brokers(tmp_path)
     assert "upstox:UPXREADONLYPRIMARY" in brokers["registered"]
@@ -688,6 +706,7 @@ def test_connect_read_only_session_cannot_become_execution_default(client):
 
 def test_relogin_read_only_session_cannot_remain_execution_default(client):
     c, app, tmp_path = client
+    _configure_openalgo_bridge()
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -730,6 +749,101 @@ def test_relogin_read_only_session_cannot_remain_execution_default(client):
         if r["account_id"] == "UPXREADONLYREFRESH"
     )
     assert row["is_primary"] is False
+
+
+def test_read_only_demotion_fails_closed_without_configured_bridge(client):
+    """Repo rule: native write-target fail-closed.
+
+    When the demoted read-only selector was the write default and neither the
+    prior default nor a CONFIGURED OpenAlgo bridge is available, the default
+    must be CLEARED — never silently retargeted to an arbitrary other
+    registered account (here a second live Upstox account that happens to be
+    registered). Default-routed writes must fail loudly, not dispatch through
+    an account the operator never chose.
+    """
+    c, _app, tmp_path = client
+    # Deliberately NO _configure_openalgo_bridge(): openalgo:default is
+    # registered in the default workspace but has no API key.
+    first = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXFAILCLOSEDA",
+            "credentials": {"access_token": "tok-write-a"},
+            "is_primary": True,
+        },
+    )
+    assert first.status_code == 200, first.get_json()
+    second = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXFAILCLOSEDB",
+            "credentials": {"access_token": "tok-write-b"},
+        },
+    )
+    assert second.status_code == 200, second.get_json()
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:UPXFAILCLOSEDA"
+
+    relogin = c.post(
+        "/api/v1/native/accounts/upstox/UPXFAILCLOSEDA/login",
+        headers=_h(),
+        json={
+            "credentials": {
+                "access_token": "tok-read-only-a",
+                "read_only": "true",
+                "token_scope": "analytics",
+            },
+        },
+    )
+    assert relogin.status_code == 200, relogin.get_json()
+    body = relogin.get_json()["data"]
+    assert body["session"]["read_only"] is True
+
+    brokers = _workspace_brokers(tmp_path)
+    # Cleared — NOT the sibling account, NOT the unconfigured bridge.
+    assert brokers["execution"]["default"] == ""
+    assert "upstox:UPXFAILCLOSEDA" in brokers["registered"]
+    assert "upstox:UPXFAILCLOSEDB" in brokers["registered"]
+
+    # The operator is told the write default was cleared and where to fix it.
+    notice = str(body.get("notice") or "")
+    assert "no write default" in notice.lower()
+    assert "settings" in notice.lower()
+
+
+def test_read_only_demotion_defers_on_corrupt_workspace(client):
+    """A corrupt workspace.json must degrade to 'connected, demotion deferred'
+    — not turn a successful relogin into a 500. The session stays healthy and
+    BrokerRouter still fail-closes read-only writes."""
+    c, _app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXCORRUPTWS",
+            "credentials": {"access_token": "tok-write-capable"},
+            "is_primary": True,
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    from flinttrade_core import native_account_routes as native_routes
+
+    (tmp_path / "workspace.json").write_text("{not-json", encoding="utf-8")
+    with _app.app_context():
+        notice = native_routes._demote_read_only_connected_account(
+            _app.config["CREDENTIAL_STORE"],
+            _app.config["REGISTRY"],
+            adapter_id="upstox",
+            account_id="UPXCORRUPTWS",
+            fallback_label="Upstox corrupt-ws",
+        )
+    assert notice is not None
+    assert "could not be applied" in notice.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -368,24 +368,56 @@ def _register_selector_in_workspace(
     tmp.replace(path)
 
 
+def _openalgo_bridge_configured() -> bool:
+    """True when the OpenAlgo bridge has a usable configuration (an API key).
+
+    A merely *registered* ``openalgo:default`` selector exists in every fresh
+    workspace — without an API key it cannot execute anything, so promoting it
+    as a write default would just move the failure somewhere quieter.
+    """
+    try:
+        from .config import Settings  # noqa: PLC0415
+
+        return bool(Settings.from_env().openalgo_api_key)
+    except Exception:  # noqa: BLE001 - unreadable config means "not configured"
+        return False
+
+
 def _demote_selector_as_execution_default(
     adapter_id: str,
     account_id: str,
     *,
     prior_workspace_snapshot: str | None = None,
-) -> bool:
-    """Keep a selector registered, but remove it from the write default."""
+) -> str | None:
+    """Keep a selector registered, but remove it from the write default.
+
+    Replacement policy is FAIL-CLOSED (repo rule: native write-target
+    fail-closed): restore the operator's own prior default when it is still
+    registered; otherwise fall back to ``openalgo:default`` ONLY when the
+    bridge is both registered and actually configured; otherwise CLEAR the
+    default (``""``). NEVER promote an arbitrary other registered selector —
+    a silently retargeted live write default would send default-routed orders
+    (webhook / agent / basket paths without an explicit selector) through an
+    account the operator never chose. An empty default makes those writes
+    fail loudly until the operator picks a new one in Settings → Brokers.
+
+    Returns:
+        An operator-facing notice describing the write-default change, or
+        ``None`` when the selector was not the execution default (nothing
+        changed). The notice deliberately names no selectors/account ids —
+        connect responses must never echo operator identifiers.
+    """
     selector = f"{adapter_id}:{account_id}"
     path = workspace_dir() / "workspace.json"
     if not path.exists():
-        return False
+        return None
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     brokers = data.setdefault("brokers", {})
     execution = brokers.setdefault("execution", {})
     if execution.get("default") != selector:
-        return False
+        return None
 
     registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
     prior_default = ""
@@ -400,17 +432,30 @@ def _demote_selector_as_execution_default(
 
     if prior_default and prior_default != selector and prior_default in registered:
         replacement = prior_default
-    elif "openalgo:default" in registered:
+        notice = (
+            "This account's session is read-only, so the previous live write "
+            "default was restored."
+        )
+    elif "openalgo:default" in registered and _openalgo_bridge_configured():
         replacement = "openalgo:default"
+        notice = (
+            "This account's session is read-only, so the live write default "
+            "was moved to the OpenAlgo bridge."
+        )
     else:
-        replacement = next((entry for entry in registered if entry != selector), "")
+        replacement = ""
+        notice = (
+            "This account's session is read-only, so it was removed as the "
+            "live write default. No write default is set — choose one in "
+            "Settings → Brokers."
+        )
     execution["default"] = replacement
 
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     tmp.replace(path)
-    return True
+    return notice
 
 
 def _snapshot_workspace() -> str | None:
@@ -605,24 +650,49 @@ def _demote_read_only_connected_account(
     account_id: str,
     fallback_label: str,
     prior_workspace_snapshot: str | None = None,
-) -> None:
-    """Remove a connected read-only selector from write-default metadata."""
-    _demote_selector_as_execution_default(
-        adapter_id,
-        account_id,
-        prior_workspace_snapshot=prior_workspace_snapshot,
-    )
-    _demote_read_only_vault_primary(
-        store,
-        account_id=account_id,
-        adapter_id=adapter_id,
-        fallback_label=fallback_label,
-    )
+) -> str | None:
+    """Remove a connected read-only selector from write-default metadata.
 
-    from .app import configure_broker_router  # noqa: PLC0415
+    Never raises: the session itself is healthy at this point and the router
+    still fail-closes read-only writes (``BrokerRouter`` rejects
+    ``is_read_only`` sessions), so a corrupt/unwritable ``workspace.json``
+    must degrade to "connected, demotion deferred" — not turn a successful
+    connect/relogin into a 500.
 
-    app = current_app._get_current_object()  # type: ignore[attr-defined]
-    configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+    Returns:
+        An operator-facing notice describing the write-default change (or the
+        deferral), or ``None`` when the selector was not the write default.
+    """
+    try:
+        notice = _demote_selector_as_execution_default(
+            adapter_id,
+            account_id,
+            prior_workspace_snapshot=prior_workspace_snapshot,
+        )
+        _demote_read_only_vault_primary(
+            store,
+            account_id=account_id,
+            adapter_id=adapter_id,
+            fallback_label=fallback_label,
+        )
+
+        from .app import configure_broker_router  # noqa: PLC0415
+
+        app = current_app._get_current_object()  # type: ignore[attr-defined]
+        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+    except Exception:  # noqa: BLE001 - demotion is metadata hygiene, not connect-critical
+        logger.warning(
+            "Read-only write-default demotion deferred for %s — workspace/router update failed",
+            selector_ref(adapter_id, account_id),
+            exc_info=True,
+        )
+        return (
+            "This account's session is read-only, but the write-default "
+            "demotion could not be applied (workspace update failed). The "
+            "account is connected; review the write default in Settings → "
+            "Brokers."
+        )
+    return notice
 
 
 @_serialized
@@ -705,9 +775,10 @@ def _do_connect(
     login_state = login_results.get(selector, "not-activated")
     session_status = _session_status(registry, adapter_id, account_id)
     connected = session_status["has_session"]
+    demotion_notice: str | None = None
     if connected:
         if bool(session_status.get("read_only")):
-            _demote_read_only_connected_account(
+            demotion_notice = _demote_read_only_connected_account(
                 store,
                 registry,
                 account_id=account_id,
@@ -753,7 +824,7 @@ def _do_connect(
                 prior_meta=prior_meta,
                 prior_credentials=prior_credentials,
             )
-    return {
+    body: dict[str, Any] = {
         "status": "success" if connected else "error",
         "data": {
             "adapter_id": adapter_id,
@@ -767,7 +838,13 @@ def _do_connect(
             if connected
             else f"Login did not establish a session ({login_state}); credentials were not kept."
         ),
-    }, (200 if connected else 502)
+    }
+    if demotion_notice:
+        # Surface the write-default change so the UI can tell the operator —
+        # a silent workspace.json diff is exactly the failure mode the
+        # fail-closed demotion policy exists to prevent.
+        body["data"]["notice"] = demotion_notice
+    return body, (200 if connected else 502)
 
 
 @native_accounts_bp.route("/brokers", methods=["GET"])
@@ -826,7 +903,13 @@ def connect_native_account() -> Any:
 
     _body_out, code = _do_connect(adapter_id, account_id, label, credentials, is_primary)
     if code == 200:
-        return jsonify(_public_connect_success_body()), 200
+        success_body = _public_connect_success_body()
+        notice = _body_out.get("data", {}).get("notice")
+        if notice:
+            # The fixed public body carries no operator input; the demotion
+            # notice is a constant server-side string (no ids), safe to echo.
+            success_body["data"]["notice"] = notice
+        return jsonify(success_body), 200
     if code == 503 and _body_out.get("data", {}).get("login") == "sdk-not-ready":
         return jsonify(_body_out), 503
     return jsonify(_public_connect_failure_body()), 502
@@ -1018,11 +1101,14 @@ def native_oauth_callback() -> Any:
         adapter_id, account_id, pending["label"], credentials, pending["is_primary"]
     )
     connected = bool(body_out.get("data", {}).get("connected"))
+    notice = str(body_out.get("data", {}).get("notice") or "")
     msg = (
         f"{adapter_id} account connected - you can close this tab and return to FlintTrade."
         if connected
         else "Login failed - return to FlintTrade and try again."
     )
+    if connected and notice:
+        msg = f"{msg} {notice}"
     return _oauth_result_html(msg, ok=connected), (200 if connected else 502)
 
 
@@ -1110,21 +1196,28 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     selector = f"{adapter_id}:{account_id}"
     session_status = _session_status(registry, adapter_id, account_id)
     connected = session_status["has_session"]
+    demotion_notice: str | None = None
     if connected and bool(session_status.get("read_only")):
         try:
             row = _stored_native_account(store, adapter_id, account_id) or {}
         except Exception:  # noqa: BLE001
             row = {}
-        _demote_read_only_connected_account(
+        demotion_notice = _demote_read_only_connected_account(
             store,
             registry,
             adapter_id=adapter_id,
             account_id=account_id,
             fallback_label=str(row.get("label") or adapter_id),
         )
+    data: dict[str, Any] = {
+        "login": login_results.get(selector, "not-activated"),
+        "session": session_status,
+    }
+    if demotion_notice:
+        data["notice"] = demotion_notice
     return jsonify({
         "status": "success" if connected else "error",
-        "data": {"login": login_results.get(selector, "not-activated"), "session": session_status},
+        "data": data,
     }), (200 if connected else 502)
 
 

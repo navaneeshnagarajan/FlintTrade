@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 import {
@@ -116,10 +117,6 @@ function sdkReadyForConnect(broker: NativeBroker): boolean {
   const status = broker.sdk_attestation?.status;
   if (!status) return true;
   return status === "ok" || status === "not_required";
-}
-
-function canPromotePrimaryAccount(account: BrokerAccount): boolean {
-  return account.status === "connected" && !account.is_primary && account.read_only !== true;
 }
 
 function McpSetupValue({

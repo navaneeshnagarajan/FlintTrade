@@ -32,16 +32,18 @@ _tracker: ExpiryTracker | None = None
 
 
 def _get_tracker() -> ExpiryTracker:
-    """Return the module-level tracker singleton, creating it lazily."""
+    """Return the module-level tracker singleton, creating it lazily.
+
+    The tracker receives the ``get_openalgo_client`` PROVIDER — not a resolved
+    client instance — so each capture uses the app's CURRENT shared client.
+    ``POST /v1/config/openalgo`` hot-reload swaps and closes that client; a
+    client captured here at construction time would be permanently closed
+    after the first settings change, failing every subsequent capture until a
+    process restart.
+    """
     global _tracker  # noqa: PLW0603
     if _tracker is None:
-        client = None
-        if get_openalgo_client is not None:
-            try:
-                client = get_openalgo_client()
-            except Exception as exc:  # pragma: no cover - defensive startup guard
-                logger.warning("OpenAlgo client unavailable for ExpiryTracker capture: %s", exc)
-        _tracker = ExpiryTracker(client=client)
+        _tracker = ExpiryTracker(client=get_openalgo_client)
     return _tracker
 
 

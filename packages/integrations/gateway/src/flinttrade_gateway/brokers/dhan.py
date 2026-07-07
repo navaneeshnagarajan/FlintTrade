@@ -144,6 +144,38 @@ def _download_text(url: str) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
+def load_scrip_master_rows(
+    mode: str = "compact", *, downloader: Callable[[str], str] | None = None
+) -> list[dict]:
+    """Download + parse the Dhan scrip-master CSV (public, synchronous).
+
+    The ONE canonical fetch+parse composition for Dhan instrument rows:
+    :meth:`DhanAdapter.fetch_security_list` wraps it for async adapter use and
+    the core app's lazy Dhan security resolver calls it directly — so a future
+    retry/timeout/URL fix lands on both paths instead of drifting. Feed the
+    returned rows to ``dhan_mapping.build_security_resolver``.
+
+    Args:
+        mode: ``"compact"`` or ``"detailed"`` scrip-master variant.
+        downloader: Injectable fetcher for tests; defaults to the HTTPS-pinned
+            stdlib downloader.
+
+    Returns:
+        The CSV rows as dicts keyed by the header tags (``SEM_*`` for compact).
+
+    Raises:
+        BrokerError: If ``mode`` is not a known scrip-master variant.
+    """
+    url = M.SCRIP_MASTER_URLS.get(str(mode).lower())
+    if url is None:
+        raise BrokerError(f"Scrip master mode must be 'compact' or 'detailed', got {mode!r}")
+    text = (downloader or _download_text)(url)
+    import csv  # noqa: PLC0415
+    import io  # noqa: PLC0415
+
+    return [dict(row) for row in csv.DictReader(io.StringIO(text))]
+
+
 class DhanAdapter(BrokerAdapter):
     """Native Dhan adapter.
 
@@ -873,20 +905,14 @@ class DhanAdapter(BrokerAdapter):
     ) -> list[dict]:
         """Download + parse the Dhan scrip master CSV (instruments.md).
 
-        Returns the rows as dicts keyed by the CSV header tags (``SEM_*`` for
-        compact). Feed the rows to ``dhan_mapping.build_security_resolver`` to
-        obtain a ``security_resolver`` for this adapter. ``downloader`` is
-        injectable for tests; the default fetches over HTTPS via stdlib.
+        Thin async wrapper over the canonical module-level
+        :func:`load_scrip_master_rows` (run off the event loop). Returns the
+        rows as dicts keyed by the CSV header tags (``SEM_*`` for compact).
+        Feed the rows to ``dhan_mapping.build_security_resolver`` to obtain a
+        ``security_resolver`` for this adapter. ``downloader`` is injectable
+        for tests; the default fetches over HTTPS via stdlib.
         """
-        url = M.SCRIP_MASTER_URLS.get(str(mode).lower())
-        if url is None:
-            raise BrokerError(f"Scrip master mode must be 'compact' or 'detailed', got {mode!r}")
-        fetch = downloader or _download_text
-        text = await self._call(fetch, url)
-        import csv  # noqa: PLC0415
-        import io  # noqa: PLC0415
-
-        return [dict(row) for row in csv.DictReader(io.StringIO(text))]
+        return await self._call(load_scrip_master_rows, mode, downloader=downloader)
 
     # ---------- market data: expired (rolling) options ----------
 

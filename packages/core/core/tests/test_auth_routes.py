@@ -158,6 +158,123 @@ class TestPinEndpoint:
         assert data["live_mode_unlocked"] is True
 
 
+class TestPinSetEndpoint:
+    """POST /v1/auth/pin/set — the set-PIN-later path.
+
+    The PIN is optional at setup, but Live is armed exclusively via
+    /v1/auth/pin; without this route a PIN-less account could never reach
+    Live except by wiping itself. Session-bound (G9-style) + password
+    re-confirm; mints no token (the PIN stays a re-auth factor, D6).
+    """
+
+    def _setup_without_pin(self, c):
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_status_exposes_has_pin(self, client):
+        c, _ = client
+        self._setup_without_pin(c)
+        data = c.get("/v1/auth/status").get_json()["data"]
+        assert data["has_pin"] is False
+
+    def test_pin_verify_without_pin_returns_distinct_message(self, client):
+        """A PIN-less account must not be told 'Invalid PIN.' — the old
+        message sent operators chasing a PIN they never set, leaving Live
+        permanently unreachable with no hint of the fix."""
+        c, _ = client
+        self._setup_without_pin(c)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                      headers=_session_headers())
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body.get("code") == "pin_not_set"
+        assert "no pin is set" in body["message"].lower()
+        assert "settings" in body["message"].lower()
+
+    def test_set_pin_requires_session(self, client):
+        c, _ = client
+        self._setup_without_pin(c)
+        resp = c.post("/v1/auth/pin/set",
+                      json={"password": "StrongP@ss123!", "pin": "654321"},
+                      headers={"Content-Type": "application/json"})
+        assert resp.status_code == 401
+
+    def test_set_pin_rejects_reset_token(self, client):
+        """A reset token proves only email possession — (reset token + new
+        PIN) must never become a Live-arming path."""
+        c, _ = client
+        self._setup_without_pin(c)
+        from flinttrade_core.auth_routes import _create_reset_token
+
+        reset = _create_reset_token("nav")
+        resp = c.post("/v1/auth/pin/set",
+                      json={"password": "StrongP@ss123!", "pin": "654321"},
+                      headers={"Content-Type": "application/json",
+                               "Authorization": f"Bearer {reset}"})
+        assert resp.status_code == 401
+        assert "full login session" in resp.get_json()["message"].lower()
+
+    def test_set_pin_rejects_wrong_password(self, client):
+        c, _ = client
+        self._setup_without_pin(c)
+        resp = c.post("/v1/auth/pin/set",
+                      json={"password": "wrong-password", "pin": "654321"},
+                      headers=_session_headers())
+        assert resp.status_code == 401
+
+    def test_set_pin_rejects_malformed_pin(self, client):
+        c, _ = client
+        self._setup_without_pin(c)
+        resp = c.post("/v1/auth/pin/set",
+                      json={"password": "StrongP@ss123!", "pin": "12ab56"},
+                      headers=_session_headers())
+        assert resp.status_code == 400
+
+    def test_set_pin_then_live_unlock_works(self, client):
+        """End-to-end recovery for the skipped-PIN account: set a PIN over a
+        live session, then arm Live with it via /v1/auth/pin."""
+        c, svc = client
+        self._setup_without_pin(c)
+
+        resp = c.post("/v1/auth/pin/set",
+                      json={"password": "StrongP@ss123!", "pin": "654321"},
+                      headers=_session_headers())
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["has_pin"] is True
+        # Mints no token — the PIN set is not a session/mode change.
+        assert "token" not in resp.get_json()["data"]
+        assert svc.has_pin() is True
+
+        status = c.get("/v1/auth/status").get_json()["data"]
+        assert status["has_pin"] is True
+
+        unlock = c.post("/v1/auth/pin", json={"pin": "654321"},
+                        headers=_session_headers())
+        assert unlock.status_code == 200
+        data = unlock.get_json()["data"]
+        assert data["mode"] == "live"
+        assert data["live_mode_unlocked"] is True
+
+    def test_set_pin_changes_existing_pin(self, client):
+        c, _ = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+        resp = c.post("/v1/auth/pin/set",
+                      json={"password": "StrongP@ss123!", "pin": "999999"},
+                      headers=_session_headers())
+        assert resp.status_code == 200
+
+        old = c.post("/v1/auth/pin", json={"pin": "123456"}, headers=_session_headers())
+        assert old.status_code == 401
+        new = c.post("/v1/auth/pin", json={"pin": "999999"}, headers=_session_headers())
+        assert new.status_code == 200
+
+
 class TestModeSwitchEndpoint:
     """POST /v1/auth/mode — downgrade live → practice + revoke prior JWT.
 

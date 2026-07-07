@@ -144,3 +144,64 @@ class TestWatchlistRoutes:
         assert data["data"]["status"] == "running"
         assert captured["total"] >= 1
         assert captured["storage_path"] == str(workspace_dir())
+
+
+# ---------------------------------------------------------------------------
+# Legacy-path migration — pre-workspace_dir() installs
+# ---------------------------------------------------------------------------
+
+
+def test_lazy_watchlist_migrates_legacy_home_db(monkeypatch, tmp_path):
+    """The lazy getter copies a legacy ~/.flinttrade/watchlist.db into the
+    workspace when the workspace copy is absent — commit 89755390 moved the
+    default without a migration, silently orphaning existing macOS/Windows
+    watchlists."""
+    import flinttrade_historical.watchlist_routes as wr
+    from flinttrade_historical.watchlist import DownloadWatchlist
+
+    legacy_home = tmp_path / "legacy-home"
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+    monkeypatch.setattr(wr, "_legacy_state_dir", lambda: legacy_home)
+    monkeypatch.setattr(wr, "_watchlist", None)
+
+    # Seed the legacy DB with one curated item, then release the handle.
+    legacy_home.mkdir(parents=True)
+    legacy = DownloadWatchlist(legacy_home / "watchlist.db")
+    legacy.add("RELIANCE", "NSE", "1d")
+    legacy.close()
+
+    migrated = wr._get_watchlist()
+    items = migrated.list_items()
+    assert [(i.symbol, i.exchange) for i in items] == [("RELIANCE", "NSE")]
+    assert (workspace / "watchlist.db").exists()
+    # Copy, not move — the legacy file stays behind as a backup.
+    assert (legacy_home / "watchlist.db").exists()
+    migrated.close()
+
+
+def test_lazy_watchlist_prefers_existing_workspace_db(monkeypatch, tmp_path):
+    """No clobbering: when the workspace already has a watchlist.db, the
+    legacy file is left alone and NOT copied over it."""
+    import flinttrade_historical.watchlist_routes as wr
+    from flinttrade_historical.watchlist import DownloadWatchlist
+
+    legacy_home = tmp_path / "legacy-home"
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+    monkeypatch.setattr(wr, "_legacy_state_dir", lambda: legacy_home)
+    monkeypatch.setattr(wr, "_watchlist", None)
+
+    legacy_home.mkdir(parents=True)
+    legacy = DownloadWatchlist(legacy_home / "watchlist.db")
+    legacy.add("RELIANCE", "NSE", "1d")
+    legacy.close()
+
+    workspace.mkdir(parents=True)
+    current = DownloadWatchlist(workspace / "watchlist.db")
+    current.add("TCS", "NSE", "1d")
+    current.close()
+
+    resolved = wr._get_watchlist()
+    assert [(i.symbol, i.exchange) for i in resolved.list_items()] == [("TCS", "NSE")]
+    resolved.close()

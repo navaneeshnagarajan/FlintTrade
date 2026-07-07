@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Trash2, RefreshCw, Star } from "lucide-react";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import {
   reconnectBrokerAccount,
@@ -109,8 +110,10 @@ export function ConnectedAccounts() {
         </p>
       )}
       {accounts.map((acct: BrokerAccount) => {
-        const canSetPrimary = !acct.is_primary
-          && (acct.source !== "native" || (acct.status === "connected" && !acct.read_only));
+        // Shared rule with Settings › Brokers (BrokerConnect) — a stale or
+        // read-only gateway/OpenAlgo row must not offer "Set primary" here
+        // either, or setup can point the execution default at a dead account.
+        const canSetPrimary = canPromotePrimaryAccount(acct);
         return (
           <div
             key={brokerAccountKey(acct)}

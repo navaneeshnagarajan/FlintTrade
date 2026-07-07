@@ -149,3 +149,29 @@ def test_capture_historical_chain_reports_capture_failure(client):
     assert body["status"] == "error"
     assert body["data"]["captured"] is False
     assert body["data"]["rows_inserted"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Lazy tracker wiring — hot-reload safety
+# ---------------------------------------------------------------------------
+
+
+def test_get_tracker_wires_the_client_provider_not_an_instance(monkeypatch):
+    """The lazy tracker must receive the ``get_openalgo_client`` PROVIDER.
+
+    Capturing a resolved client instance at construction time breaks after the
+    ``POST /v1/config/openalgo`` hot-reload closes that client — every later
+    expiry capture then fails until a process restart.
+    """
+    captured: dict[str, object] = {}
+
+    class _StubTracker:
+        def __init__(self, client=None, **_kwargs):
+            captured["client"] = client
+
+    monkeypatch.setattr(mod, "ExpiryTracker", _StubTracker)
+    monkeypatch.setattr(mod, "_tracker", None)
+
+    mod._get_tracker()
+
+    assert captured["client"] is mod.get_openalgo_client

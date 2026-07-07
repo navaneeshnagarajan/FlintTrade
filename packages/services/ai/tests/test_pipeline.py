@@ -136,3 +136,134 @@ class TestSignalPipeline:
         from flinttrade_ai import SignalPipeline
 
         assert SignalPipeline is not None
+
+
+class TestWorkspaceRestPort:
+    """U20: the fallback client must carry the workspace REST-port override."""
+
+    def _seed_workspace(self, tmp_path, monkeypatch):
+        from flinttrade_core.workspace import Workspace
+
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+        for var in ("OPENALGO_API_KEY", "OPENALGO_HOST", "OPENALGO_PORT"):
+            monkeypatch.delenv(var, raising=False)
+
+        workspace = Workspace()
+        workspace.initialise()
+        config = workspace.as_dict()
+        config["openalgo"] = {
+            "api_key": "workspace-port-key",
+            "host": "http://127.0.0.1",
+            "port": 5055,
+        }
+        workspace.save(config)
+
+    def test_init_retains_full_settings_including_port(self, monkeypatch, tmp_path):
+        from flinttrade_ai.pipeline import SignalPipeline
+        from flinttrade_core.config import openalgo_rest_base_url
+
+        self._seed_workspace(tmp_path, monkeypatch)
+        p = SignalPipeline()
+
+        assert p._settings.openalgo_port == 5055
+        assert p._settings.openalgo_api_key == "workspace-port-key"
+        assert openalgo_rest_base_url(p._settings) == "http://127.0.0.1:5055"
+
+    def test_fetch_bars_fallback_client_receives_full_settings(self, monkeypatch, tmp_path):
+        """The fallback client is built from the FULL retained Settings — the
+        old partial rebuild (host+key only) silently reverted the configured
+        REST port to :5000."""
+        from flinttrade_core import openalgo_client as oc
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        self._seed_workspace(tmp_path, monkeypatch)
+
+        captured: dict = {}
+
+        class _StubClient:
+            def __init__(self, settings):
+                captured["settings"] = settings
+
+            async def history(self, **_kwargs):
+                return []
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(oc, "OpenAlgoClient", _StubClient)
+
+        p = SignalPipeline()
+        p.fetch_bars("NIFTY", "NSE_INDEX")
+
+        assert captured["settings"].openalgo_port == 5055
+        assert captured["settings"].openalgo_api_key == "workspace-port-key"
+
+    def test_constructor_overrides_still_win(self, monkeypatch, tmp_path):
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        self._seed_workspace(tmp_path, monkeypatch)
+        p = SignalPipeline(openalgo_host="http://10.0.0.9:6000/", openalgo_api_key="explicit")
+
+        assert p.host == "http://10.0.0.9:6000"
+        assert p.api_key == "explicit"
+        assert p._settings.openalgo_host == "http://10.0.0.9:6000"
+        assert p._settings.openalgo_api_key == "explicit"
+
+
+class TestLegacyModelMigration:
+    """One-shot ~/.flinttrade → workspace_dir() migration for the trained model."""
+
+    def test_legacy_model_copied_into_workspace(self, monkeypatch, tmp_path):
+        import flinttrade_ai.pipeline as pipeline_mod
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        legacy_home = tmp_path / "legacy-home" / ".flinttrade"
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        monkeypatch.setattr(pipeline_mod, "_legacy_state_dir", lambda: legacy_home)
+
+        (legacy_home / "models").mkdir(parents=True)
+        (legacy_home / "models" / "signal_model.joblib").write_bytes(b"trained-model-bytes")
+
+        p = SignalPipeline()
+
+        migrated = workspace / "models" / "signal_model.joblib"
+        assert p.model_path == str(migrated)
+        assert migrated.read_bytes() == b"trained-model-bytes"
+        # Copy, not move — the legacy file stays behind as a backup.
+        assert (legacy_home / "models" / "signal_model.joblib").exists()
+
+    def test_existing_workspace_model_not_clobbered(self, monkeypatch, tmp_path):
+        import flinttrade_ai.pipeline as pipeline_mod
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        legacy_home = tmp_path / "legacy-home" / ".flinttrade"
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        monkeypatch.setattr(pipeline_mod, "_legacy_state_dir", lambda: legacy_home)
+
+        (legacy_home / "models").mkdir(parents=True)
+        (legacy_home / "models" / "signal_model.joblib").write_bytes(b"legacy")
+        (workspace / "models").mkdir(parents=True)
+        (workspace / "models" / "signal_model.joblib").write_bytes(b"current")
+
+        SignalPipeline()
+
+        assert (workspace / "models" / "signal_model.joblib").read_bytes() == b"current"
+
+    def test_explicit_model_path_skips_migration(self, monkeypatch, tmp_path):
+        import flinttrade_ai.pipeline as pipeline_mod
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        legacy_home = tmp_path / "legacy-home" / ".flinttrade"
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        monkeypatch.setattr(pipeline_mod, "_legacy_state_dir", lambda: legacy_home)
+
+        (legacy_home / "models").mkdir(parents=True)
+        (legacy_home / "models" / "signal_model.joblib").write_bytes(b"legacy")
+
+        p = SignalPipeline(model_path=str(tmp_path / "explicit.joblib"))
+
+        assert p.model_path == str(tmp_path / "explicit.joblib")
+        assert not (workspace / "models" / "signal_model.joblib").exists()

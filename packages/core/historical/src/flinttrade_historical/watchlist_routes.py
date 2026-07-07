@@ -12,7 +12,9 @@ POST   /v1/historify/download   — trigger download for all enabled items
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -21,6 +23,36 @@ from .historify_jobs import STATUS_REFUSED, HistorifyJobManager
 from .watchlist import DownloadWatchlist
 
 logger = logging.getLogger("flinttrade.historical.watchlist_routes")
+
+
+def _legacy_state_dir() -> Path:
+    """Pre-workspace_dir() state directory (a fixed ``~/.flinttrade`` on every OS)."""
+    return Path.home() / ".flinttrade"
+
+
+def _migrate_legacy_watchlist_db(legacy: Path, new: Path) -> None:
+    """One-shot copy of a pre-``workspace_dir()`` watchlist DB into the workspace.
+
+    The watchlist default moved from ``~/.flinttrade/watchlist.db`` to
+    ``workspace_dir()/watchlist.db`` (macOS: ``~/Library/Application
+    Support/flinttrade``; Windows: ``%APPDATA%/flinttrade``) without a
+    migration, silently presenting an empty watchlist to existing installs on
+    those platforms. Copy — never move; the legacy file stays behind as a
+    backup — when the new path is absent and the legacy one exists. No-op on
+    Linux where the two paths coincide. Best-effort: a failed copy degrades to
+    the empty-watchlist behaviour, never an exception. (Sibling migration:
+    ``flinttrade_ai.pipeline`` does the same for ``signal_model.joblib``.)
+    """
+    try:
+        if new.exists() or not legacy.exists():
+            return
+        if legacy.resolve() == new.resolve():
+            return
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy, new)
+        logger.info("Migrated legacy download watchlist from %s to %s", legacy, new)
+    except OSError as exc:
+        logger.warning("Could not migrate legacy watchlist DB %s -> %s: %s", legacy, new, exc)
 
 historify_bp = Blueprint("historify", __name__)
 
@@ -46,6 +78,7 @@ def _get_watchlist() -> DownloadWatchlist:
         from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
 
         default_path = workspace_dir() / "watchlist.db"
+        _migrate_legacy_watchlist_db(_legacy_state_dir() / "watchlist.db", default_path)
         _watchlist = DownloadWatchlist(default_path)
     return _watchlist
 

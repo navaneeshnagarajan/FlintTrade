@@ -6,11 +6,42 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("flinttrade.ai.pipeline")
+
+
+def _legacy_state_dir() -> Path:
+    """Pre-workspace_dir() state directory (a fixed ``~/.flinttrade`` on every OS)."""
+    return Path.home() / ".flinttrade"
+
+
+def _migrate_legacy_model_file(legacy: Path, new: Path) -> None:
+    """One-shot copy of a pre-``workspace_dir()`` trained model into the workspace.
+
+    The model default moved from ``~/.flinttrade`` to ``workspace_dir()``
+    (macOS: ``~/Library/Application Support/flinttrade``; Windows:
+    ``%APPDATA%/flinttrade``) without a migration, silently orphaning an
+    already-trained model on those platforms. Copy — never move; the legacy
+    file stays behind as a backup — when the new path is absent and the legacy
+    one exists. No-op on Linux where the two paths coincide. Best-effort: a
+    failed copy degrades to the pre-existing "untrained model" fallback, never
+    an exception. (Sibling migration: ``flinttrade_historical.watchlist_routes``
+    does the same for ``watchlist.db``.)
+    """
+    try:
+        if new.exists() or not legacy.exists():
+            return
+        if legacy.resolve() == new.resolve():
+            return
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy, new)
+        logger.info("Migrated legacy signal model from %s to %s", legacy, new)
+    except OSError as exc:
+        logger.warning("Could not migrate legacy signal model %s -> %s: %s", legacy, new, exc)
 
 
 def _run_async(coro: Any) -> Any:
@@ -59,12 +90,28 @@ class SignalPipeline:
         from flinttrade_core.workspace import workspace_dir
 
         settings = Settings.from_env()
-        self.host = (openalgo_host or settings.openalgo_host).rstrip("/")
-        self.api_key = openalgo_api_key if openalgo_api_key is not None else settings.openalgo_api_key
+        overrides: dict[str, Any] = {}
+        if openalgo_host:
+            overrides["openalgo_host"] = openalgo_host.rstrip("/")
+        if openalgo_api_key is not None:
+            overrides["openalgo_api_key"] = openalgo_api_key
+        if overrides:
+            settings = settings.model_copy(update=overrides)
+        # Keep the FULL workspace/env Settings (incl. openalgo_port) — the
+        # fallback client in fetch_bars previously rebuilt a partial Settings
+        # from host+key only, silently reverting the workspace REST-port
+        # override (U20) to :5000.
+        self._settings = settings
+        self.host = settings.openalgo_host.rstrip("/")
+        self.api_key = settings.openalgo_api_key
         self._openalgo_client = openalgo_client
-        self.model_path = model_path or str(
-            workspace_dir() / "models" / "signal_model.joblib"
-        )
+        default_model_path = workspace_dir() / "models" / "signal_model.joblib"
+        if not model_path:
+            _migrate_legacy_model_file(
+                _legacy_state_dir() / "models" / "signal_model.joblib",
+                default_model_path,
+            )
+        self.model_path = model_path or str(default_model_path)
         self.instruments = instruments or [
             {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
             {"symbol": "BANKNIFTY", "exchange": "NSE_INDEX"},
@@ -94,7 +141,6 @@ class SignalPipeline:
 
     def fetch_bars(self, symbol: str, exchange: str, count: int = 200) -> list[dict]:
         """Fetch OHLCV bars from OpenAlgo history API."""
-        from flinttrade_core.config import Settings
         from flinttrade_core.openalgo_client import OpenAlgoClient
 
         end = datetime.now()
@@ -102,9 +148,9 @@ class SignalPipeline:
         client = self._openalgo_client
         close_client = False
         if client is None:
-            client = OpenAlgoClient(
-                Settings(openalgo_host=self.host, openalgo_api_key=self.api_key)
-            )
+            # Full Settings (host, key, AND rest/ws ports) from __init__ — a
+            # partial rebuild here dropped the workspace openalgo.port override.
+            client = OpenAlgoClient(self._settings)
             close_client = True
 
         # Fetch AND close on ONE loop. Running close on a second fresh loop

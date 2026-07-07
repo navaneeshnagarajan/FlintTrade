@@ -28,13 +28,16 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import duckdb
 
 from flinttrade_core.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.historical.expiry_tracker")
+
+# Any object exposing one of these is treated as a client, not a provider.
+_CHAIN_METHOD_NAMES = ("get_option_chain", "option_chain", "optionchain")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -163,7 +166,13 @@ class ExpiryTracker:
     - Migration tracking
 
     Args:
-        client: OpenAlgo client for fetching live option chain data.
+        client: OpenAlgo client for fetching live option chain data, OR a
+            zero-argument callable returning the CURRENT client (e.g.
+            ``flinttrade_core.openalgo_client.get_openalgo_client``). Passing a
+            provider keeps the tracker honouring OpenAlgo settings hot-reload:
+            ``POST /v1/config/openalgo`` swaps AND CLOSES the shared app
+            client, so a client instance captured at construction time would
+            be permanently closed after the first settings change.
         db_path: Path to the DuckDB database. Use ``":memory:"`` for tests.
         rate_limiter: Optional rate limiter. A default (5 req/s) is created
             if ``None``.
@@ -171,7 +180,7 @@ class ExpiryTracker:
 
     def __init__(
         self,
-        client: OpenAlgoClient | None = None,
+        client: OpenAlgoClient | Callable[[], Any] | None = None,
         db_path: str = "",
         rate_limiter: SnapshotRateLimiter | None = None,
     ) -> None:
@@ -240,13 +249,14 @@ class ExpiryTracker:
             Number of rows inserted.
         """
         self.last_capture_error = None
-        if self._client is None:
+        client = self._resolve_client()
+        if client is None:
             self.last_capture_error = "No OpenAlgo client configured"
             logger.error("No OpenAlgo client configured — cannot capture snapshot")
             return 0
 
         try:
-            data = self._fetch_option_chain(symbol, exchange, expiry)
+            data = self._fetch_option_chain(client, symbol, exchange, expiry)
         except Exception as exc:
             self.last_capture_error = str(exc)
             logger.error("Failed to fetch option chain for %s %s: %s", symbol, expiry, exc)
@@ -281,9 +291,33 @@ class ExpiryTracker:
         )
         return len(insert_rows)
 
-    def _fetch_option_chain(self, symbol: str, exchange: str, expiry: str) -> Any:
-        """Call the configured broker/OpenAlgo client using supported chain shapes."""
-        if self._client is None:
+    def _resolve_client(self) -> Any | None:
+        """Return the client to use for THIS capture call.
+
+        ``self._client`` may be a client instance or a zero-argument provider
+        callable. Resolving per call (instead of once at construction) keeps
+        the tracker working across OpenAlgo settings hot-reloads, which close
+        the previously shared client out from under long-lived holders.
+        Provider detection: a plain callable that exposes none of the
+        option-chain methods is treated as a provider; client objects (and
+        test mocks, which expose every attribute) are returned as-is.
+        """
+        candidate = self._client
+        if candidate is None:
+            return None
+        if callable(candidate) and not any(
+            callable(getattr(candidate, name, None)) for name in _CHAIN_METHOD_NAMES
+        ):
+            try:
+                return candidate()
+            except Exception as exc:  # noqa: BLE001 - capture reports "no client"
+                logger.warning("OpenAlgo client provider failed for ExpiryTracker: %s", exc)
+                return None
+        return candidate
+
+    def _fetch_option_chain(self, client: Any, symbol: str, exchange: str, expiry: str) -> Any:
+        """Call the given broker/OpenAlgo client using supported chain shapes."""
+        if client is None:
             raise RuntimeError("No OpenAlgo client configured")
 
         payload = {
@@ -305,7 +339,7 @@ class ExpiryTracker:
 
         last_type_error: TypeError | None = None
         for method_name, args in attempts:
-            method = getattr(self._client, method_name, None)
+            method = getattr(client, method_name, None)
             if not callable(method):
                 continue
             try:
