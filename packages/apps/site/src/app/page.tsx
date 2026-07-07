@@ -28,7 +28,7 @@ const featureCards = [
 ];
 
 const docsCards = [
-  { href: '/docs/desktop', label: 'Desktop App', copy: 'Install FlintTrade on macOS, Windows, or Linux, then configure everything in the app.' },
+  { href: '/download', label: 'Download', copy: 'One command installs FlintTrade on macOS, Windows, or Linux — built from the latest release on your machine.' },
   { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect OpenAlgo or verified native brokers, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
@@ -127,8 +127,8 @@ export default function HomePage() {
           <div className="hero-actions">
             <Link
               className="button primary"
-              href="/docs/desktop"
-              aria-label="Open FlintTrade desktop app install instructions"
+              href="/download"
+              aria-label="Open the FlintTrade download page"
             >
               Install desktop app <Download aria-hidden="true" size={17} />
             </Link>
@@ -190,13 +190,16 @@ export default function HomePage() {
         <div className="section-heading">
           <h2>Install the desktop app first.</h2>
           <p>
-            FlintTrade is built as a native desktop app for macOS, Windows, and Linux. Download the
-            current beta installer from GitHub releases, or build locally from source when
-            developing the app.
+            One command fetches the latest release from GitHub and builds the native app on your
+            own machine — no unsigned installer to trust, and updating later is the same command.
+            Pre-built beta installers remain available from GitHub releases.
           </p>
           <div className="section-actions">
-            <Link className="button primary" href="/docs/desktop">
-              Desktop install guide <ArrowRight aria-hidden="true" size={17} />
+            <Link className="button primary" href="/download">
+              One-command install <ArrowRight aria-hidden="true" size={17} />
+            </Link>
+            <Link className="button secondary" href="/docs/desktop">
+              Desktop guide <ArrowRight aria-hidden="true" size={17} />
             </Link>
             <Link
               className="button secondary"

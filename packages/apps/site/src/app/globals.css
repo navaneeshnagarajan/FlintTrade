@@ -671,6 +671,13 @@ kbd {
   animation-delay: 5.2s;
 }
 
+.subpage p.hero-disclaimer {
+  margin-top: 20px;
+  color: var(--site-hero-disclaimer);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
 /* Feature chips — parity with the app welcome's four-feature grid. */
 .hero-feature-grid {
   display: grid;
@@ -981,6 +988,15 @@ kbd {
   color: var(--site-code-text);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.code-panel .code-panel-note {
+  margin: 0;
+  border-top: 1px solid var(--site-line);
+  padding: 12px 16px;
+  color: var(--site-muted);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .package-list {

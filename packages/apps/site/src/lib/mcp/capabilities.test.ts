@@ -78,11 +78,17 @@ describe('docs index generation', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
     const headerSource = readFileSync(resolve(process.cwd(), 'src/components/site-header.tsx'), 'utf8');
     const footerSource = readFileSync(resolve(process.cwd(), 'src/components/site-footer.tsx'), 'utf8');
+    const downloadSource = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
     const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
 
-    expect(pageSource).toContain('href="/docs/desktop"');
+    // Primary install path: the /download page (one-command, build-on-device).
+    expect(headerSource).toContain("href: '/download'");
+    expect(pageSource).toContain('href="/download"');
     expect(pageSource).toContain('Install desktop app');
-    expect(headerSource).toContain("href: '/docs/desktop'");
+    expect(downloadSource).toContain('install.sh | bash');
+    expect(downloadSource).toContain('install.ps1 | iex');
+    // The desktop guide stays reachable from the homepage, footer, and docs.
+    expect(pageSource).toContain('href="/docs/desktop"');
     expect(footerSource).toContain('href="/docs/desktop"');
     expect(desktopDoc?.content).toContain('GitHub Releases');
     expect(desktopDoc?.content).toContain('Launch FlintTrade and complete the in-app Setup flow');
