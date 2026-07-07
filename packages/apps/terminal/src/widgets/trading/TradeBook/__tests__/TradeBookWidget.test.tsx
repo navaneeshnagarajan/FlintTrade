@@ -116,6 +116,22 @@ describe("TradeBookWidget", () => {
     expect(screen.queryByText("BANKNIFTY24APR50000CE")).not.toBeInTheDocument();
   });
 
+  it("shows an error banner with Retry instead of 'No trades today' when the fetch fails", () => {
+    mockUseTradebook.mockReturnValue(
+      queryResult({ data: undefined, isError: true, error: new Error("OpenAlgo server error") }),
+    );
+    render(<TradeBookWidget {...makeDockviewPanelProps()} />);
+
+    // The misleading empty state must not appear while the query is errored
+    expect(screen.queryByText("No trades today")).not.toBeInTheDocument();
+    expect(screen.getByText(/Failed to load trades: OpenAlgo server error/)).toBeInTheDocument();
+    expect(screen.getByText("Trade book unavailable — retry above")).toBeInTheDocument();
+
+    // Retry triggers a refetch
+    fireEvent.click(screen.getByText("Retry"));
+    expect(mockRefetch).toHaveBeenCalled();
+  });
+
   it("does not fetch or refresh tradebook without a broker connection", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     mockUseTradebook.mockReturnValue(queryResult({ data: [] }));

@@ -41,13 +41,6 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useMargin } from "@/hooks/useMargin";
@@ -72,69 +65,13 @@ const DEBOUNCE_MS = 300;
 /** Exchanges that have option strikes (NFO = NSE F&O, BFO = BSE F&O). */
 const OPTIONS_EXCHANGES = new Set(["NFO", "BFO"]);
 
-/** Strike offset values. ATM = 0, ITMn = negative offset, OTMn = positive offset. */
-type StrikeOffset =
-  | "ATM"
-  | "ITM1" | "ITM2" | "ITM3" | "ITM4" | "ITM5"
-  | "ITM6" | "ITM7" | "ITM8" | "ITM9" | "ITM10"
-  | "OTM1" | "OTM2" | "OTM3" | "OTM4" | "OTM5"
-  | "OTM6" | "OTM7" | "OTM8" | "OTM9" | "OTM10";
-
-const STRIKE_OFFSET_OPTIONS: StrikeOffset[] = [
-  "ITM10", "ITM9", "ITM8", "ITM7", "ITM6", "ITM5", "ITM4", "ITM3", "ITM2", "ITM1",
-  "ATM",
-  "OTM1", "OTM2", "OTM3", "OTM4", "OTM5", "OTM6", "OTM7", "OTM8", "OTM9", "OTM10",
-];
-
-/**
- * Common strike gaps per instrument.
- * Falls back to 50 for NIFTY/BANKNIFTY/FINNIFTY etc.
- * These are standard NSE F&O strike intervals.
- */
-const STRIKE_GAP_MAP: Record<string, number> = {
-  NIFTY: 50,
-  BANKNIFTY: 100,
-  FINNIFTY: 50,
-  MIDCPNIFTY: 25,
-  SENSEX: 100,
-  BANKEX: 100,
-};
-
-function getStrikeGap(symbol: string): number {
-  const base = symbol.replace(/\d+/g, "").toUpperCase();
-  return STRIKE_GAP_MAP[base] ?? 50;
-}
-
-/**
- * Calculate target strike from spot price, offset label, and strike gap.
- * For a BUY call (CE): ITM = lower strike, OTM = higher strike.
- * For a BUY put (PE): ITM = higher strike, OTM = lower strike.
- * We detect CE/PE from the symbol suffix; default to CE behaviour.
- */
-function calculateStrike(
-  spotLtp: number,
-  offset: StrikeOffset,
-  strikeGap: number,
-  symbol: string,
-): number {
-  if (spotLtp <= 0 || strikeGap <= 0) return 0;
-
-  const isPut = symbol.toUpperCase().endsWith("PE");
-  const atmStrike = Math.round(spotLtp / strikeGap) * strikeGap;
-
-  if (offset === "ATM") return atmStrike;
-
-  const match = /^(ITM|OTM)(\d+)$/.exec(offset);
-  if (!match) return atmStrike;
-
-  const direction = match[1] as "ITM" | "OTM";
-  const steps = parseInt(match[2], 10);
-
-  // CE: ITM = below ATM, OTM = above ATM
-  // PE: ITM = above ATM, OTM = below ATM
-  const sign = (direction === "ITM") === !isPut ? -1 : 1;
-  return atmStrike + sign * steps * strikeGap;
-}
+// NOTE: A "strike offset" selector (ATM/ITMn/OTMn) previously lived here. It
+// computed a strike from the OPTION CONTRACT'S OWN PREMIUM (mistaking it for
+// the underlying spot) and wrote that strike-like number into the order's
+// LIMIT/SL PRICE field — an economically absurd limit price. Until a genuine
+// underlying-spot feed and option-symbol replacement (getOptionSymbol) are
+// wired, the pad prefills the price field from the option's live premium
+// instead, and no strike arithmetic touches the price field.
 
 // ─── Zod schema ───────────────────────────────────────────────────────────────
 
@@ -403,9 +340,6 @@ function OrderPadWidget(props: WidgetProps) {
   type InputMode = "qty" | "fund";
   const [inputMode, setInputMode] = useState<InputMode>("qty");
 
-  // Strike offset for options orders (NFO / BFO exchange)
-  const [strikeOffset, setStrikeOffset] = useState<StrikeOffset>("ATM");
-
   // "Calculate from capital" state — user types an INR amount, qty is auto-calculated
   const [capitalAmount, setCapitalAmount] = useState("");
 
@@ -453,14 +387,8 @@ function OrderPadWidget(props: WidgetProps) {
   const tick = useAtomValue(tickAtomFamily(tickKey));
   const ltp = tick?.ltp ?? 0;
 
-  // Options-specific: show strike offset selector when exchange is NFO or BFO
+  // Options-specific: the tick for an NFO/BFO contract IS the option premium.
   const isOptionsExchange = OPTIONS_EXCHANGES.has(exchange);
-  const strikeGap = getStrikeGap(symbol);
-
-  // Auto-fill price when strike offset changes and we have LTP + LIMIT order
-  const calculatedStrike = isOptionsExchange && ltp > 0
-    ? calculateStrike(ltp, strikeOffset, strikeGap, symbol)
-    : 0;
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
   // On match, qty is set to the instrument's lotsize so the first order is valid.
@@ -580,12 +508,19 @@ function OrderPadWidget(props: WidgetProps) {
     if (!triggerEnabled) setValue("trigPrice", undefined);
   }, [orderType, priceEnabled, triggerEnabled, setValue]);
 
-  // When strike offset changes on a LIMIT/SL options order, auto-fill the price field
+  // For a LIMIT/SL options order, prefill the empty price field with the
+  // contract's live premium (its own LTP) — never a strike value. Prefills at
+  // most once per contract/order-type so a user-typed price is never clobbered.
+  const premiumPrefillKeyRef = useRef("");
   useEffect(() => {
-    if (isOptionsExchange && priceEnabled && calculatedStrike > 0) {
-      setValue("price", calculatedStrike);
+    if (!isOptionsExchange || !priceEnabled || ltp <= 0) return;
+    const key = `${exchange}:${symbol}:${orderType}`;
+    if (premiumPrefillKeyRef.current === key) return;
+    if (price == null || price === 0) {
+      setValue("price", ltp);
+      premiumPrefillKeyRef.current = key;
     }
-  }, [strikeOffset, isOptionsExchange, priceEnabled, calculatedStrike, setValue]);
+  }, [isOptionsExchange, priceEnabled, ltp, exchange, symbol, orderType, price, setValue]);
 
   const handleSelect = useCallback(
     (item: SymbolSuggestion) => {
@@ -851,50 +786,23 @@ function OrderPadWidget(props: WidgetProps) {
           />
         </div>
 
-        {/* Strike offset selector — only shown for options exchanges (NFO/BFO) */}
+        {/* Options premium hint — shown for options exchanges (NFO/BFO) */}
         {isOptionsExchange && (
           <div className="flex flex-col gap-0.5">
-            <label className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1">
+            <span className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1">
               <Target size={9} aria-hidden="true" />
-              Strike Offset
-            </label>
-            <div className="flex items-center gap-2">
-              <Select
-                value={strikeOffset}
-                onValueChange={(v) => setStrikeOffset(v as StrikeOffset)}
-              >
-                <SelectTrigger className="h-8 text-xs px-2 border-border-default bg-surface-hover text-text-primary flex-1 focus:ring-0 focus-visible:ring-0 focus-visible:border-accent">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-surface-card border-border-default text-xs max-h-60">
-                  {STRIKE_OFFSET_OPTIONS.map((opt) => (
-                    <SelectItem
-                      key={opt}
-                      value={opt}
-                      className={`text-xs font-mono ${
-                        opt === "ATM"
-                          ? "text-accent font-semibold"
-                          : opt.startsWith("ITM")
-                          ? "text-profit"
-                          : "text-loss"
-                      }`}
-                    >
-                      {opt}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {calculatedStrike > 0 && (
-                <span className="text-xs font-mono tabular-nums text-text-secondary shrink-0">
-                  → {calculatedStrike}
-                </span>
+              Option Premium
+            </span>
+            <p className="text-xxs text-text-muted">
+              {ltp > 0 ? (
+                <>
+                  Live premium ₹{ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })} — prefills
+                  the LIMIT/SL price field.
+                </>
+              ) : (
+                "Live premium unavailable — enter the limit price manually."
               )}
-            </div>
-            {calculatedStrike > 0 && (
-              <p className="text-xxs text-text-muted">
-                Spot ≈ {ltp > 0 ? ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"} · Gap {strikeGap} · Strike {calculatedStrike}
-              </p>
-            )}
+            </p>
           </div>
         )}
 

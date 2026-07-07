@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -20,6 +20,7 @@ const mockCancelAllOrders = vi.hoisted(() => vi.fn());
 const mockClosePosition = vi.hoisted(() => vi.fn());
 const mockGetExpiry = vi.hoisted(() => vi.fn());
 const mockGetQuotes = vi.hoisted(() => vi.fn());
+const mockGetLotSize = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
@@ -27,6 +28,14 @@ vi.mock("@/services/api", () => ({
   closePosition: mockClosePosition,
   getExpiry: mockGetExpiry,
   getQuotes: mockGetQuotes,
+}));
+
+vi.mock("@/services/ftApi", () => ({
+  getLotSize: mockGetLotSize,
+}));
+
+vi.mock("@/hooks/useVoiceAlert", () => ({
+  useVoiceAlert: () => ({ announceOrder: vi.fn() }),
 }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -92,6 +101,7 @@ describe("ScalperWidget", () => {
     mockClosePosition.mockResolvedValue({});
     mockGetExpiry.mockResolvedValue(["2026-04-10", "2026-04-17"]);
     mockGetQuotes.mockResolvedValue({ ltp: 24000 });
+    mockGetLotSize.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", lot_size: 75 });
   });
 
   it("renders without crashing", () => {
@@ -208,5 +218,94 @@ describe("ScalperWidget", () => {
     expect(ceStrikeLabel.closest("div")).toHaveTextContent(/\d{4,}/);
     expect(screen.queryByText("Failed to load")).not.toBeInTheDocument();
     expect(mockGetExpiry).not.toHaveBeenCalled();
+  });
+
+  // ── Order safety tests ─────────────────────────────────────────────────────
+
+  /** Wait for the CE contract to resolve, click Buy CE, confirm the modal. */
+  async function buyCeWithConfirm(): Promise<void> {
+    await waitFor(() => {
+      const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByText("Buy CE"));
+    fireEvent.click(await screen.findByText("Confirm BUY"));
+  }
+
+  it("does not render the unwired SL/Target inputs anywhere", () => {
+    render(<ScalperWidget {...defaultProps} />);
+
+    expect(screen.queryByText("SL")).not.toBeInTheDocument();
+    expect(screen.queryByText("Target")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("pts")).not.toBeInTheDocument();
+  });
+
+  it("sizes the order from the backend-verified lot size (lots × lot size)", async () => {
+    mockGetLotSize.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", lot_size: 99 });
+    render(<ScalperWidget {...defaultProps} />);
+
+    // Sublabel confirms the dynamic lot size arrived (not the built-in 75)
+    await screen.findByText("×99");
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "BUY", quantity: 99, price: 0, orderType: "MARKET" }),
+      );
+    });
+  });
+
+  it("fails closed when the lot size is not confirmed by the backend", async () => {
+    mockGetLotSize.mockRejectedValue(new Error("backend down"));
+    render(<ScalperWidget {...defaultProps} />);
+
+    // Falls back to the built-in table for DISPLAY only, marked unverified
+    await screen.findByText("×75 (unverified)");
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/Lot size not confirmed from the backend yet/);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("blocks a LIMIT order without a limit price instead of sending ₹0", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    // Switch to LIMIT — the price input appears; leave it empty
+    fireEvent.click(screen.getByText("LIMIT"));
+    expect(screen.getByText("Limit ₹")).toBeInTheDocument();
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/Enter a limit price before placing a LIMIT order/);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("sends the entered limit price with a LIMIT order", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ orderType: "LIMIT", price: 185.5, quantity: 75 }),
+      );
+    });
+  });
+
+  it("reports 'placed' — never 'filled' — after placeOrder resolves", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    await buyCeWithConfirm();
+
+    await screen.findByText(/placed$/);
+    expect(screen.queryByText(/filled/)).not.toBeInTheDocument();
   });
 });

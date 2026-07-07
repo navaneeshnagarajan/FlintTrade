@@ -22,8 +22,8 @@ export interface OrderConfirmModalProps {
   lotSize: number;
   product: ProductType;
   orderType: OrderTypeValue;
-  sl: string;
-  target: string;
+  /** Limit price actually sent with the order — shown only for LIMIT. */
+  limitPrice: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -34,8 +34,7 @@ export function OrderConfirmModal({
   lotSize,
   product,
   orderType,
-  sl,
-  target,
+  limitPrice,
   onConfirm,
   onCancel,
 }: OrderConfirmModalProps) {
@@ -87,16 +86,13 @@ export function OrderConfirmModal({
               {product} · {orderType}
             </span>
           </div>
-          {sl && (
+          {/* Only parameters that are ACTUALLY sent to the broker may appear
+              here — the modal previously displayed SL/Target values that were
+              silently discarded, which is worse than showing nothing. */}
+          {orderType === "LIMIT" && (
             <div className="flex justify-between text-xs">
-              <span className="text-text-muted font-sans">SL</span>
-              <span className="font-mono text-loss">{sl} pts</span>
-            </div>
-          )}
-          {target && (
-            <div className="flex justify-between text-xs">
-              <span className="text-text-muted font-sans">Target</span>
-              <span className="font-mono text-profit">{target} pts</span>
+              <span className="text-text-muted font-sans">Limit Price</span>
+              <span className="font-mono font-bold text-text-primary">₹{limitPrice || "—"}</span>
             </div>
           )}
         </div>

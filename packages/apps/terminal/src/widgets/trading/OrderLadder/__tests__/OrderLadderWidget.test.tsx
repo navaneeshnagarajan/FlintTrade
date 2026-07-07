@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
 // Mocks — inline selectors to avoid Zustand cast issues
 // ---------------------------------------------------------------------------
+
+const mockMode = vi.hoisted(() => ({ value: "explore" }));
+const mockWsTicks = vi.hoisted(() => ({ value: {} as Record<string, { ltp: number }> }));
+const mockPlaceOrder = vi.hoisted(() => vi.fn());
+const mockCancelOrder = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
@@ -11,12 +16,16 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) =>
-    selector({ mode: "explore" }),
+    selector({ mode: mockMode.value }),
+}));
+
+vi.mock("@/hooks/useWebSocket", () => ({
+  default: () => ({ ticks: mockWsTicks.value, connected: true }),
 }));
 
 vi.mock("@/services/api", () => ({
-  placeOrder: vi.fn().mockResolvedValue({ orderId: "test_123" }),
-  modifyOrder: vi.fn().mockResolvedValue({}),
+  placeOrder: mockPlaceOrder,
+  cancelOrder: mockCancelOrder,
 }));
 
 beforeAll(() => {
@@ -27,7 +36,15 @@ beforeAll(() => {
   };
 });
 
-import OrderLadderWidget, { generateLadderLevels } from "../OrderLadderWidget";
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockMode.value = "explore";
+  mockWsTicks.value = {};
+  mockPlaceOrder.mockResolvedValue({ orderId: "test_123" });
+  mockCancelOrder.mockResolvedValue(undefined);
+});
+
+import OrderLadderWidget, { generateLadderLevels, extractBrokerOrderId } from "../OrderLadderWidget";
 
 // ---------------------------------------------------------------------------
 // generateLadderLevels unit tests
@@ -138,5 +155,102 @@ describe("OrderLadderWidget", () => {
     const input = screen.getByLabelText("Order quantity") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "50" } });
     expect(input.value).toBe("50");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractBrokerOrderId unit tests
+// ---------------------------------------------------------------------------
+
+describe("extractBrokerOrderId", () => {
+  it("reads orderId / orderid / order_id aliases", () => {
+    expect(extractBrokerOrderId({ orderId: "A1" })).toBe("A1");
+    expect(extractBrokerOrderId({ orderid: "B2" })).toBe("B2");
+    expect(extractBrokerOrderId({ order_id: "C3" })).toBe("C3");
+  });
+
+  it("accepts a bare string or numeric id", () => {
+    expect(extractBrokerOrderId("XYZ")).toBe("XYZ");
+    expect(extractBrokerOrderId({ orderId: 12345 })).toBe("12345");
+  });
+
+  it("returns null for anything else — the caller must fail closed", () => {
+    expect(extractBrokerOrderId(undefined)).toBeNull();
+    expect(extractBrokerOrderId(null)).toBeNull();
+    expect(extractBrokerOrderId({})).toBeNull();
+    expect(extractBrokerOrderId({ orderId: "" })).toBeNull();
+    expect(extractBrokerOrderId("")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Live-mode order placement + cancel with the REAL broker order id
+// ---------------------------------------------------------------------------
+
+describe("OrderLadderWidget live cancel", () => {
+  function renderLiveLadder(): void {
+    mockMode.value = "live";
+    mockWsTicks.value = { "NSE:NIFTY": { ltp: 100 } };
+    render(<OrderLadderWidget />);
+  }
+
+  async function placeBuyAtTopLevel(): Promise<void> {
+    // Top ask level = 100 + 20 × 0.25 = 105.00
+    const askBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.getAttribute("title")?.startsWith("BUY"));
+    expect(askBtn).toBeTruthy();
+    fireEvent.click(askBtn as HTMLElement);
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+  }
+
+  it("cancels a ladder order with the REAL broker order id from placeOrder", async () => {
+    mockPlaceOrder.mockResolvedValue({ orderId: "BRK-98765" });
+    renderLiveLadder();
+
+    await placeBuyAtTopLevel();
+
+    // The cancel affordance unlocks only once the broker id is stored
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/^Cancel buy order at/) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
+    fireEvent.click(screen.getByLabelText(/^Cancel buy order at/));
+
+    await waitFor(() => {
+      expect(mockCancelOrder).toHaveBeenCalledTimes(1);
+      expect(mockCancelOrder).toHaveBeenCalledWith("BRK-98765", "orderladder");
+    });
+    // Never the fabricated local id
+    expect(mockCancelOrder).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^lo_/),
+      expect.anything(),
+    );
+  });
+
+  it("disables cancel (fail closed) when the broker id is not in the response", async () => {
+    mockPlaceOrder.mockResolvedValue({ status: "success" });
+    renderLiveLadder();
+
+    await placeBuyAtTopLevel();
+
+    // Placement resolved (status message shown) but no broker id was returned
+    await screen.findByText(/order id unconfirmed/);
+    const cancelBtn = screen.getByLabelText(/^Cancel buy order at/) as HTMLButtonElement;
+    expect(cancelBtn.disabled).toBe(true);
+    fireEvent.click(cancelBtn);
+    expect(mockCancelOrder).not.toHaveBeenCalled();
+  });
+
+  it("removes the pending row when placeOrder rejects", async () => {
+    mockPlaceOrder.mockRejectedValue(new Error("Order blocked in live mode."));
+    renderLiveLadder();
+
+    await placeBuyAtTopLevel();
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/^Cancel buy order at/)).toBeNull();
+    });
   });
 });

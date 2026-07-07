@@ -34,18 +34,19 @@ export interface ScalperControlsProps {
   // Row 2
   lots: number;
   lotSize: number;
+  /** False until the backend confirms the lot size — orders stay blocked. */
+  lotSizeVerified: boolean;
   onLotsDec: () => void;
   onLotsInc: () => void;
   product: ProductType;
   onProductChange: (v: ProductType) => void;
   orderType: OrderTypeValue;
   onOrderTypeChange: (v: OrderTypeValue) => void;
+  /** Limit price — required (and shown) only when orderType is LIMIT. */
+  limitPrice: string;
+  onLimitPriceChange: (v: string) => void;
   interval: IntervalValue;
   onIntervalChange: (v: IntervalValue) => void;
-  sl: string;
-  onSlChange: (v: string) => void;
-  target: string;
-  onTargetChange: (v: string) => void;
   oneClick: boolean;
   onOneClickToggle: () => void;
 }
@@ -68,18 +69,17 @@ export function ScalperControls({
   focused,
   lots,
   lotSize,
+  lotSizeVerified,
   onLotsDec,
   onLotsInc,
   product,
   onProductChange,
   orderType,
   onOrderTypeChange,
+  limitPrice,
+  onLimitPriceChange,
   interval,
   onIntervalChange,
-  sl,
-  onSlChange,
-  target,
-  onTargetChange,
   oneClick,
   onOneClickToggle,
 }: ScalperControlsProps) {
@@ -164,12 +164,15 @@ export function ScalperControls({
         )}
       </div>
 
-      {/* Row 2: Lots, Product, OrderType, Interval, SL, Target, One-click */}
+      {/* Row 2: Lots, Product, OrderType, Limit price, Interval, One-click.
+          SL/Target inputs were removed: they were never sent to the broker,
+          so displaying them was silent-risk theatre. Reintroduce only once
+          real SL/target legs go through a gated route. */}
       <div className="flex items-end gap-3 px-3 py-2 border-t border-border-subtle flex-wrap">
-        {/* Lot spinner — large */}
+        {/* Lot spinner — large. Unverified lot sizes block orders (fail closed). */}
         <Stepper
           label="Lot"
-          sublabel={`×${lotSize}`}
+          sublabel={lotSizeVerified ? `×${lotSize}` : `×${lotSize} (unverified)`}
           value={`${lots} (${lots * lotSize})`}
           onDec={onLotsDec}
           onInc={onLotsInc}
@@ -192,6 +195,17 @@ export function ScalperControls({
           onChange={(v) => onOrderTypeChange(v as OrderTypeValue)}
         />
 
+        {/* Limit price — required for LIMIT orders (₹0 limits are rejected) */}
+        {orderType === "LIMIT" && (
+          <NumberInput
+            label="Limit ₹"
+            value={limitPrice}
+            onChange={onLimitPriceChange}
+            min={0}
+            placeholder="0.00"
+          />
+        )}
+
         {/* Timeframe buttons */}
         <ToggleGroup
           label="Timeframe"
@@ -199,12 +213,6 @@ export function ScalperControls({
           options={["1m", "3m", "5m", "15m"] as const}
           onChange={(v) => onIntervalChange(v as IntervalValue)}
         />
-
-        {/* SL input */}
-        <NumberInput label="SL" value={sl} onChange={onSlChange} min={0} placeholder="pts" />
-
-        {/* Target input */}
-        <NumberInput label="Target" value={target} onChange={onTargetChange} min={0} placeholder="pts" />
 
         <div className="flex-1" />
 

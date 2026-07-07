@@ -2,23 +2,30 @@
  * QuickTradeWidget — Ultra-compact one-click order entry for scalpers.
  *
  * Features:
- *   - Symbol + exchange display (from props or defaults)
+ *   - Symbol + exchange from panel params, falling back to the workspace's
+ *     selected instrument (Watchlist selection), then NIFTY/NSE
  *   - Large BUY / SELL buttons side by side
- *   - Quantity lot presets: 1, 2, 5, 10
+ *   - Quantity lot presets: 1, 2, 5, 10 — sized by the instrument's REAL lot
+ *     size (quantity = lots × lot size, fetched via getSymbol)
+ *   - Fail-closed on derivative exchanges: no order is sent until the lot
+ *     size has been confirmed from the backend
  *   - Product type toggle: MIS / NRML / CNC
  *   - Order type selector: MARKET / LIMIT
  *   - Optional limit price input (LIMIT mode only)
- *   - Fires placeOrder from @/services/api
- *   - Confirm dialog for orders > 10 lots
+ *   - Fires placeOrder from @/services/api (gated backend route)
+ *   - Confirm dialog for orders of 10+ lots
  */
 
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, useEffect, memo } from "react";
+import { useAtomValue } from "jotai";
 import { Zap, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { placeOrder } from "@/services/api";
+import { placeOrder, getSymbol } from "@/services/api";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { useModeStore } from "@/stores/modeStore";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,7 +40,11 @@ type ProductType = (typeof PRODUCT_TYPES)[number];
 const ORDER_TYPES = ["MARKET", "LIMIT"] as const;
 type OrderType = (typeof ORDER_TYPES)[number];
 
+/** Orders of this many lots or more require confirmation. */
 const LARGE_ORDER_THRESHOLD = 10;
+
+/** Exchanges where contracts trade in lots — a real lot size is mandatory. */
+const DERIVATIVE_EXCHANGES = new Set(["NFO", "BFO", "MCX", "CDS", "BCD"]);
 
 // ---------------------------------------------------------------------------
 // Pill selector component
@@ -103,11 +114,12 @@ interface ConfirmProps {
   symbol: string;
   action: "BUY" | "SELL";
   lots: number;
+  quantity: number;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function ConfirmOverlay({ symbol, action, lots, onConfirm, onCancel }: ConfirmProps) {
+function ConfirmOverlay({ symbol, action, lots, quantity, onConfirm, onCancel }: ConfirmProps) {
   return (
     <div
       className="absolute inset-0 bg-surface-base/90 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-10 rounded"
@@ -117,10 +129,11 @@ function ConfirmOverlay({ symbol, action, lots, onConfirm, onCancel }: ConfirmPr
     >
       <div className="text-sm font-semibold text-text-primary">Confirm Order</div>
       <div className="text-xs text-text-secondary text-center px-4">
-        {action} <span className="font-semibold text-text-primary">{lots} lots</span> of{" "}
+        {action} <span className="font-semibold text-text-primary">{lots} lots</span>{" "}
+        (<span className="font-semibold text-text-primary">{quantity} qty</span>) of{" "}
         <span className="font-semibold text-text-primary">{symbol}</span>?
         <br />
-        <span className="text-warning">Large order (&gt;{LARGE_ORDER_THRESHOLD} lots)</span>
+        <span className="text-warning">Large order ({LARGE_ORDER_THRESHOLD}+ lots)</span>
       </div>
       <div className="flex gap-2">
         <Button
@@ -149,14 +162,26 @@ function ConfirmOverlay({ symbol, action, lots, onConfirm, onCancel }: ConfirmPr
 // Main widget
 // ---------------------------------------------------------------------------
 
-interface QuickTradeProps {
+/** Prefill params carried by a Dockview panel launching quicktrade. */
+interface QuickTradePrefill {
   symbol?: string;
   exchange?: string;
 }
 
-function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProps) {
+function QuickTradeWidget(props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const track = useTrackBehavior();
+
+  // Dockview delivers launcher-provided values under props.params — reading
+  // top-level props silently dropped every prefill (the old hardcoded-NIFTY
+  // bug). When no params are given, follow the workspace's selected
+  // instrument (e.g. the active Watchlist row) so the ticket targets what the
+  // trader is actually looking at.
+  const prefill = (props.params ?? {}) as QuickTradePrefill;
+  const selectedInstrument = useAtomValue(selectedSymbolAtom);
+  const symbol = prefill.symbol ?? selectedInstrument?.symbol ?? "NIFTY";
+  const exchange =
+    prefill.exchange ?? (prefill.symbol ? "NSE" : selectedInstrument?.exchange ?? "NSE");
 
   const [lots, setLots] = useState<LotPreset>(1);
   const [product, setProduct] = useState<ProductType>("MIS");
@@ -167,8 +192,48 @@ function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProp
   const [pendingAction, setPendingAction] = useState<"BUY" | "SELL" | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Real lot size for the instrument — null until confirmed by the backend.
+  const [lotSize, setLotSize] = useState<number | null>(null);
+  useEffect(() => {
+    if (!symbol || !exchange) return;
+    let cancelled = false;
+    setLotSize(null);
+    getSymbol(symbol, exchange)
+      .then((info) => {
+        if (cancelled) return;
+        // Equities report 0/1 — normalise to 1 so quantity = lots.
+        setLotSize(info.lotsize > 0 ? info.lotsize : 1);
+      })
+      .catch(() => {
+        // Leave null — derivative orders stay blocked (fail closed).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, exchange]);
+
+  const isDerivative = DERIVATIVE_EXCHANGES.has(exchange);
+
+  /**
+   * Resolve the real order quantity (lots × lot size), or null when the lot
+   * size is not yet confirmed for a derivatives contract — in which case no
+   * order may be sent.
+   */
+  const resolveQuantity = useCallback((): number | null => {
+    if (isDerivative && (lotSize == null || lotSize <= 0)) return null;
+    return lots * (lotSize != null && lotSize > 0 ? lotSize : 1);
+  }, [isDerivative, lotSize, lots]);
+
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL") => {
+      const quantity = resolveQuantity();
+      if (quantity == null) {
+        setStatus({
+          type: "error",
+          message: `Lot size for ${symbol} is unverified — order not sent`,
+        });
+        return;
+      }
       setIsPending(true);
       setStatus(null);
       try {
@@ -177,14 +242,17 @@ function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProp
           symbol,
           exchange,
           action,
-          quantity: lots,
+          quantity,
           price,
           triggerPrice: 0,
           product,
           orderType: orderType,
           strategy: "quicktrade",
         });
-        setStatus({ type: "success", message: `${action} order placed for ${lots} lot(s)` });
+        setStatus({
+          type: "success",
+          message: `${action} order placed · ${lots} lot(s) = ${quantity} qty`,
+        });
         track("trade", `quicktrade_${action.toLowerCase()}`);
         setTimeout(() => setStatus(null), 4000);
       } catch (err) {
@@ -194,7 +262,7 @@ function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProp
         setIsPending(false);
       }
     },
-    [symbol, exchange, lots, product, orderType, limitPrice, track],
+    [symbol, exchange, lots, product, orderType, limitPrice, track, resolveQuantity],
   );
 
   const handleAction = useCallback(
@@ -203,14 +271,21 @@ function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProp
         setStatus({ type: "error", message: "Connect a broker to place orders" });
         return;
       }
-      if (lots > LARGE_ORDER_THRESHOLD) {
+      if (resolveQuantity() == null) {
+        setStatus({
+          type: "error",
+          message: `Lot size for ${symbol} is unverified — order not sent`,
+        });
+        return;
+      }
+      if (lots >= LARGE_ORDER_THRESHOLD) {
         setPendingAction(action);
         setShowConfirm(true);
         return;
       }
       void executeOrder(action);
     },
-    [lots, mode, executeOrder],
+    [lots, mode, executeOrder, resolveQuantity, symbol],
   );
 
   const handleConfirm = useCallback(() => {
@@ -224,15 +299,18 @@ function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProp
     setPendingAction(null);
   }, []);
 
+  const displayQuantity = resolveQuantity();
+
   return (
     <div className="relative h-full flex flex-col bg-surface-base overflow-hidden">
 
       {/* Confirm overlay */}
-      {showConfirm && pendingAction && (
+      {showConfirm && pendingAction && displayQuantity != null && (
         <ConfirmOverlay
           symbol={symbol}
           action={pendingAction}
           lots={lots}
+          quantity={displayQuantity}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
         />
@@ -272,6 +350,16 @@ function QuickTradeWidget({ symbol = "NIFTY", exchange = "NSE" }: QuickTradeProp
               </button>
             ))}
           </div>
+          {/* Effective quantity — the trader must see the real order size */}
+          {displayQuantity != null ? (
+            <div className="text-xxs text-text-muted font-mono tabular-nums">
+              Qty: {lots} × {lotSize ?? 1} = {displayQuantity}
+            </div>
+          ) : (
+            <div className="text-xxs text-warning" role="note">
+              Lot size unverified — orders blocked until it loads
+            </div>
+          )}
         </div>
 
         {/* Product type */}

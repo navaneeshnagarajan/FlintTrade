@@ -69,8 +69,11 @@ function ScalperWidget(_props: WidgetProps) {
   const [lots, setLots] = useState(1);
   const [product, setProduct] = useState<ProductType>("MIS");
   const [orderType, setOrderType] = useState<OrderTypeValue>("MARKET");
-  const [sl, setSl] = useState("");
-  const [target, setTarget] = useState("");
+  // NOTE: SL/Target inputs previously lived here but were never sent to the
+  // broker — the confirm modal displayed them as if attached, which is a
+  // silent-risk bug. They were removed; reintroduce them only once they place
+  // real legs through a gated route (e.g. super orders).
+  const [limitPrice, setLimitPrice] = useState("");
   const [oneClick, setOneClick] = useState(false);
   const [interval, setInterval_] = useState<IntervalValue>("5m");
 
@@ -95,24 +98,32 @@ function ScalperWidget(_props: WidgetProps) {
   const spotExch = cfg.exchange;
   const optExch = cfg.optExchange;
 
-  // Dynamic lot size — fetch from backend, fall back to built-in config
+  // Dynamic lot size — fetched from the backend. The built-in config value is
+  // only a DISPLAY fallback; real (non-explore) orders are blocked until the
+  // backend confirms the lot size, because lot sizes change over time and a
+  // stale hardcoded value mis-sizes every order.
   const [dynamicLotSize, setDynamicLotSize] = useState<number | null>(null);
   const lotSize = dynamicLotSize ?? cfg.lotSize;
+  const lotSizeVerified = dynamicLotSize != null;
 
-  useEffect(() => {
-    let cancelled = false;
-    setDynamicLotSize(null); // reset on symbol change
+  const refreshLotSize = useCallback((signal?: { cancelled: boolean }) => {
     getLotSize(symbol, optExch)
       .then((res) => {
-        if (!cancelled && res.lot_size > 0) {
+        if (!signal?.cancelled && res.lot_size > 0) {
           setDynamicLotSize(res.lot_size);
         }
       })
       .catch(() => {
-        // Fallback to built-in config silently
+        // Stays unverified — executeOrder fails closed and retries the fetch.
       });
-    return () => { cancelled = true; };
   }, [symbol, optExch]);
+
+  useEffect(() => {
+    const signal = { cancelled: false };
+    setDynamicLotSize(null); // reset on symbol change
+    refreshLotSize(signal);
+    return () => { signal.cancelled = true; };
+  }, [refreshLotSize]);
 
   const ceStrike = atmStrike != null ? atmStrike + ceOffset * step : null;
   const peStrike = atmStrike != null ? atmStrike + peOffset * step : null;
@@ -215,6 +226,20 @@ function ScalperWidget(_props: WidgetProps) {
         showStatus("Connect a broker to place orders", "error");
         return;
       }
+      // Fail closed: never size a real order from the hardcoded fallback lot
+      // table — lot sizes change and a stale value mis-sizes every order.
+      if (!lotSizeVerified) {
+        showStatus("Lot size not confirmed from the backend yet — order not sent", "error");
+        refreshLotSize();
+        return;
+      }
+      // A LIMIT order must carry a real price — ₹0 is a guaranteed rejection
+      // (or worse, a lenient bridge could treat it as marketable).
+      const price = orderType === "LIMIT" ? parseFloat(limitPrice) : 0;
+      if (orderType === "LIMIT" && (!Number.isFinite(price) || price <= 0)) {
+        showStatus("Enter a limit price before placing a LIMIT order", "error");
+        return;
+      }
       const qty = lots * lotSize;
       const params: PlaceOrderParams = {
         symbol: sym,
@@ -223,19 +248,20 @@ function ScalperWidget(_props: WidgetProps) {
         quantity: qty,
         orderType,
         product,
-        price: 0,
+        price: orderType === "LIMIT" ? price : 0,
         strategy: "FlintScalper",
       };
       showStatus(`${action} ${sym} × ${qty}…`, "pending", 0);
       try {
         await placeOrder(params);
-        showStatus(`${action} ${sym} filled`, "success");
+        // Placement ≠ fill — report what actually happened.
+        showStatus(`${action} ${sym} placed`, "success");
         announceOrder(action, sym, qty);
       } catch (err) {
         showStatus(err instanceof Error ? err.message : "Order failed", "error");
       }
     },
-    [lots, lotSize, orderType, product, showStatus, announceOrder, isExplore],
+    [lots, lotSize, lotSizeVerified, refreshLotSize, orderType, limitPrice, product, showStatus, announceOrder, isExplore],
   );
 
   const handleOrder = useCallback(
@@ -347,18 +373,17 @@ function ScalperWidget(_props: WidgetProps) {
         focused={focused}
         lots={lots}
         lotSize={lotSize}
+        lotSizeVerified={lotSizeVerified}
         onLotsDec={() => setLots((l) => Math.max(1, l - 1))}
         onLotsInc={() => setLots((l) => l + 1)}
         product={product}
         onProductChange={setProduct}
         orderType={orderType}
         onOrderTypeChange={setOrderType}
+        limitPrice={limitPrice}
+        onLimitPriceChange={setLimitPrice}
         interval={interval}
         onIntervalChange={setInterval_}
-        sl={sl}
-        onSlChange={setSl}
-        target={target}
-        onTargetChange={setTarget}
         oneClick={oneClick}
         onOneClickToggle={() => setOneClick((v) => !v)}
       />
@@ -386,8 +411,7 @@ function ScalperWidget(_props: WidgetProps) {
         lotSize={lotSize}
         product={product}
         orderType={orderType}
-        sl={sl}
-        target={target}
+        limitPrice={limitPrice}
         onConfirm={confirmOrder}
         onCancel={() => setPendingOrder(null)}
       />

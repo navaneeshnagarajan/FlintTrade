@@ -20,6 +20,10 @@ vi.mock("@/services/api", () => ({
   closePosition: (strategy: string) => mockClosePosition(strategy),
 }));
 
+vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
+  emitNotification: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
@@ -106,6 +110,47 @@ describe("useGlobalKeys", () => {
     fireKey("X", { shiftKey: true });
 
     expect(mockClosePosition).toHaveBeenCalledWith("Flint");
+  });
+
+  it("plain X (advertised in the /trade banner) confirms and calls closePosition", () => {
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("x");
+
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(mockClosePosition).toHaveBeenCalledWith("Flint");
+  });
+
+  it("does not call closePosition when the confirmation is declined", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("x");
+
+    expect(mockClosePosition).not.toHaveBeenCalled();
+  });
+
+  // Regression: the hook is mounted by BOTH AppLayout and TerminalRoute on
+  // /trade. A single keypress must show ONE confirm dialog and execute the
+  // destructive action ONCE — never twice.
+  it("double-mounted hook fires exactly one confirm + one cancelAllOrders for C", () => {
+    renderHook(() => useGlobalKeys({}));
+    renderHook(() => useGlobalKeys({ onEscape: vi.fn() }));
+
+    fireKey("c");
+
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it("double-mounted hook fires exactly one confirm + one closePosition for Shift+X", () => {
+    renderHook(() => useGlobalKeys({}));
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("X", { shiftKey: true });
+
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(mockClosePosition).toHaveBeenCalledTimes(1);
   });
 
   it("does not fire shortcuts when INPUT is focused", () => {

@@ -25,17 +25,44 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import useWebSocket from "@/hooks/useWebSocket";
 import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { placeOrder, cancelOrder } from "@/services/api";
+import type { WsInstrument } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types & constants
 // ---------------------------------------------------------------------------
 
 type Side = "buy" | "sell";
-interface PendingOrder { orderId: string; side: Side; price: number; qty: number; status: "pending" | "cancelling" }
+interface PendingOrder {
+  /** Local row key — NEVER sent to the broker. */
+  localId: string;
+  /** Real broker order id from the placeOrder response; null until known. */
+  brokerOrderId: string | null;
+  side: Side;
+  price: number;
+  qty: number;
+  status: "placing" | "open" | "cancelling";
+}
 interface LadderLevel  { price: number; bidQty: number; askQty: number }
+
+/**
+ * Extract the broker order id from a placeOrder response. The gated backend
+ * returns the id under `orderId`/`orderid`/`order_id` (or as a bare string
+ * for lenient bridges); anything else yields null so the caller can fail
+ * closed rather than fabricate an id.
+ */
+export function extractBrokerOrderId(result: unknown): string | null {
+  if (typeof result === "string") return result.trim() !== "" ? result : null;
+  if (result == null || typeof result !== "object") return null;
+  const rec = result as { orderId?: unknown; orderid?: unknown; order_id?: unknown };
+  const candidate = rec.orderId ?? rec.orderid ?? rec.order_id;
+  if (typeof candidate === "string" && candidate.trim() !== "") return candidate;
+  if (typeof candidate === "number") return String(candidate);
+  return null;
+}
 
 const TICK_OPTIONS = [0.05, 0.25, 0.5, 1, 5] as const;
 type TickSize = (typeof TICK_OPTIONS)[number];
@@ -113,12 +140,19 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk,
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => onCancel(order.orderId)}
-              disabled={order.status === "cancelling"}
+              onClick={() => onCancel(order.localId)}
+              disabled={order.status !== "open" || order.brokerOrderId == null}
+              title={
+                order.brokerOrderId == null
+                  ? "Broker order id not confirmed yet — cancel from the Orders widget if needed"
+                  : `Cancel ${order.side} order at ${fmtPrice(level.price)}`
+              }
               className="h-auto w-auto p-0 text-text-muted hover:text-loss disabled:opacity-40 transition-colors"
               aria-label={`Cancel ${order.side} order at ${fmtPrice(level.price)}`}
             >
-              {order.status === "cancelling" ? <Loader2 size={9} className="animate-spin" /> : <X size={9} />}
+              {order.status === "cancelling" || order.status === "placing"
+                ? <Loader2 size={9} className="animate-spin" />
+                : <X size={9} />}
             </Button>
           </span>
         )}
@@ -149,8 +183,17 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
   const track = useTrackBehavior();
 
   // Live LTP for the selected instrument — drives the ladder centre.
-  // Key format: "{exchange}:{symbol}" — matches the WS bridge and REST fallback atom keys.
-  const tick = useAtomValue(tickAtomFamily(`${exchange}:${symbol}`));
+  // The ladder subscribes its own instrument to the WS feed (nothing else is
+  // guaranteed to), and falls back to the shared tick atom in case another
+  // widget already streams the same instrument.
+  const wsInstruments = useMemo<WsInstrument[]>(
+    () => (isExplore ? [] : [{ symbol, exchange }]),
+    [isExplore, symbol, exchange],
+  );
+  const { ticks: wsTicks } = useWebSocket(wsInstruments, "quote");
+  const wsTick = wsTicks[`${exchange}:${symbol}`];
+  const atomTick = useAtomValue(tickAtomFamily(`${exchange}:${symbol}`));
+  const tick = wsTick ?? atomTick;
   const liveLtp = tick?.ltp && tick.ltp > 0 ? tick.ltp : null;
 
   const [tickSize, setTickSize] = useState<TickSize>(0.25);
@@ -181,29 +224,45 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
     // Defence in depth: rows are disabled without a live price, but guard the
     // submit path too so a stale click can never place an order at a made-up price.
     if (liveLtp == null) { showMsg("Waiting for a live price before orders can be placed"); return; }
-    const order: PendingOrder = { orderId: `lo_${Date.now()}`, side: action === "BUY" ? "buy" : "sell", price, qty, status: "pending" };
+    const localId = `lo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const order: PendingOrder = { localId, brokerOrderId: null, side: action === "BUY" ? "buy" : "sell", price, qty, status: "placing" };
     setPendingOrders((p) => [...p, order]);
     try {
-      await placeOrder({ symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder" });
-      showMsg(`${action} ${qty} @ ${fmtPrice(price)} placed`);
+      const result = await placeOrder({ symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder" });
+      // Store the REAL broker order id — cancel is disabled until it is known,
+      // so the ladder can never send a fabricated id to the broker.
+      const brokerOrderId = extractBrokerOrderId(result);
+      setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, brokerOrderId, status: "open" } : o));
+      showMsg(
+        brokerOrderId != null
+          ? `${action} ${qty} @ ${fmtPrice(price)} placed · ID ${brokerOrderId}`
+          : `${action} ${qty} @ ${fmtPrice(price)} placed — order id unconfirmed, manage it from the Orders widget`,
+      );
       track("trade", `order_ladder_${action.toLowerCase()}`);
     } catch (err) {
       showMsg(err instanceof Error ? err.message : "Order failed");
-      setPendingOrders((p) => p.filter((o) => o.orderId !== order.orderId));
+      setPendingOrders((p) => p.filter((o) => o.localId !== localId));
     }
   }, [mode, liveLtp, qty, symbol, exchange, track, showMsg]);
 
-  const cancelPending = useCallback(async (orderId: string) => {
-    setPendingOrders((p) => p.map((o) => o.orderId === orderId ? { ...o, status: "cancelling" } : o));
+  const cancelPending = useCallback(async (localId: string) => {
+    const order = pendingOrders.find((o) => o.localId === localId);
+    // Fail closed: never send a locally minted id to the broker.
+    if (!order || order.brokerOrderId == null) {
+      showMsg("Broker order id not confirmed yet — cancel from the Orders widget");
+      return;
+    }
+    const brokerOrderId = order.brokerOrderId;
+    setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, status: "cancelling" } : o));
     try {
-      await cancelOrder(orderId, "orderladder");
-      setPendingOrders((p) => p.filter((o) => o.orderId !== orderId));
+      await cancelOrder(brokerOrderId, "orderladder");
+      setPendingOrders((p) => p.filter((o) => o.localId !== localId));
       showMsg("Order cancelled");
     } catch (err) {
       showMsg(err instanceof Error ? err.message : "Cancel failed");
-      setPendingOrders((p) => p.map((o) => o.orderId === orderId ? { ...o, status: "pending" } : o));
+      setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, status: "open" } : o));
     }
-  }, [showMsg]);
+  }, [pendingOrders, showMsg]);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Order Ladder widget">

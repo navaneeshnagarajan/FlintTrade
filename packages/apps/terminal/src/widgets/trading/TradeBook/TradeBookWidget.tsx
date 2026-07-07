@@ -91,7 +91,14 @@ function FilterPill({ value, label, count, activeFilter, onClick }: FilterPillPr
 
 function TradeBookWidget(_props: WidgetProps) {
   const isBrokerConnected = useBrokerConnected();
-  const { data: tradesData, dataUpdatedAt, refetch, isFetching } = useTradebook({ enabled: isBrokerConnected });
+  const {
+    data: tradesData,
+    dataUpdatedAt,
+    refetch,
+    isFetching,
+    isError,
+    error,
+  } = useTradebook({ enabled: isBrokerConnected });
   const [sorting, setSorting] = useState<SortingState>([]);
   const [filter, setFilter] = useState<FilterValue>(FILTER_ALL);
 
@@ -248,12 +255,34 @@ function TradeBookWidget(_props: WidgetProps) {
         <FilterPill value={FILTER_SELL} label="Sell" count={counts.sell} activeFilter={filter} onClick={setFilter} />
       </div>
 
+      {/* Error banner — a failed fetch must never masquerade as "No trades today" */}
+      {isError && (
+        <div className="flex items-center gap-2 px-3 py-2 mx-3 mt-2 bg-loss/10 border border-loss/20 rounded-md text-sm text-loss">
+          <span className="flex-1">
+            Failed to load trades{error instanceof Error ? `: ${error.message}` : ""}
+          </span>
+          <Button
+            variant="link"
+            size="sm"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
+          >
+            {isFetching ? "Retrying…" : "Retry"}
+          </Button>
+        </div>
+      )}
+
       {/* Body */}
       {filteredRows.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <ArrowRightLeft size={24} className="text-text-disabled" />
           <span className="text-sm">
-            {isBrokerConnected ? "No trades today" : "Connect a broker to load trades"}
+            {!isBrokerConnected
+              ? "Connect a broker to load trades"
+              : isError
+                ? "Trade book unavailable — retry above"
+                : "No trades today"}
           </span>
         </div>
       ) : (
