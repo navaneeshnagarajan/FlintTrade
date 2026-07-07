@@ -4,6 +4,7 @@ import { useConnectionStore } from "../connectionStore";
 describe("connectionStore", () => {
   beforeEach(() => {
     useConnectionStore.setState(useConnectionStore.getInitialState());
+    sessionStorage.clear();
   });
 
   it("initializes with disconnected status", () => {
@@ -38,6 +39,7 @@ describe("connectionStore", () => {
     const state = useConnectionStore.getState();
     expect(state.host).toBe("http://localhost:5000");
     expect(state.apiKey).toBe("test-key");
+    expect(sessionStorage.getItem("flinttrade:connection")).toBeNull();
   });
 
   it("tracks WebSocket connection state", () => {

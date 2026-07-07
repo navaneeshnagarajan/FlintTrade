@@ -12,6 +12,11 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { resetWsService } from "@/services/websocket";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import {
+  deriveOpenAlgoWsUrl,
+  openAlgoRestPortFromHost,
+  openAlgoWsPortFromUrl,
+} from "@/hooks/useOpenAlgoConfigHydration";
+import {
   persistOpenAlgoConfigPatch,
   readOpenAlgoConfig,
 } from "@/services/ftApi.openalgo";
@@ -84,34 +89,6 @@ export interface DataPathsData {
 }
 
 export { isAcceptedOpenAlgoConfigStatus } from "@/services/ftApi.openalgo";
-
-function deriveWsUrl(host: string, wsPort: string): string {
-  if (!host.trim()) return "";
-  try {
-    const parsed = new URL(host);
-    const protocol = parsed.protocol === "https:" ? "wss" : "ws";
-    return `${protocol}://${parsed.hostname}:${wsPort || "8765"}`;
-  } catch {
-    return `ws://127.0.0.1:${wsPort || "8765"}`;
-  }
-}
-
-function wsPortFromUrl(wsUrl: string): string {
-  try {
-    const wsUrlObj = new URL(wsUrl.replace(/^ws/, "http"));
-    return wsUrlObj.port || "8765";
-  } catch {
-    return "8765";
-  }
-}
-
-function restPortFromHost(host: string): string {
-  try {
-    return new URL(host).port || "";
-  } catch {
-    return "";
-  }
-}
 
 async function persistOpenAlgoPatch(connection: Partial<ConnectionData>): Promise<void> {
   await persistOpenAlgoConfigPatch(connection);
@@ -187,19 +164,18 @@ export function useSettingsState(): SettingsState {
         if (cancelled || payload.status !== "success") return;
         const data = payload.data ?? {};
         const patch = pendingConnectionPatchRef.current;
-        const current = useConnectionStore.getState();
         const host = "host" in patch ? String(patch.host ?? "") : String(data.host ?? "");
-        const hostPort = restPortFromHost(host);
+        const hostPort = openAlgoRestPortFromHost(host);
         const port = "port" in patch
           ? String(patch.port ?? "")
           : (hostPort || String(data.port ?? "5000"));
-        const apiKey = "apiKey" in patch ? String(patch.apiKey ?? "") : current.apiKey;
+        const apiKey = "apiKey" in patch ? String(patch.apiKey ?? "") : useConnectionStore.getState().apiKey;
         const wsPort = "wsPort" in patch ? String(patch.wsPort ?? "") : String(data.ws_port ?? "8765");
         setConnRestPort(port);
         useConnectionStore.getState().setConfig({
           host,
           apiKey,
-          wsUrl: deriveWsUrl(host, wsPort),
+          wsUrl: deriveOpenAlgoWsUrl(host, wsPort),
         });
       })
       .catch((err) => {
@@ -267,13 +243,13 @@ export function useSettingsState(): SettingsState {
     pendingConnectionPatchRef.current = { ...pendingConnectionPatchRef.current, [field]: value };
     const current = useConnectionStore.getState();
     let host = current.host;
-    let port = connRestPort || restPortFromHost(current.host) || "5000";
+    let port = connRestPort || openAlgoRestPortFromHost(current.host) || "5000";
     let apiKey = current.apiKey;
-    let wsPort = wsPortFromUrl(current.wsUrl);
+    let wsPort = openAlgoWsPortFromUrl(current.wsUrl);
 
     if (field === "host") {
       host = value;
-      port = restPortFromHost(value) || port;
+      port = openAlgoRestPortFromHost(value) || port;
       setConnRestPort(port);
     } else if (field === "port") {
       port = value;
@@ -283,7 +259,7 @@ export function useSettingsState(): SettingsState {
     } else if (field === "wsPort") {
       wsPort = value;
     }
-    const wsUrl = deriveWsUrl(host, wsPort);
+    const wsUrl = deriveOpenAlgoWsUrl(host, wsPort);
     useConnectionStore.getState().setConfig({ host, apiKey, wsUrl });
 
     // Backend contract (/v1/config/openalgo): port and ws_port must be
@@ -385,9 +361,9 @@ export function useSettingsState(): SettingsState {
   const connection = useMemo<ConnectionData>(() => {
     return {
       host: connHost,
-      port: connRestPort || restPortFromHost(connHost) || "5000",
+      port: connRestPort || openAlgoRestPortFromHost(connHost) || "5000",
       apiKey: connApiKey,
-      wsPort: wsPortFromUrl(connWsUrl),
+      wsPort: openAlgoWsPortFromUrl(connWsUrl),
     };
   }, [connHost, connRestPort, connApiKey, connWsUrl]);
 

@@ -2225,10 +2225,21 @@ def create_flask_app(
         if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):
             return None
 
-        api_key = (
-            request.headers.get("X-API-Key")
-            or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        )
+        auth_header = request.headers.get("Authorization", "")
+        bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+        if bearer:
+            try:
+                from .auth_routes import decode_token  # noqa: PLC0415
+
+                payload = decode_token(bearer)
+                if payload.get("type") == "session":
+                    return None
+            except Exception:
+                # Preserve the legacy ``Authorization: Bearer <api-key>`` path
+                # below when the bearer is not a FlintTrade session JWT.
+                pass
+
+        api_key = request.headers.get("X-API-Key") or bearer
 
         expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
         if not expected_key:

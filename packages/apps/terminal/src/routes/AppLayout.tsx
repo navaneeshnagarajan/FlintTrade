@@ -8,6 +8,7 @@ import { useWsBridge } from "@/hooks/useWsBridge";
 import { useDemoFeed } from "@/hooks/useDemoFeed";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
+import { useOpenAlgoConfigHydration } from "@/hooks/useOpenAlgoConfigHydration";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
@@ -138,6 +139,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
  * Flow routes (/welcome, /explore, /setup) render outside this layout.
  */
 export default function AppLayout() {
+  useOpenAlgoConfigHydration(); // Workspace config is authoritative; connectionStore is a runtime cache.
   useWsBridge();         // WebSocket connection (no-ops if no apiKey)
   useDemoFeed();         // Simulated-live market feed in Explore mode (no broker)
   useTickerFallback();   // REST polling fallback when WS is disconnected

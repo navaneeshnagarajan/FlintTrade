@@ -47,6 +47,19 @@ def test_flinttrade_api_key_authenticates_without_openalgo_key(monkeypatch, tmp_
     assert ok.get_json()["status"] == "success"
 
 
+def test_flinttrade_session_jwt_authenticates_app_requests(monkeypatch, tmp_path: Path) -> None:
+    app = _make_app(monkeypatch, tmp_path, flint_key="flint-local-key")
+    from flinttrade_core.auth_routes import _create_token
+
+    token = _create_token("operator", mode="practice")
+
+    with app.test_client() as client:
+        resp = client.get("/v1/sandbox/capital", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "success"
+
+
 def test_auth_state_default_is_workspace_scoped(monkeypatch, tmp_path: Path) -> None:
     """Auth revocation/rate-limit state must not leak to the operator home."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))

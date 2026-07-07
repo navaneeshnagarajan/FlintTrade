@@ -82,6 +82,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
   `workspace.json`; every consolidated route resolves the OpenAlgo base URL
   through the shared `openalgo_rest_base_url` helper, so a non-default REST
   port no longer needs a `.env` edit.
+- **OpenAlgo connection cache is no longer a second credential store** — the
+  terminal hydrates host/WebSocket state from `/v1/config/openalgo` on app
+  startup, keeps any just-entered API key only in memory for the current
+  session, clears the legacy `flinttrade:connection` session cache, and lets
+  authenticated app API calls use the FlintTrade session JWT instead of relying
+  on a browser-persisted OpenAlgo key.
 
 - **Six new Analysis widgets** — FII Long/Short, Gamma Density, Arbitrage Scanner,
   Index Contribution, Pattern Detection, and Time & Sales, taking the widget
