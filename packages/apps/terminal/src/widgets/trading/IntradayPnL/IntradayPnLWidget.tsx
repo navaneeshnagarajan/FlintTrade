@@ -116,9 +116,25 @@ function quantityOf(pos: Position): number {
  * Effective P&L for a position. OpenAlgo's pnl field is wrong for some
  * brokers (CLAUDE.md quirk 4), so for open positions we compute the
  * mark-to-market locally as (LTP − average price) × quantity whenever those
- * inputs exist, and fall back to the broker-supplied pnl only when the local
- * computation is impossible (closed position, or LTP/average price missing).
- * All inputs are coerced defensively — adapters send string-typed numerics.
+ * inputs are genuinely available, and fall back to the broker-supplied pnl
+ * when the local computation is impossible or untrustworthy.
+ *
+ * Fall-back cases (all defer to the broker pnl, never fabricate a figure):
+ *   - closed position (qty === 0);
+ *   - LTP or average price missing;
+ *   - LTP ≤ 0 or average price ≤ 0 — several brokers report ltp: 0 for an
+ *     open position (illiquid option with no trade yet, pre-market, or a
+ *     positionbook that simply does not populate LTP). Treating that literal
+ *     0 as valid produced a fabricated (0 − avg)×qty loss that overrode the
+ *     correct broker figure, so non-positive inputs are treated as missing.
+ *
+ * Known limitation: the local MTM is the *unrealised* P&L on the currently
+ * open quantity only. For a position that was partially closed earlier in the
+ * session the broker pnl additionally carries the booked realised amount,
+ * which positionbook cannot separate — the tradebook-based recomputation that
+ * would restore it (CLAUDE.md quirk 4) is not wired yet, so where a broker
+ * pnl looks trustworthy it is generally the more complete figure. All inputs
+ * are coerced defensively — adapters send string-typed numerics.
  */
 function effectivePnL(pos: Position): number {
   const qty = quantityOf(pos);
@@ -126,7 +142,7 @@ function effectivePnL(pos: Position): number {
   const avg = toFiniteNumber(
     (pos as WirePosition).averagePrice ?? (pos as WirePosition).average_price,
   );
-  if (qty !== 0 && ltp !== null && avg !== null) {
+  if (qty !== 0 && ltp !== null && ltp > 0 && avg !== null && avg > 0) {
     return (ltp - avg) * qty;
   }
   return toFiniteNumber(pos.pnl) ?? 0;

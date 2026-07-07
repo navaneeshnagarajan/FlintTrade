@@ -2,6 +2,8 @@
 // Direct API calls (placeOrder, cancelAllOrders, closePosition, getExpiry, getQuotes)
 // are intentional here: Scalper requires interactive one-click orders, not cached REST data.
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
+import { AlertTriangle, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   placeOrder,
   cancelAllOrders,
@@ -10,7 +12,12 @@ import {
   getQuotes,
   getSymbol,
 } from "@/services/api";
-import { getLotSize, placeBracketOrder } from "@/services/ftApi";
+import {
+  getLotSize,
+  placeBracketOrder,
+  cancelBracket,
+  type BracketOrderData,
+} from "@/services/ftApi";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useVoiceAlert } from "@/hooks/useVoiceAlert";
 import { useModeStore } from "@/stores/modeStore";
@@ -104,6 +111,15 @@ function ScalperWidget(_props: WidgetProps) {
   const [peOffset, setPeOffset] = useState(0);
 
   const [status, setStatus] = useState<StatusState>({ message: "", type: "idle" });
+  // A partial bracket (entry live, protective exit leg rejected) leaves a NAKED
+  // live position. That must NOT ride on the auto-dismissing status toast — it
+  // sits in a persistent banner with the bracket id and a real cancel path
+  // until the operator acts on it.
+  const [unprotectedBracket, setUnprotectedBracket] = useState<{
+    data: BracketOrderData;
+    message: string;
+  } | null>(null);
+  const [cancellingBracket, setCancellingBracket] = useState(false);
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [closeAllOpen, setCloseAllOpen] = useState(false);
   const [cancelAllOpen, setCancelAllOpen] = useState(false);
@@ -372,10 +388,17 @@ function ScalperWidget(_props: WidgetProps) {
           announceOrder(action, sym, qty);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Bracket order failed";
-          const code =
-            typeof err === "object" && err !== null && "code" in err
-              ? String((err as { code?: unknown }).code ?? "")
-              : "";
+          const data = (err as { data?: BracketOrderData }).data;
+          const code = String((err as { code?: unknown }).code ?? "");
+          // A 'partial' bracket means the entry leg is LIVE but the protective
+          // exit leg failed — the position is unprotected. Persist it (never a
+          // fading toast) with the bracket id and a working cancel path.
+          if (data?.status === "partial") {
+            setUnprotectedBracket({ data, message });
+            setStatus({ message: "", type: "idle" });
+            announceOrder(action, sym, qty);
+            return;
+          }
           // Practice/Explore JWTs are refused server-side — tell the user
           // why, alongside the backend's own message.
           if (code === "practice_unsupported" || code === "mode_blocked") {
@@ -427,6 +450,32 @@ function ScalperWidget(_props: WidgetProps) {
       setPendingOrder(null);
     }
   }, [pendingOrder, executeOrder]);
+
+  // Cancel the entry leg of an unprotected (partial) bracket via the gated
+  // DELETE route. On success the banner clears; any honest caveat the backend
+  // returns (e.g. a filled MARKET entry position this cannot close) is
+  // surfaced so the operator still knows to square off manually.
+  const cancelUnprotectedBracket = useCallback(async () => {
+    if (!unprotectedBracket || cancellingBracket) return;
+    setCancellingBracket(true);
+    try {
+      const { warnings } = await cancelBracket(unprotectedBracket.data.bracket_id);
+      setUnprotectedBracket(null);
+      showStatus(
+        warnings.length ? warnings.join(" ") : "Bracket cancelled",
+        warnings.length ? "error" : "success",
+        warnings.length ? 12000 : 4000,
+      );
+    } catch (err) {
+      showStatus(
+        err instanceof Error ? err.message : "Bracket cancel failed — square off from Positions",
+        "error",
+        10000,
+      );
+    } finally {
+      setCancellingBracket(false);
+    }
+  }, [unprotectedBracket, cancellingBracket, showStatus]);
 
   const confirmCloseAll = useCallback(async () => {
     setCloseAllOpen(false);
@@ -501,6 +550,43 @@ function ScalperWidget(_props: WidgetProps) {
       }}
       className="h-full flex flex-col bg-surface-base text-text-primary focus:outline-none overflow-hidden"
     >
+      {unprotectedBracket && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 border-b border-loss/50 bg-loss/10 px-3 py-2 text-xs text-loss"
+        >
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold">Position unprotected</p>
+            <p className="mt-0.5 text-text-secondary">
+              {unprotectedBracket.data.action} {unprotectedBracket.data.quantity}{" "}
+              {unprotectedBracket.data.symbol} entered, but the protective exit leg failed.
+              Cancel the bracket or square off from Positions. Bracket{" "}
+              <span className="font-mono">{unprotectedBracket.data.bracket_id}</span>.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-6 px-2 text-[11px]"
+              disabled={cancellingBracket}
+              onClick={() => void cancelUnprotectedBracket()}
+            >
+              {cancellingBracket ? <Loader2 size={11} className="animate-spin" /> : "Cancel bracket"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => setUnprotectedBracket(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
       <ScalperControls
         symbol={symbol}
         onSymbolChange={setSymbol}

@@ -313,3 +313,39 @@ export async function placeBracketOrder(params: PlaceBracketParams): Promise<Pla
   }
   return { message: json.message ?? "Bracket placed", data: json.data ?? null };
 }
+
+/** Outcome of a bracket cancel — the backend's honest caveats travel here. */
+export interface CancelBracketResult {
+  message: string;
+  /** Caveats such as a filled MARKET entry position this cancel does NOT close. */
+  warnings: string[];
+}
+
+/**
+ * Cancel a bracket order's resting legs through the gated DELETE route
+ * (`DELETE /api/v1/orders/bracket/<id>`). The backend rebinds the cancel to the
+ * selector the legs were PLACED on, so this is deliberately best-effort about
+ * the broker target and NEVER fails closed on an unresolved native account —
+ * cancelling an unprotected position must not be blocked by write-target
+ * gating. `data.warnings` carry the honest caveats (e.g. a filled MARKET entry
+ * position that removing the protective legs does not close). Direct fetch so
+ * the backend message + `code` reach the caller verbatim.
+ */
+export async function cancelBracket(bracketId: string): Promise<CancelBracketResult> {
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  const target = pickNativeBrokerOrderTarget(mode, apiKey) ?? {};
+  const resp = await fetch(`${getBase()}/api/v1/orders/bracket/${encodeURIComponent(bracketId)}`, {
+    method: "DELETE",
+    headers: buildHeaders(true),
+    body: JSON.stringify(target),
+  });
+  const json = (await resp.json().catch(() => null)) as
+    | { status?: string; message?: string; code?: string; error?: string; data?: { warnings?: string[] } }
+    | null;
+  if (!resp.ok || json?.status !== "success") {
+    const message = json?.message ?? `Bracket cancel failed (HTTP ${resp.status})`;
+    throw new BracketApiError(json?.error ? `${message}: ${json.error}` : message, json?.code);
+  }
+  return { message: json.message ?? "Bracket cancelled", warnings: json.data?.warnings ?? [] };
+}

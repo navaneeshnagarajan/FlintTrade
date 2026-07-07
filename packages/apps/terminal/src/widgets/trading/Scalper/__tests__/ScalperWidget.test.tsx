@@ -25,6 +25,7 @@ const mockGetQuotes = vi.hoisted(() => vi.fn());
 const mockGetSymbol = vi.hoisted(() => vi.fn());
 const mockGetLotSize = vi.hoisted(() => vi.fn());
 const mockPlaceBracketOrder = vi.hoisted(() => vi.fn());
+const mockCancelBracket = vi.hoisted(() => vi.fn());
 /** Mutable tick map handed to the widget by the mocked useWebSocket hook. */
 const mockTicks = vi.hoisted(() => ({
   current: {} as Record<string, { ltp?: number; close?: number }>,
@@ -42,6 +43,7 @@ vi.mock("@/services/api", () => ({
 vi.mock("@/services/ftApi", () => ({
   getLotSize: mockGetLotSize,
   placeBracketOrder: mockPlaceBracketOrder,
+  cancelBracket: mockCancelBracket,
 }));
 
 vi.mock("@/hooks/useVoiceAlert", () => ({
@@ -537,6 +539,34 @@ describe("ScalperWidget", () => {
     await buyCeWithConfirm();
 
     await screen.findByText("Safety layer L1 rejected the entry leg");
+  });
+
+  it("pins a persistent unprotected-position banner and cancels the partial bracket", async () => {
+    // Entry leg live, exit leg rejected → HTTP 422 partial: the position is NAKED.
+    mockPlaceBracketOrder.mockRejectedValue(
+      Object.assign(new Error("Entry leg placed but the protective exit leg failed"), {
+        code: "",
+        data: { bracket_id: "brk-77", symbol: "NIFTY24APR24000CE", action: "BUY", quantity: 75, status: "partial" },
+      }),
+    );
+    mockCancelBracket.mockResolvedValue({ message: "Bracket cancelled", warnings: [] });
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+
+    await buyCeWithConfirm();
+
+    // Persistent alert (role="alert"), the bracket id, and a real cancel action.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Position unprotected");
+    expect(alert).toHaveTextContent("brk-77");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel bracket" }));
+    await waitFor(() => expect(mockCancelBracket).toHaveBeenCalledWith("brk-77"));
+    await waitFor(() => expect(screen.queryByText("Position unprotected")).not.toBeInTheDocument());
   });
 
   it("shows the SL leg in the confirm modal before placing", async () => {

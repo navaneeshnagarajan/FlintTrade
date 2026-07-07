@@ -413,6 +413,28 @@ fn parse_ready_port(buffer: &str) -> Option<u16> {
     None
 }
 
+/// Whether an in-webview navigation target may load in the privileged main
+/// window.
+///
+/// Only the backend's own http(s) origin (scheme + host + port) is allowed —
+/// that is the origin the `main-remote` capability scopes the privileged
+/// desktop commands to. Non-http schemes (`blob:`, `data:`, `about:`) never
+/// match the capability's `http://127.0.0.1:*` allowlist, so they carry no
+/// privileged commands and stay permitted (SPA downloads, workers, PDF views).
+/// Any cross-origin http(s) navigation is refused.
+fn navigation_allowed(
+    target: &tauri::Url,
+    backend_scheme: &str,
+    backend_host: Option<&str>,
+    backend_port: Option<u16>,
+) -> bool {
+    let same_origin = target.scheme() == backend_scheme
+        && target.host_str() == backend_host
+        && target.port() == backend_port;
+    let privileged_scheme = matches!(target.scheme(), "http" | "https");
+    same_origin || !privileged_scheme
+}
+
 /// Create the main window pointed at the backend, then close the splash.
 fn show_main_window(app: &AppHandle, port: u16) {
     if app.get_webview_window("main").is_some() {
@@ -426,11 +448,37 @@ fn show_main_window(app: &AppHandle, port: u16) {
             return;
         }
     };
-    let result = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+    // Capture the backend's exact origin so in-webview navigation can be
+    // confined to it (see the on_navigation guard below).
+    let backend_scheme = url.scheme().to_string();
+    let backend_host = url.host_str().map(str::to_string);
+    let backend_port = url.port();
+    let result = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
         .title("FlintTrade")
         .inner_size(1440.0, 900.0)
         .min_inner_size(960.0, 640.0)
         .center()
+        .on_navigation(move |target| {
+            // Confine the webview to the backend's OWN loopback origin. The main
+            // window carries the `main-remote` capability, which grants the
+            // privileged desktop commands (run_self_update, updater_state) plus
+            // the opener to any `http://127.0.0.1:*` origin. Without this guard a
+            // navigation or redirect to a DIFFERENT loopback origin (a second
+            // local HTTP service) would inherit those commands and could trigger
+            // an unattended local build/exec. External links (broker OAuth) open
+            // in the system browser via the opener, not in-webview, so this does
+            // not break them.
+            let allow = navigation_allowed(
+                target,
+                &backend_scheme,
+                backend_host.as_deref(),
+                backend_port,
+            );
+            if !allow {
+                eprintln!("[flinttrade] blocked in-webview navigation to non-backend origin: {target}");
+            }
+            allow
+        })
         .build();
     match result {
         Ok(win) => {
@@ -948,5 +996,39 @@ mod tests {
         // A reused PID belonging to anything else must never match.
         assert!(!looks_like_backend_sidecar("/usr/bin/python3 some_other_server.py"));
         assert!(!looks_like_backend_sidecar("\"notepad.exe\",\"1234\",\"Console\",\"1\",\"9,000 K\""));
+    }
+
+    #[test]
+    fn navigation_confined_to_backend_origin() {
+        let backend_scheme = "http";
+        let backend_host = Some("127.0.0.1");
+        let backend_port = Some(56576u16);
+        let allow = |u: &str| {
+            navigation_allowed(
+                &tauri::Url::parse(u).unwrap(),
+                backend_scheme,
+                backend_host,
+                backend_port,
+            )
+        };
+
+        // The backend's own origin — permitted (SPA client-side routes).
+        assert!(allow("http://127.0.0.1:56576/"));
+        assert!(allow("http://127.0.0.1:56576/setup?tab=native"));
+
+        // A DIFFERENT loopback port is a foreign origin that would otherwise
+        // inherit the privileged main-remote commands — refused.
+        assert!(!allow("http://127.0.0.1:5000/"));
+        // Different host, and an https loopback — both refused.
+        assert!(!allow("http://localhost:56576/"));
+        assert!(!allow("https://127.0.0.1:56576/"));
+        // Any external site — refused (broker OAuth uses the system browser).
+        assert!(!allow("https://api.upstox.com/v2/login/authorization/dialog"));
+
+        // Non-http schemes carry no capability, so SPA downloads/workers/views
+        // stay permitted.
+        assert!(allow("about:blank"));
+        assert!(allow("data:text/html,hello"));
+        assert!(allow("blob:http://127.0.0.1:56576/uuid"));
     }
 }

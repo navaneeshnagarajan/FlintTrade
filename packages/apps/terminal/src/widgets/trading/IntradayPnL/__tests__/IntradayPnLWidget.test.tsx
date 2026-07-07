@@ -221,6 +221,32 @@ describe("IntradayPnLWidget", () => {
     expect(screen.getByTestId("net-pnl").textContent).toContain("250.50");
   });
 
+  it("does not fabricate a loss when the broker reports ltp: 0 for an open position", async () => {
+    // Illiquid/pre-market open long: broker LTP is a literal 0 but the pnl
+    // field is correct. (0 − 134) × 75 = −10,050 would be a fabricated loss;
+    // the widget must fall back to the broker pnl instead.
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "NIFTY24APR24000CE", exchange: "NFO", product: "NRML", quantity: 75, averagePrice: 134, ltp: 0, pnl: 375, pnlPercent: 0 },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    const netEl = screen.getByTestId("net-pnl");
+    expect(netEl.textContent).toContain("375.00");
+    expect(netEl.textContent).not.toContain("10,050");
+  });
+
+  it("does not fabricate P&L when the broker reports averagePrice: 0", async () => {
+    // averagePrice 0 would make (ltp − 0) × qty the full notional shown as P&L.
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 10, averagePrice: 0, ltp: 110, pnl: 42.5, pnlPercent: 0 },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    const netEl = screen.getByTestId("net-pnl");
+    expect(netEl.textContent).toContain("42.50");
+    expect(netEl.textContent).not.toContain("1,100");
+  });
+
   it("guards against non-numeric garbage instead of rendering NaN", async () => {
     mockGetPositionbook.mockResolvedValue([
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: "abc", pnl: "N/A", ltp: "", average_price: null },
