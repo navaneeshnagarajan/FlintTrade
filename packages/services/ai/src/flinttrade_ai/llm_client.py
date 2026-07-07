@@ -82,6 +82,14 @@ class LLMConfig:
             except Exception:
                 host = host or "http://127.0.0.1:1234"
 
+        workspace_api_key = ""
+        try:
+            from flinttrade_core.llm_config import resolve_llm_api_key
+
+            workspace_api_key = resolve_llm_api_key()
+        except Exception:
+            workspace_api_key = ""
+
         return cls(
             provider=provider,
             host=host,
@@ -98,6 +106,7 @@ class LLMConfig:
                 or os.getenv("TOGETHER_API_KEY", "")
                 or os.getenv("NVIDIA_API_KEY", "")
                 or os.getenv("OPENROUTER_API_KEY", "")
+                or workspace_api_key
             ),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
             reasoning_max_tokens=int(os.getenv("LLM_REASONING_MAX_TOKENS", "8192")),

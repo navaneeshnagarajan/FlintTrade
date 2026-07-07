@@ -2503,6 +2503,43 @@ def create_flask_app(
             "message": "OpenAlgo config saved and client reloaded",
         }), 200
 
+    @app.route("/v1/config/llm", methods=["GET", "POST"])
+    @limiter.limit("10 per minute")
+    def _llm_config() -> Any:
+        """Persist redacted LLM settings from the UI."""
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify({
+                "status": "error",
+                "message": "This endpoint is only reachable from localhost",
+            }), 403
+
+        try:
+            from .llm_config import persist_llm_config, read_llm_config  # noqa: PLC0415
+
+            if request.method == "GET":
+                return jsonify({"status": "success", "data": read_llm_config()}), 200
+
+            payload = request.get_json(silent=True) or {}
+            data = persist_llm_config(payload)
+            return jsonify({
+                "status": "ok",
+                "message": "LLM config saved",
+                "data": data,
+            }), 200
+        except ValueError as exc:
+            logger.warning("Invalid LLM config payload: %s", exc)
+            return jsonify({
+                "status": "error",
+                "message": "At least one of provider, host, model, api_key is required",
+            }), 400
+        except Exception as exc:
+            logger.error("Failed to persist LLM config: %s", exc)
+            return jsonify({
+                "status": "error",
+                "message": "Could not persist LLM config",
+            }), 500
+
     # ------------------------------------------------------------------
     # Connection-test endpoint — /ft-api/v1/test-connection
     # Used by the Setup wizard + Settings › Connection. The browser cannot

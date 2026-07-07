@@ -88,6 +88,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
   session, clears the legacy `flinttrade:connection` session cache, and lets
   authenticated app API calls use the FlintTrade session JWT instead of relying
   on a browser-persisted OpenAlgo key.
+- **LLM config persists from Settings** — `GET/POST /v1/config/llm` now stores
+  provider, host, and model in `workspace.json`, stores the active provider API
+  key in a hardened local secret referenced by `llm.api_key_ref`, returns only
+  redacted key metadata, and `LLMConfig.from_env()` resolves that workspace
+  secret when explicit env overrides are absent.
 
 - **Six new Analysis widgets** — FII Long/Short, Gamma Density, Arbitrage Scanner,
   Index Contribution, Pattern Detection, and Time & Sales, taking the widget

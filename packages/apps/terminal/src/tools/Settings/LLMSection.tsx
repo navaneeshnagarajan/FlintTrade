@@ -146,7 +146,7 @@ export function LLMSection({ settings, onChange }: LLMSectionProps) {
       {!isLocal && (
         <FieldRow
           label="API Key"
-          hint="Provider API key. Kept in memory and not persisted."
+          hint="Provider API key. Stored in the local hardened workspace; re-enter to replace it."
         >
           <TextInput
             value={settings.apiKey}

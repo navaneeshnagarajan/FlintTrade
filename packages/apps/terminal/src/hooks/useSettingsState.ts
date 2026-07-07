@@ -20,6 +20,10 @@ import {
   persistOpenAlgoConfigPatch,
   readOpenAlgoConfig,
 } from "@/services/ftApi.openalgo";
+import {
+  persistLlmConfigPatch,
+  readLlmConfig,
+} from "@/services/ftApi.llm";
 
 // ---------------------------------------------------------------------------
 // Section data shapes (mirror the section component prop interfaces)
@@ -53,6 +57,7 @@ export interface RiskData {
 export type LlmProvider =
   | "lmstudio"
   | "ollama"
+  | "hermes"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -151,6 +156,7 @@ export function useSettingsState(): SettingsState {
   const [connRestPort, setConnRestPort] = useState("");
   const restartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingConnectionPatchRef = useRef<Partial<ConnectionData>>({});
+  const pendingLlmPatchRef = useRef<Partial<LlmData>>({});
 
   // Cleanup pending restart timer when the component that owns this hook unmounts
   useEffect(() => {
@@ -180,6 +186,28 @@ export function useSettingsState(): SettingsState {
       })
       .catch((err) => {
         console.warn("[settings] failed to hydrate OpenAlgo config:", err);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readLlmConfig()
+      .then((payload) => {
+        if (cancelled || payload.status !== "success") return;
+        const data = payload.data ?? {};
+        const patch = pendingLlmPatchRef.current;
+        const current = useSettingsStore.getState().llm;
+        useSettingsStore.getState().setLLM({
+          provider: "provider" in patch ? String(patch.provider ?? "") : String(data.provider ?? current.provider),
+          host: "host" in patch ? String(patch.host ?? "") : String(data.host ?? current.host),
+          model: "model" in patch ? String(patch.model ?? "") : String(data.model ?? current.model),
+          apiKey: "apiKey" in patch ? String(patch.apiKey ?? "") : current.apiKey,
+        });
+      })
+      .catch((err) => {
+        console.warn("[settings] failed to hydrate LLM config:", err);
       });
 
     return () => { cancelled = true; };
@@ -222,7 +250,17 @@ export function useSettingsState(): SettingsState {
   }, []);
 
   const updateLLM = useCallback((field: keyof LlmData, value: string) => {
+    pendingLlmPatchRef.current = { ...pendingLlmPatchRef.current, [field]: value };
     useSettingsStore.getState().setLLM({ [field]: value });
+    const save = persistLlmConfigPatch({ [field]: value });
+    void save.catch((err: unknown) => {
+      console.warn("[settings] failed to persist LLM config:", err);
+      emitNotification({
+        category: "system",
+        title: "LLM settings not saved",
+        body: err instanceof Error ? err.message : "The LLM settings could not be saved.",
+      });
+    });
   }, []);
 
   const updateTelegram = useCallback((field: keyof TelegramData, value: string | boolean) => {

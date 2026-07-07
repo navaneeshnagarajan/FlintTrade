@@ -38,12 +38,19 @@ function resetStores() {
 
 function mockFetchWithOpenAlgoConfig(
   config = { api_key_configured: false, api_key_last4: "", host: "", port: 5000, ws_port: 8765 },
+  llmConfig = { provider: "", host: "", model: "", api_key_configured: false, api_key_last4: "" },
 ) {
-  const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
       return {
         ok: true,
         json: async () => ({ status: "ok" }),
+      } as Response;
+    }
+    if (String(input).includes("/config/llm")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "success", data: llmConfig }),
       } as Response;
     }
     return {
@@ -57,13 +64,20 @@ function mockFetchWithOpenAlgoConfig(
 
 function mockFetchWithFailedPost(
   config = { api_key_configured: false, api_key_last4: "", host: "", port: 5000, ws_port: 8765 },
+  llmConfig = { provider: "", host: "", model: "", api_key_configured: false, api_key_last4: "" },
 ) {
-  const fetchMock = vi.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
       return {
         ok: false,
         status: 500,
         json: async () => ({ status: "error", message: "workspace locked" }),
+      } as Response;
+    }
+    if (String(input).includes("/config/llm")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "success", data: llmConfig }),
       } as Response;
     }
     return {
@@ -294,11 +308,26 @@ describe("useSettingsState", () => {
 
   it("merges late hydration data around a pre-hydration edit", async () => {
     let resolveGet: ((response: Response) => void) | undefined;
-    const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {
         return Promise.resolve({
           ok: true,
           json: async () => ({ status: "ok" }),
+        } as Response);
+      }
+      if (String(input).includes("/config/llm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            status: "success",
+            data: {
+              provider: "",
+              host: "",
+              model: "",
+              api_key_configured: false,
+              api_key_last4: "",
+            },
+          }),
         } as Response);
       }
       return new Promise<Response>((resolve) => {
@@ -510,6 +539,43 @@ describe("useSettingsState", () => {
 
     expect(result.current.llm.provider).toBe("lmstudio");
     expect(result.current.llm.model).toBe("qwen3:9b");
+  });
+
+  it("hydrates LLM config from the backend workspace endpoint without exposing the API key", async () => {
+    mockFetchWithOpenAlgoConfig(undefined, {
+      provider: "openai",
+      host: "",
+      model: "gpt-4o",
+      api_key_configured: true,
+      api_key_last4: "test",
+    });
+
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => {
+      expect(result.current.llm.provider).toBe("openai");
+      expect(result.current.llm.model).toBe("gpt-4o");
+      expect(result.current.llm.apiKey).toBe("");
+    });
+  });
+
+  it("persists LLM edits as partial backend patches", async () => {
+    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const { result } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateLLM("apiKey", "sk-next-key");
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/ft-api/v1/config/llm",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ api_key: "sk-next-key" }),
+        }),
+      );
+    });
   });
 
   it("exposes update action functions", () => {
