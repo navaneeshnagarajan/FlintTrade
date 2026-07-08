@@ -23,6 +23,9 @@ beforeAll(() => {
 let mockMode = "live";
 const mockConnectionState = vi.hoisted(() => ({
   apiKey: "test-openalgo-key",
+  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  // fail-closed window is covered by brokerTargets/api tests.
+  openAlgoHydrated: true,
 }));
 const mockBrokerState = vi.hoisted(() => ({
   accounts: [] as Array<{

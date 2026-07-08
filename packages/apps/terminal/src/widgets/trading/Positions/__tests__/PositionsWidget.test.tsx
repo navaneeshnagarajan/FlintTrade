@@ -32,6 +32,9 @@ const mockUsePositions = vi.fn();
 const mockUseBrokerConnected = vi.fn();
 const mockConnectionState = vi.hoisted(() => ({
   apiKey: "",
+  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  // fail-closed window is covered by brokerTargets/api tests.
+  openAlgoHydrated: true,
 }));
 const mockModeState = vi.hoisted(() => ({
   mode: "live",

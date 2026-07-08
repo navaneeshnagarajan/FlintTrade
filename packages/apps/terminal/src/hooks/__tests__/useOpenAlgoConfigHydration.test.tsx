@@ -21,12 +21,16 @@ describe("useOpenAlgoConfigHydration", () => {
     expect(openAlgoWsPortFromUrl("ws://127.0.0.1:8765")).toBe("8765");
   });
 
-  it("hydrates non-secret connection cache fields from backend config", async () => {
+  it("rehydrates the raw bridge apiKey and opens the routing gate from backend config", async () => {
+    // The store is memory-only, so the raw key is re-fetched over loopback on
+    // every load. Until this completes openAlgoHydrated is false so live-order
+    // routing fails closed; after it, the apiKey is restored without a re-type.
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       json: async () => ({
         status: "success",
         data: {
+          api_key: "live-bridge-key",
           api_key_configured: true,
           api_key_last4: "-key",
           host: "http://192.168.1.20",
@@ -36,16 +40,29 @@ describe("useOpenAlgoConfigHydration", () => {
       }),
     } as Response)));
 
+    expect(useConnectionStore.getState().openAlgoHydrated).toBe(false);
+
     renderHook(() => useOpenAlgoConfigHydration());
 
     await waitFor(() => {
-      expect(useConnectionStore.getState().host).toBe("http://192.168.1.20");
-      expect(useConnectionStore.getState().wsUrl).toBe("ws://192.168.1.20:8770");
+      expect(useConnectionStore.getState().openAlgoHydrated).toBe(true);
     });
-    expect(useConnectionStore.getState().apiKey).toBe("");
+    expect(useConnectionStore.getState().host).toBe("http://192.168.1.20");
+    expect(useConnectionStore.getState().wsUrl).toBe("ws://192.168.1.20:8770");
+    expect(useConnectionStore.getState().apiKey).toBe("live-bridge-key");
   });
 
-  it("preserves an in-memory API key entered during the current session", () => {
+  it("leaves the routing gate closed while the config read has not yet completed", () => {
+    // A never-resolving fetch models the async hydration window. The gate must
+    // remain closed so a live order attempted in this window fails closed.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderHook(() => useOpenAlgoConfigHydration());
+
+    expect(useConnectionStore.getState().openAlgoHydrated).toBe(false);
+  });
+
+  it("preserves an in-memory API key when the backend omits api_key", () => {
     useConnectionStore.getState().setConfig({ apiKey: "typed-this-session" });
 
     applyOpenAlgoConfigToConnectionCache({
@@ -54,5 +71,17 @@ describe("useOpenAlgoConfigHydration", () => {
     });
 
     expect(useConnectionStore.getState().apiKey).toBe("typed-this-session");
+  });
+
+  it("applies an explicitly empty api_key (bridge cleared) over a stale in-memory key", () => {
+    useConnectionStore.getState().setConfig({ apiKey: "stale-key" });
+
+    applyOpenAlgoConfigToConnectionCache({
+      api_key: "",
+      host: "http://127.0.0.1",
+      ws_port: 8765,
+    });
+
+    expect(useConnectionStore.getState().apiKey).toBe("");
   });
 });

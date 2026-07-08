@@ -522,6 +522,37 @@ describe("WebSocketService — lifecycle", () => {
       expect(svc.isConnected).toBe(true);
     });
 
+    it("re-authenticates when the apiKey is rehydrated from empty after a reload", () => {
+      // Post-reload the WS service is first created with an empty apiKey (the
+      // memory-only store has not hydrated yet), so it connects unauthenticated
+      // and live market data is dead. When OpenAlgo-config hydration rehydrates
+      // the raw key, useWsBridge re-invokes getWsService → updateCredentials,
+      // which must tear down and re-authenticate so the feed recovers without
+      // the operator re-typing the key.
+      const svc = new WebSocketService("ws://localhost:8765", "");
+      svc.connect();
+
+      const ws1 = lastWs();
+      ws1._open();
+      // No key yet → no authenticate frame was sent.
+      const authFramesBefore = ws1.send.mock.calls.filter(
+        (call) => JSON.parse(call[0] as string).action === "authenticate",
+      );
+      expect(authFramesBefore).toHaveLength(0);
+
+      // Hydration lands the raw key.
+      svc.updateCredentials("ws://localhost:8765", "rehydrated-key");
+
+      const ws2 = lastWs();
+      expect(ws2).not.toBe(ws1);
+      ws2._open();
+      const payload = JSON.parse(ws2.send.mock.calls[0][0] as string);
+      expect(payload).toEqual({ action: "authenticate", api_key: "rehydrated-key" });
+
+      ws2._receive({ type: "auth", status: "success" });
+      expect(svc.isConnected).toBe(true);
+    });
+
     it("resets the backoff and clears the failure after a successful authentication", () => {
       const svc = createService();
       svc.connect();

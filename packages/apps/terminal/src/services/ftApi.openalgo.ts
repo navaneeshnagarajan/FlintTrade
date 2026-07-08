@@ -1,6 +1,14 @@
 import { buildHeaders } from "./ftApi.helpers";
 
 export interface OpenAlgoConfigData {
+  /**
+   * The raw OpenAlgo bridge API key. The backend returns this ONLY over the
+   * loopback-guarded GET (127.0.0.1) so the memory-only connection store can
+   * rehydrate it after a page/webview reload — the frontend already holds this
+   * key in memory for every OpenAlgo request, so returning it on loopback is
+   * consistent with the trust model. It is never persisted to browser storage.
+   */
+  api_key?: string;
   api_key_configured?: boolean;
   api_key_last4?: string;
   host?: string;

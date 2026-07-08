@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 const mockConnectionState = vi.hoisted(() => ({
   host: "http://localhost:5000",
   apiKey: "test-key-123",
+  openAlgoHydrated: true,
 }));
 
 const mockModeState = vi.hoisted(() => ({
@@ -143,6 +144,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     vi.mocked(orderLimiter.tryConsume).mockReturnValue(true);
     vi.mocked(generalLimiter.tryConsume).mockReturnValue(true);
     mockConnectionState.apiKey = "test-key-123";
+    mockConnectionState.openAlgoHydrated = true;
     mockModeState.mode = "live";
     mockBrokerState.accounts = [];
     mockBrokerState.activeAccountId = null;
@@ -1505,6 +1507,59 @@ describe("OpenAlgo API client (api.ts)", () => {
       } as unknown as Parameters<typeof placeOrder>[0]),
     ).rejects.toThrow(/not available for live writes/i);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed and never diverts to native before the OpenAlgo config has hydrated", async () => {
+    // The apiKey-drop regression: after a reload the in-memory bridge apiKey is
+    // transiently "" while the loopback config GET is still in flight. With a
+    // connected native account selected, the old code would silently DIVERT a
+    // bridge order to that native account. postOrder must instead fail closed
+    // with the "still loading" message and never fetch (neither native nor bridge).
+    mockConnectionState.apiKey = "";
+    mockConnectionState.openAlgoHydrated = false;
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [
+      { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+
+    await expect(
+      placeOrder({
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        price_type: "MARKET",
+        product: "MIS",
+        orderType: "MARKET",
+      } as unknown as Parameters<typeof placeOrder>[0]),
+    ).rejects.toThrow(/still loading/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not block practice-mode orders during the OpenAlgo hydration window", async () => {
+    // Non-live orders never depend on the bridge-vs-native routing decision (they
+    // execute in the SandboxEngine), so the hydration gate must not block them.
+    mockConnectionState.apiKey = "";
+    mockConnectionState.openAlgoHydrated = false;
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "SBX-1" } }),
+    );
+
+    await placeOrder({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      price_type: "MARKET",
+      product: "MIS",
+      orderType: "MARKET",
+    } as unknown as Parameters<typeof placeOrder>[0]);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/orders/place");
   });
 
   it("routes live modifyOrder through the active connected native account", async () => {

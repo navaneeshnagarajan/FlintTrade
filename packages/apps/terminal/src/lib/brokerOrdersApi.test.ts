@@ -29,7 +29,9 @@ const storeState = vi.hoisted(() => ({
 
 // buildHeaders reads these stores imperatively on every call.
 vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey }) },
+  // openAlgoHydrated: true models a normally-loaded app; the hydration
+  // fail-closed window is covered by brokerTargets/api tests.
+  useConnectionStore: { getState: () => ({ apiKey: storeState.apiKey, openAlgoHydrated: true }) },
 }));
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: storeState.token }) },

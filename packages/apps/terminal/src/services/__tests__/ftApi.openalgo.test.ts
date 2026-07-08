@@ -84,6 +84,27 @@ describe("ftApi.openalgo", () => {
     });
   });
 
+  it("surfaces the raw api_key from the loopback GET so the store can rehydrate it", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          api_key: "live-bridge-key",
+          api_key_configured: true,
+          api_key_last4: "-key",
+          host: "http://127.0.0.1",
+          port: 5000,
+          ws_port: 8765,
+        },
+      }),
+    );
+
+    const payload = await readOpenAlgoConfig();
+
+    expect(payload.data?.api_key).toBe("live-bridge-key");
+    expect(payload.data?.api_key_last4).toBe("-key");
+  });
+
   it("normalises connection-test hosts and preserves HTTP status fallback", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({}, 400));
 

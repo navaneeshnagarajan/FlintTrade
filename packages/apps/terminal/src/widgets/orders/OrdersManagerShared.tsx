@@ -170,15 +170,21 @@ export function useBrokerOrderTarget(
   mode: string,
 ): [Required<BrokerTarget>, (target: Required<BrokerTarget>) => void] {
   const apiKey = useConnectionStore((s) => s.apiKey);
+  // Read the hydration gate reactively so the target recomputes once the raw
+  // OpenAlgo apiKey is rehydrated after a reload. While un-hydrated the pure
+  // selector fails closed (returns undefined), so this initial target falls
+  // back to the default rather than diverting to a native account on a
+  // transiently-empty apiKey.
+  const openAlgoHydrated = useConnectionStore((s) => s.openAlgoHydrated);
   const { accounts, activeAccountId } = useBrokerStore(
     useShallow((s) => ({ accounts: s.accounts, activeAccountId: s.activeAccountId })),
   );
 
   const automaticTarget = useMemo<Required<BrokerTarget>>(
     () =>
-      pickNativeBrokerOrderTargetFromState(mode, apiKey, accounts, activeAccountId) ??
+      pickNativeBrokerOrderTargetFromState(mode, apiKey, accounts, activeAccountId, openAlgoHydrated) ??
       DEFAULT_BROKER_TARGET,
-    [mode, apiKey, accounts, activeAccountId],
+    [mode, apiKey, accounts, activeAccountId, openAlgoHydrated],
   );
   const [target, setTarget] = useState<Required<BrokerTarget>>(automaticTarget);
   const [manualTarget, setManualTarget] = useState(false);

@@ -13,6 +13,15 @@ describe("connectionStore", () => {
     expect(state.wsConnected).toBe(false);
   });
 
+  it("starts un-hydrated so live-order routing fails closed until the first config read", () => {
+    expect(useConnectionStore.getState().openAlgoHydrated).toBe(false);
+  });
+
+  it("opens the OpenAlgo hydration gate via setOpenAlgoHydrated", () => {
+    useConnectionStore.getState().setOpenAlgoHydrated(true);
+    expect(useConnectionStore.getState().openAlgoHydrated).toBe(true);
+  });
+
   it("starts without build-time OpenAlgo connection defaults", async () => {
     vi.resetModules();
     vi.stubEnv("VITE_OPENALGO_HOST", "http://192.0.2.10:5000");

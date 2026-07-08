@@ -54,7 +54,11 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
     )
 
     assert get_response.status_code == 200
+    # The loopback GET returns the RAW api_key so the memory-only frontend store
+    # can rehydrate it after a reload (the browser already holds it in memory for
+    # every OpenAlgo request); status fields are retained alongside it.
     assert get_response.get_json()["data"] == {
+        "api_key": "openalgo-ui-key",
         "api_key_configured": True,
         "api_key_last4": "-key",
         "host": "http://127.0.0.1",
@@ -82,6 +86,34 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
         "port": 5000,
         "ws_port": 8765,
     }
+
+
+def test_openalgo_config_get_rejects_non_loopback_and_never_leaks_key(monkeypatch, tmp_path):
+    """The GET returns the raw api_key, so a non-loopback caller must be refused."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+
+    app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": "secret-bridge-key", "host": "http://127.0.0.1"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    response = app.test_client().get(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        environ_overrides={"REMOTE_ADDR": "203.0.113.5"},
+    )
+
+    assert response.status_code == 403
+    assert "secret-bridge-key" not in response.get_data(as_text=True)
 
 
 def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):

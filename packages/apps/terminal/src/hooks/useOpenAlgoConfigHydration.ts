@@ -30,32 +30,69 @@ export function openAlgoWsPortFromUrl(wsUrl: string): string {
   }
 }
 
-export function applyOpenAlgoConfigToConnectionCache(
-  data: OpenAlgoConfigData,
-  options: { preserveApiKey?: boolean } = {},
-): void {
+export function applyOpenAlgoConfigToConnectionCache(data: OpenAlgoConfigData): void {
   const current = useConnectionStore.getState();
   const host = String(data.host ?? "");
   const wsPort = String(data.ws_port ?? "8765");
-  useConnectionStore.getState().setConfig({
+  // Rehydrate the raw bridge apiKey from the loopback GET. The connection store
+  // is memory-only (never persisted to browser storage), so the key is
+  // re-fetched fresh over loopback on every load rather than kept in the
+  // browser — that memory-only property is deliberate and must stay. When the
+  // backend omits api_key (a partial response), preserve whatever is already in
+  // memory instead of clobbering it with "".
+  const apiKey = "api_key" in data ? String(data.api_key ?? "") : current.apiKey;
+  current.setConfig({
     host,
-    apiKey: options.preserveApiKey === false ? "" : current.apiKey,
+    apiKey,
     wsUrl: deriveOpenAlgoWsUrl(host, wsPort),
   });
 }
 
+/** Attempts before the hydration gate is left latched-closed (fail-closed). */
+const MAX_HYDRATION_ATTEMPTS = 5;
+
 export function useOpenAlgoConfigHydration(): void {
   useEffect(() => {
     let cancelled = false;
-    void readOpenAlgoConfig()
-      .then((payload) => {
-        if (cancelled || payload.status !== "success") return;
-        applyOpenAlgoConfigToConnectionCache(payload.data ?? {});
-      })
-      .catch((err) => {
-        console.warn("[openalgo] failed to hydrate connection cache:", err);
-      });
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    return () => { cancelled = true; };
+    const scheduleRetry = (): void => {
+      attempt += 1;
+      // Give up after a bounded number of tries. `openAlgoHydrated` stays false,
+      // so live-order routing keeps failing closed — a genuinely unreachable
+      // backend would fail the order fetch anyway, and never opening the gate is
+      // safer than opening it on an empty apiKey and misrouting a live order.
+      if (attempt >= MAX_HYDRATION_ATTEMPTS) return;
+      retryTimer = setTimeout(hydrate, Math.min(1000 * attempt, 5000));
+    };
+
+    const hydrate = (): void => {
+      void readOpenAlgoConfig()
+        .then((payload) => {
+          if (cancelled) return;
+          if (payload.status !== "success") {
+            scheduleRetry();
+            return;
+          }
+          applyOpenAlgoConfigToConnectionCache(payload.data ?? {});
+          // Open the routing gate only after a successful read has rehydrated
+          // the raw apiKey, so live-order routing fails closed during the async
+          // hydration window instead of diverting an order on an empty apiKey.
+          useConnectionStore.getState().setOpenAlgoHydrated(true);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.warn("[openalgo] failed to hydrate connection cache:", err);
+          scheduleRetry();
+        });
+    };
+
+    hydrate();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, []);
 }

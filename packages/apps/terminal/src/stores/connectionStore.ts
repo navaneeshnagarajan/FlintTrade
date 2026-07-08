@@ -18,12 +18,23 @@ interface ConnectionStore {
   wsFailure: WsFailure | null;
   lastPing: number | null;
   demo: boolean;
+  /**
+   * False until the first successful OpenAlgo-config read over loopback
+   * completes and rehydrates the raw bridge `apiKey` into this memory-only
+   * store. While false, live-order routing MUST fail closed: an empty
+   * in-memory `apiKey` during this window is indistinguishable from "no bridge
+   * configured", so routing either way could silently divert a live order
+   * (see services/brokerTargets.ts). This is a runtime gate only — it is never
+   * persisted to browser storage.
+   */
+  openAlgoHydrated: boolean;
   setStatus: (status: ConnectionStatus) => void;
   setWsConnected: (connected: boolean) => void;
   setWsFailure: (failure: WsFailure | null) => void;
   setConfig: (config: { host?: string; apiKey?: string; wsUrl?: string }) => void;
   setLastPing: (timestamp: number) => void;
   setDemo: (v: boolean) => void;
+  setOpenAlgoHydrated: (v: boolean) => void;
 }
 
 // SECURITY: do not seed connection values from Vite env vars. Vite inlines
@@ -42,12 +53,14 @@ const storeImpl: StateCreator<ConnectionStore> = (set) => ({
   wsFailure: null,
   lastPing: null,
   demo: false,
+  openAlgoHydrated: false,
   setStatus: (status) => set({ status }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
   setWsFailure: (wsFailure) => set({ wsFailure }),
   setConfig: (config) => set((state) => ({ ...state, ...config })),
   setLastPing: (lastPing) => set({ lastPing }),
   setDemo: (demo) => set({ demo }),
+  setOpenAlgoHydrated: (openAlgoHydrated) => set({ openAlgoHydrated }),
 });
 
 try {

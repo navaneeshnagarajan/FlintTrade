@@ -2405,9 +2405,20 @@ def create_flask_app(
                 if not isinstance(openalgo, dict):
                     openalgo = {}
                 api_key = str(openalgo.get("api_key", "") or "")
+                # Return the RAW api_key here (not just last4). This GET is
+                # loopback-guarded (127.0.0.1 only) — the same guard that
+                # protects the POST which accepts the raw key — and the frontend
+                # already holds the key in memory for every OpenAlgo request, so
+                # returning it on the loopback GET is consistent with the trust
+                # model. It lets the memory-only connection store rehydrate the
+                # key after a page/webview reload without the operator re-typing
+                # it, which is what keeps live-order bridge-vs-native routing
+                # from failing closed on every reload. api_key_configured /
+                # api_key_last4 are retained for callers that only need status.
                 return jsonify({
                     "status": "success",
                     "data": {
+                        "api_key": api_key,
                         "api_key_configured": bool(api_key),
                         "api_key_last4": api_key[-4:] if api_key else "",
                         "host": str(openalgo.get("host", "") or ""),
