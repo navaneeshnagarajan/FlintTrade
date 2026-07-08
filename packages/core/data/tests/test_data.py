@@ -441,6 +441,165 @@ class TestAuditLogger:
 
 
 # ======================================================================
+# AuditLogger — hash chain (tamper-evidence)
+# ======================================================================
+
+
+class TestAuditHashChain:
+    """The audit log is a real SHA-256 hash chain, not just JSONL."""
+
+    def _write_three(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+        audit = AuditLogger(str(tmp_path))
+        audit.log_order_placed(
+            strategy="Flint", symbol="RELIANCE", exchange="NSE",
+            action="BUY", quantity="10", price="2500",
+        )
+        audit.log_safety_check(layer="L1_ORDER", verdict="PASS", symbol="RELIANCE")
+        audit.log_order_cancelled(strategy="Flint", orderid="123")
+        audit.close()
+        return audit
+
+    def test_records_carry_linked_chain_fields(self, tmp_path):
+        from flinttrade_data.audit_logger import GENESIS_HASH
+        audit = self._write_three(tmp_path)
+        events = audit.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert [e["seq"] for e in events] == [0, 1, 2]
+        # First record anchors at genesis; each subsequent prev_hash is the
+        # previous record's hash — an actual chain, not independent hashes.
+        assert events[0]["prev_hash"] == GENESIS_HASH
+        assert events[1]["prev_hash"] == events[0]["hash"]
+        assert events[2]["prev_hash"] == events[1]["hash"]
+        assert len({e["hash"] for e in events}) == 3
+
+    def test_verify_chain_passes_for_untampered_log(self, tmp_path):
+        audit = self._write_three(tmp_path)
+        result = audit.verify_chain()
+        assert result["ok"] is True
+        assert result["checked"] == 3
+        assert result["break"] is None
+
+    def test_verify_chain_detects_content_tampering(self, tmp_path):
+        self._write_three(tmp_path)
+        from flinttrade_data.audit_logger import AuditLogger
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        lines = path.read_text().splitlines()
+        rec = json.loads(lines[1])
+        rec["price"] = "99999"  # edit a field WITHOUT recomputing its hash
+        lines[1] = json.dumps(rec)
+        path.write_text("\n".join(lines) + "\n")
+
+        result = AuditLogger(str(tmp_path)).verify_chain()
+        assert result["ok"] is False
+        assert result["break"]["seq"] == 1
+        assert "hash" in result["break"]["reason"]
+
+    def test_verify_chain_detects_deletion(self, tmp_path):
+        self._write_three(tmp_path)
+        from flinttrade_data.audit_logger import AuditLogger
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        lines = path.read_text().splitlines()
+        del lines[1]  # remove the middle record
+        path.write_text("\n".join(lines) + "\n")
+
+        result = AuditLogger(str(tmp_path)).verify_chain()
+        assert result["ok"] is False
+        assert result["break"] is not None
+
+    def test_chain_is_continuous_across_reopen(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+        first = AuditLogger(str(tmp_path))
+        first.log_event("ONE")
+        first.log_event("TWO")
+        first.close()
+
+        second = AuditLogger(str(tmp_path))  # fresh instance, same directory
+        second.log_event("THREE")
+        second.close()
+
+        events = second.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert [e["seq"] for e in events] == [0, 1, 2]
+        assert events[2]["prev_hash"] == events[1]["hash"]
+        assert second.verify_chain()["ok"] is True
+
+    def test_write_is_fsynced(self, tmp_path, monkeypatch):
+        from flinttrade_data import audit_logger
+        calls = {"n": 0}
+        real_fsync = audit_logger.os.fsync
+        def _counting_fsync(fd):
+            calls["n"] += 1
+            return real_fsync(fd)
+        monkeypatch.setattr(audit_logger.os, "fsync", _counting_fsync)
+
+        audit = audit_logger.AuditLogger(str(tmp_path))
+        audit.log_event("DURABLE")
+        audit.close()
+        assert calls["n"] >= 1  # the record was fsync-ed, not just flushed
+
+    def test_intact_chain_is_anchored_at_genesis(self, tmp_path):
+        audit = self._write_three(tmp_path)
+        result = audit.verify_chain()
+        assert result["ok"] is True
+        assert result["anchored_at_genesis"] is True
+
+    def test_head_deletion_is_surfaced_as_not_anchored(self, tmp_path):
+        # Deleting the oldest (genesis) record leaves a self-consistent tail, so
+        # ok stays True — but the chain is no longer provably complete from the
+        # start, which verify_chain reports honestly rather than hiding.
+        self._write_three(tmp_path)
+        from flinttrade_data.audit_logger import AuditLogger
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        lines = path.read_text().splitlines()
+        del lines[0]
+        path.write_text("\n".join(lines) + "\n")
+
+        result = AuditLogger(str(tmp_path)).verify_chain()
+        assert result["ok"] is True
+        assert result["anchored_at_genesis"] is False
+
+    def test_torn_partial_tail_is_repaired_not_concatenated(self, tmp_path):
+        # A crash mid-write leaves a newline-less partial record. The next open
+        # must drop it (never fsync-committed), not merge the next record into it.
+        from flinttrade_data.audit_logger import AuditLogger
+        first = AuditLogger(str(tmp_path))
+        first.log_event("ONE")
+        first.log_event("TWO")
+        first.close()
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write('{"event_type": "TORN", "seq": 9')  # no brace, no newline
+
+        second = AuditLogger(str(tmp_path))
+        second.log_event("THREE")
+        second.close()
+
+        result = second.verify_chain()
+        assert result["ok"] is True
+        events = second.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert [e["event_type"] for e in events] == ["ONE", "TWO", "THREE"]
+        assert [e["seq"] for e in events] == [0, 1, 2]
+
+    def test_verify_chain_skips_legacy_prefix(self, tmp_path):
+        from flinttrade_data.audit_logger import GENESIS_HASH, AuditLogger
+        # A pre-chain (legacy) record with no hash, then chained records appended.
+        day = datetime.now(IST).strftime("%Y-%m-%d")
+        legacy = tmp_path / f"audit_{day}.jsonl"
+        legacy.write_text('{"event_type": "LEGACY", "ts": "2020-01-01T00:00:00"}\n')
+
+        audit = AuditLogger(str(tmp_path))
+        audit.log_event("NEW_ONE")
+        audit.log_event("NEW_TWO")
+        audit.close()
+
+        events = audit.read_day(day)
+        chained = [e for e in events if "hash" in e]
+        assert chained[0]["prev_hash"] == GENESIS_HASH  # fresh chain after legacy
+        result = audit.verify_chain()
+        assert result["ok"] is True
+        assert result["checked"] == 2  # only the chained records are verified
+
+
+# ======================================================================
 # TradeLogger — P&L calculation + daily summaries
 # ======================================================================
 

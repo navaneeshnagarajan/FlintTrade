@@ -389,3 +389,38 @@ def audit_events() -> tuple[Response, int]:
         "status": "success",
         "data": {"logs": logs, "total": total},
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/verify
+# ---------------------------------------------------------------------------
+
+
+@audit_bp.route("/verify", methods=["GET"])
+@require_scope("admin.audit.read")
+def audit_verify() -> tuple[Response, int]:
+    """Verify the gated-execution audit hash chain and report any tampering.
+
+    Recomputes the SHA-256 chain across every audit file (see
+    :meth:`~flinttrade_data.audit_logger.AuditLogger.verify_chain`). ``ok`` is
+    true only when every present record links to its predecessor and matches its
+    own hash; a ``break`` pinpoints the first interior edit, deletion, insertion,
+    or reorder. ``anchored_at_genesis`` reports whether the chain is provably
+    complete from its first record (prefix/suffix removal is indistinguishable
+    from retention using the log alone).
+
+    Returns:
+        ``{"status": "success", "data": {"ok": bool, "checked": int,
+        "anchored_at_genesis": bool, "break": {...} | None}}``.
+    """
+    audit = _get_audit()
+    if audit is None:
+        return jsonify({"status": "error", "message": "Audit log not initialised"}), 503
+
+    try:
+        result = audit.verify_chain()
+    except Exception:  # noqa: BLE001 — verification must never 500 the dashboard
+        logger.exception("Audit chain verification failed to run")
+        return jsonify({"status": "error", "message": "Audit chain verification failed to run"}), 500
+
+    return jsonify({"status": "success", "data": result}), 200

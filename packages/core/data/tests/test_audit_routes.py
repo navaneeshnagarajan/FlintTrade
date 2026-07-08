@@ -240,3 +240,42 @@ def test_audit_events_corrupt_day_is_empty(client, app):
     resp = client.get("/v1/audit/events?date=2026-04-19")
     assert resp.status_code == 200
     assert resp.get_json()["data"] == {"logs": [], "total": 0}
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/verify  (hash-chain tamper-evidence)
+# ---------------------------------------------------------------------------
+
+
+def test_audit_verify_ok(client, app):
+    """The route surfaces the logger's verify_chain result verbatim."""
+    app.config["AUDIT"].verify_chain.return_value = {"ok": True, "checked": 3, "break": None}
+    resp = client.get("/v1/audit/verify")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"ok": True, "checked": 3, "break": None}
+
+
+def test_audit_verify_reports_break(client, app):
+    """A detected tamper is reported as ok=false with the break location."""
+    brk = {"file": "audit_2026-04-19.jsonl", "line": 1, "seq": 1, "reason": "tampered"}
+    app.config["AUDIT"].verify_chain.return_value = {"ok": False, "checked": 1, "break": brk}
+    resp = client.get("/v1/audit/verify")
+    assert resp.status_code == 200
+    body = resp.get_json()["data"]
+    assert body["ok"] is False
+    assert body["break"]["seq"] == 1
+
+
+def test_audit_verify_no_log(app_no_log):
+    """503 when the audit logger is not initialised."""
+    with app_no_log.test_client() as c:
+        resp = c.get("/v1/audit/verify")
+    assert resp.status_code == 503
+
+
+def test_audit_verify_run_failure_is_500(client, app):
+    """If verification itself raises, the route returns 500, not a stack trace."""
+    app.config["AUDIT"].verify_chain.side_effect = RuntimeError("disk gone")
+    resp = client.get("/v1/audit/verify")
+    assert resp.status_code == 500
+    assert resp.get_json()["status"] == "error"

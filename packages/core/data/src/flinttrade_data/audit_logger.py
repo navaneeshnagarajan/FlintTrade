@@ -1,4 +1,4 @@
-"""Append-only local audit logger for the operator's own records.
+"""Append-only, hash-chained local audit logger for the operator's own records.
 
 Behaviour:
 - Append-only — never deletes; old daily files may optionally be compressed
@@ -6,6 +6,31 @@ Behaviour:
   there is no purge or expiry code here
 - File format: audit_YYYY-MM-DD.jsonl (one JSON object per line)
 - Storage: /data/flinttrade/audit/
+
+Tamper-evidence (hash chain):
+- Every record carries a monotonic ``seq``, the ``prev_hash`` of the record
+  before it, and its own ``hash`` (SHA-256 over the record's canonical JSON,
+  every field except ``hash`` — so ``seq`` and ``prev_hash`` are covered too).
+- The chain is *continuous across daily-file rotation and process restarts*:
+  on first write the logger resumes from the tail hash of the newest existing
+  file, or from the genesis hash (64 zeros) when the log is empty or begins
+  with legacy pre-chain records.
+- :meth:`AuditLogger.verify_chain` recomputes the chain across every file and
+  reports the first break, so any *interior* edit, deletion, insertion, or
+  reordering is detectable. Deletion of the oldest (prefix) or newest (suffix)
+  records cannot be told from the operator's own retention/rotation using the
+  log alone, so ``verify_chain`` also returns ``anchored_at_genesis`` — whether
+  the first verified record is the genesis record (seq 0) — to distinguish a
+  chain that is provably complete from the start from one whose earliest records
+  are absent. This is the detection a ``chain_break`` / ``chain_restored``
+  monitor would build on (that ActivityLog event emission is not yet wired) and
+  makes the "hash-chain" claim in the audit routes true.
+- Records are ``flush()``-ed *and* ``os.fsync()``-ed on every write, and the
+  audit directory itself is fsync-ed when a new daily file is created, so an
+  accepted record survives a power loss (flush alone leaves it in the OS cache;
+  a new file also needs its parent-directory entry on disk). A crash mid-write
+  can leave a newline-less partial record, which is truncated on the next open
+  (it was never fsync-committed) rather than merged into the following record.
 
 Events logged:
 - ORDER_PLACED, ORDER_MODIFIED, ORDER_CANCELLED
@@ -17,6 +42,7 @@ Events logged:
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -26,6 +52,9 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("flinttrade.data.audit")
+
+# Genesis link for the first record of a fresh chain (no predecessor).
+GENESIS_HASH = "0" * 64
 
 def _default_audit_dir() -> str:
     """Resolve audit directory: env override > workspace > fallback."""
@@ -57,6 +86,11 @@ class AuditLogger:
         self._audit_dir.mkdir(parents=True, exist_ok=True)
         self._current_date: str = ""
         self._current_file: Any = None
+        # Hash-chain cursor. ``_last_hash == ""`` means "not yet resolved"; it
+        # is lazily loaded from the newest file's tail on the first write so a
+        # restart resumes the same chain rather than forking a new one.
+        self._last_hash: str = ""
+        self._seq: int = -1
 
     def close(self) -> None:
         """Close the current file handle."""
@@ -81,16 +115,140 @@ class AuditLogger:
             self.close()
             self._current_date = today
             filepath = self._audit_dir / f"audit_{today}.jsonl"
+            existed = filepath.exists()
+            self._repair_torn_tail(filepath)  # drop any uncommitted partial line
             self._current_file = open(filepath, "a", encoding="utf-8")
+            if not existed:
+                # A new file's directory entry must reach disk too, or a crash
+                # right after its first record would lose the whole file.
+                self._fsync_dir()
             logger.debug("Audit log rotated to %s", filepath)
         return self._current_file
 
+    @staticmethod
+    def _repair_torn_tail(path: Path) -> None:
+        """Drop a trailing partial line left by a crash mid-write.
+
+        :meth:`_write` fsyncs only *after* writing a complete ``line + "\\n"``,
+        so a file whose last byte is not a newline ends in an uncommitted partial
+        record. Truncating back to the last newline restores a clean append point
+        and stops the next record from being concatenated onto the partial (which
+        would merge two records into one unparseable line and swallow the valid
+        one). Every committed record is newline-terminated, so this never drops
+        durable data.
+        """
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return
+        if size == 0:
+            return
+        with open(path, "rb+") as fh:
+            fh.seek(-1, os.SEEK_END)
+            if fh.read(1) == b"\n":
+                return  # cleanly terminated — nothing to repair
+            newline_at = -1
+            pos = size - 1
+            step = 4096
+            while pos >= 0:
+                start = max(0, pos - step + 1)
+                fh.seek(start)
+                data = fh.read(pos - start + 1)
+                idx = data.rfind(b"\n")
+                if idx != -1:
+                    newline_at = start + idx
+                    break
+                pos = start - 1
+            fh.truncate(newline_at + 1)  # keep through the last newline (0 → empty)
+
+    def _fsync_dir(self) -> None:
+        """fsync the audit directory so a newly created file's entry persists.
+
+        POSIX-only; a best-effort no-op where opening a directory fd is not
+        supported (e.g. Windows), where journalled filesystems cover this.
+        """
+        try:
+            dir_fd = os.open(self._audit_dir, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        except OSError:
+            pass
+        finally:
+            os.close(dir_fd)
+
+    @staticmethod
+    def _record_hash(record: dict[str, Any]) -> str:
+        """SHA-256 over a record's canonical JSON, excluding the ``hash`` field.
+
+        Every other field — including ``seq`` and ``prev_hash`` — is covered,
+        so editing any of them (or the linkage) invalidates the hash. Sorted
+        keys + compact separators give a stable, reproducible canonical form.
+        """
+        payload = {k: v for k, v in record.items() if k != "hash"}
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _iter_files(self) -> list[Path]:
+        """All audit files (``.jsonl`` and ``.jsonl.gz``) in chronological order."""
+        return sorted(self._audit_dir.glob("audit_*"))
+
+    @staticmethod
+    def _read_lines(path: Path) -> list[str]:
+        """Read a plain or gzipped audit file as a list of raw JSON lines."""
+        if path.suffix == ".gz":
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                return [ln for ln in fh if ln.strip()]
+        with open(path, "r", encoding="utf-8") as fh:
+            return [ln for ln in fh if ln.strip()]
+
+    def _resolve_chain_tail(self) -> None:
+        """Set ``_last_hash`` / ``_seq`` from the newest chained record on disk.
+
+        Scans files newest-first and returns the last record that carries a
+        ``hash`` (a chained record). Falls back to the genesis hash when the log
+        is empty or contains only legacy pre-chain records — starting a fresh
+        chain anchored at genesis rather than pretending the legacy tail linked.
+        """
+        for path in reversed(self._iter_files()):
+            try:
+                lines = self._read_lines(path)
+            except (OSError, gzip.BadGzipFile):
+                continue
+            for line in reversed(lines):
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and rec.get("hash"):
+                    self._last_hash = str(rec["hash"])
+                    self._seq = int(rec.get("seq", -1))
+                    return
+        self._last_hash = GENESIS_HASH
+        self._seq = -1
+
     def _write(self, event: dict[str, Any]) -> None:
-        """Append a single JSON line to today's audit file."""
+        """Append one hash-chained JSON record to today's audit file.
+
+        The record is linked to its predecessor via ``prev_hash`` and sealed
+        with its own ``hash``, then flushed and fsync-ed so an accepted record
+        survives a crash. The chain cursor persists across daily rotation and
+        restarts, so the whole log verifies as one tamper-evident chain.
+        """
+        if self._last_hash == "":
+            self._resolve_chain_tail()
+        self._seq += 1
+        record = {**event, "seq": self._seq, "prev_hash": self._last_hash}
+        record["hash"] = self._record_hash(record)
         f = self._get_file()
-        line = json.dumps(event, default=str, ensure_ascii=False)
+        line = json.dumps(record, default=str, ensure_ascii=False)
         f.write(line + "\n")
-        f.flush()  # fsync for durability (no data loss)
+        f.flush()
+        os.fsync(f.fileno())  # force to disk — flush() only reaches the OS cache
+        self._last_hash = record["hash"]
 
     def _make_event(self, event_type: str, **fields: Any) -> dict[str, Any]:
         """Build a timestamped audit event."""
@@ -219,6 +377,69 @@ class AuditLogger:
         """List all audit files (both .jsonl and .jsonl.gz)."""
         files = sorted(self._audit_dir.glob("audit_*"))
         return [f.name for f in files]
+
+    def verify_chain(self) -> dict[str, Any]:
+        """Recompute the hash chain across every audit file, oldest first.
+
+        Detects any *interior* content edit (a record's stored ``hash`` no longer
+        matches its fields), deletion, insertion, or reordering (a broken
+        ``prev_hash`` link or a ``seq`` gap). Deletion of the oldest (prefix) or
+        newest (suffix) records cannot be told from the operator's own
+        retention/rotation using the log alone, because the surviving tail is
+        internally consistent; ``anchored_at_genesis`` reports whether the first
+        verified record is the genesis record (``seq`` 0, ``prev_hash`` genesis)
+        so a chain that is provably complete from the start is distinguishable
+        from one whose earliest records are absent. Legacy pre-chain records
+        (no ``hash``) are skipped until the first chained record, which becomes
+        the anchor; verification then runs forward from there.
+
+        Returns:
+            ``{"ok": bool, "checked": int, "anchored_at_genesis": bool,
+            "break": {...} | None}`` — ``checked`` counts verified chained
+            records; ``break`` describes the first failure (file, line, seq,
+            reason) or is ``None`` when the present records form an unbroken
+            chain.
+        """
+        prev: str | None = None  # running expected prev_hash; None until anchored
+        expected_seq = 0
+        checked = 0
+        anchored_at_genesis = False
+        for path in self._iter_files():
+            try:
+                lines = self._read_lines(path)
+            except (OSError, gzip.BadGzipFile) as exc:
+                return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
+                        "break": {"file": path.name, "reason": f"unreadable: {exc}"}}
+            for idx, line in enumerate(lines):
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
+                            "break": {"file": path.name, "line": idx, "reason": "invalid JSON"}}
+                is_chained = isinstance(rec, dict) and bool(rec.get("hash"))
+                if prev is None:
+                    if not is_chained:
+                        continue  # legacy pre-chain prefix
+                    prev = str(rec.get("prev_hash", GENESIS_HASH))
+                    expected_seq = int(rec.get("seq", 0))
+                    anchored_at_genesis = prev == GENESIS_HASH and expected_seq == 0
+                reason: str | None = None
+                if not is_chained:
+                    reason = "chained-region record is missing its hash (deletion or insertion?)"
+                elif str(rec.get("prev_hash")) != prev:
+                    reason = "prev_hash does not link to the previous record's hash"
+                elif self._record_hash(rec) != str(rec.get("hash")):
+                    reason = "record content does not match its hash (tampered)"
+                elif int(rec.get("seq", -1)) != expected_seq:
+                    reason = f"seq gap: expected {expected_seq}, found {rec.get('seq')}"
+                if reason is not None:
+                    return {"ok": False, "checked": checked, "anchored_at_genesis": anchored_at_genesis,
+                            "break": {"file": path.name, "line": idx,
+                                      "seq": rec.get("seq"), "reason": reason}}
+                prev = str(rec["hash"])
+                expected_seq += 1
+                checked += 1
+        return {"ok": True, "checked": checked, "anchored_at_genesis": anchored_at_genesis, "break": None}
 
     # ------------------------------------------------------------------
     # Compression (optional compression of old daily files, operator-controlled retention)
