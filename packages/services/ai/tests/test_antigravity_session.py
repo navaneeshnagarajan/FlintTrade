@@ -379,3 +379,52 @@ async def test_run_turn_times_out_on_stalled_child() -> None:
     assert proc.terminated is True
     errors = [e for e in events if e.kind == AgentEventKind.ERROR]
     assert len(errors) == 1
+
+
+# ======================================================================
+# Memory bounds + env-scrub coverage (Wave B2 audit follow-ups)
+# ======================================================================
+
+
+async def test_stdout_aggregate_is_bounded_but_streams_all_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A runaway/verbose turn must not OOM the backend: the in-memory aggregate
+    # used for final_text is capped, while EVERY line is still streamed live.
+    from flinttrade_ai.agent_backends import antigravity_session as mod
+
+    monkeypatch.setattr(mod, "_MAX_STDOUT_AGGREGATE_BYTES", 24)
+    lines = [f"line-{i:03d}" for i in range(50)]  # ~8 bytes each ≫ 24-byte cap
+    fake = _FakeAgy(stdout=lines, exit_code=0)
+    session = _session(fake)
+
+    events: list[AgentEvent] = []
+    done = await session.run_turn("go", on_event=_collect(events))
+    await session.close()
+
+    # Live stream carried ALL 50 lines (nothing dropped from the operator).
+    output_texts = [e.text for e in events if e.kind == AgentEventKind.OUTPUT]
+    assert output_texts == lines
+    # The aggregated final_text is bounded and carries the truncation marker.
+    assert "output truncated" in (done.text or "")
+    assert len(done.text or "") < 24 + 200  # a couple of early lines + the marker
+    assert "line-049" not in (done.text or "")
+
+
+async def test_env_scrub_covers_key_suffix_secrets() -> None:
+    # *_KEY / *_KEY_ID secrets must be scrubbed; non-secrets that merely contain
+    # "key" (KEYBOARD_LAYOUT, MONKEY_MODE) must survive.
+    from flinttrade_ai.agent_backends.antigravity_session import _is_secret_env_key
+
+    for secret in (
+        "PRIVATE_KEY",
+        "ENCRYPTION_KEY",
+        "SIGNING_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN",
+        "JWT_SECRET",
+    ):
+        assert _is_secret_env_key(secret), secret
+    for keep in ("KEYBOARD_LAYOUT", "MONKEY_MODE", "PATH", "HOME", "LANG", "PWD"):
+        assert not _is_secret_env_key(keep), keep

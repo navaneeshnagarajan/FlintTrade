@@ -70,6 +70,16 @@ _STDERR_TAIL_LINES = 12
 # Hard cap on retained stderr lines so a chatty child cannot grow memory without
 # bound over a long turn.
 _MAX_STDERR_LINES = 500
+# Hard cap on retained stdout bytes for the aggregated final_text. stdout IS the
+# answer payload (unlike stderr), and every line is still streamed live to the
+# on_event sink — this only bounds the in-memory aggregate so a runaway/verbose
+# agy turn (up to _DEFAULT_TURN_TIMEOUT) cannot OOM the trading backend; the
+# excess is dropped with a marker. ~4 MiB keeps a large legitimate answer intact.
+_MAX_STDOUT_AGGREGATE_BYTES = 4 * 1024 * 1024
+# Bound the inter-task event queue so a slow on_event/SSE sink applies
+# backpressure to the pumps (and thence the child) instead of buffering without
+# limit. The turn timeout still bounds a genuinely wedged child.
+_QUEUE_MAXSIZE = 2048
 
 # Stdout/stderr StreamReader buffer cap. asyncio's default is 64 KiB, but a
 # single ``agy`` output line — a big diff, a pasted file, a long reasoning
@@ -94,8 +104,16 @@ _SECRET_ENV_MARKERS = (
 
 
 def _is_secret_env_key(name: str) -> bool:
-    """Return whether an env var name looks like a credential to scrub."""
+    """Return whether an env var name looks like a credential to scrub.
+
+    Matches the substring markers, plus any name ending in ``_KEY`` / ``_KEY_ID``
+    (ENCRYPTION_KEY, PRIVATE_KEY, SIGNING_KEY, AWS_ACCESS_KEY_ID, …) — a bare
+    ``key`` substring is deliberately NOT a marker so KEYBOARD_LAYOUT / MONKEY_*
+    and similar non-secrets survive.
+    """
     lowered = name.lower()
+    if lowered.endswith("_key") or lowered.endswith("_key_id"):
+        return True
     return any(marker in lowered for marker in _SECRET_ENV_MARKERS)
 
 
@@ -330,7 +348,7 @@ class AntigravitySession(AgentSession):
             ) from exc
 
         self._current_proc = proc
-        queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+        queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
         pumps = [
             asyncio.ensure_future(self._pump(proc.stdout, "stdout", queue)),
             asyncio.ensure_future(self._pump(proc.stderr, "stderr", queue)),
@@ -338,6 +356,8 @@ class AntigravitySession(AgentSession):
         self._current_pumps = pumps
 
         stdout_lines: list[str] = []
+        stdout_bytes = 0
+        stdout_truncated = False
         stderr_tail: list[str] = []
         interrupted = False
         error: str | None = None
@@ -364,7 +384,18 @@ class AntigravitySession(AgentSession):
                     continue
                 stream, text = item
                 if stream == "stdout":
-                    stdout_lines.append(text)
+                    # Always stream the line live; only BOUND the in-memory
+                    # aggregate used for final_text so a runaway/verbose turn
+                    # cannot OOM the backend. Excess is dropped with a marker.
+                    if not stdout_truncated:
+                        stdout_bytes += len(text.encode("utf-8", "replace")) + 1
+                        if stdout_bytes <= _MAX_STDOUT_AGGREGATE_BYTES:
+                            stdout_lines.append(text)
+                        else:
+                            stdout_lines.append(
+                                "… [output truncated — see the live stream for the full turn]"
+                            )
+                            stdout_truncated = True
                     if text.strip():
                         await emit(AgentEvent(AgentEventKind.OUTPUT, text=text, data={"stream": "stdout"}))
                 elif stream == "stderr":
@@ -427,19 +458,25 @@ class AntigravitySession(AgentSession):
                 try:
                     raw = await reader.readline()
                 except (ValueError, asyncio.LimitOverrunError):
-                    queue.put_nowait(("diag", f"<{stream} line over buffer limit; discarded>"))
+                    await queue.put(("diag", f"<{stream} line over buffer limit; discarded>"))
                     continue
                 if not raw:
                     break
                 text = raw.decode("utf-8", "replace").rstrip("\r\n")
-                queue.put_nowait((stream, text))
+                # Blocking put: the bounded queue applies backpressure to the
+                # reader (and thence the child) when a slow on_event/SSE sink is
+                # not draining, instead of buffering the whole turn in memory.
+                await queue.put((stream, text))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             with contextlib.suppress(Exception):
                 queue.put_nowait(("diag", f"<{stream} reader error> {exc}"))
         finally:
-            queue.put_nowait(None)
+            # Best-effort EOF sentinel; the turn deadline bounds the main loop
+            # even if a full queue drops it during teardown.
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(None)
 
     async def _cleanup_turn(self, proc: _ProcessLike | None, pumps: Sequence[asyncio.Task[None]]) -> None:
         """Cancel reader tasks and terminate the child if still alive."""
