@@ -78,6 +78,26 @@ _MAX_STDERR_LINES = 500
 # (see ``_pump``). Mirrors the Codex session's 16 MiB cap.
 _STREAM_LIMIT = 16 * 1024 * 1024  # 16 MiB
 
+# Substrings that mark an inherited env var as a credential the third-party
+# ``agy`` CLI must not receive (it manages its own auth). Matched
+# case-insensitively; deliberately narrow so PATH/HOME/LANG etc. survive.
+_SECRET_ENV_MARKERS = (
+    "api_key",
+    "api-key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "credential",
+)
+
+
+def _is_secret_env_key(name: str) -> bool:
+    """Return whether an env var name looks like a credential to scrub."""
+    lowered = name.lower()
+    return any(marker in lowered for marker in _SECRET_ENV_MARKERS)
+
 
 class _ProcessLike(Protocol):
     """The subprocess surface this session needs (asyncio.subprocess.Process)."""
@@ -206,9 +226,18 @@ class AntigravitySession(AgentSession):
         """Assemble the child env: inherit the process env, overlay extras.
 
         Deliberately injects **no** credentials — ``agy`` authenticates itself
-        via the OS keyring / browser sign-in.
+        via the OS keyring / browser sign-in — AND scrubs the operator's other
+        provider secrets from the inherited environment before handing it to a
+        third-party CLI. Antigravity does not need FlintTrade's LLM/broker keys,
+        so a leaked ``ANTHROPIC_API_KEY``/``OPENAI_API_KEY``/``*_TOKEN``/
+        ``*_SECRET`` in ``agy``'s environment would be gratuitous exposure. PATH,
+        HOME, and other non-secret vars are preserved so the CLI still runs.
         """
-        env = os.environ.copy()
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not _is_secret_env_key(key)
+        }
         env.update(self._env)
         return env
 

@@ -160,8 +160,18 @@ async def test_run_turn_streams_stdout_as_output_and_done() -> None:
     assert done.data["tool_iterations"] == 0
 
 
-async def test_run_turn_does_not_inject_api_key_into_env() -> None:
-    # Antigravity manages its own auth — the session must never add a key.
+async def test_run_turn_does_not_inject_api_key_into_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Antigravity manages its own auth — the session must never add a key AND
+    # must scrub the operator's other provider secrets from the inherited env
+    # before handing it to the third-party CLI. Set some to prove they are
+    # stripped (deterministic regardless of the ambient/CI environment), while a
+    # non-secret var survives.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "cb-secret")
+    monkeypatch.setenv("SOME_TOKEN", "tok-secret")
+    monkeypatch.setenv("FLINTTRADE_WORKDIR", "keep-me")
+
     fake = _FakeAgy(stdout=["ok"], exit_code=0)
     session = _session(fake)
     await session.run_turn("hi")
@@ -171,6 +181,10 @@ async def test_run_turn_does_not_inject_api_key_into_env() -> None:
     lowered = {k.lower() for k in env}
     assert not any("api_key" in k or "api-key" in k for k in lowered)
     assert "anthropic_api_key" not in lowered
+    assert "some_token" not in lowered  # *_TOKEN scrubbed too
+    assert "sk-ant-secret" not in env.values()
+    assert "sk-openai-secret" not in env.values()
+    assert env.get("FLINTTRADE_WORKDIR") == "keep-me"  # non-secret preserved
     assert "--dangerously-skip-permissions" not in fake.calls[0][0]  # safe default
 
 
