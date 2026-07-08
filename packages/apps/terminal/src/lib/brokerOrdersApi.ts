@@ -20,7 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
-import { pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
+import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { queryKeys } from "@/services/queryKeys";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -170,6 +170,18 @@ async function request<T>(
   path: string,
   options: { body?: object; query?: Record<string, string | undefined> } = {},
 ): Promise<T> {
+  // Every non-GET here is a live broker-management WRITE (forever/GTT, super,
+  // conditional-trigger, multi, cancel-all, cancel-smart). Fail closed on the
+  // same conditions as the primary order path: refuse while the OpenAlgo config
+  // is still hydrating after a reload (so a write can't fall through to the
+  // openalgo/default target on a transiently-empty apiKey), and when the
+  // selected native account is not confirmed connected.
+  if (method !== "GET") {
+    assertNativeWriteTargetReadyOrThrow(
+      useModeStore.getState().mode,
+      useConnectionStore.getState().apiKey,
+    );
+  }
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined && value !== "") params.set(key, value);

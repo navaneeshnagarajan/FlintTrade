@@ -39,8 +39,11 @@ const mockBrokerState = vi.hoisted(() => ({
 }));
 
 vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector?: (s: { mode: string }) => unknown) =>
-    typeof selector === "function" ? selector({ mode: mockMode }) : { mode: mockMode },
+  useModeStore: Object.assign(
+    (selector?: (s: { mode: string }) => unknown) =>
+      typeof selector === "function" ? selector({ mode: mockMode }) : { mode: mockMode },
+    { getState: () => ({ mode: mockMode }) },
+  ),
 }));
 
 vi.mock("@/stores/connectionStore", () => ({

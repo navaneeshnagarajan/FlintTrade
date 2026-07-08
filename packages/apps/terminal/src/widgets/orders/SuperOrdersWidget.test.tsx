@@ -6,14 +6,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 let mockMode = "live";
 vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector?: (s: { mode: string }) => unknown) =>
-    typeof selector === "function" ? selector({ mode: mockMode }) : { mode: mockMode },
+  useModeStore: Object.assign(
+    (selector?: (s: { mode: string }) => unknown) =>
+      typeof selector === "function" ? selector({ mode: mockMode }) : { mode: mockMode },
+    { getState: () => ({ mode: mockMode }) },
+  ),
 }));
 
 import SuperOrdersWidget from "./SuperOrdersWidget";
@@ -69,6 +73,7 @@ function renderWidget() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockMode = "live";
+  useConnectionStore.setState({ openAlgoHydrated: true });
   listRows = [LIST_ROW];
   listStatus = 200;
   listMessage = "";
