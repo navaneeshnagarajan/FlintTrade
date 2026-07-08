@@ -2,7 +2,7 @@
  * N8nSection — n8n Bridge tab.
  *
  * Surfaces the n8n workflow-automation bridge (an OPTIONAL external
- * self-hosted service, like OpenAlgo/OpenClaw): connection health, the
+ * self-hosted service, like the OpenAlgo bridge): connection health, the
  * workflow list with activate/deactivate controls, and a manual webhook
  * trigger. Honest states throughout — offline shows a setup hint, a missing
  * N8N_API_KEY shows the backend's real error, nothing is fabricated.

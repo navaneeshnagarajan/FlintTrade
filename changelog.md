@@ -8,6 +8,21 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **AI backends — six supported, OpenClaw removed** — the OpenClaw external-
+  gateway bridge is gone (bridge, `/ai/openclaw/*` routes, widget, exports).
+  In its place a `flinttrade_ai.agent_backends` registry catalogues the six
+  supported backends and an **AI Backends** widget lists them with honest
+  installed/ready/needs-config status. Three are chat/completion providers
+  wired into the existing `LLMClient`: **Cerebras** (OpenAI-compatible),
+  **Claude Code (API key)**, and **Claude Code (OAuth/subscription credits)** —
+  the anthropic path now selects `Authorization: Bearer` + the Claude Code
+  beta/identity headers vs `x-api-key` by token shape (operator-supplied token;
+  no OAuth flow is run and no keychain is read). Three are agent runtimes
+  replacing the "deploy an agent" concept: **Codex** streams live over its
+  `app-server` JSON-RPC-over-stdio protocol now; **Hermes** (ACP) and
+  **Antigravity CLI** are catalogued with detection and land their streaming in
+  the next phase. `POST /api/v1/ai/agents/run` streams `AgentEvent`s as SSE.
+
 - **Binary-first desktop install and update** — `/download`, `/install.sh`,
   `/install.ps1`, and Settings → Updates now resolve the canonical
   `/api/desktop-release` manifest and install the matching published desktop

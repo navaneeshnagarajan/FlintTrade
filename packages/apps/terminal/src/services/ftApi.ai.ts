@@ -1,4 +1,4 @@
-import { get, post } from "./ftApi.helpers";
+import { buildHeaders, get, getBase, post } from "./ftApi.helpers";
 import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -97,21 +97,6 @@ export interface TeamConfig {
   agents: AgentRoleConfig[];
 }
 
-export interface OpenClawStatusData {
-  connected: boolean;
-  agent_control_supported?: boolean;
-  message?: string;
-}
-
-export interface OpenClawAgentData {
-  id: string;
-  name: string;
-  status: string;
-  strategy: string;
-  symbols: string[];
-  created_at: string;
-}
-
 export const getRecentSignals = (limit?: number) => {
   const qs = limit !== undefined ? `?limit=${limit}` : "";
   return get<{ signals: LiveSignal[] }>("signals/recent" + qs);
@@ -147,31 +132,163 @@ export const getTeamConfig = () => get<TeamConfig>("ai/team/config");
 export const updateTeamConfig = (config: TeamConfig) =>
   post<TeamConfig>("ai/team/config", config);
 
-export const getOpenClawStatus = () =>
-  get<OpenClawStatusData>("ai/openclaw/status");
+// ---------------------------------------------------------------------------
+// AI agent backends (agent_backends registry — /ai/agents/*)
+//
+// The catalogue lists six backends in two families: LLM chat/completion
+// providers (claude-code, claude-code-oauth, cerebras) that are configured via
+// Settings and driven through the AI advisor, and CLI/ACP agent runtimes
+// (codex, antigravity, hermes) detected by a binary on PATH and run as a
+// streamed turn. `runAgent` speaks Server-Sent Events; the honest error cases
+// (LLM backend, unknown id, not-installed) come back as JSON and throw the
+// backend's actionable message.
+// ---------------------------------------------------------------------------
 
-export const getOpenClawAgents = () =>
-  get<{ agents: OpenClawAgentData[] }>("ai/openclaw/agents");
+/** Backend family: chat/completion LLM vs stand-alone/ACP agent runtime. */
+export type BackendKind = "llm" | "cli_agent" | "acp_agent";
 
-export interface OpenClawDeployConfig {
-  name: string;
-  strategy: string;
-  symbols: string[];
+/** Live detection status reported by the backend for a single agent backend. */
+export type BackendStatus = "ready" | "not_installed" | "needs_config" | "installed";
+
+/** One catalogue entry from GET /ai/agents/backends. */
+export interface BackendItem {
+  id: string;
+  display_name: string;
+  kind: BackendKind;
+  auth_mode: string;
+  description: string;
+  llm_provider: string | null;
+  detect_binaries: string[];
+  invocation: string[];
+  requires_binary: boolean;
+  status: BackendStatus;
 }
 
-export const deployOpenClawAgent = (config: OpenClawDeployConfig) =>
-  post<{ agent_id?: string; status?: string }>("ai/openclaw/agents", config);
+/** One decoded Server-Sent Event frame from a streaming agent turn. */
+export type AgentEventKind = "output" | "tool" | "error" | "done";
 
-export const stopOpenClawAgent = (agentId: string) =>
-  post<Record<string, unknown>>(
-    `ai/openclaw/agents/${encodeURIComponent(agentId)}/stop`,
-    {},
-  );
+export interface AgentEvent {
+  kind: AgentEventKind;
+  text: string | null;
+  data: Record<string, unknown> | null;
+}
 
-export const getOpenClawAgentLogs = (agentId: string) =>
-  get<{ logs: string[] }>(
-    `ai/openclaw/agents/${encodeURIComponent(agentId)}/logs`,
-  );
+/** List every supported agent backend with its live detection status. */
+export const getAgentBackends = () =>
+  get<{ backends: BackendItem[] }>("ai/agents/backends");
+
+/**
+ * Extract the backend's actionable error message from a non-streaming JSON
+ * response (the honest LLM-backend / unknown-id / not-installed cases) and
+ * throw it, falling back to the status code when there is no message.
+ */
+async function throwAgentRunError(resp: Response): Promise<never> {
+  let message: string | null = null;
+  try {
+    const body: unknown = await resp.json();
+    if (body !== null && typeof body === "object") {
+      const record = body as Record<string, unknown>;
+      if (typeof record.message === "string") message = record.message;
+      else if (typeof record.error === "string") message = record.error;
+    }
+  } catch {
+    // Not a JSON body — fall through to the generic message.
+  }
+  throw new Error(message ?? `Agent run failed: HTTP ${resp.status}`);
+}
+
+/**
+ * Parse a single SSE line into an {@link AgentEvent}, or null for the blank
+ * separator lines and any non-`data:` frame. Each frame the backend emits is
+ * `data: {json}\n\n`, so splitting on newlines yields one payload line plus
+ * blank lines.
+ */
+function parseAgentEvent(line: string): AgentEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const raw = trimmed.slice(5).trim();
+  if (!raw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object") return null;
+
+  const record = parsed as Record<string, unknown>;
+  const kind = record.kind;
+  if (kind !== "output" && kind !== "tool" && kind !== "error" && kind !== "done") {
+    return null;
+  }
+  return {
+    kind,
+    text: typeof record.text === "string" ? record.text : null,
+    data:
+      record.data !== null && typeof record.data === "object"
+        ? (record.data as Record<string, unknown>)
+        : null,
+  };
+}
+
+/**
+ * Run one turn on an installed CLI/ACP agent backend, yielding each decoded
+ * {@link AgentEvent} as it streams in. The stream always ends with a `done`
+ * event. Honest error responses (an LLM backend, an unknown id, or a
+ * not-installed agent) come back as JSON, not a stream, and are surfaced by
+ * throwing the backend's message — never a fabricated event.
+ */
+export async function* runAgent(
+  backendId: string,
+  prompt: string,
+  signal?: AbortSignal,
+): AsyncGenerator<AgentEvent, void, unknown> {
+  const resp = await fetch(`${getBase()}/api/v1/ai/agents/run`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify({ backend_id: backendId, prompt }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    await throwAgentRunError(resp);
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    throw new Error("No readable stream in agent run response.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        const event = parseAgentEvent(line);
+        if (event) yield event;
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+    // Flush any trailing buffered frame not terminated by a newline.
+    const tail = parseAgentEvent(buffer);
+    if (tail) yield tail;
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Already cancelled/closed.
+    }
+    reader.releaseLock();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Market Sentiment Dashboard (structured_sentiment.py — MarketSummary schema)

@@ -18,9 +18,18 @@ type LlmProvider =
   | "groq"
   | "grok"
   | "mistral"
+  | "cerebras"
   | "together"
   | "openrouter"
   | "custom";
+
+/**
+ * UI-only dropdown value for "Claude Code (OAuth)". It is not a distinct backend
+ * provider — it persists as `anthropic`, and the backend chooses the OAuth
+ * (Bearer) auth scheme automatically from the token's shape. A session-local
+ * flag keeps the dropdown showing this label after the operator selects it.
+ */
+const CLAUDE_CODE_OAUTH = "claude-code-oauth";
 
 interface LlmSettings {
   provider: LlmProvider;
@@ -57,6 +66,8 @@ function buildTestUrl(provider: LlmProvider, host: string): string | null {
       return "https://api.groq.com/openai/v1/models";
     case "mistral":
       return "https://api.mistral.ai/v1/models";
+    case "cerebras":
+      return "https://api.cerebras.ai/v1/models";
     case "together":
       return "https://api.together.xyz/v1/models";
     case "openrouter":
@@ -70,6 +81,33 @@ export function LLMSection({ settings, onChange }: LLMSectionProps) {
   const isLocal = LOCAL_PROVIDERS.has(settings.provider);
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [testMessage, setTestMessage] = useState<string>("");
+  // "Claude Code (OAuth)" persists as `anthropic`; this keeps the dropdown
+  // showing the OAuth label for the rest of the session after selection.
+  const [oauthSelected, setOauthSelected] = useState(false);
+
+  // The value shown in the provider dropdown: the OAuth alias when the operator
+  // picked it this session and the underlying provider is still Anthropic,
+  // otherwise the persisted provider itself.
+  const selectedProvider =
+    oauthSelected && settings.provider === "anthropic" ? CLAUDE_CODE_OAUTH : settings.provider;
+  const isClaudeCodeOAuth = selectedProvider === CLAUDE_CODE_OAUTH;
+
+  const handleProviderChange = useCallback(
+    (value: string) => {
+      setTestStatus("idle");
+      setTestMessage("");
+      if (value === CLAUDE_CODE_OAUTH) {
+        // A UI alias for Anthropic + an OAuth-shaped token — persist the real
+        // backend provider so the request routes through the Anthropic transport.
+        setOauthSelected(true);
+        onChange("provider", "anthropic");
+        return;
+      }
+      setOauthSelected(false);
+      onChange("provider", value);
+    },
+    [onChange],
+  );
 
   const handleTestConnection = useCallback(async () => {
     setTestStatus("testing");
@@ -110,12 +148,21 @@ export function LLMSection({ settings, onChange }: LLMSectionProps) {
         hint="Local providers (LM Studio, Ollama) run on your machine — no API key needed."
       >
         <SelectInput
-          value={settings.provider}
-          onChange={(v) => { onChange("provider", v); setTestStatus("idle"); setTestMessage(""); }}
+          value={selectedProvider}
+          onChange={handleProviderChange}
           options={LLM_PROVIDER_OPTIONS}
           aria-label="LLM provider"
         />
       </FieldRow>
+
+      {isClaudeCodeOAuth && (
+        <p className="text-xs text-text-muted -mt-2">
+          Claude Code (OAuth) uses the Anthropic endpoint. Paste your Claude Code OAuth
+          token (starts with <code className="font-mono">sk-ant-oat-</code>,{" "}
+          <code className="font-mono">cc-</code>, or a JWT) into the API key field —
+          FlintTrade detects the OAuth scheme automatically.
+        </p>
+      )}
 
       {isLocal && (
         <FieldRow

@@ -59,9 +59,9 @@ Closed-market/no-funds verification does not prove funded live order execution.
 
 | Item | Status | Notes |
 |---|---|---|
-| Connect to any model — cloud providers | ✅ | OpenAI/Anthropic/Gemini/Groq/Mistral/… via `LLMProvider` + `LLMSection` |
+| Connect to any model — cloud providers | ✅ | OpenAI/Anthropic/Gemini/Groq/Mistral/Cerebras/… via `LLMProvider` + `LLMSection` |
 | Local models — Ollama, LM Studio, Hermes | ✅ | First-class providers in backend + settings UI |
-| OpenClaw agents | ✅ | Control-plane widget (deploy / stop / logs) |
+| AI agent backends | ✅ | `agent_backends` registry + AI Backends widget — Claude Code (API/OAuth), Cerebras, Codex (streaming), Hermes/Antigravity (catalogued); replaced the OpenClaw bridge |
 | Obsidian vault | ✅ | Read-only browser widget + agent vault context |
 | Create strategies | ✅ | StrategyBuilder (legs / payoff / margin / Pine) — Lab "Options Builder" tab; loads templates from the StrategyTemplates widget via explicit strike offsets |
 | Backtest strategies (single + portfolio) | ✅ | Lab Backtest + Portfolio tabs (132 runnable by name; 41 selectable in the Lab picker) |

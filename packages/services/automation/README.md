@@ -1,6 +1,6 @@
 # Automation
 
-> Cron scheduler, Telegram bot with kill switch, OpenClaw bridge, post-market analysis pipelines, voice-order intent extraction.
+> Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines, voice-order intent extraction.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 

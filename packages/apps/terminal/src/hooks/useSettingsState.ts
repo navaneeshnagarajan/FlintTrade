@@ -65,6 +65,7 @@ export type LlmProvider =
   | "groq"
   | "grok"
   | "mistral"
+  | "cerebras"
   | "together"
   | "openrouter"
   | "custom";
