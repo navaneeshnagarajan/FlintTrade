@@ -59,6 +59,15 @@ _CLOSE_TIMEOUT = 3.0
 # How many tailing stderr lines to attach to a user-facing error.
 _STDERR_TAIL_LINES = 12
 
+# Stdout/stderr StreamReader buffer cap. asyncio's default is 64 KiB, but a
+# single codex JSON-RPC frame — an ``item/completed`` carrying the full
+# aggregated command output inline, a long agentMessage, or a big reasoning
+# block — routinely exceeds that. Size the buffer generously so realistic
+# frames fit; the reader additionally survives an over-limit frame by
+# discarding it rather than dying (see ``_read_stdout``). Mirrors Hermes'
+# blocking ``Popen`` reader, which has no per-line cap at all.
+_STREAM_LIMIT = 16 * 1024 * 1024  # 16 MiB
+
 
 @dataclass
 class CodexAppServerError(RuntimeError):
@@ -100,6 +109,9 @@ async def _default_spawn(cmd: Sequence[str], env: Mapping[str, str]) -> _Process
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=dict(env),
+        # Raise the per-line StreamReader cap well above the 64 KiB default so a
+        # large single JSON-RPC frame doesn't overrun the buffer mid-turn.
+        limit=_STREAM_LIMIT,
     )
 
 
@@ -271,6 +283,7 @@ class _CodexAppServerClient:
         self._stderr_lines: list[str] = []
         self._reader_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
+        self._reader_done = False
         self._closed = False
         self._initialized = False
 
@@ -300,7 +313,10 @@ class _CodexAppServerClient:
         cmd = self._build_cmd()
         try:
             self._proc = await self._spawn(cmd, self._build_env())
-        except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+        except OSError as exc:
+            # FileNotFoundError/NotADirectoryError/PermissionError and any other
+            # OSError on spawn (bad interpreter, exec-format, resource limits …)
+            # all become the honest fail-closed signal rather than a raw OSError.
             raise AgentBackendUnavailable(
                 "codex",
                 f"could not launch {cmd[0]!r}: install the Codex CLI "
@@ -312,7 +328,16 @@ class _CodexAppServerClient:
             self._stderr_task = asyncio.ensure_future(self._read_stderr())
 
     def is_alive(self) -> bool:
-        """Return whether the subprocess is still running."""
+        """Return whether the subprocess AND its stdout reader are still live.
+
+        Once the reader task has stopped (EOF, fatal error, or a genuinely dead
+        child) the session can make no further progress even if the child's
+        ``returncode`` is not yet observable, so report not-alive. This lets
+        ``run_turn``'s liveness break fire promptly instead of hanging out the
+        full turn timeout.
+        """
+        if self._reader_done:
+            return False
         return self._proc is not None and self._proc.returncode is None
 
     async def close(self, timeout: float = _CLOSE_TIMEOUT) -> None:
@@ -427,6 +452,19 @@ class _CodexAppServerClient:
         """Await the next notification or server-initiated request."""
         return await self._inbound.get()
 
+    def drain_inbound(self) -> None:
+        """Discard any buffered inbound frames.
+
+        Called at the start of a turn so stale notifications/requests left in
+        the queue by a prior or interrupted turn on a reused session are never
+        replayed into the new turn.
+        """
+        while True:
+            try:
+                self._inbound.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     def stderr_tail(self, n: int = _STDERR_TAIL_LINES) -> list[str]:
         """Return the last ``n`` captured stderr lines (for diagnostics)."""
         return list(self._stderr_lines[-n:])
@@ -445,13 +483,41 @@ class _CodexAppServerClient:
         # both go onto the inbound queue for the session to route.
         self._inbound.put_nowait(msg)
 
+    def _fail_pending_and_wake(self, reason: str) -> None:
+        """Fail every pending request future and wake the inbound consumer.
+
+        Invoked when the stdout reader stops so a caller awaiting a reply
+        future (the handshake or ``turn/start``) or blocked on
+        :meth:`next_inbound` observes the dead reader at once, ending the turn
+        honestly instead of waiting out a long timeout.
+        """
+        if self._pending:
+            exc = RuntimeError(reason)
+            for rid in list(self._pending):
+                fut = self._pending.pop(rid, None)
+                if fut is not None and not fut.done():
+                    fut.set_exception(exc)
+        # Nudge run_turn's inbound poll so it re-checks liveness immediately.
+        with contextlib.suppress(Exception):
+            self._inbound.put_nowait({"__reader_stopped__": True})
+
     async def _read_stdout(self) -> None:
         proc = self._proc
-        if proc is None or proc.stdout is None:
-            return
         try:
+            if proc is None or proc.stdout is None:
+                return
             while True:
-                line = await proc.stdout.readline()
+                try:
+                    line = await proc.stdout.readline()
+                except (ValueError, asyncio.LimitOverrunError) as exc:
+                    # A single frame exceeded the StreamReader buffer cap.
+                    # readline() has already drained the oversized bytes from
+                    # the buffer, so discard this frame and keep reading — never
+                    # return. If the reader returned here instead, the child
+                    # would deadlock on stdout backpressure and the turn would
+                    # hang to its full timeout.
+                    self._stderr_lines.append(f"<stdout frame over buffer limit; discarded> {exc}")
+                    continue
                 if not line:
                     break
                 stripped = line.strip()
@@ -468,6 +534,13 @@ class _CodexAppServerClient:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             self._stderr_lines.append(f"<stdout reader error> {exc}")
+        finally:
+            # The reader is stopping (EOF, fatal error, or cancellation). Mark
+            # it done so ``is_alive`` reports False, fail any in-flight request
+            # futures, and nudge a caller blocked on the inbound queue so the
+            # turn ends honestly instead of hanging to its timeout.
+            self._reader_done = True
+            self._fail_pending_and_wake("codex app-server stdout reader stopped")
 
     async def _read_stderr(self) -> None:
         proc = self._proc
@@ -475,7 +548,13 @@ class _CodexAppServerClient:
             return
         try:
             while True:
-                line = await proc.stderr.readline()
+                try:
+                    line = await proc.stderr.readline()
+                except (ValueError, asyncio.LimitOverrunError):
+                    # An over-limit stderr line: readline() already discarded it
+                    # from the buffer. Skip it and keep tailing rather than
+                    # losing the diagnostics stream entirely.
+                    continue
                 if not line:
                     break
                 self._stderr_lines.append(line.decode("utf-8", "replace").rstrip())
@@ -575,22 +654,31 @@ class CodexAppServerSession(AgentSession):
         if self._client is None:
             self._client = self._client_factory()
         await self._client.start()
-        await self._client.initialize()
-        result = await self._client.request(
-            "thread/start", {"cwd": self._cwd}, timeout=_HANDSHAKE_TIMEOUT
-        )
-        thread = result.get("thread") or {}
-        thread_id = (
-            thread.get("id")
-            or thread.get("sessionId")
-            or result.get("sessionId")
-            or result.get("threadId")
-        )
-        if not thread_id:
-            raise CodexAppServerError(
-                code=-32603,
-                message=f"thread/start returned no thread id (keys: {sorted(result)})",
+        # start() has now spawned the child + reader tasks. If the handshake or
+        # thread start fails from here, close the client so the subprocess and
+        # both reader tasks don't leak, then re-raise the honest error.
+        try:
+            await self._client.initialize()
+            result = await self._client.request(
+                "thread/start", {"cwd": self._cwd}, timeout=_HANDSHAKE_TIMEOUT
             )
+            thread = result.get("thread") or {}
+            thread_id = (
+                thread.get("id")
+                or thread.get("sessionId")
+                or result.get("sessionId")
+                or result.get("threadId")
+            )
+            if not thread_id:
+                raise CodexAppServerError(
+                    code=-32603,
+                    message=f"thread/start returned no thread id (keys: {sorted(result)})",
+                )
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await self._client.close()
+            self._client = None
+            raise
         self._thread_id = str(thread_id)
 
     async def close(self) -> None:
@@ -616,6 +704,9 @@ class CodexAppServerSession(AgentSession):
         await self.ensure_started()
         assert self._client is not None and self._thread_id is not None
         client = self._client
+        # A reused session may still hold notifications from a prior/interrupted
+        # turn in the inbound queue; drop them so this turn never replays them.
+        client.drain_inbound()
 
         async def emit(event: AgentEvent) -> None:
             if on_event is not None:
@@ -634,7 +725,10 @@ class CodexAppServerSession(AgentSession):
                 timeout=_TURN_START_TIMEOUT,
             )
             turn_id = (ts.get("turn") or {}).get("id")
-        except (CodexAppServerError, TimeoutError) as exc:
+        except (CodexAppServerError, TimeoutError, RuntimeError) as exc:
+            # RuntimeError covers a stdin already closed and a reader that died
+            # mid-handshake (its pending future is failed with RuntimeError);
+            # surface all three as an honest single error event, not a raw raise.
             error = f"turn/start failed: {exc}"
             # _finish emits the single terminal error event; keep the stderr
             # tail on the done summary rather than duplicating an error event.

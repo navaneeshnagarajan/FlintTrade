@@ -1340,6 +1340,12 @@ def _sse_frame(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+# Upper bound (seconds) we wait, on a client disconnect, for the agent turn to
+# interrupt and its backend subprocess to be torn down. Bounded so a stuck close
+# never wedges the WSGI worker; the driver thread is a daemon regardless.
+_AGENT_TEARDOWN_TIMEOUT = 15.0
+
+
 def _stream_agent_turn(
     backend_id: str,
     prompt: str,
@@ -1353,6 +1359,14 @@ def _stream_agent_turn(
     thread-safe queue and yielded here as an SSE frame as it arrives. A terminal
     ``done`` frame is always emitted — even when the backend fails to start — so
     the client always sees a clean end-of-stream.
+
+    Client-disconnect honesty: when the operator hits Stop (or the socket drops),
+    the WSGI server closes this generator, raising ``GeneratorExit`` at the paused
+    ``yield``. The ``finally`` below then cancels the in-flight turn on the loop
+    thread and joins it, so the session's ``run_turn`` unwinds (best-effort
+    interrupting the backend) and ``AgentSession.close()`` runs — the backend
+    subprocess is genuinely stopped rather than left running on the operator's
+    machine after Stop is pressed.
 
     Args:
         backend_id: The catalogue backend id to run (a CLI/ACP agent runtime).
@@ -1371,6 +1385,11 @@ def _stream_agent_turn(
 
     events: queue.Queue[Any] = queue.Queue()
     sentinel = object()
+    # Cross-thread handles so a client disconnect (below) can reach into the loop
+    # thread and cancel the running turn.
+    loop_box: dict[str, asyncio.AbstractEventLoop] = {}
+    task_box: dict[str, asyncio.Task[None]] = {}
+    disconnected = threading.Event()
 
     async def _drive() -> None:
         session: Any = None
@@ -1386,6 +1405,10 @@ def _stream_agent_turn(
             session = get_session(backend_id, **session_kwargs)
             await session.ensure_started()
             await session.run_turn(prompt, _on_event)
+        except asyncio.CancelledError:
+            # Client disconnected: unwind so the ``finally`` closes the session
+            # (terminating the backend subprocess). Never emit — nobody is reading.
+            raise
         except AgentBackendUnavailable as exc:
             events.put(AgentEvent(AgentEventKind.ERROR, text=exc.reason, data={"backend": backend_id}))
         except (ValueError, NotImplementedError) as exc:
@@ -1397,9 +1420,13 @@ def _stream_agent_turn(
             events.put(AgentEvent(AgentEventKind.ERROR, text="Agent run failed", data={"backend": backend_id}))
         finally:
             if session is not None:
+                # Runs on both the happy path and the cancelled path (one
+                # CancelledError is delivered, so this await completes), so the
+                # runtime is always torn down. ``suppress(Exception)`` never
+                # swallows the propagating ``CancelledError`` (a BaseException).
                 with contextlib.suppress(Exception):
                     await session.close()
-            if not saw_done:
+            if not saw_done and not disconnected.is_set():
                 events.put(AgentEvent(
                     AgentEventKind.DONE,
                     text="",
@@ -1407,19 +1434,43 @@ def _stream_agent_turn(
                 ))
 
     def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        loop_box["loop"] = loop
+        asyncio.set_event_loop(loop)
         try:
-            asyncio.run(_drive())
+            task = loop.create_task(_drive())
+            task_box["task"] = task
+            loop.run_until_complete(task)
+        except asyncio.CancelledError:
+            pass  # disconnect-triggered cancellation; teardown ran in _drive
         finally:
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            with contextlib.suppress(Exception):
+                loop.close()
             events.put(sentinel)
 
     worker = threading.Thread(target=_runner, name=f"agent-run-{backend_id}", daemon=True)
     worker.start()
 
-    while True:
-        item = events.get()
-        if item is sentinel:
-            break
-        yield _sse_frame(item.to_dict())
+    try:
+        while True:
+            item = events.get()
+            if item is sentinel:
+                break
+            yield _sse_frame(item.to_dict())
+    finally:
+        # Normal completion and client disconnect (``GeneratorExit``) both land
+        # here. On disconnect the turn is still live: flag it, cancel the driving
+        # task on the loop thread, then wait (bounded) for the teardown so the
+        # backend is genuinely stopped before this request returns.
+        disconnected.set()
+        loop = loop_box.get("loop")
+        task = task_box.get("task")
+        if loop is not None and task is not None:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(task.cancel)
+        worker.join(timeout=_AGENT_TEARDOWN_TIMEOUT)
 
 
 @operations_bp.route("/ai/agents/backends", methods=["GET"])

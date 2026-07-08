@@ -204,3 +204,49 @@ def test_anthropic_stream_api_key_uses_x_api_key() -> None:
     assert "Authorization" not in headers
     assert "anthropic-beta" not in headers
     client.close()
+
+
+# ---------------------------------------------------------------------------
+# Credential hygiene — a whitespace-wrapped token must be trimmed before send
+# so auth doesn't break on a stray newline from a copy-paste or config file.
+# ---------------------------------------------------------------------------
+
+
+def test_is_anthropic_oauth_token_ignores_surrounding_whitespace() -> None:
+    assert is_anthropic_oauth_token("  sk-ant-oat01-tok  ") is True
+    assert is_anthropic_oauth_token("\tsk-ant-api03-key\n") is False
+
+
+def test_anthropic_oauth_token_is_trimmed_before_send() -> None:
+    cfg = LLMConfig(provider="anthropic", host="", model="claude-sonnet-4", api_key="  sk-ant-oat01-tok\n")
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_ANTHROPIC_PAYLOAD))
+
+    assert client.chat(_MSGS).success
+    headers = client._http.post.call_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer sk-ant-oat01-tok"
+    assert "x-api-key" not in headers
+    client.close()
+
+
+def test_anthropic_api_key_is_trimmed_before_send() -> None:
+    cfg = LLMConfig(provider="anthropic", host="", model="claude-sonnet-4", api_key="  sk-ant-api03-key\n")
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_ANTHROPIC_PAYLOAD))
+
+    assert client.chat(_MSGS).success
+    headers = client._http.post.call_args.kwargs["headers"]
+    assert headers["x-api-key"] == "sk-ant-api03-key"
+    assert "Authorization" not in headers
+    client.close()
+
+
+def test_openai_compat_token_is_trimmed_before_send() -> None:
+    cfg = LLMConfig(provider="cerebras", host="", model="llama-3.3-70b", api_key="  csk-secret  ")
+    client = LLMClient(config=cfg)
+    client._http.post = MagicMock(return_value=_fake_response(_OPENAI_PAYLOAD))
+
+    assert client.chat(_MSGS).success
+    headers = client._http.post.call_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer csk-secret"
+    client.close()

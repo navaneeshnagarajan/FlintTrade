@@ -218,6 +218,10 @@ def is_anthropic_oauth_token(token: str) -> bool:
     Returns:
         ``True`` for an OAuth / Claude Code token, ``False`` otherwise.
     """
+    # Trim on classification so a whitespace-wrapped credential (a trailing
+    # newline from a copy-paste or a config file) is matched by shape rather
+    # than being mis-classified and sent verbatim.
+    token = (token or "").strip()
     if not token:
         return False
     # Regular Anthropic Console API key — x-api-key auth, never OAuth.
@@ -250,6 +254,9 @@ def _anthropic_headers(api_key: str) -> dict[str, str]:
     Returns:
         The request headers for the Anthropic Messages API.
     """
+    # Trim before sending: a stray leading/trailing space or newline in the
+    # credential would otherwise be transmitted verbatim and rejected by auth.
+    api_key = (api_key or "").strip()
     headers: dict[str, str] = {
         "Content-Type": "application/json",
         "anthropic-version": "2023-06-01",
@@ -391,8 +398,9 @@ class LLMClient:
         url = resolve_endpoint(cfg.provider, cfg.host)
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
-        if cfg.api_key:
-            headers["Authorization"] = f"Bearer {cfg.api_key}"
+        api_key = (cfg.api_key or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload: dict[str, Any] = {
             "model": model,
@@ -547,8 +555,9 @@ class LLMClient:
     ) -> Generator[str, None, None]:
         url = resolve_endpoint(cfg.provider, cfg.host)
         headers: dict[str, str] = {"Content-Type": "application/json"}
-        if cfg.api_key:
-            headers["Authorization"] = f"Bearer {cfg.api_key}"
+        api_key = (cfg.api_key or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {
             "model": cfg.model,
@@ -576,7 +585,9 @@ class LLMClient:
                         except json.JSONDecodeError:
                             continue
         except Exception as exc:
-            logger.error("Streaming error: %s", exc)
+            # Log the exception type only — never the request (which carries the
+            # Authorization/x-api-key header) nor the token.
+            logger.error("Streaming request failed (provider=%s): %s", cfg.provider, type(exc).__name__)
 
     def _stream_anthropic(
         self, cfg: LLMConfig, messages: list[LLMMessage],
@@ -617,7 +628,9 @@ class LLMClient:
                         except json.JSONDecodeError:
                             continue
         except Exception as exc:
-            logger.error("Anthropic streaming error: %s", exc)
+            # Log the exception type only — never the request (which carries the
+            # Bearer/x-api-key auth header) nor the token itself.
+            logger.error("Anthropic streaming request failed: %s", type(exc).__name__)
 
     # ------------------------------------------------------------------
     # Token management

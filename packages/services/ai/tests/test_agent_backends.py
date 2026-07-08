@@ -36,6 +36,7 @@ from flinttrade_ai.agent_backends import (
     list_backends,
     project_codex_notification,
 )
+from flinttrade_ai.agent_backends.codex_session import CodexAppServerError
 
 pytestmark = pytest.mark.unit
 
@@ -525,3 +526,129 @@ async def test_run_turn_surfaces_spawn_failure() -> None:
     session = CodexAppServerSession(spawn=boom_spawn)
     with pytest.raises(AgentBackendUnavailable):
         await session.run_turn("hello")
+
+
+async def test_run_turn_surfaces_generic_oserror_as_backend_unavailable() -> None:
+    # A non-ENOENT spawn failure (generic OSError) must still fail closed as an
+    # honest AgentBackendUnavailable, not leak a raw OSError.
+    async def boom_spawn(_cmd, _env):
+        raise OSError("Exec format error")
+
+    session = CodexAppServerSession(spawn=boom_spawn)
+    with pytest.raises(AgentBackendUnavailable) as excinfo:
+        await session.ensure_started()
+    assert excinfo.value.backend_id == "codex"
+
+
+# ======================================================================
+# Codex session — oversized-frame reader resilience (>64 KiB)
+# ======================================================================
+
+
+async def test_codex_session_survives_oversized_stdout_frame() -> None:
+    # A single JSON-RPC frame larger than asyncio's default 64 KiB StreamReader
+    # cap must NOT wedge the reader. readline() raises ValueError on the
+    # oversized line; the reader discards that line and keeps going, so the turn
+    # completes promptly on the following frames instead of the reader dying and
+    # run_turn hanging to its full turn timeout while the child deadlocks on
+    # stdout backpressure. The fake server drives a real asyncio.StreamReader at
+    # the default limit, exactly reproducing the production wire behaviour.
+    huge_output = "X" * (128 * 1024)  # 128 KiB — well over the 64 KiB default cap
+    huge_frame = {
+        "method": "item/completed",
+        "params": {
+            "item": {
+                "type": "commandExecution",
+                "id": "big",
+                "command": "cat big.log",
+                "exitCode": 0,
+                "aggregatedOutput": huge_output,
+            }
+        },
+    }
+    server = _FakeCodexServer(extra_notifications=[huge_frame])
+    # A short turn timeout turns a regression (reader dies → long hang) into a
+    # fast, unambiguous failure rather than a multi-minute wait.
+    session = CodexAppServerSession(spawn=server.spawn, turn_timeout=5.0)
+
+    events: list[AgentEvent] = []
+    done = await asyncio.wait_for(
+        session.run_turn("go", on_event=_collect(events)), timeout=30.0
+    )
+    client = session._client
+    assert client is not None
+    reader_alive = client.is_alive()  # reader survived the oversized frame
+    diagnostics = client.stderr_tail()
+    await session.close()
+
+    # The turn completed normally — not interrupted, no timeout error.
+    assert done.kind == AgentEventKind.DONE
+    assert done.data is not None
+    assert done.data["error"] is None
+    assert done.data["interrupted"] is False
+    # Frames before AND after the oversized one were still delivered; only the
+    # oversized commandExecution was dropped (so just the small `ls` counts).
+    assert done.text == "Hello from codex"
+    assert done.data["tool_iterations"] == 1
+    # The reader logged a diagnostic and stayed alive through the whole turn.
+    assert reader_alive is True
+    assert any("over buffer limit" in line for line in diagnostics)
+
+
+# ======================================================================
+# Codex session — no subprocess/reader leak on handshake failure
+# ======================================================================
+
+
+class _FailingThreadStartServer(_FakeCodexServer):
+    """Handshake succeeds but ``thread/start`` returns a JSON-RPC error."""
+
+    def _on_client_line(self, line: bytes) -> None:
+        msg = json.loads(line)
+        self.received.append(msg)
+        method = msg.get("method")
+        mid = msg.get("id")
+        if method == "initialize":
+            self._feed({"id": mid, "result": {"userAgent": "codex/test"}})
+        elif method == "initialized":
+            return
+        elif method == "thread/start":
+            self._feed({"id": mid, "error": {"code": -32000, "message": "no thread"}})
+
+
+async def test_ensure_started_closes_client_when_handshake_fails() -> None:
+    server = _FailingThreadStartServer()
+    session = CodexAppServerSession(spawn=server.spawn)
+
+    with pytest.raises(CodexAppServerError):
+        await session.ensure_started()
+
+    # The subprocess was terminated (close() ran) and the client reference was
+    # dropped, so neither the child nor its two reader tasks leak.
+    assert session._client is None
+    assert server.proc.returncode is not None
+
+
+# ======================================================================
+# Codex session — stale notifications don't leak across turns
+# ======================================================================
+
+
+async def test_codex_session_drains_stale_notifications_between_turns() -> None:
+    server = _FakeCodexServer()
+    session = CodexAppServerSession(spawn=server.spawn)
+
+    await session.run_turn("first")
+    assert session._client is not None
+
+    # Simulate a residual frame left in the inbound queue by a prior/interrupted
+    # turn. run_turn must drop it, never replay it into the next turn.
+    session._client._inbound.put_nowait(
+        {"method": "item/completed", "params": {"item": {"type": "agentMessage", "text": "STALE-LEFTOVER"}}}
+    )
+
+    events: list[AgentEvent] = []
+    await session.run_turn("second", on_event=_collect(events))
+    await session.close()
+
+    assert all(e.text != "STALE-LEFTOVER" for e in events)
