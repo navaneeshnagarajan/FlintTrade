@@ -67,6 +67,7 @@ type CheckState =
   | { phase: "checking" }
   | { phase: "current"; tag: string }
   | { phase: "newer"; manifest: DesktopReleaseManifest; asset: DesktopReleaseAsset | null }
+  | { phase: "indeterminate"; manifest: DesktopReleaseManifest; asset: DesktopReleaseAsset | null }
   | { phase: "error"; message: string };
 
 type UpdateKind = "binary" | "source";
@@ -236,8 +237,14 @@ function DesktopUpdatesSection() {
     }
     const latestParsed = parseVersionTag(manifest.tag);
     const runningParsed = parseVersionTag(runningTag);
-    if (latestParsed && runningParsed && compareVersions(latestParsed, runningParsed) > 0) {
-      setCheck({ phase: "newer", manifest, asset: matchingPlatformAsset(manifest, shell ?? undefined) });
+    const asset = matchingPlatformAsset(manifest, shell ?? undefined);
+    if (!latestParsed || !runningParsed) {
+      // Fail safe: an unparseable version tag must never be reported as "up to
+      // date" (that would silently hide a real update). Surface the uncertainty
+      // and still offer the update path — prefer showing it over hiding it.
+      setCheck({ phase: "indeterminate", manifest, asset });
+    } else if (compareVersions(latestParsed, runningParsed) > 0) {
+      setCheck({ phase: "newer", manifest, asset });
     } else {
       setCheck({ phase: "current", tag: manifest.tag });
     }
@@ -267,10 +274,15 @@ function DesktopUpdatesSection() {
     }
   }
 
-  const newer = check.phase === "newer" ? check : null;
-  const showBinaryPath = newer != null && shell?.installer_script != null && newer.asset != null;
-  const showSourcePath = newer != null && shell?.src_dir != null;
-  const showOneLinerFallback = newer != null && !showBinaryPath && !showSourcePath;
+  const release = check.phase === "newer" || check.phase === "indeterminate" ? check : null;
+  const indeterminate = check.phase === "indeterminate";
+  // The bundled installer script resolves the correct release asset server-side,
+  // so a failed client-side platform match must NOT hide the one-click update —
+  // require only that a script is present. The website one-liner stays the
+  // fallback only when there is genuinely no in-app update path.
+  const showBinaryPath = release != null && shell?.installer_script != null;
+  const showSourcePath = release != null && shell?.src_dir != null;
+  const showOneLinerFallback = release != null && !showBinaryPath && !showSourcePath;
 
   return (
     <div className="space-y-5">
@@ -314,19 +326,34 @@ function DesktopUpdatesSection() {
         </p>
       )}
 
-      {newer && (
+      {release && (
         <div className="space-y-3 p-4 rounded-lg bg-surface-card border border-accent/30">
-          <p className="text-xs text-text-primary">
-            <span className="font-mono font-semibold">{newer.manifest.tag}</span> is available (you are on{" "}
-            <span className="font-mono">{runningTag}</span>).
-          </p>
+          {indeterminate ? (
+            <p className="text-xs text-text-primary">
+              Could not determine whether{" "}
+              <span className="font-mono font-semibold">{release.manifest.tag}</span> is newer than
+              your current version (<span className="font-mono">{runningTag}</span>). Re-run the
+              check above, or install it below if you want the latest build.
+            </p>
+          ) : (
+            <p className="text-xs text-text-primary">
+              <span className="font-mono font-semibold">{release.manifest.tag}</span> is available
+              (you are on <span className="font-mono">{runningTag}</span>).
+            </p>
+          )}
 
           {showBinaryPath && !updateStarted && (
             <>
               <p className="text-xs text-text-secondary leading-relaxed">
-                The default update downloads the published installer asset for this machine:{" "}
-                <span className="font-mono break-all">{newer.asset?.name}</span>. The app will close
-                while the installer runs.
+                {release.asset ? (
+                  <>
+                    The default update downloads the published installer asset for this machine:{" "}
+                    <span className="font-mono break-all">{release.asset.name}</span>.
+                  </>
+                ) : (
+                  <>The bundled installer script will download the matching desktop package for this machine.</>
+                )}{" "}
+                The app will close while the installer runs.
               </p>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -337,7 +364,7 @@ function DesktopUpdatesSection() {
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Install {newer.manifest.tag}?</AlertDialogTitle>
+                    <AlertDialogTitle>Install {release.manifest.tag}?</AlertDialogTitle>
                     <AlertDialogDescription>
                       FlintTrade will launch the bundled installer script, download the matching
                       desktop package, close this app, and let the OS installer replace the old app.
@@ -345,7 +372,7 @@ function DesktopUpdatesSection() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void startUpdate("binary", newer.manifest.tag)}>
+                    <AlertDialogAction onClick={() => void startUpdate("binary", release.manifest.tag)}>
                       Install and relaunch
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -370,7 +397,7 @@ function DesktopUpdatesSection() {
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Rebuild {newer.manifest.tag} from source?</AlertDialogTitle>
+                    <AlertDialogTitle>Rebuild {release.manifest.tag} from source?</AlertDialogTitle>
                     <AlertDialogDescription>
                       FlintTrade will run the source-build installer from the local checkout. The app
                       will close while the build runs and relaunch after installation.

@@ -231,9 +231,18 @@ function Build-FromSource {
 
     if (-not $Ref) {
         Say "Resolving newest release tag from GitHub..."
+        # Newest by version core, then a STABLE release must outrank its own
+        # prerelease at the same version (v1.2.3 > v1.2.3-beta.1). PowerShell's
+        # Sort-Object is ordinary string comparison, so the sh script's '~' trick
+        # (filevercmp-specific) does NOT apply here; instead a secondary boolean
+        # key sorts stable ($true) last. A newer prerelease still beats an older
+        # stable because the version core is the primary key.
         $tags = git ls-remote --tags --refs $RepoUrl "v*" |
             ForEach-Object { ($_ -split "/")[-1] } |
-            Sort-Object { [version]((($_ -replace "^v", "") -split "-")[0]) }, { $_ }
+            Sort-Object `
+                { [version]((($_ -replace "^v", "") -split "-", 2)[0]) }, `
+                { -not ($_ -match "-") }, `
+                { $_ }
         $script:Ref = $tags | Select-Object -Last 1
         if (-not $Ref) { Fail "Could not resolve a release tag from $RepoUrl" }
     }

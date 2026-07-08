@@ -277,7 +277,10 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "uv sync --frozen --extra desktop" in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
-    assert 'prerelease: true' in workflow
+    # Prerelease is derived from the tag (a '-' suffix ⇒ beta ⇒ prerelease) so a
+    # stable release is not wrongly flagged prerelease; beta tags still are.
+    assert "prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}" in workflow
+    assert 'prerelease = "-" in version' in workflow
     assert 'overwrite_files: true' in workflow
     assert "No installers were produced" in workflow
     assert "--output \"supply-chain/vuln-snapshot-${DATE}.json\" || true" not in vuln_refresh

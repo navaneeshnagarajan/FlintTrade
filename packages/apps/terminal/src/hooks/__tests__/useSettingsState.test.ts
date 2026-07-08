@@ -7,7 +7,7 @@
  * The websocket service is mocked so resetWsService doesn't blow up in jsdom.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { isAcceptedOpenAlgoConfigStatus, useSettingsState } from "../useSettingsState";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -98,6 +98,12 @@ describe("useSettingsState", () => {
     resetStores();
     mockFetchWithOpenAlgoConfig();
     mockEmitNotification.mockClear();
+  });
+
+  afterEach(() => {
+    // LLM persistence is debounced with timers; a test that leaves fake timers
+    // installed would poison the next one, so always restore real timers.
+    vi.useRealTimers();
   });
 
   it("accepts backend OpenAlgo config save status variants", () => {
@@ -559,13 +565,27 @@ describe("useSettingsState", () => {
     });
   });
 
-  it("persists LLM edits as partial backend patches", async () => {
+  function postCalls(fetchMock: ReturnType<typeof mockFetchWithOpenAlgoConfig>) {
+    return fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+  }
+
+  it("persists LLM edits as a debounced partial backend patch", async () => {
+    vi.useFakeTimers();
     const fetchMock = mockFetchWithOpenAlgoConfig();
     const { result } = renderHook(() => useSettingsState());
 
     act(() => {
       result.current.updateLLM("apiKey", "sk-next-key");
     });
+    // Inside the debounce window nothing is persisted yet.
+    expect(postCalls(fetchMock)).toHaveLength(0);
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -575,6 +595,108 @@ describe("useSettingsState", () => {
           body: JSON.stringify({ api_key: "sk-next-key" }),
         }),
       );
+    });
+  });
+
+  it("does not persist LLM config per keystroke — coalesces rapid edits into one POST", async () => {
+    // POST /v1/config/llm is rate limited to 10/min, and a per-keystroke save
+    // can leave a truncated key as the last value written to the secret file.
+    vi.useFakeTimers();
+    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const { result } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateLLM("apiKey", "s");
+      result.current.updateLLM("apiKey", "sk");
+      result.current.updateLLM("apiKey", "sk-live-1234");
+    });
+    // Still mid-type — no partial key persisted.
+    expect(postCalls(fetchMock)).toHaveLength(0);
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      const posts = postCalls(fetchMock);
+      expect(posts).toHaveLength(1);
+      expect(posts[0][0]).toBe("/ft-api/v1/config/llm");
+      expect((posts[0][1] as RequestInit).body).toBe(JSON.stringify({ api_key: "sk-live-1234" }));
+    });
+  });
+
+  it("coalesces edits across LLM fields into a single debounced POST", async () => {
+    vi.useFakeTimers();
+    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const { result } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateLLM("provider", "openai");
+      result.current.updateLLM("model", "gpt-4o");
+      result.current.updateLLM("apiKey", "sk-key");
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      const posts = postCalls(fetchMock);
+      expect(posts).toHaveLength(1);
+      expect((posts[0][1] as RequestInit).body).toBe(
+        JSON.stringify({ provider: "openai", model: "gpt-4o", api_key: "sk-key" }),
+      );
+    });
+  });
+
+  it("surfaces a failed LLM save as a notification (never silently dropped)", async () => {
+    vi.useFakeTimers();
+    mockFetchWithFailedPost();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateLLM("apiKey", "sk-bad-key");
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(mockEmitNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: "system",
+          title: "LLM settings not saved",
+          body: "workspace locked",
+        }),
+      );
+    });
+    warnSpy.mockRestore();
+  });
+
+  it("flushes a pending LLM edit when the settings surface unmounts", async () => {
+    vi.useFakeTimers();
+    const fetchMock = mockFetchWithOpenAlgoConfig();
+    const { result, unmount } = renderHook(() => useSettingsState());
+
+    act(() => {
+      result.current.updateLLM("model", "gpt-4o");
+    });
+    // Inside the debounce window — not yet persisted.
+    expect(postCalls(fetchMock)).toHaveLength(0);
+
+    act(() => {
+      unmount();
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      const posts = postCalls(fetchMock);
+      expect(posts).toHaveLength(1);
+      expect((posts[0][1] as RequestInit).body).toBe(JSON.stringify({ model: "gpt-4o" }));
     });
   });
 

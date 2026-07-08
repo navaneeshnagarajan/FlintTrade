@@ -270,10 +270,7 @@ fn run_binary_update(app: AppHandle, tag: Option<String>) -> Result<(), String> 
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    spawn_detached_updater(&script, &current_dir, false, release_tag)
-        .map_err(|e| format!("Could not start the installer update: {e}"))?;
-    schedule_update_exit(&app);
-    Ok(())
+    launch_binary_update(&app, &script, &current_dir, release_tag)
 }
 
 /// Kick off a self-update: spawn the LOCAL bootstrap script detached (so the
@@ -289,7 +286,11 @@ fn run_self_update(app: AppHandle) -> Result<(), String> {
         );
     };
     let script = install_script_path(&src_dir);
-    spawn_detached_updater(&script, &src_dir, true, None)
+    // Detached rebuild: the returned handle is kept only to detach from — a
+    // dropped `Child` is never signalled or waited, so the process survives our
+    // exit. Source rebuilds keep the timed exit (the built installer owns the
+    // relaunch and does not hand a "download verified" signal back to us).
+    let _child = spawn_detached_updater(&script, &src_dir, true, None, None)
         .map_err(|e| format!("Could not start the update script: {e}"))?;
 
     schedule_update_exit(&app);
@@ -298,16 +299,184 @@ fn run_self_update(app: AppHandle) -> Result<(), String> {
 
 fn schedule_update_exit(app: &AppHandle) {
     // Mark the quit as deliberate (close-to-tray must not intercept it), then
-    // exit shortly so the updater can replace the bundle underneath us.
+    // exit shortly so the updater can replace the bundle underneath us. Used by
+    // the source-rebuild path and the Windows binary path, whose installers own
+    // the relaunch and do not signal a verified download back to us.
     if let Some(q) = app.try_state::<QuitRequested>() {
         q.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(2));
-        let h = handle.clone();
-        let _ = handle.run_on_main_thread(move || h.exit(0));
+        do_deliberate_exit(&handle);
     });
+}
+
+/// Mark the quit as deliberate (so the close-to-tray handler steps aside) and
+/// exit on the main thread.
+fn do_deliberate_exit(app: &AppHandle) {
+    if let Some(q) = app.try_state::<QuitRequested>() {
+        q.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let handle = app.clone();
+    let h = handle.clone();
+    let _ = handle.run_on_main_thread(move || h.exit(0));
+}
+
+/// Environment variable naming the file the installer touches once it has
+/// downloaded + verified the release and is about to replace the running
+/// bundle. The desktop shell waits for that file before quitting, so a failed
+/// or slow download can never leave the app gone with nothing installed.
+#[cfg(unix)]
+const UPDATE_HANDOFF_ENV: &str = "FLINTTRADE_UPDATE_HANDOFF";
+
+/// A fresh, not-yet-existing path (under the workspace dir) for the installer's
+/// download-verified handoff marker. ``None`` when no workspace dir resolves,
+/// in which case the caller falls back to the timed exit.
+#[cfg(unix)]
+fn update_handoff_path() -> Option<PathBuf> {
+    let dir = flinttrade_home()?;
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("update_handoff_{}_{}", std::process::id(), nonce));
+    // A stale marker from a prior run would trigger an instant false handoff.
+    let _ = std::fs::remove_file(&path);
+    Some(path)
+}
+
+/// One poll's worth of decision for the binary-update handoff watcher.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum HandoffDecision {
+    /// The installer signalled it has downloaded + verified and is replacing the
+    /// bundle — quit so the freshly installed build can relaunch.
+    Proceed,
+    /// The updater exited before signalling — it could not proceed. Keep the app
+    /// running and surface the failure rather than vanishing.
+    Failed,
+    /// The updater exited cleanly without ever needing us to step aside (e.g. a
+    /// package-manager install that replaces files in place). Nothing to do.
+    Done,
+    /// The updater is still working (download in progress) — keep waiting.
+    KeepWaiting,
+}
+
+/// Decide what the handoff watcher should do from the marker's presence and the
+/// child's exit state (``None`` = still running, ``Some(success)`` = exited).
+/// A present marker always wins: once the installer is replacing the bundle we
+/// must step aside even if the child has also just exited.
+#[cfg(unix)]
+fn handoff_decision(handoff_present: bool, exited_success: Option<bool>) -> HandoffDecision {
+    if handoff_present {
+        return HandoffDecision::Proceed;
+    }
+    match exited_success {
+        None => HandoffDecision::KeepWaiting,
+        Some(true) => HandoffDecision::Done,
+        Some(false) => HandoffDecision::Failed,
+    }
+}
+
+/// Kick off the binary-first update (unix). The detached installer touches the
+/// handoff marker once the download is verified and it is about to replace the
+/// bundle; only then do we quit, so a failed or slow download can never leave
+/// the app gone with nothing installed. Falls back to the timed exit when no
+/// workspace dir (hence no marker path) is available.
+#[cfg(unix)]
+fn launch_binary_update(
+    app: &AppHandle,
+    script: &Path,
+    current_dir: &Path,
+    release_tag: Option<&str>,
+) -> Result<(), String> {
+    match update_handoff_path() {
+        Some(handoff) => {
+            let child = spawn_detached_updater(
+                script,
+                current_dir,
+                false,
+                release_tag,
+                Some(handoff.as_path()),
+            )
+            .map_err(|e| format!("Could not start the installer update: {e}"))?;
+            wait_for_handoff_then_exit(app, child, handoff);
+        }
+        None => {
+            let _child = spawn_detached_updater(script, current_dir, false, release_tag, None)
+                .map_err(|e| format!("Could not start the installer update: {e}"))?;
+            schedule_update_exit(app);
+        }
+    }
+    Ok(())
+}
+
+/// Kick off the binary-first update (non-unix, i.e. Windows). The NSIS setup.exe
+/// owns the relaunch and does not signal a verified download back to us, so the
+/// existing timed exit is kept. The failed-download-vanish hardening is the unix
+/// handoff path above; the Windows script staging (running the .ps1 from a temp
+/// dir outside $INSTDIR) lives in ``spawn_detached_updater``.
+#[cfg(not(unix))]
+fn launch_binary_update(
+    app: &AppHandle,
+    script: &Path,
+    current_dir: &Path,
+    release_tag: Option<&str>,
+) -> Result<(), String> {
+    let _child = spawn_detached_updater(script, current_dir, false, release_tag, None)
+        .map_err(|e| format!("Could not start the installer update: {e}"))?;
+    schedule_update_exit(app);
+    Ok(())
+}
+
+/// Watch the detached installer: quit once it signals the verified-download
+/// handoff, or surface a failure (and stay running) if it exits before it can
+/// proceed. Preserves the detached-spawn + installer-driven relaunch design.
+#[cfg(unix)]
+fn wait_for_handoff_then_exit(app: &AppHandle, mut child: std::process::Child, handoff: PathBuf) {
+    let handle = app.clone();
+    std::thread::spawn(move || loop {
+        let handoff_present = handoff.exists();
+        let exited_success = match child.try_wait() {
+            Ok(Some(status)) => Some(status.success()),
+            Ok(None) => None,
+            Err(_) => Some(false),
+        };
+        match handoff_decision(handoff_present, exited_success) {
+            HandoffDecision::Proceed => {
+                let _ = std::fs::remove_file(&handoff);
+                do_deliberate_exit(&handle);
+                return;
+            }
+            HandoffDecision::Failed => {
+                let _ = std::fs::remove_file(&handoff);
+                surface_update_failure(&handle);
+                return;
+            }
+            HandoffDecision::Done => {
+                let _ = std::fs::remove_file(&handoff);
+                return;
+            }
+            HandoffDecision::KeepWaiting => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        }
+    });
+}
+
+/// Tell the operator the update could not start, keeping the app alive.
+#[cfg(unix)]
+fn surface_update_failure(app: &AppHandle) {
+    eprintln!("[flinttrade] update could not proceed; keeping the app running");
+    raise_notification(
+        app,
+        "Update could not start",
+        "FlintTrade could not download the update and is still running. Please try again.",
+    );
 }
 
 /// Open (create/append) the self-update log file under the workspace dir.
@@ -363,7 +532,8 @@ fn spawn_detached_updater(
     current_dir: &Path,
     build_from_source: bool,
     release_tag: Option<&str>,
-) -> std::io::Result<()> {
+    handoff: Option<&Path>,
+) -> std::io::Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
@@ -393,7 +563,10 @@ fn spawn_detached_updater(
         // New process group: the script survives this app's exit and any
         // group-targeted signals sent to us on the way down.
         .process_group(0);
-    cmd.spawn().map(|_| ())
+    if let Some(marker) = handoff {
+        cmd.env(UPDATE_HANDOFF_ENV, marker);
+    }
+    cmd.spawn()
 }
 
 /// Spawn the update script detached (Windows): its own console + process
@@ -405,23 +578,68 @@ fn spawn_detached_updater(
     current_dir: &Path,
     build_from_source: bool,
     release_tag: Option<&str>,
-) -> std::io::Result<()> {
+    handoff: Option<&Path>,
+) -> std::io::Result<std::process::Child> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
+    // Binary-first updates run the script bundled in the app's resource dir
+    // ($INSTDIR). The NSIS updater it launches replaces $INSTDIR wholesale,
+    // which would pull the running .ps1 — and its working directory — out from
+    // under it mid-run. Stage the script (and cwd) to a temp dir OUTSIDE
+    // $INSTDIR so the running script cannot be deleted by the install it
+    // triggers. Source builds run from the separate source workspace, which the
+    // build never replaces, so they run in place.
+    let staged = if build_from_source {
+        None
+    } else {
+        stage_updater_script_in_temp(script)
+    };
+    let (run_script, run_dir): (&Path, &Path) = match staged.as_ref() {
+        Some((staged_script, staged_dir)) => (staged_script.as_path(), staged_dir.as_path()),
+        None => (script, current_dir),
+    };
+
     let mut cmd = std::process::Command::new("powershell");
     cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(script);
+        .arg(run_script);
     if build_from_source {
         cmd.arg("-BuildFromSource");
     } else if let Some(tag) = release_tag {
         cmd.arg("-Ref").arg(tag);
     }
     cmd.env("FLINTTRADE_YES", "1")
-        .current_dir(current_dir)
+        .current_dir(run_dir)
         .creation_flags(CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP);
-    cmd.spawn().map(|_| ())
+    if let Some(marker) = handoff {
+        cmd.env("FLINTTRADE_UPDATE_HANDOFF", marker);
+    }
+    cmd.spawn()
+}
+
+/// Copy the updater script to a fresh temp dir OUTSIDE the app's install dir and
+/// return ``(staged_script, staged_dir)``. Used on Windows so an in-app binary
+/// update — whose NSIS installer replaces $INSTDIR — cannot delete the running
+/// .ps1 (or its working directory) mid-run. The temp dir is deliberately left
+/// in place: the OS reclaims %TEMP% and the still-running script needs it.
+/// Returns ``None`` if staging fails, in which case the caller runs in place.
+#[cfg(any(windows, test))]
+fn stage_updater_script_in_temp(script: &Path) -> Option<(PathBuf, PathBuf)> {
+    let name = script.file_name()?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "flinttrade-update-{}-{}",
+        std::process::id(),
+        nonce
+    ));
+    std::fs::create_dir_all(&dir).ok()?;
+    let dest = dir.join(name);
+    std::fs::copy(script, &dest).ok()?;
+    Some((dest, dir))
 }
 
 /// Build and run the FlintTrade desktop application.
@@ -1217,6 +1435,54 @@ mod tests {
         assert_eq!(find_bundled_install_script(&root), Some(flat));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_decision_prioritises_marker_then_reports_failure() {
+        // Marker present -> step aside regardless of the child's exit state.
+        assert_eq!(handoff_decision(true, None), HandoffDecision::Proceed);
+        assert_eq!(handoff_decision(true, Some(true)), HandoffDecision::Proceed);
+        assert_eq!(handoff_decision(true, Some(false)), HandoffDecision::Proceed);
+        // No marker, still running -> keep waiting (a slow download must not
+        // make the app vanish).
+        assert_eq!(handoff_decision(false, None), HandoffDecision::KeepWaiting);
+        // No marker, exited with failure -> the update could not proceed; stay
+        // alive and surface it.
+        assert_eq!(handoff_decision(false, Some(false)), HandoffDecision::Failed);
+        // No marker, exited cleanly -> nothing to step aside for.
+        assert_eq!(handoff_decision(false, Some(true)), HandoffDecision::Done);
+    }
+
+    #[test]
+    fn staged_updater_script_lives_outside_the_source_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-stage-src-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("flinttrade-install.ps1");
+        std::fs::write(&script, "echo staged\n").unwrap();
+
+        let (staged_script, staged_dir) =
+            stage_updater_script_in_temp(&script).expect("staging should succeed");
+
+        assert!(staged_script.is_file());
+        assert_eq!(
+            std::fs::read_to_string(&staged_script).unwrap(),
+            "echo staged\n"
+        );
+        assert_eq!(staged_script.file_name(), script.file_name());
+        // Crucially, the staged copy must NOT live under the source (install)
+        // dir the NSIS updater would replace.
+        assert!(!staged_script.starts_with(&root));
+        assert!(staged_dir.starts_with(std::env::temp_dir()));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&staged_dir);
     }
 
     #[test]

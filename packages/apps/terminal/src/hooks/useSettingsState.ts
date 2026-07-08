@@ -99,6 +99,16 @@ async function persistOpenAlgoPatch(connection: Partial<ConnectionData>): Promis
   await persistOpenAlgoConfigPatch(connection);
 }
 
+/**
+ * Debounce window for persisting LLM config edits.
+ *
+ * POST /v1/config/llm is rate limited to 10 requests/min. Persisting on every
+ * keystroke both trips that limit and can write a truncated mid-type value
+ * (e.g. half an API key) into the hardened secret file — so edits are coalesced
+ * and only flushed once typing pauses.
+ */
+const LLM_PERSIST_DEBOUNCE_MS = 600;
+
 // ---------------------------------------------------------------------------
 // Hook return type
 // ---------------------------------------------------------------------------
@@ -157,6 +167,10 @@ export function useSettingsState(): SettingsState {
   const restartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingConnectionPatchRef = useRef<Partial<ConnectionData>>({});
   const pendingLlmPatchRef = useRef<Partial<LlmData>>({});
+  // LLM edits accumulated since the last backend flush, plus the debounce timer.
+  // Persistence is debounced (never per keystroke) — see LLM_PERSIST_DEBOUNCE_MS.
+  const unsavedLlmPatchRef = useRef<Partial<LlmData>>({});
+  const llmSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup pending restart timer when the component that owns this hook unmounts
   useEffect(() => {
@@ -249,11 +263,18 @@ export function useSettingsState(): SettingsState {
     }
   }, []);
 
-  const updateLLM = useCallback((field: keyof LlmData, value: string) => {
-    pendingLlmPatchRef.current = { ...pendingLlmPatchRef.current, [field]: value };
-    useSettingsStore.getState().setLLM({ [field]: value });
-    const save = persistLlmConfigPatch({ [field]: value });
-    void save.catch((err: unknown) => {
+  // Flush the coalesced LLM edits to the backend as a single patch. A failed
+  // save is surfaced (never silently dropped) so the operator does not believe
+  // an API key was saved when it was not.
+  const flushLlmConfig = useCallback(() => {
+    if (llmSaveTimerRef.current) {
+      clearTimeout(llmSaveTimerRef.current);
+      llmSaveTimerRef.current = null;
+    }
+    const patch = unsavedLlmPatchRef.current;
+    if (Object.keys(patch).length === 0) return;
+    unsavedLlmPatchRef.current = {};
+    void persistLlmConfigPatch(patch).catch((err: unknown) => {
       console.warn("[settings] failed to persist LLM config:", err);
       emitNotification({
         category: "system",
@@ -262,6 +283,26 @@ export function useSettingsState(): SettingsState {
       });
     });
   }, []);
+
+  // Flush any pending LLM edit when the settings surface unmounts, so a
+  // debounced save is not lost when the operator navigates away before it fires.
+  useEffect(() => {
+    return () => { flushLlmConfig(); };
+  }, [flushLlmConfig]);
+
+  const updateLLM = useCallback((field: keyof LlmData, value: string) => {
+    // Reflect the edit in the store immediately (responsive field) and record
+    // it for both the late-hydration merge and the pending backend flush.
+    pendingLlmPatchRef.current = { ...pendingLlmPatchRef.current, [field]: value };
+    unsavedLlmPatchRef.current = { ...unsavedLlmPatchRef.current, [field]: value };
+    useSettingsStore.getState().setLLM({ [field]: value });
+    // Debounce the backend write — never POST per keystroke. This keeps a
+    // half-typed key from being persisted mid-type and avoids tripping the
+    // 10/min rate limit (which could otherwise leave a truncated value as the
+    // last one written to the hardened secret file).
+    if (llmSaveTimerRef.current) clearTimeout(llmSaveTimerRef.current);
+    llmSaveTimerRef.current = setTimeout(flushLlmConfig, LLM_PERSIST_DEBOUNCE_MS);
+  }, [flushLlmConfig]);
 
   const updateTelegram = useCallback((field: keyof TelegramData, value: string | boolean) => {
     useSettingsStore.getState().setTelegram({ [field]: value });

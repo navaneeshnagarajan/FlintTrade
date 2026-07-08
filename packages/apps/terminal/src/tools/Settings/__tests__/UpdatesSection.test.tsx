@@ -202,6 +202,54 @@ describe("UpdatesSection binary update flow", () => {
   });
 });
 
+describe("UpdatesSection resilient update paths", () => {
+  it("does not claim up to date when a version tag cannot be parsed", async () => {
+    // Fail safe: an unparseable manifest tag must not be reported as current
+    // (that would silently hide a real update).
+    mockRelease(releaseManifest("nightly"));
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    await checkForUpdates();
+
+    expect(screen.queryByText(/latest desktop release/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/could not determine/i)).toBeInTheDocument();
+    // The update path is still offered rather than hidden.
+    expect(screen.getByRole("button", { name: /download & install update/i })).toBeInTheDocument();
+  });
+
+  it("offers the one-click update when the client cannot match a platform asset but a script is present", async () => {
+    // Shell reports linux/arm64; the manifest only ships linux x64, so the
+    // client-side asset match fails — but the bundled installer script resolves
+    // the correct asset server-side, so the update must not be hidden.
+    mockShellState({
+      app_version: "0.6.0-beta.1",
+      platform_os: "linux",
+      platform_arch: "arm64",
+      src_dir: null,
+      installer_script: "/opt/flinttrade/flinttrade-install.sh",
+    });
+    mockRelease();
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    const user = await checkForUpdates();
+
+    const installBtn = await screen.findByRole("button", { name: /download & install update/i });
+    expect(installBtn).toBeInTheDocument();
+    // The website one-liner fallback must NOT be shown — there is an update path.
+    expect(screen.queryByRole("button", { name: /copy install command/i })).not.toBeInTheDocument();
+    // Generic copy is used since the client could not name the asset.
+    expect(
+      screen.getByText(/the bundled installer script will download the matching desktop package for this machine/i),
+    ).toBeInTheDocument();
+
+    await user.click(installBtn);
+    await user.click(await screen.findByRole("button", { name: /install and relaunch/i }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("run_binary_update", { tag: "v0.7.0" }));
+  });
+});
+
 describe("UpdatesSection source rebuild fallback", () => {
   it("keeps rebuild-from-source available when a source workspace exists", async () => {
     mockShellState({
