@@ -330,6 +330,10 @@ def test_unix_installer_source_mode_reports_missing_prerequisites(tmp_path: Path
         },
         text=True,
         capture_output=True,
+        # Detach the controlling terminal so the missing-uv consent() prompt
+        # sees an unopenable /dev/tty and declines, matching headless installs.
+        # Without this the test would block on a real terminal locally.
+        start_new_session=True,
     )
 
     assert result.returncode != 0
@@ -371,7 +375,7 @@ function Invoke-RestMethod {{
                 arch = "x64"
                 kind = "nsis"
                 name = "FlintTrade_9.9.9-beta.1_x64-setup.exe"
-                url = "https://example.invalid/flinttrade-setup.exe"
+                url = "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade_9.9.9-beta.1_x64-setup.exe"
             }}
         )
     }}

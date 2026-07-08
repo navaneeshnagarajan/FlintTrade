@@ -130,14 +130,14 @@ run_or_echo() {
 consent() {
   local question="$1"
   if [ "$ASSUME_YES" = "1" ]; then return 0; fi
-  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-    local answer
-    printf '\033[1;36m[flinttrade]\033[0m %s [y/N] ' "$question" > /dev/tty
-    read -r answer < /dev/tty
-    [ "$answer" = "y" ] || [ "$answer" = "Y" ]
-  else
-    return 1
-  fi
+  # A controlling terminal can exist as an unopenable device node on headless
+  # or CI hosts — the -r/-w permission bits pass yet opening /dev/tty fails with
+  # ENXIO — so guard every access and keep `answer` defined so `set -u` cannot
+  # abort the run mid-prompt. No usable terminal means no consent.
+  local answer=""
+  printf '\033[1;36m[flinttrade]\033[0m %s [y/N] ' "$question" > /dev/tty 2>/dev/null || return 1
+  read -r answer < /dev/tty 2>/dev/null || return 1
+  [ "$answer" = "y" ] || [ "$answer" = "Y" ]
 }
 
 json_object_field() {
