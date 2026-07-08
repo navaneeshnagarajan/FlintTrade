@@ -291,6 +291,14 @@ def get_session(backend_id: str, **kwargs: Any) -> AgentSession:
         from flinttrade_ai.agent_backends.codex_session import CodexAppServerSession
 
         return CodexAppServerSession(**kwargs)
+    if backend_id == "hermes":
+        from flinttrade_ai.agent_backends.hermes_session import HermesACPSession
+
+        return HermesACPSession(**kwargs)
+    if backend_id == "antigravity":
+        from flinttrade_ai.agent_backends.antigravity_session import AntigravitySession
+
+        return AntigravitySession(**kwargs)
     raise NotImplementedError(
         f"streaming AgentSession for backend {backend_id!r} is not implemented yet"
     )

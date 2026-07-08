@@ -214,11 +214,19 @@ def test_get_session_llm_backend_raises_value_error() -> None:
         get_session("cerebras")
 
 
-def test_get_session_unimplemented_runtime_raises() -> None:
-    with pytest.raises(NotImplementedError):
-        get_session("antigravity")
-    with pytest.raises(NotImplementedError):
-        get_session("hermes")
+def test_get_session_builds_each_agent_runtime() -> None:
+    """Every catalogued agent runtime now constructs a concrete AgentSession."""
+    from flinttrade_ai.agent_backends.antigravity_session import AntigravitySession
+    from flinttrade_ai.agent_backends.hermes_session import HermesACPSession
+
+    for backend_id, cls in (
+        ("codex", CodexAppServerSession),
+        ("hermes", HermesACPSession),
+        ("antigravity", AntigravitySession),
+    ):
+        session = get_session(backend_id, cwd="/tmp/flinttrade-agent")
+        assert isinstance(session, cls)
+        assert isinstance(session, AgentSession)
 
 
 # ======================================================================

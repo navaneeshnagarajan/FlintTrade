@@ -18,11 +18,13 @@ replacing the removed OpenClaw external-gateway bridge:
 
 from __future__ import annotations
 
+from flinttrade_ai.agent_backends.antigravity_session import AntigravitySession
 from flinttrade_ai.agent_backends.codex_session import (
     CodexAppServerError,
     CodexAppServerSession,
     project_codex_notification,
 )
+from flinttrade_ai.agent_backends.hermes_session import HermesACPSession
 from flinttrade_ai.agent_backends.profiles import (
     AGENT_BACKEND_CATALOGUE,
     CATALOGUE_BY_ID,
@@ -74,4 +76,7 @@ __all__ = [
     "CodexAppServerSession",
     "CodexAppServerError",
     "project_codex_notification",
+    # hermes (ACP) + antigravity (CLI) streaming runtimes
+    "HermesACPSession",
+    "AntigravitySession",
 ]

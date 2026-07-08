@@ -18,10 +18,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
   the anthropic path now selects `Authorization: Bearer` + the Claude Code
   beta/identity headers vs `x-api-key` by token shape (operator-supplied token;
   no OAuth flow is run and no keychain is read). Three are agent runtimes
-  replacing the "deploy an agent" concept: **Codex** streams live over its
-  `app-server` JSON-RPC-over-stdio protocol now; **Hermes** (ACP) and
-  **Antigravity CLI** are catalogued with detection and land their streaming in
-  the next phase. `POST /api/v1/ai/agents/run` streams `AgentEvent`s as SSE.
+  replacing the "deploy an agent" concept, each streaming live turn output over
+  the shared `AgentSession` contract: **Codex** over its `app-server`
+  JSON-RPC-over-stdio protocol, **Hermes** over the Agent Client Protocol (ACP)
+  JSON-RPC stdio session (`initialize`/`session/new`/`session/prompt` →
+  `session/update` chunks, with fail-closed permission handling), and
+  **Antigravity CLI** by spawning `agy -p` per turn and streaming its stdout (it
+  manages its own auth). `POST /api/v1/ai/agents/run` streams `AgentEvent`s as
+  SSE; a client disconnect genuinely stops the backend turn and terminates the
+  subprocess.
 
 - **Binary-first desktop install and update** — `/download`, `/install.sh`,
   `/install.ps1`, and Settings → Updates now resolve the canonical
