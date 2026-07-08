@@ -16,6 +16,7 @@ def _make_app(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     master_password = tmp_path / "master_password"
     master_password.write_text("unit-test-master-password", encoding="utf-8")
@@ -102,3 +103,23 @@ def test_llm_config_from_env_reads_workspace_secret(monkeypatch, tmp_path: Path)
     assert cfg.provider == "openai"
     assert cfg.model == "gpt-4o"
     assert cfg.api_key == "sk-unit-secret"
+
+
+def test_claude_oauth_token_round_trips_through_the_operator_secret(monkeypatch, tmp_path: Path) -> None:
+    # A Claude Code OAuth token is an operator-supplied secret carried by the
+    # SAME file-backed LLM secret path as any API key — no keychain read, no
+    # OAuth flow. It must persist/resolve verbatim, load via from_env, and be
+    # recognised as an OAuth token by the client's classifier.
+    _make_app(monkeypatch, tmp_path)
+    from flinttrade_ai.llm_client import LLMConfig, is_anthropic_oauth_token
+    from flinttrade_core.llm_config import persist_llm_config, resolve_llm_api_key
+
+    token = "sk-ant-oat01-operator-supplied"
+    persist_llm_config({"provider": "anthropic", "model": "claude-sonnet-4", "api_key": token})
+
+    assert resolve_llm_api_key() == token
+
+    cfg = LLMConfig.from_env()
+    assert cfg.provider == "anthropic"
+    assert cfg.api_key == token
+    assert is_anthropic_oauth_token(cfg.api_key) is True

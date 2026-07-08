@@ -13,7 +13,24 @@ from .news_scraper import NewsScraper, NewsArticle
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
 from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
-from .openclaw_bridge import OpenClawAgent, OpenClawBridge
+from .agent_backends import (
+    AGENT_BACKEND_CATALOGUE,
+    AgentAuthMode,
+    AgentBackendKind,
+    AgentBackendProfile,
+    AgentBackendUnavailable,
+    AgentEvent,
+    AgentEventKind,
+    AgentSession,
+    BackendStatus,
+    CodexAppServerSession,
+    backend_ids,
+    detect_backend,
+    get_backend,
+    get_session,
+    list_backends,
+    register_backend,
+)
 from .memory import MemoryItem, MemoryLayer, MemoryQueryResult, TradedMemory
 from .rag import Document, RAGEngine, RAGResponse, RetrievedChunk
 from .sentiment import (
@@ -116,9 +133,23 @@ __all__ = [
     "ParticipantAction",
     "SimulationResult",
     "DEFAULT_PARTICIPANTS",
-    # OpenClaw bridge
-    "OpenClawBridge",
-    "OpenClawAgent",
+    # Agent backends (replaces the removed OpenClaw external-gateway bridge)
+    "AGENT_BACKEND_CATALOGUE",
+    "AgentAuthMode",
+    "AgentBackendKind",
+    "AgentBackendProfile",
+    "AgentBackendUnavailable",
+    "AgentEvent",
+    "AgentEventKind",
+    "AgentSession",
+    "BackendStatus",
+    "CodexAppServerSession",
+    "backend_ids",
+    "detect_backend",
+    "get_backend",
+    "get_session",
+    "list_backends",
+    "register_backend",
     # Extended signal functions
     "generate_sharpe_labels",
     "compute_turbulence",

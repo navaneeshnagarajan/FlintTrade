@@ -3,8 +3,9 @@
 Providers:
 - LM Studio (local, http://127.0.0.1:1234)
 - Ollama (local, http://127.0.0.1:11434)
-- Anthropic Claude (cloud)
-- OpenAI (cloud)
+- Anthropic Claude (cloud; both a Console API key and a Claude Code OAuth token —
+  the auth scheme is chosen by token shape, see ``is_anthropic_oauth_token``)
+- OpenAI and other OpenAI-compatible clouds (incl. Cerebras)
 
 Provider selection from .env: LLM_PROVIDER, LLM_HOST, LLM_MODEL.
 Retry with fallback: primary fails → fallback provider.
@@ -43,6 +44,7 @@ class LLMProvider(StrEnum):
     MISTRAL = "mistral"
     TOGETHER = "together"
     NVIDIA = "nvidia"    # NVIDIA NIM — OpenAI-compatible (integrate.api.nvidia.com)
+    CEREBRAS = "cerebras"  # Cerebras — wafer-scale fast inference, OpenAI-compatible (cerebras.ai)
     OPENROUTER = "openrouter"  # Routes to 100+ models
     HERMES = "hermes"    # Nous Hermes function-calling agent models (OpenAI-compatible host)
     CUSTOM = "custom"    # Any OpenAI-compatible endpoint
@@ -105,6 +107,7 @@ class LLMConfig:
                 or os.getenv("MISTRAL_API_KEY", "")
                 or os.getenv("TOGETHER_API_KEY", "")
                 or os.getenv("NVIDIA_API_KEY", "")
+                or os.getenv("CEREBRAS_API_KEY", "")
                 or os.getenv("OPENROUTER_API_KEY", "")
                 or workspace_api_key
             ),
@@ -158,6 +161,9 @@ _PROVIDER_URLS: dict[str, str] = {
     "mistral": "https://api.mistral.ai/v1/chat/completions",
     "together": "https://api.together.xyz/v1/chat/completions",
     "nvidia": "https://integrate.api.nvidia.com/v1/chat/completions",
+    # Cerebras — strictly OpenAI-compatible (Bearer auth), flows through
+    # ``_chat_openai_compat`` with no extra transport code.
+    "cerebras": "https://api.cerebras.ai/v1/chat/completions",
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     # Hermes — Nous Hermes function-calling/agent models, served OpenAI-compatibly
     # (local Ollama `hermes3`, a self-hosted vLLM, or any Hermes API host).
@@ -178,6 +184,84 @@ def resolve_endpoint(provider: str, host: str) -> str:
     """
     template = _PROVIDER_URLS.get((provider or "").lower(), "{host}/v1/chat/completions")
     return template.format(host=(host or "").rstrip("/"))
+
+
+# Beta and identity headers Anthropic requires for Claude Code OAuth traffic.
+# Without the Claude Code fingerprint, Anthropic's infrastructure intermittently
+# rejects OAuth requests. Mirrors the Nous Hermes adapter's OAuth branch.
+_ANTHROPIC_OAUTH_BETAS = "claude-code-20250219,oauth-2025-04-20"
+_CLAUDE_CODE_USER_AGENT = "claude-code/1.0 (external, cli)"
+
+
+def is_anthropic_oauth_token(token: str) -> bool:
+    """Return True when an Anthropic credential is an OAuth / Claude Code token.
+
+    The Anthropic Messages API accepts two auth schemes and the right one is
+    determined purely by the credential's shape. A Claude Code OAuth / setup
+    token is sent as ``Authorization: Bearer`` with the Claude Code identity
+    headers; a regular Console API key keeps the standard ``x-api-key`` path.
+
+    A token is treated as OAuth when it:
+
+    - starts with ``sk-ant-`` but NOT ``sk-ant-api`` (setup tokens such as
+      ``sk-ant-oat-…`` and managed keys); or
+    - starts with ``eyJ`` (a JWT issued by the Anthropic OAuth flow); or
+    - starts with ``cc-`` (a Claude Code OAuth access token).
+
+    Anything else — a blank token, a Console API key (``sk-ant-api…``), or a
+    non-Anthropic key (MiniMax, Alibaba, …) — returns ``False`` so the standard
+    ``x-api-key`` path is used.
+
+    Args:
+        token: The operator-supplied Anthropic credential.
+
+    Returns:
+        ``True`` for an OAuth / Claude Code token, ``False`` otherwise.
+    """
+    if not token:
+        return False
+    # Regular Anthropic Console API key — x-api-key auth, never OAuth.
+    if token.startswith("sk-ant-api"):
+        return False
+    # Anthropic-issued setup tokens (sk-ant-oat-*) and managed keys.
+    if token.startswith("sk-ant-"):
+        return True
+    # JWT from the Anthropic OAuth flow.
+    if token.startswith("eyJ"):
+        return True
+    # Opaque Claude Code OAuth access token.
+    if token.startswith("cc-"):
+        return True
+    return False
+
+
+def _anthropic_headers(api_key: str) -> dict[str, str]:
+    """Build Anthropic Messages API headers, choosing auth by token shape.
+
+    A Claude Code OAuth token (per :func:`is_anthropic_oauth_token`) is sent as
+    ``Authorization: Bearer`` with the OAuth beta headers plus the Claude Code
+    identity (``user-agent``/``x-app``) and no ``x-api-key``; a regular Console
+    API key keeps the ``x-api-key`` header. This is the single header-resolution
+    point shared by the blocking and streaming Anthropic request paths.
+
+    Args:
+        api_key: The operator-supplied Anthropic credential.
+
+    Returns:
+        The request headers for the Anthropic Messages API.
+    """
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+    }
+    if is_anthropic_oauth_token(api_key):
+        headers["Authorization"] = f"Bearer {api_key}"
+        headers["anthropic-beta"] = _ANTHROPIC_OAUTH_BETAS
+        headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
+        headers["x-app"] = "cli"
+    else:
+        headers["x-api-key"] = api_key
+    return headers
 
 
 def estimate_tokens(text: str) -> int:
@@ -378,13 +462,15 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
     ) -> LLMResponse:
-        """Anthropic Messages API."""
+        """Anthropic Messages API.
+
+        Auth is chosen by token shape: an operator-supplied Claude Code OAuth
+        token is sent as ``Authorization: Bearer`` with the Claude Code identity
+        headers; a Console API key keeps ``x-api-key`` (see
+        :func:`is_anthropic_oauth_token`).
+        """
         url = "https://api.anthropic.com/v1/messages"
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": cfg.api_key,
-            "anthropic-version": "2023-06-01",
-        }
+        headers = _anthropic_headers(cfg.api_key)
 
         # Separate system message
         system = ""
@@ -497,11 +583,7 @@ class LLMClient:
         temperature: float | None, max_tokens: int | None,
     ) -> Generator[str, None, None]:
         url = "https://api.anthropic.com/v1/messages"
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": cfg.api_key,
-            "anthropic-version": "2023-06-01",
-        }
+        headers = _anthropic_headers(cfg.api_key)
         system = ""
         api_messages = []
         for m in messages:

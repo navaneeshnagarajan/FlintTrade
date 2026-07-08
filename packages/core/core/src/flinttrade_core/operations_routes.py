@@ -8,9 +8,14 @@ backtest/strategy lifecycle.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
+import queue
+import threading
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from datetime import datetime as _dt
 from datetime import timedelta as _td
 from datetime import timezone as _tz
@@ -18,7 +23,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
@@ -1320,112 +1325,217 @@ def ditto_kill_all() -> tuple[Any, int]:
 
 
 # ------------------------------------------------------------------
-# AI — OpenClaw bridge
+# AI — agent backends (replaces the removed OpenClaw external-gateway bridge)
+#
+# merge-not-delete: OpenClaw's honest health-probe + error-dict scaffolding is
+# preserved here. ``/ai/agents/backends`` is the health/status probe — a live
+# ``detect_backend`` status per backend rather than a single gateway ping — and
+# ``/ai/agents/run`` returns honest error dicts (unknown id / LLM-only /
+# not-installed / unavailable) instead of ever fabricating a stream.
 # ------------------------------------------------------------------
 
 
-@operations_bp.route("/ai/openclaw/status", methods=["GET"])
-def ai_openclaw_status() -> tuple[Any, int]:
-    """Check OpenClaw health.
+def _sse_frame(payload: dict[str, Any]) -> str:
+    """Serialise one payload dict as a single Server-Sent Events ``data:`` frame."""
+    return f"data: {json.dumps(payload)}\n\n"
 
-    Returns whether the OpenClaw AI agent gateway is running.
+
+def _stream_agent_turn(
+    backend_id: str,
+    prompt: str,
+    session_kwargs: dict[str, Any],
+) -> Iterator[str]:
+    """Yield SSE frames for one agent turn, bridging the async session to WSGI.
+
+    The :class:`~flinttrade_ai.agent_backends.AgentSession` API is asyncio-native
+    while Flask is WSGI (synchronous). The turn is driven on a private event loop
+    in a background thread; each streamed ``AgentEvent`` is funnelled through a
+    thread-safe queue and yielded here as an SSE frame as it arrives. A terminal
+    ``done`` frame is always emitted — even when the backend fails to start — so
+    the client always sees a clean end-of-stream.
+
+    Args:
+        backend_id: The catalogue backend id to run (a CLI/ACP agent runtime).
+        prompt: The operator instruction forwarded to the agent.
+        session_kwargs: Extra keyword args for the concrete session (e.g. ``cwd``).
+
+    Yields:
+        ``text/event-stream`` frames, one JSON :class:`AgentEvent` per frame.
+    """
+    from flinttrade_ai.agent_backends import (  # noqa: PLC0415
+        AgentBackendUnavailable,
+        AgentEvent,
+        AgentEventKind,
+        get_session,
+    )
+
+    events: queue.Queue[Any] = queue.Queue()
+    sentinel = object()
+
+    async def _drive() -> None:
+        session: Any = None
+        saw_done = False
+
+        async def _on_event(event: AgentEvent) -> None:
+            nonlocal saw_done
+            if event.kind == AgentEventKind.DONE:
+                saw_done = True
+            events.put(event)
+
+        try:
+            session = get_session(backend_id, **session_kwargs)
+            await session.ensure_started()
+            await session.run_turn(prompt, _on_event)
+        except AgentBackendUnavailable as exc:
+            events.put(AgentEvent(AgentEventKind.ERROR, text=exc.reason, data={"backend": backend_id}))
+        except (ValueError, NotImplementedError) as exc:
+            # LLM ids never reach here (pre-checked in the route); this covers a
+            # runtime whose streaming session is not implemented yet (Phase B2).
+            events.put(AgentEvent(AgentEventKind.ERROR, text=str(exc), data={"backend": backend_id}))
+        except Exception:
+            logger.exception("agent run failed for backend %s", backend_id)
+            events.put(AgentEvent(AgentEventKind.ERROR, text="Agent run failed", data={"backend": backend_id}))
+        finally:
+            if session is not None:
+                with contextlib.suppress(Exception):
+                    await session.close()
+            if not saw_done:
+                events.put(AgentEvent(
+                    AgentEventKind.DONE,
+                    text="",
+                    data={"backend": backend_id, "interrupted": True},
+                ))
+
+    def _runner() -> None:
+        try:
+            asyncio.run(_drive())
+        finally:
+            events.put(sentinel)
+
+    worker = threading.Thread(target=_runner, name=f"agent-run-{backend_id}", daemon=True)
+    worker.start()
+
+    while True:
+        item = events.get()
+        if item is sentinel:
+            break
+        yield _sse_frame(item.to_dict())
+
+
+@operations_bp.route("/ai/agents/backends", methods=["GET"])
+def ai_agents_backends() -> tuple[Any, int]:
+    """List every supported agent backend with a live detection status.
+
+    Returns:
+        JSON with ``status`` and ``data.backends`` — one object per backend
+        carrying its ``id``, ``display_name``, ``kind``, ``auth_mode``,
+        ``description``, ``requires_binary`` (from ``profile.to_dict()``), and a
+        live ``status`` (``ready`` / ``installed`` / ``not_installed`` /
+        ``needs_config``). LLM backends are detected by their configured
+        provider + key; CLI/ACP agents by their binary on ``PATH``.
     """
     try:
-        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
+        from flinttrade_ai.agent_backends import (  # noqa: PLC0415
+            detect_backend,
+            list_backends,
+        )
+    except Exception:
+        logger.exception("agent_backends import failed")
+        return jsonify({"status": "error", "message": "Agent backends unavailable"}), 503
 
-        bridge = OpenClawBridge()
-        healthy = bridge.check_health()
-        control_supported = getattr(bridge, "agent_control_supported", False)
-        if not isinstance(control_supported, bool):
-            control_supported = False
-        control_message = getattr(bridge, "agent_control_message", "")
-        if not isinstance(control_message, str):
-            control_message = ""
+    backends: list[dict[str, Any]] = []
+    for profile in list_backends():
+        try:
+            status = str(detect_backend(profile.id))
+        except Exception:
+            logger.warning("detect_backend failed for %s", profile.id)
+            # Honest fallback: we could not confirm it is usable.
+            status = "needs_config" if profile.is_llm else "not_installed"
+        backends.append({**profile.to_dict(), "status": status})
+    return jsonify({"status": "success", "data": {"backends": backends}}), 200
+
+
+@operations_bp.route("/ai/agents/run", methods=["POST"])
+def ai_agents_run() -> Response | tuple[Any, int]:
+    """Run one turn on an agent backend, streaming events as Server-Sent Events.
+
+    Request JSON:
+        backend_id (str): A catalogue backend id (see ``/ai/agents/backends``).
+        prompt (str): The operator instruction for the agent.
+        cwd (str, optional): Working directory for a CLI/ACP agent runtime.
+
+    Behaviour by backend kind (honest — never a fabricated stream):
+        * LLM backends (``claude-code``, ``claude-code-oauth``, ``cerebras``)
+          are chat/completion providers driven through the AI advisor path — a
+          clear ``400`` is returned pointing at ``/api/v1/advisor``.
+        * A CLI/ACP agent that is not installed returns a ``503`` with its
+          detection status.
+        * An installed agent returns ``text/event-stream``: one JSON
+          :class:`AgentEvent` per ``data:`` frame, always ending with a
+          ``done`` event.
+
+    Returns:
+        A streaming ``text/event-stream`` :class:`Response` on success, or a
+        ``(json, status)`` tuple for the honest error cases above.
+    """
+    body = request.get_json(silent=True) or {}
+    backend_id = str(body.get("backend_id") or "").strip()
+    prompt = str(body.get("prompt") or "").strip()
+
+    if not backend_id:
+        return jsonify({"status": "error", "message": "backend_id is required"}), 400
+    if not prompt:
+        return jsonify({"status": "error", "message": "prompt is required"}), 400
+
+    try:
+        from flinttrade_ai.agent_backends import (  # noqa: PLC0415
+            BackendStatus,
+            detect_backend,
+            get_backend,
+        )
+    except Exception:
+        logger.exception("agent_backends import failed")
+        return jsonify({"status": "error", "message": "Agent backends unavailable"}), 503
+
+    try:
+        profile = get_backend(backend_id)
+    except KeyError:
+        return jsonify({"status": "error", "message": f"Unknown agent backend '{backend_id}'"}), 404
+
+    if profile.is_llm:
+        # Honest: LLM backends are chat/completion providers, not agent runtimes.
         return jsonify({
-            "status": "success",
-            "data": {
-                "connected": healthy,
-                "agent_control_supported": control_supported,
-                "message": control_message,
-            },
-        }), 200
-    except Exception:
-        logger.exception("ai_openclaw_status error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+            "status": "error",
+            "code": "llm_backend_not_agent_run",
+            "message": (
+                f"'{profile.display_name}' is an LLM backend — chat with it via the "
+                "AI advisor (/api/v1/advisor), not the agent-run stream."
+            ),
+            "data": {"backend": backend_id, "kind": str(profile.kind)},
+        }), 400
 
-
-@operations_bp.route("/ai/openclaw/agents", methods=["GET"])
-def ai_openclaw_agents() -> tuple[Any, int]:
-    """List running agents on OpenClaw.
-
-    Returns an empty list if OpenClaw is not reachable.
-    """
     try:
-        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
-
-        bridge = OpenClawBridge()
-        agents = bridge.list_agents()
+        status = detect_backend(backend_id)
+    except Exception:
+        status = BackendStatus.NOT_INSTALLED
+    if status == BackendStatus.NOT_INSTALLED:
         return jsonify({
-            "status": "success",
-            "data": {"agents": agents},
-        }), 200
-    except Exception:
-        logger.exception("ai_openclaw_agents error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+            "status": "error",
+            "code": "backend_not_installed",
+            "message": f"{profile.display_name} is not installed on this host.",
+            "data": {"backend": backend_id, "status": str(status)},
+        }), 503
 
+    session_kwargs: dict[str, Any] = {}
+    cwd_raw = body.get("cwd")
+    if isinstance(cwd_raw, str) and cwd_raw.strip():
+        session_kwargs["cwd"] = cwd_raw.strip()
 
-@operations_bp.route("/ai/openclaw/agents", methods=["POST"])
-def ai_openclaw_deploy() -> tuple[Any, int]:
-    """Deploy a trading agent on OpenClaw.
-
-    Control-plane relay to the external OpenClaw gateway — the agent runs on
-    OpenClaw with its OWN broker connection, so this does not traverse
-    FlintTrade's gated order path. A 502 is returned when OpenClaw is
-    unreachable (the bridge returns an error dict rather than raising).
-    """
-    try:
-        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
-
-        config = request.get_json(silent=True) or {}
-        if not config.get("name"):
-            return jsonify({"status": "error", "message": "agent 'name' is required"}), 400
-        result = OpenClawBridge().deploy_agent(config)
-        if isinstance(result, dict) and result.get("status") == "error":
-            status_code = 501 if result.get("code") == "openclaw_agent_control_unsupported" else 502
-            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), status_code
-        return jsonify({"status": "success", "data": result}), 200
-    except Exception:
-        logger.exception("ai_openclaw_deploy error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
-
-
-@operations_bp.route("/ai/openclaw/agents/<agent_id>/stop", methods=["POST"])
-def ai_openclaw_stop(agent_id: str) -> tuple[Any, int]:
-    """Stop a running OpenClaw agent. 502 when OpenClaw is unreachable."""
-    try:
-        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
-
-        result = OpenClawBridge().stop_agent(agent_id)
-        if isinstance(result, dict) and result.get("status") == "error":
-            status_code = 501 if result.get("code") == "openclaw_agent_control_unsupported" else 502
-            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), status_code
-        return jsonify({"status": "success", "data": result}), 200
-    except Exception:
-        logger.exception("ai_openclaw_stop error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
-
-
-@operations_bp.route("/ai/openclaw/agents/<agent_id>/logs", methods=["GET"])
-def ai_openclaw_logs(agent_id: str) -> tuple[Any, int]:
-    """Fetch logs for an OpenClaw agent — an empty list when unreachable."""
-    try:
-        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
-
-        logs = OpenClawBridge().get_agent_logs(agent_id)
-        return jsonify({"status": "success", "data": {"logs": logs}}), 200
-    except Exception:
-        logger.exception("ai_openclaw_logs error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+    return Response(
+        _stream_agent_turn(backend_id, prompt, session_kwargs),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ------------------------------------------------------------------
