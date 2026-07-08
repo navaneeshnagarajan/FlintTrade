@@ -8,13 +8,16 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **One-command install (build on your machine)** — `curl -fsSL
-  https://flinttrade.vercel.app/install.sh | bash` (macOS/Linux) and
-  `irm https://flinttrade.vercel.app/install.ps1 | iex` (Windows) fetch the
-  newest release tag from GitHub and build + install the desktop app locally
-  (no unsigned-installer warnings; updating later is the same command). The
-  scripts live in `scripts/install/`; the site serves them via always-current
-  redirects and a new `/download` page.
+- **Binary-first desktop install and update** — `/download`, `/install.sh`,
+  `/install.ps1`, and Settings → Updates now resolve the canonical
+  `/api/desktop-release` manifest and install the matching published desktop
+  asset (`.dmg`, NSIS `.exe`, `.AppImage`, `.deb`, or `.rpm`) by default. The
+  older local Rust/Node/Python/Tauri build path remains available only through
+  the explicit `--build-from-source` / `-BuildFromSource` advanced fallback.
+- **Desktop release manifest and checksums** — the Desktop Release workflow now
+  aggregates matrix artifacts, publishes `flinttrade-desktop-manifest.json`,
+  publishes `SHA256SUMS.txt`, and keeps unsigned beta installers honestly
+  labelled while leaving signing/notarisation hooks env-gated for future certs.
 - **Gated bracket orders** — `POST /api/v1/orders/bracket` (entry + stop-loss
   or target exit) is now live: every leg traverses SafetySystem L1–L5 →
   `gate_order` → `BrokerRouter` via injected dispatchers (the service holds no
@@ -32,12 +35,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
   without an anchor), and "bracket placed — legs pending", never "filled".
   The Scalper also resolves lot sizes at runtime from the symbol master
   (its hardcoded table is now an explicitly-marked display-only fallback).
-- **In-app updater (build-on-device)** — Settings → Updates (desktop builds
-  only) compares the running version against the newest GitHub tag and
-  "Update & rebuild" runs the local bootstrap installer detached: the app
-  closes while the ~10–20 minute rebuild runs and relaunches itself on the
-  new version. Installed from a pre-built release with no source workspace?
-  The section shows the one-command installer to copy instead.
+- **In-app updater (release asset first)** — Settings → Updates (desktop builds
+  only) compares the running version against the newest desktop release with a
+  matching platform asset and runs the bundled installer script in binary
+  update mode. Machines with a source checkout still get **Rebuild from
+  source** as a separate advanced fallback.
 - **One lot-size table** — the screener's contract-size table (with a
   provenance-aware resolver over the live symbol master) is now the single
   source: the mirror engine (BANKNIFTY was 15 — badly stale, mis-sizing

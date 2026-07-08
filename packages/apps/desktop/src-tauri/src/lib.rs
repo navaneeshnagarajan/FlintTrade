@@ -72,12 +72,27 @@ const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
 /// the reaper will treat it as our backend sidecar and terminate it.
 const SIDECAR_PROCESS_MARKER: &str = "flinttrade-backend";
 
-/// File name of the platform's bootstrap install/update script inside the
-/// source workspace (``scripts/install/``).
+/// File name of the platform's bootstrap install/update script. The same file
+/// can live inside a source workspace (``scripts/install/``) or inside the
+/// packaged app resources for binary-first updates.
 #[cfg(windows)]
 const INSTALL_SCRIPT_NAME: &str = "flinttrade-install.ps1";
 #[cfg(not(windows))]
 const INSTALL_SCRIPT_NAME: &str = "flinttrade-install.sh";
+
+/// Resource-relative fallbacks used by Tauri bundles. The release config maps
+/// scripts to ``scripts/install/``; the flat fallback keeps older/dev bundles
+/// usable if a platform packager flattens resources.
+#[cfg(windows)]
+const BUNDLED_INSTALL_SCRIPT_CANDIDATES: &[&str] = &[
+    "flinttrade-install.ps1",
+    "scripts/install/flinttrade-install.ps1",
+];
+#[cfg(not(windows))]
+const BUNDLED_INSTALL_SCRIPT_CANDIDATES: &[&str] = &[
+    "flinttrade-install.sh",
+    "scripts/install/flinttrade-install.sh",
+];
 
 /// Log file (under the workspace dir) capturing the detached self-update
 /// build's output, since the spawning app exits while the build runs. On
@@ -93,15 +108,12 @@ struct QuitRequested(std::sync::atomic::AtomicBool);
 struct BackendState(Mutex<Option<CommandChild>>);
 
 // ---------------------------------------------------------------------------
-// In-app updater (Hermes-style: rebuild from source on this machine).
+// In-app updater.
 //
-// The bootstrap installers (scripts/install/flinttrade-install.{sh,ps1}) fetch
-// the newest GitHub v* tag into a source workspace and rebuild/reinstall the
-// app. These two commands let the terminal drive that flow from Settings →
-// Updates: report where (and whether) the workspace exists, then run the
-// LOCAL script detached so it survives this process exiting. No remote code
-// is ever fetched or executed from Rust — only the script already present in
-// the workspace on disk.
+// Binary-first updates run the installer script bundled as an app resource; the
+// script downloads the matching published installer asset. Source rebuilds are
+// still supported through the source workspace for operators who choose that
+// heavier path explicitly.
 // ---------------------------------------------------------------------------
 
 /// Payload of the ``updater_state`` command.
@@ -109,10 +121,16 @@ struct BackendState(Mutex<Option<CommandChild>>);
 struct UpdaterState {
     /// Version of the running app, from the Tauri package metadata.
     app_version: String,
+    /// Normalised OS label used by the desktop release manifest.
+    platform_os: String,
+    /// Normalised CPU architecture used by the desktop release manifest.
+    platform_arch: String,
     /// Resolved source workspace containing the install script, or ``None``
     /// when no usable workspace exists (the UI then shows the website
     /// one-liner to copy instead of the in-app rebuild button).
     src_dir: Option<String>,
+    /// Bundled binary installer script, if this build packaged one.
+    installer_script: Option<String>,
 }
 
 /// Resolve the bootstrap source workspace, mirroring the install scripts:
@@ -127,7 +145,10 @@ fn resolve_source_workspace() -> Option<PathBuf> {
             let home = env_nonempty("USERPROFILE").or_else(|| env_nonempty("HOME"))?;
             #[cfg(not(windows))]
             let home = env_nonempty("HOME")?;
-            PathBuf::from(home).join(".flinttrade").join("src").join("FlintTrade")
+            PathBuf::from(home)
+                .join(".flinttrade")
+                .join("src")
+                .join("FlintTrade")
         }
     };
     if install_script_path(&dir).is_file() {
@@ -139,7 +160,80 @@ fn resolve_source_workspace() -> Option<PathBuf> {
 
 /// Path of the platform's install script inside a source workspace.
 fn install_script_path(src_dir: &Path) -> PathBuf {
-    src_dir.join("scripts").join("install").join(INSTALL_SCRIPT_NAME)
+    src_dir
+        .join("scripts")
+        .join("install")
+        .join(INSTALL_SCRIPT_NAME)
+}
+
+/// Find the packaged installer script under a Tauri resource directory.
+fn find_bundled_install_script(resource_dir: &Path) -> Option<PathBuf> {
+    for relative in BUNDLED_INSTALL_SCRIPT_CANDIDATES {
+        let candidate = resource_dir.join(relative);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Resolve the packaged installer script for binary-first updates.
+fn resolve_bundled_install_script(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    find_bundled_install_script(&resource_dir)
+}
+
+/// OS label matching the site release manifest.
+fn desktop_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+/// Architecture label matching the site release manifest.
+fn desktop_arch() -> String {
+    match std::env::consts::ARCH {
+        "aarch64" | "arm64" => "arm64".to_string(),
+        "x86_64" | "amd64" => "x64".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Accept only release tags understood by the installer API (`v1.2.3` plus an
+/// optional ASCII prerelease suffix). The shell must not pass arbitrary strings
+/// through to the spawned script command line.
+fn valid_release_tag(tag: &str) -> bool {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() || trimmed != tag || trimmed.len() > 80 {
+        return false;
+    }
+    let body = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    let (core, prerelease) = body
+        .split_once('-')
+        .map_or((body, None), |(core, pre)| (core, Some(pre)));
+    let parts: Vec<&str> = core.split('.').collect();
+    if parts.len() != 3
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()))
+    {
+        return false;
+    }
+    match prerelease {
+        None => true,
+        Some(pre) => {
+            !pre.is_empty()
+                && pre
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        }
+    }
 }
 
 /// Report the running app version and the resolved source workspace (if any)
@@ -148,8 +242,38 @@ fn install_script_path(src_dir: &Path) -> PathBuf {
 fn updater_state(app: AppHandle) -> UpdaterState {
     UpdaterState {
         app_version: app.package_info().version.to_string(),
+        platform_os: desktop_os().to_string(),
+        platform_arch: desktop_arch(),
         src_dir: resolve_source_workspace().map(|d| d.display().to_string()),
+        installer_script: resolve_bundled_install_script(&app).map(|p| p.display().to_string()),
     }
+}
+
+/// Kick off the binary-first update path: run the packaged installer script
+/// detached. The script downloads and installs the matching release asset for
+/// this OS/arch, so no source checkout or build toolchain is required.
+#[tauri::command]
+fn run_binary_update(app: AppHandle, tag: Option<String>) -> Result<(), String> {
+    let release_tag = tag
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(value) = release_tag {
+        if !valid_release_tag(value) {
+            return Err(format!("Refusing invalid release tag: {value}"));
+        }
+    }
+    let Some(script) = resolve_bundled_install_script(&app) else {
+        return Err("No packaged installer script found in this desktop build.".to_string());
+    };
+    let current_dir = script
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    spawn_detached_updater(&script, &current_dir, false, release_tag)
+        .map_err(|e| format!("Could not start the installer update: {e}"))?;
+    schedule_update_exit(&app);
+    Ok(())
 }
 
 /// Kick off a self-update: spawn the LOCAL bootstrap script detached (so the
@@ -165,9 +289,14 @@ fn run_self_update(app: AppHandle) -> Result<(), String> {
         );
     };
     let script = install_script_path(&src_dir);
-    spawn_detached_updater(&script, &src_dir)
+    spawn_detached_updater(&script, &src_dir, true, None)
         .map_err(|e| format!("Could not start the update script: {e}"))?;
 
+    schedule_update_exit(&app);
+    Ok(())
+}
+
+fn schedule_update_exit(app: &AppHandle) {
     // Mark the quit as deliberate (close-to-tray must not intercept it), then
     // exit shortly so the updater can replace the bundle underneath us.
     if let Some(q) = app.try_state::<QuitRequested>() {
@@ -179,7 +308,6 @@ fn run_self_update(app: AppHandle) -> Result<(), String> {
         let h = handle.clone();
         let _ = handle.run_on_main_thread(move || h.exit(0));
     });
-    Ok(())
 }
 
 /// Open (create/append) the self-update log file under the workspace dir.
@@ -206,7 +334,10 @@ fn augmented_path() -> String {
         .filter(|p| !p.is_empty())
         .map(str::to_string)
         .collect();
-    let mut extras = vec![PathBuf::from("/usr/local/bin"), PathBuf::from("/opt/homebrew/bin")];
+    let mut extras = vec![
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+    ];
     if let Some(home) = std::env::var_os("HOME") {
         let home = PathBuf::from(home);
         extras.push(home.join(".cargo").join("bin"));
@@ -227,23 +358,35 @@ fn augmented_path() -> String {
 /// freshly built app itself. ``FLINTTRADE_YES=1`` consents to user-local tool
 /// installs (uv/pnpm) since the detached script has no TTY to ask on.
 #[cfg(unix)]
-fn spawn_detached_updater(script: &Path, src_dir: &Path) -> std::io::Result<()> {
+fn spawn_detached_updater(
+    script: &Path,
+    current_dir: &Path,
+    build_from_source: bool,
+    release_tag: Option<&str>,
+) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
     let (out, err) = match self_update_log_file() {
         Some(f) => {
             let clone = f.try_clone();
-            (Stdio::from(f), clone.map(Stdio::from).unwrap_or_else(|_| Stdio::null()))
+            (
+                Stdio::from(f),
+                clone.map(Stdio::from).unwrap_or_else(|_| Stdio::null()),
+            )
         }
         None => (Stdio::null(), Stdio::null()),
     };
     let mut cmd = std::process::Command::new("bash");
-    cmd.arg(script)
-        .arg("--update")
-        .env("FLINTTRADE_YES", "1")
+    cmd.arg(script).arg("--update");
+    if build_from_source {
+        cmd.arg("--build-from-source");
+    } else if let Some(tag) = release_tag {
+        cmd.arg("--ref").arg(tag);
+    }
+    cmd.env("FLINTTRADE_YES", "1")
         .env("PATH", augmented_path())
-        .current_dir(src_dir)
+        .current_dir(current_dir)
         .stdin(Stdio::null())
         .stdout(out)
         .stderr(err)
@@ -257,19 +400,28 @@ fn spawn_detached_updater(script: &Path, src_dir: &Path) -> std::io::Result<()> 
 /// group, so the PowerShell build keeps running — and shows progress — after
 /// this app exits. ``FLINTTRADE_YES=1`` consents to user-local tool installs.
 #[cfg(windows)]
-fn spawn_detached_updater(script: &Path, src_dir: &Path) -> std::io::Result<()> {
+fn spawn_detached_updater(
+    script: &Path,
+    current_dir: &Path,
+    build_from_source: bool,
+    release_tag: Option<&str>,
+) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-    std::process::Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(script)
-        .env("FLINTTRADE_YES", "1")
-        .current_dir(src_dir)
-        .creation_flags(CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP)
-        .spawn()
-        .map(|_| ())
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(script);
+    if build_from_source {
+        cmd.arg("-BuildFromSource");
+    } else if let Some(tag) = release_tag {
+        cmd.arg("-Ref").arg(tag);
+    }
+    cmd.env("FLINTTRADE_YES", "1")
+        .current_dir(current_dir)
+        .creation_flags(CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP);
+    cmd.spawn().map(|_| ())
 }
 
 /// Build and run the FlintTrade desktop application.
@@ -286,9 +438,14 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // In-app updater commands (Settings → Updates). Like the opener above,
         // the remote main window only reaches these via the explicit
-        // ``allow-updater-state`` / ``allow-run-self-update`` entries in
+        // ``allow-updater-state`` / ``allow-run-binary-update`` /
+        // ``allow-run-self-update`` entries in
         // ``capabilities/main-remote.json`` (autogenerated by build.rs).
-        .invoke_handler(tauri::generate_handler![updater_state, run_self_update])
+        .invoke_handler(tauri::generate_handler![
+            updater_state,
+            run_binary_update,
+            run_self_update
+        ])
         .manage(BackendState(Mutex::new(None)))
         .manage(QuitRequested(std::sync::atomic::AtomicBool::new(false)))
         .setup(|app| {
@@ -353,7 +510,8 @@ pub fn run() {
                                 if let Some(port) = parse_ready_port(&buffer) {
                                     shown = true;
                                     let h = handle.clone();
-                                    let _ = handle.run_on_main_thread(move || show_main_window(&h, port));
+                                    let _ = handle
+                                        .run_on_main_thread(move || show_main_window(&h, port));
                                 }
                             }
                         }
@@ -475,7 +633,9 @@ fn show_main_window(app: &AppHandle, port: u16) {
                 backend_port,
             );
             if !allow {
-                eprintln!("[flinttrade] blocked in-webview navigation to non-backend origin: {target}");
+                eprintln!(
+                    "[flinttrade] blocked in-webview navigation to non-backend origin: {target}"
+                );
             }
             allow
         })
@@ -580,11 +740,13 @@ fn register_toggle_shortcut(app: &AppHandle) {
             return;
         }
     };
-    let result = app.global_shortcut().on_shortcut(shortcut, |app, _sc, event| {
-        if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            toggle_main_window(app);
-        }
-    });
+    let result = app
+        .global_shortcut()
+        .on_shortcut(shortcut, |app, _sc, event| {
+            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                toggle_main_window(app);
+            }
+        });
     if let Err(e) = result {
         eprintln!("[flinttrade] could not register global toggle shortcut: {e}");
     }
@@ -592,12 +754,7 @@ fn register_toggle_shortcut(app: &AppHandle) {
 
 /// Raise a native OS notification.
 fn raise_notification(app: &AppHandle, title: &str, body: &str) {
-    let _ = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show();
+    let _ = app.notification().builder().title(title).body(body).show();
 }
 
 /// Parse a ``FLINTTRADE_NOTIFY\t<title>\t<body>`` stdout line into (title, body).
@@ -652,7 +809,12 @@ fn format_pid_file(sidecar_pid: u32, shell_pid: u32) -> String {
 /// single-line file. Any malformed first line yields ``None``.
 fn parse_pid_file(contents: &str) -> Option<(u32, Option<u32>)> {
     let mut lines = contents.lines();
-    let sidecar = lines.next()?.trim().parse::<u32>().ok().filter(|p| *p > 0)?;
+    let sidecar = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|p| *p > 0)?;
     let shell = lines
         .next()
         .and_then(|l| l.trim().parse::<u32>().ok())
@@ -695,7 +857,9 @@ fn process_command_line(pid: u32) -> Option<String> {
     let text = String::from_utf8_lossy(&out.stdout).to_string();
     // A match prints a quoted CSV row; a miss prints an ``INFO:`` line.
     let needle = format!("\"{pid}\"");
-    text.lines().find(|l| l.contains(&needle)).map(str::to_string)
+    text.lines()
+        .find(|l| l.contains(&needle))
+        .map(str::to_string)
 }
 
 /// Best-effort liveness probe for an arbitrary PID.
@@ -719,14 +883,18 @@ fn process_alive(pid: u32) -> bool {
 #[cfg(unix)]
 fn terminate_process(pid: u32) {
     let pid_s = pid.to_string();
-    let _ = std::process::Command::new("kill").args(["-TERM", &pid_s]).status();
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", &pid_s])
+        .status();
     for _ in 0..20 {
         if !process_alive(pid) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    let _ = std::process::Command::new("kill").args(["-KILL", &pid_s]).status();
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", &pid_s])
+        .status();
 }
 
 /// Terminate a process (Windows `taskkill`, including its child tree).
@@ -750,8 +918,12 @@ fn terminate_process(pid: u32) {
 ///   ``flinttrade-backend`` binary — a reused PID belonging to any other
 ///   process is never killed.
 fn reap_stale_sidecar() {
-    let Some(path) = sidecar_pid_file() else { return };
-    let Ok(contents) = std::fs::read_to_string(&path) else { return };
+    let Some(path) = sidecar_pid_file() else {
+        return;
+    };
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return;
+    };
     let Some((sidecar_pid, shell_pid)) = parse_pid_file(&contents) else {
         let _ = std::fs::remove_file(&path);
         return;
@@ -823,8 +995,12 @@ fn flinttrade_home() -> Option<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     {
-        return std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join("Library").join("Application Support").join("flinttrade"));
+        return std::env::var_os("HOME").map(|h| {
+            PathBuf::from(h)
+                .join("Library")
+                .join("Application Support")
+                .join("flinttrade")
+        });
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -914,12 +1090,18 @@ mod tests {
 
     #[test]
     fn parses_default_port() {
-        assert_eq!(parse_ready_port("FLINTTRADE_BACKEND_READY port=5100"), Some(5100));
+        assert_eq!(
+            parse_ready_port("FLINTTRADE_BACKEND_READY port=5100"),
+            Some(5100)
+        );
     }
 
     #[test]
     fn handles_trailing_text_after_port() {
-        assert_eq!(parse_ready_port("FLINTTRADE_BACKEND_READY port=8080 extra"), Some(8080));
+        assert_eq!(
+            parse_ready_port("FLINTTRADE_BACKEND_READY port=8080 extra"),
+            Some(8080)
+        );
     }
 
     #[test]
@@ -932,7 +1114,10 @@ mod tests {
         let line = "FLINTTRADE_NOTIFY\tOrder filled\tRELIANCE BUY 10 @ 2900";
         assert_eq!(
             parse_notify_line(line),
-            Some(("Order filled".to_string(), "RELIANCE BUY 10 @ 2900".to_string()))
+            Some((
+                "Order filled".to_string(),
+                "RELIANCE BUY 10 @ 2900".to_string()
+            ))
         );
     }
 
@@ -946,7 +1131,10 @@ mod tests {
 
     #[test]
     fn rejects_non_notify_or_malformed_lines() {
-        assert_eq!(parse_notify_line("FLINTTRADE_BACKEND_READY port=5100"), None);
+        assert_eq!(
+            parse_notify_line("FLINTTRADE_BACKEND_READY port=5100"),
+            None
+        );
         assert_eq!(parse_notify_line("FLINTTRADE_NOTIFY no tabs here"), None);
         assert_eq!(parse_notify_line("FLINTTRADE_NOTIFY\t\tbody only"), None);
         assert_eq!(parse_notify_line("random log line"), None);
@@ -954,7 +1142,10 @@ mod tests {
 
     #[test]
     fn pid_file_round_trips() {
-        assert_eq!(parse_pid_file(&format_pid_file(1234, 99)), Some((1234, Some(99))));
+        assert_eq!(
+            parse_pid_file(&format_pid_file(1234, 99)),
+            Some((1234, Some(99)))
+        );
     }
 
     #[test]
@@ -975,12 +1166,57 @@ mod tests {
     #[test]
     fn install_script_lives_under_scripts_install() {
         let path = install_script_path(Path::new("/home/op/.flinttrade/src/FlintTrade"));
-        let expected: PathBuf = ["/home/op/.flinttrade/src/FlintTrade", "scripts", "install", INSTALL_SCRIPT_NAME]
-            .iter()
-            .collect();
+        let expected: PathBuf = [
+            "/home/op/.flinttrade/src/FlintTrade",
+            "scripts",
+            "install",
+            INSTALL_SCRIPT_NAME,
+        ]
+        .iter()
+        .collect();
         assert_eq!(path, expected);
         // The updater must always target the platform's bootstrap script.
         assert!(path.to_string_lossy().contains("flinttrade-install."));
+    }
+
+    #[test]
+    fn release_tag_validation_accepts_semver_refs_only() {
+        assert!(valid_release_tag("v0.6.0-beta.1"));
+        assert!(valid_release_tag("0.7.0"));
+        assert!(valid_release_tag("v1.2.3-rc.4"));
+
+        assert!(!valid_release_tag(""));
+        assert!(!valid_release_tag(" latest "));
+        assert!(!valid_release_tag("main"));
+        assert!(!valid_release_tag("v1.2"));
+        assert!(!valid_release_tag("v1.2.3 && open /Applications"));
+        assert!(!valid_release_tag("v1.2.3/beta"));
+    }
+
+    #[test]
+    fn bundled_install_script_resolver_accepts_mapped_or_flat_resources() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-resource-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("scripts").join("install")).unwrap();
+
+        let nested = root
+            .join("scripts")
+            .join("install")
+            .join(INSTALL_SCRIPT_NAME);
+        std::fs::write(&nested, "echo ok\n").unwrap();
+        assert_eq!(find_bundled_install_script(&root), Some(nested.clone()));
+
+        std::fs::remove_file(&nested).unwrap();
+        let flat = root.join(INSTALL_SCRIPT_NAME);
+        std::fs::write(&flat, "echo ok\n").unwrap();
+        assert_eq!(find_bundled_install_script(&root), Some(flat));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -994,8 +1230,12 @@ mod tests {
             "\"flinttrade-backend.exe\",\"1234\",\"Console\",\"1\",\"120,000 K\""
         ));
         // A reused PID belonging to anything else must never match.
-        assert!(!looks_like_backend_sidecar("/usr/bin/python3 some_other_server.py"));
-        assert!(!looks_like_backend_sidecar("\"notepad.exe\",\"1234\",\"Console\",\"1\",\"9,000 K\""));
+        assert!(!looks_like_backend_sidecar(
+            "/usr/bin/python3 some_other_server.py"
+        ));
+        assert!(!looks_like_backend_sidecar(
+            "\"notepad.exe\",\"1234\",\"Console\",\"1\",\"9,000 K\""
+        ));
     }
 
     #[test]
@@ -1023,7 +1263,9 @@ mod tests {
         assert!(!allow("http://localhost:56576/"));
         assert!(!allow("https://127.0.0.1:56576/"));
         // Any external site — refused (broker OAuth uses the system browser).
-        assert!(!allow("https://api.upstox.com/v2/login/authorization/dialog"));
+        assert!(!allow(
+            "https://api.upstox.com/v2/login/authorization/dialog"
+        ));
 
         // Non-http schemes carry no capability, so SPA downloads/workers/views
         // stay permitted.

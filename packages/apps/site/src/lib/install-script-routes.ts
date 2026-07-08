@@ -2,11 +2,11 @@
  * Shared handler for the `/install.sh` and `/install.ps1` bootstrap-script
  * routes.
  *
- * The site never snapshots the scripts: it redirects to the raw GitHub copy
- * on `main`, so `curl -fsSL https://<site>/install.sh | bash` always fetches
- * the current script without a site redeploy. The scripts themselves resolve
- * the newest release tag at run time and build FlintTrade on the user's own
- * machine (see `scripts/install/` in the repository).
+ * The site never snapshots the scripts: it redirects to the raw GitHub copy on
+ * `main`, so `curl -fsSL https://<site>/install.sh | bash` always fetches the
+ * current script without a site redeploy. The scripts resolve the current
+ * desktop-release manifest at run time and install the matching release asset by
+ * default, with source builds available only via explicit flags.
  */
 
 const RAW_BASE =

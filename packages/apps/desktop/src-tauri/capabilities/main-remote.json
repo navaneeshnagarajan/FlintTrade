@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-remote",
-  "description": "IPC surface for the main window, which loads the loopback backend over HTTP — a remote origin to Tauri. Exposes exactly three commands: opener:open_url scoped to https URLs (broker OAuth approval pages in the system browser — the webview has no window.open handler), plus the app's own updater_state / run_self_update pair driving the Settings → Updates rebuild-from-source flow. Nothing else is reachable from the page. The remote.urls wildcard port is required because the backend binds an OS-chosen loopback port; the shell's on_navigation guard (lib.rs) confines the webview to that single backend origin, so these privileged commands can never reach a foreign loopback origin. The opener allow-list stays https://* (not per-broker hosts) deliberately: the sole caller is the broker OAuth flow with a backend-issued authorize URL, the backend is the app's own trust anchor, and enumerating each broker's authorize host here would silently break every newly added OAuth broker until a desktop rebuild — an availability regression that outweighs the marginal, system-browser-scoped defence-in-depth gain.",
+  "description": "IPC surface for the main window, which loads the loopback backend over HTTP — a remote origin to Tauri. Exposes exactly four command families: opener:open_url scoped to https URLs (broker OAuth approval pages in the system browser — the webview has no window.open handler), plus the app's own updater_state / run_binary_update / run_self_update trio driving Settings → Updates. Nothing else is reachable from the page. The remote.urls wildcard port is required because the backend binds an OS-chosen loopback port; the shell's on_navigation guard (lib.rs) confines the webview to that single backend origin, so these privileged commands can never reach a foreign loopback origin. The opener allow-list stays https://* (not per-broker hosts) deliberately: the sole caller is the broker OAuth flow with a backend-issued authorize URL, the backend is the app's own trust anchor, and enumerating each broker's authorize host here would silently break every newly added OAuth broker until a desktop rebuild — an availability regression that outweighs the marginal, system-browser-scoped defence-in-depth gain.",
   "local": false,
   "windows": ["main"],
   "remote": {
@@ -13,6 +13,7 @@
       "allow": [{ "url": "https://*" }]
     },
     "allow-updater-state",
+    "allow-run-binary-update",
     "allow-run-self-update"
   ]
 }

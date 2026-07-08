@@ -71,9 +71,9 @@ export interface SectionDef {
 /**
  * Build the visible section list.
  *
- * The Updates section drives the desktop shell's rebuild-from-source updater
- * (Tauri IPC), so it only exists inside the desktop app — web builds must not
- * show it at all.
+   * The Updates section drives the desktop shell's binary-first updater (with a
+   * source-rebuild fallback), so it only exists inside the desktop app — web
+   * builds must not show it at all.
  */
 export function buildSections(desktopShell: boolean): SectionDef[] {
   const sections: SectionDef[] = [

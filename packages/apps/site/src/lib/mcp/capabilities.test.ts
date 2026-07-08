@@ -81,7 +81,7 @@ describe('docs index generation', () => {
     const downloadSource = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
     const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
 
-    // Primary install path: the /download page (one-command, build-on-device).
+    // Primary install path: the /download page (one-command, release asset first).
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
     expect(pageSource).toContain('Install desktop app');
@@ -90,7 +90,7 @@ describe('docs index generation', () => {
     // The desktop guide stays reachable from the homepage, footer, and docs.
     expect(pageSource).toContain('href="/docs/desktop"');
     expect(footerSource).toContain('href="/docs/desktop"');
-    expect(desktopDoc?.content).toContain('GitHub Releases');
+    expect(desktopDoc?.content).toContain('desktop release manifest');
     expect(desktopDoc?.content).toContain('Launch FlintTrade and complete the in-app Setup flow');
   });
 });

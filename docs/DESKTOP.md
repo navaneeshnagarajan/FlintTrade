@@ -11,7 +11,7 @@ configure**.
 - **Windows** — `.exe` (NSIS) installer — x64
 - **Linux** — `.deb`, `.rpm`, and `.AppImage` — x64 and arm64
 
-## Download or build
+## Download, install, or build
 
 The public website links to this guide from the homepage and primary
 navigation. Start here when you want to run FlintTrade as an end-user desktop
@@ -19,11 +19,11 @@ app rather than as a contributor checkout.
 
 ### One-command install (recommended)
 
-The bootstrap installer fetches the **latest release tag from GitHub and
-builds the app on your own machine** — like rustup or Homebrew. A locally
-built binary carries no unsigned-installer warning, and updating later is the
-same command (it fetches the newest tag into the same source workspace and
-rebuilds).
+The bootstrap installer now downloads the **published desktop release asset**
+for your OS and CPU architecture, installs it, and launches FlintTrade. It does
+not require Rust, Node, Python, uv, pnpm, PyInstaller, Xcode, Visual Studio
+Build Tools, or Linux Tauri development headers unless you explicitly choose
+the source-build fallback.
 
 ```bash
 # macOS / Linux
@@ -35,39 +35,37 @@ curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 irm https://flinttrade.vercel.app/install.ps1 | iex
 ```
 
-The script checks for the required toolchain (Rust, Node 22+, uv, plus the
-platform's Tauri libraries), prints the exact install command for anything
-missing, and never elevates or installs system packages silently. First build:
-roughly 10–20 minutes and a few GB of toolchain. The scripts live at
-[`scripts/install/`](../scripts/install/) — read them before piping to a shell
-if that is your policy (it should be).
+The default channel is `beta` while `v0.6` is a prerelease. Use
+`--channel stable` for stable-only installs, `--ref <tag>` for an exact
+version, `--no-launch` to install without opening the app, and
+`--build-from-source` only when you intentionally want the contributor build
+path. The scripts live at [`scripts/install/`](../scripts/install/) — read them
+before piping to a shell if that is your policy (it should be).
 
 ### Pre-built installers
 
-1. Open the [GitHub Releases](https://github.com/navaneeshnagarajan/FlintTrade/releases) page.
-2. Pick the latest release that has an installer for your operating system.
-3. If the current beta release has no installer asset for your OS yet, use the
-   one-command install above or the commands in [Building locally](#building-locally).
+1. Open [/download](/download) for direct macOS, Windows, and Linux links.
+2. Pick the installer for your operating system and CPU architecture:
+   `.dmg` for macOS, NSIS `.exe` for Windows, or `.AppImage`/`.deb`/`.rpm` for
+   Linux.
+3. The [desktop release manifest](/api/desktop-release) is the canonical
+   machine-readable source used by the install scripts and in-app updater.
 4. Launch FlintTrade and complete the in-app Setup flow. You do not need a
    `.env` file for desktop use.
 
 ### Updating
 
 The desktop app has a built-in updater at **Settings → Updates** (desktop
-builds only — the web terminal never shows it). "Check for updates" compares
-the running version against the newest `v*` tag on GitHub; **Update &
-rebuild** then runs the bootstrap installer from the local source workspace
-(`~/.flinttrade/src/FlintTrade`, or `FLINTTRADE_SRC_DIR`) detached — the app
-closes whilst the build runs (roughly 10–20 minutes) and relaunches itself
-once the new version is installed. On macOS/Linux the build's output is
-appended to `self_update.log` in the FlintTrade workspace directory; on
-Windows the build runs in its own console window.
+builds only — the web terminal never shows it). "Check for updates" reads
+`/api/desktop-release?channel=beta` and only offers an update when that release
+has a matching installer for your current platform. **Download & install
+update** launches the bundled installer script in binary-update mode, so a
+source checkout is not required.
 
-Re-running the install one-liner above is exactly equivalent — the in-app
-updater invokes the same script against the same workspace. If no source
-workspace exists on the machine (for example, you installed a pre-built
-release), the Updates section shows that one-liner to copy instead of the
-rebuild button.
+If this machine also has a FlintTrade source workspace
+(`~/.flinttrade/src/FlintTrade`, or `FLINTTRADE_SRC_DIR`), Settings still shows
+**Rebuild from source** as an advanced fallback. That path uses the same
+script with `--build-from-source` and keeps the older local-build behaviour.
 
 ---
 
@@ -172,12 +170,19 @@ environment variable.
   `%APPDATA%\flinttrade\`.
 
 ### Linux
+- **Recommended default:** use the AppImage via the installer script. It
+  installs under `~/.local/bin/flinttrade.AppImage` and writes a desktop entry
+  without sudo.
 - **`.deb`** (Debian/Ubuntu): `sudo apt install ./FlintTrade_*.deb` —
   uninstall with `sudo apt remove flinttrade`.
 - **`.rpm`** (Fedora/RHEL): `sudo dnf install ./FlintTrade-*.rpm` —
   uninstall with `sudo dnf remove flinttrade`.
 - **`.AppImage`** (portable, no install): `chmod +x FlintTrade_*.AppImage && ./FlintTrade_*.AppImage`.
   Nothing to uninstall — just delete the file.
+- Some distributions require FUSE for AppImage execution, and every desktop
+  package still depends on the platform WebKitGTK/GTK runtime libraries Tauri
+  uses. If AppImage does not run cleanly on your distro, install the `.deb` or
+  `.rpm` package instead.
 - To also remove data: delete `~/.flinttrade/`.
 
 ---
@@ -233,6 +238,11 @@ installers to a GitHub Release.
 - Each job freezes the backend, bundles the Tauri app, and uploads the
   per-platform installers as workflow artifacts and, when a release tag is
   supplied, draft release assets.
+- A final publish job aggregates the installer artifacts, writes
+  `SHA256SUMS.txt`, writes `flinttrade-desktop-manifest.json`, and uploads
+  both alongside the installers. The website and installer scripts consume the
+  public release manifest; they do not rely on GitHub's `latest` redirect
+  because prerelease desktop installers can be newer than the stable tag.
 
 ### Code signing
 The default builds are **unsigned**. For distribution, configure signing via the
@@ -242,6 +252,10 @@ standard Tauri mechanisms and CI secrets:
 - **Windows:** an Authenticode certificate (`tauri.conf.json → bundle.windows.certificateThumbprint`).
 
 See the [Tauri signing guide](https://tauri.app/distribute/sign/).
+
+FlintTrade does not enable Tauri's native updater for unsigned beta builds. The
+Tauri v2 updater requires signed update artifacts, so Settings → Updates uses
+the bundled installer script until release-signing keys exist.
 
 ---
 

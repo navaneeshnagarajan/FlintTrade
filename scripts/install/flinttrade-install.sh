@@ -1,73 +1,114 @@
 #!/usr/bin/env bash
-# =============================================================================
-# FlintTrade — bootstrap installer / updater (macOS + Linux)
-# =============================================================================
+# FlintTrade desktop installer / updater (macOS + Linux)
 #
-# Fetches the latest FlintTrade release tag from GitHub, builds the native
-# desktop app ON THIS MACHINE (backend sidecar + Tauri bundle), and installs
-# it. Because the binary is built locally, there is no unsigned-installer
-# warning and nothing to trust beyond the source you can read.
+# Default mode downloads the published desktop installer for this OS/arch from
+# the FlintTrade release manifest and installs it. Source builds remain
+# available with --build-from-source for contributors who intentionally want the
+# Rust/Node/Python/Tauri toolchain path.
 #
 #   curl -fsSL https://flinttrade.vercel.app/install.sh | bash
-#
-# Re-running the same command (or passing --update) updates an existing
-# install: it fetches the newest tag into the same source workspace and
-# rebuilds. The in-app updater invokes this script the same way.
-#
-# Flags / environment:
-#   --ref <tag|branch>   build a specific ref instead of the newest v* tag
-#   --update             explicit update mode (same as re-running)
-#   --src <dir>          source workspace (default: ~/.flinttrade/src/FlintTrade)
-#   --no-launch          do not open the app after installing
-#   --yes                consent to auto-installing missing tools (uv, pnpm)
-#   FLINTTRADE_YES=1     same as --yes
-#   FLINTTRADE_SRC_DIR   same as --src
-#
-# What it will NEVER do: run sudo silently, install system packages without
-# telling you the exact command, or send anything anywhere. First build takes
-# roughly 10–20 minutes and needs ~4 GB (Rust + Node + Python toolchains).
-# =============================================================================
+#   curl -fsSL https://flinttrade.vercel.app/install.sh | bash -s -- --build-from-source
 
 set -euo pipefail
 
 REPO_URL="https://github.com/navaneeshnagarajan/FlintTrade.git"
+MANIFEST_BASE_URL="${FLINTTRADE_DESKTOP_RELEASE_API:-https://flinttrade.vercel.app/api/desktop-release}"
+PINNED_PNPM_VERSION="${FLINTTRADE_PNPM_VERSION:-9.15.0}"
 SRC_DIR="${FLINTTRADE_SRC_DIR:-$HOME/.flinttrade/src/FlintTrade}"
-REF=""
-NO_LAUNCH=0
+REF="${FLINTTRADE_REF:-}"
+CHANNEL="${FLINTTRADE_CHANNEL:-beta}"
+NO_LAUNCH="${FLINTTRADE_NO_LAUNCH:-0}"
 ASSUME_YES="${FLINTTRADE_YES:-0}"
+BUILD_FROM_SOURCE="${FLINTTRADE_BUILD_FROM_SOURCE:-0}"
+DRY_RUN="${FLINTTRADE_DRY_RUN:-0}"
+LINUX_PACKAGE="${FLINTTRADE_LINUX_PACKAGE:-appimage}"
+DOWNLOADED_ASSET_PATH=""
+TMP_DIRS=("")
 
-# --- logging -----------------------------------------------------------------
+cleanup_tmp_dirs() {
+  local dir
+  for dir in "${TMP_DIRS[@]}"; do
+    if [ -n "$dir" ]; then
+      rm -rf "$dir" || true
+    fi
+  done
+  return 0
+}
+trap cleanup_tmp_dirs EXIT
+
 say()  { printf '\033[1;36m[flinttrade]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[flinttrade]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[flinttrade]\033[0m ERROR: %s\n' "$*" >&2; exit 1; }
 
-on_err() {
-  warn "The build did not finish. The source workspace is kept at:"
-  warn "  $SRC_DIR"
-  warn "Fix the reported problem and re-run the same command — it resumes there."
-}
-trap on_err ERR
+usage() {
+  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+  cat <<'USAGE'
 
-# --- args --------------------------------------------------------------------
+Flags:
+  --channel beta|stable     Release channel to install (default: beta)
+  --ref <tag>               Install an exact release tag (for example v0.6.0-beta.1)
+  --package appimage|deb|rpm Linux package preference (default: appimage)
+  --build-from-source       Clone/update the release source and build locally
+  --src <dir>               Source workspace for --build-from-source
+  --update                  Alias for the default install/update flow
+  --no-launch               Do not launch FlintTrade after installing
+  --yes                     Consent to user-local helper installs in source-build mode
+  --dry-run                 Print actions without downloading/installing
+USAGE
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --ref)       REF="${2:?--ref needs a value}"; shift 2 ;;
-    --update)    shift ;;                        # same flow; kept for clarity
-    --src)       SRC_DIR="${2:?--src needs a value}"; shift 2 ;;
+    --channel) CHANNEL="${2:?--channel needs beta or stable}"; shift 2 ;;
+    --ref) REF="${2:?--ref needs a value}"; shift 2 ;;
+    --package) LINUX_PACKAGE="${2:?--package needs appimage, deb, or rpm}"; shift 2 ;;
+    --build-from-source) BUILD_FROM_SOURCE=1; shift ;;
+    --src) SRC_DIR="${2:?--src needs a value}"; shift 2 ;;
+    --update) shift ;;
     --no-launch) NO_LAUNCH=1; shift ;;
-    --yes)       ASSUME_YES=1; shift ;;
-    -h|--help)   grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *)           die "Unknown flag: $1 (see --help)" ;;
+    --yes) ASSUME_YES=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "Unknown flag: $1 (see --help)" ;;
   esac
 done
 
-OS="$(uname -s)"
-case "$OS" in
-  Darwin|Linux) ;;
-  *) die "Unsupported OS '$OS'. On Windows, use install.ps1 instead." ;;
+case "$CHANNEL" in
+  beta|stable) ;;
+  *) die "--channel must be beta or stable" ;;
 esac
 
-# --- consent helper (works when piped: prompts via /dev/tty) ------------------
+case "$LINUX_PACKAGE" in
+  appimage|deb|rpm) ;;
+  *) die "--package must be appimage, deb, or rpm" ;;
+esac
+
+need() { command -v "$1" >/dev/null 2>&1; }
+
+pnpm_run() {
+  if need corepack; then
+    corepack pnpm "$@"
+    return $?
+  fi
+  if need pnpm && [ "$(pnpm --version 2>/dev/null)" = "$PINNED_PNPM_VERSION" ]; then
+    pnpm "$@"
+    return $?
+  fi
+  if need npx; then
+    npx --yes "pnpm@$PINNED_PNPM_VERSION" "$@"
+    return $?
+  fi
+  return 127
+}
+
+run_or_echo() {
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: $*"
+  else
+    "$@"
+  fi
+}
+
 consent() {
   local question="$1"
   if [ "$ASSUME_YES" = "1" ]; then return 0; fi
@@ -81,153 +122,369 @@ consent() {
   fi
 }
 
-# --- prerequisites -------------------------------------------------------------
-say "Checking build prerequisites…"
-MISSING_HINTS=()
+json_object_field() {
+  local object="$1"
+  local field="$2"
+  printf '%s' "$object" | awk -v field="$field" '
+    {
+      pat="\"" field "\":\""
+      start=index($0, pat)
+      if (start == 0) exit 1
+      rest=substr($0, start + length(pat))
+      end=index(rest, "\"")
+      if (end == 0) exit 1
+      print substr(rest, 1, end - 1)
+    }
+  '
+}
 
-need() { command -v "$1" >/dev/null 2>&1; }
+json_object_field_optional() {
+  json_object_field "$@" 2>/dev/null || true
+}
 
-need git  || MISSING_HINTS+=("git — install from https://git-scm.com or your package manager")
-need curl || MISSING_HINTS+=("curl — install via your package manager")
-need make || MISSING_HINTS+=("make — macOS: xcode-select --install; Debian/Ubuntu: sudo apt install build-essential")
+json_contains_string_key() {
+  local json="$1"
+  local field="$2"
+  printf '%s' "$json" | tr -d '[:space:]' | grep -q "\"$field\":\""
+}
 
-if [ "$OS" = "Darwin" ] && ! xcode-select -p >/dev/null 2>&1; then
-  MISSING_HINTS+=("Xcode Command Line Tools — run: xcode-select --install")
-fi
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
 
-if ! need cargo; then
-  MISSING_HINTS+=("Rust (stable) — run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   then restart your shell")
-fi
-
-if need node; then
-  NODE_MAJOR="$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')"
-  if [ "$NODE_MAJOR" -lt 22 ]; then
-    MISSING_HINTS+=("Node.js >= 22 (found $(node --version)) — https://nodejs.org or your version manager")
-  fi
-else
-  MISSING_HINTS+=("Node.js >= 22 — https://nodejs.org or your version manager")
-fi
-
-if [ "$OS" = "Linux" ]; then
-  if need pkg-config && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
-    MISSING_HINTS+=("Tauri system libraries — Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf; Fedora: sudo dnf install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel")
-  fi
-fi
-
-# uv and pnpm can be auto-installed with consent (user-local, no sudo).
-if ! need uv; then
-  if consent "uv (Python package manager) is missing. Install it now (user-local, from astral.sh)?"; then
-    say "Installing uv…"
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-    need uv || die "uv installed but not on PATH — restart your shell and re-run."
+verify_sha256() {
+  local file="$1"
+  local expected="$2"
+  local actual
+  [ -n "$expected" ] || return 0
+  if need sha256sum; then
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+  elif need shasum; then
+    actual="$(shasum -a 256 "$file" | awk '{print $1}')"
   else
-    MISSING_HINTS+=("uv — run: curl -LsSf https://astral.sh/uv/install.sh | sh   (or pass --yes to let this script do it)")
+    die "Release manifest includes a sha256 checksum, but neither sha256sum nor shasum is available."
   fi
-fi
+  if [ "$(lowercase "$actual")" != "$(lowercase "$expected")" ]; then
+    die "Checksum mismatch for $(basename "$file"). Expected $expected, got $actual."
+  fi
+  say "Verified SHA-256 checksum."
+}
 
-if ! need pnpm; then
-  if need corepack && consent "pnpm is missing. Enable it via Node's corepack (user-local)?"; then
-    say "Enabling pnpm via corepack…"
-    corepack enable pnpm 2>/dev/null || corepack enable
-    need pnpm || MISSING_HINTS+=("pnpm — corepack enable did not expose it; see https://pnpm.io/installation")
+select_asset_object() {
+  local manifest="$1"
+  local os="$2"
+  local arch="$3"
+  local kind="$4"
+  printf '%s' "$manifest" | tr -d '[:space:]' | tr '{' '\n' | awk -v os="$os" -v arch="$arch" -v kind="$kind" '
+    index($0, "\"os\":\"" os "\"") &&
+    index($0, "\"arch\":\"" arch "\"") &&
+    index($0, "\"kind\":\"" kind "\"") { print $0; exit }
+  '
+}
+
+manifest_url() {
+  case "$MANIFEST_BASE_URL" in
+    file://*) printf '%s' "$MANIFEST_BASE_URL"; return 0 ;;
+  esac
+  local sep="?"
+  case "$MANIFEST_BASE_URL" in
+    *\?*) sep="&" ;;
+  esac
+  if [ -n "$REF" ]; then
+    printf '%s%stag=%s' "$MANIFEST_BASE_URL" "$sep" "$REF"
   else
-    MISSING_HINTS+=("pnpm — run: corepack enable pnpm   (ships with Node 22; or pass --yes to let this script do it)")
+    printf '%s%schannel=%s' "$MANIFEST_BASE_URL" "$sep" "$CHANNEL"
   fi
-fi
+}
 
-if [ ${#MISSING_HINTS[@]} -gt 0 ]; then
-  warn "Missing prerequisites:"
-  for hint in "${MISSING_HINTS[@]}"; do warn "  • $hint"; done
-  die "Install the tools above, then re-run this command."
-fi
-say "All prerequisites present."
+normalised_arch() {
+  case "$(uname -m)" in
+    arm64|aarch64) printf 'arm64' ;;
+    x86_64|amd64) printf 'x64' ;;
+    *) die "Unsupported CPU architecture: $(uname -m)" ;;
+  esac
+}
 
-# --- resolve the version to build ---------------------------------------------
-if [ -z "$REF" ]; then
-  say "Resolving the newest release tag from GitHub…"
-  REF="$(git ls-remote --tags --refs "$REPO_URL" 'v*' \
-          | awk -F/ '{print $NF}' | sort -V | tail -1)"
-  [ -n "$REF" ] || die "Could not resolve a release tag from $REPO_URL"
-fi
-say "Target version: $REF"
+download_release_asset() {
+  need curl || die "curl is required to download the FlintTrade installer."
 
-# --- clone or update the source workspace -------------------------------------
-if [ -d "$SRC_DIR/.git" ]; then
-  say "Updating existing source workspace at $SRC_DIR…"
-  git -C "$SRC_DIR" fetch --tags origin
-  CURRENT="$(git -C "$SRC_DIR" describe --tags --exact-match 2>/dev/null || echo '')"
-  if [ "$CURRENT" = "$REF" ]; then
-    if [ "${FLINTTRADE_SKIP_IF_CURRENT:-0}" = "1" ]; then
-      say "Already on $REF — nothing to update."
-      exit 0
+  local os="$1"
+  local arch="$2"
+  local kind="$3"
+  local url
+  url="$(manifest_url)"
+
+  say "Resolving FlintTrade desktop release ($url)..."
+  local manifest
+  manifest="$(curl -fsSL "$url")" || die "Could not fetch the desktop release manifest."
+  if json_contains_string_key "$manifest" warning; then
+    die "The release manifest endpoint returned a fallback warning; refusing to install from stale metadata."
+  fi
+  if json_contains_string_key "$manifest" error; then
+    die "The release manifest endpoint returned an error; refusing to install."
+  fi
+
+  local object
+  object="$(select_asset_object "$manifest" "$os" "$arch" "$kind")"
+  [ -n "$object" ] || die "No $os/$arch/$kind installer was found in the selected release."
+
+  local asset_url asset_name asset_sha
+  asset_url="$(json_object_field "$object" url)"
+  asset_name="$(json_object_field "$object" name)"
+  asset_sha="$(json_object_field_optional "$object" sha256)"
+  [ -n "$asset_url" ] || die "Release manifest did not include an asset URL."
+  [ -n "$asset_name" ] || die "Release manifest did not include an asset name."
+
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: would download $asset_name"
+    say "DRY-RUN: $asset_url"
+    if [ -n "$asset_sha" ]; then
+      say "DRY-RUN: would verify sha256 $asset_sha"
     fi
-    say "Source already at $REF — rebuilding (a rebuild is idempotent)."
+    DOWNLOADED_ASSET_PATH="/tmp/$asset_name"
+    return 0
   fi
-  git -C "$SRC_DIR" checkout --quiet "$REF"
-else
-  say "Cloning FlintTrade ($REF) into $SRC_DIR…"
-  mkdir -p "$(dirname "$SRC_DIR")"
-  git clone --branch "$REF" --depth 1 "$REPO_URL" "$SRC_DIR"
-fi
-cd "$SRC_DIR"
 
-# --- build ---------------------------------------------------------------------
-say "Installing Python dependencies (uv sync)…"
-uv sync
-say "Ensuring PyInstaller is available…"
-uv pip install pyinstaller
-say "Installing JS workspace dependencies (pnpm)…"
-pnpm install --frozen-lockfile
-say "Building the desktop app (backend sidecar + Tauri bundle) — this is the long step…"
-make desktop-build
+  local tmp_dir
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/flinttrade.XXXXXX")"
+  TMP_DIRS+=("$tmp_dir")
+  local dest="$tmp_dir/$asset_name"
+  say "Downloading $asset_name..."
+  curl -fL "$asset_url" -o "$dest"
+  verify_sha256 "$dest" "$asset_sha"
+  DOWNLOADED_ASSET_PATH="$dest"
+}
 
-BUNDLE_DIR="packages/apps/desktop/src-tauri/target/release/bundle"
-[ -d "$BUNDLE_DIR" ] || die "Build finished but no bundle directory at $BUNDLE_DIR"
+install_macos_dmg() {
+  local dmg="$1"
+  local mount_dir="${TMPDIR:-/tmp}/flinttrade-dmg-$$"
+  local dest="/Applications"
+  [ -w "$dest" ] || dest="$HOME/Applications"
 
-# --- install -------------------------------------------------------------------
-if [ "$OS" = "Darwin" ]; then
-  APP_PATH="$(find "$BUNDLE_DIR/macos" -maxdepth 1 -name '*.app' | head -1)"
-  [ -n "$APP_PATH" ] || die "No .app produced under $BUNDLE_DIR/macos"
-  DEST="/Applications"
-  [ -w "$DEST" ] || DEST="$HOME/Applications"
-  mkdir -p "$DEST"
-  APP_NAME="$(basename "$APP_PATH")"
-  say "Installing $APP_NAME into $DEST…"
-  rm -rf "${DEST:?}/$APP_NAME"
-  ditto "$APP_PATH" "$DEST/$APP_NAME"
-  say "Installed: $DEST/$APP_NAME ($REF)"
-  if [ "$NO_LAUNCH" = "0" ]; then open "$DEST/$APP_NAME"; fi
-else
-  APPIMAGE="$(find "$BUNDLE_DIR/appimage" -maxdepth 1 -name '*.AppImage' 2>/dev/null | head -1 || true)"
-  if [ -n "$APPIMAGE" ]; then
-    DEST_BIN="$HOME/.local/bin"
-    mkdir -p "$DEST_BIN"
-    install -m 0755 "$APPIMAGE" "$DEST_BIN/flinttrade.AppImage"
-    say "Installed: $DEST_BIN/flinttrade.AppImage ($REF)"
-    DESKTOP_DIR="$HOME/.local/share/applications"
-    mkdir -p "$DESKTOP_DIR"
-    cat > "$DESKTOP_DIR/flinttrade.desktop" <<DESKTOP
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: would mount $dmg and copy FlintTrade.app to $dest"
+    return 0
+  fi
+
+  mkdir -p "$mount_dir" "$dest"
+  hdiutil attach "$dmg" -nobrowse -quiet -mountpoint "$mount_dir"
+
+  local app_path
+  app_path="$(find "$mount_dir" -maxdepth 2 -name 'FlintTrade.app' -type d | head -1)"
+  if [ -z "$app_path" ]; then
+    hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+    rm -rf "$mount_dir"
+    die "No FlintTrade.app found in $dmg"
+  fi
+
+  say "Installing FlintTrade.app into $dest..."
+  rm -rf "$dest/FlintTrade.app"
+  if ! ditto "$app_path" "$dest/FlintTrade.app"; then
+    hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+    rm -rf "$mount_dir"
+    die "Could not copy FlintTrade.app to $dest"
+  fi
+  hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+  rm -rf "$mount_dir"
+
+  say "Installed: $dest/FlintTrade.app"
+  if [ "$NO_LAUNCH" != "1" ]; then open "$dest/FlintTrade.app"; fi
+}
+
+install_linux_appimage() {
+  local appimage="$1"
+  local dest_bin="$HOME/.local/bin"
+  local desktop_dir="$HOME/.local/share/applications"
+  local dest="$dest_bin/flinttrade.AppImage"
+
+  run_or_echo mkdir -p "$dest_bin" "$desktop_dir"
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: would install $appimage to $dest"
+  else
+    install -m 0755 "$appimage" "$dest"
+    cat > "$desktop_dir/flinttrade.desktop" <<DESKTOP
 [Desktop Entry]
 Name=FlintTrade
-Exec=$DEST_BIN/flinttrade.AppImage
+Exec=$dest
 Type=Application
 Categories=Office;Finance;
 Comment=Open-source self-hosted trading software
 DESKTOP
-    if [ "$NO_LAUNCH" = "0" ]; then
-      say "Launching FlintTrade…"
-      nohup "$DEST_BIN/flinttrade.AppImage" >/dev/null 2>&1 &
+  fi
+  say "Installed: $dest"
+  warn "If this distro cannot run AppImage files, install FUSE or rerun with --package deb/rpm."
+  if [ "$NO_LAUNCH" != "1" ] && [ "$DRY_RUN" != "1" ]; then
+    nohup "$dest" >/dev/null 2>&1 &
+  fi
+}
+
+install_linux_native_package() {
+  local package="$1"
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: would install $package as a .$LINUX_PACKAGE package"
+    return 0
+  fi
+  case "$LINUX_PACKAGE" in
+    deb)
+      need apt || die "apt was not found. Use --package appimage or install the .deb manually: $package"
+      say "Installing .deb package with apt..."
+      run_or_echo sudo apt install "$package"
+      ;;
+    rpm)
+      if need dnf; then
+        say "Installing .rpm package with dnf..."
+        run_or_echo sudo dnf install "$package"
+      elif need rpm; then
+        say "Installing .rpm package with rpm..."
+        run_or_echo sudo rpm -Uvh "$package"
+      else
+        die "dnf/rpm was not found. Use --package appimage or install the .rpm manually: $package"
+      fi
+      ;;
+  esac
+}
+
+install_binary_release() {
+  local os_name
+  os_name="$(uname -s)"
+  local arch
+  arch="$(normalised_arch)"
+
+  case "$os_name" in
+    Darwin)
+      local dmg
+      download_release_asset macos "$arch" dmg
+      dmg="$DOWNLOADED_ASSET_PATH"
+      install_macos_dmg "$dmg"
+      ;;
+    Linux)
+      local kind="$LINUX_PACKAGE"
+      [ "$kind" = "appimage" ] && kind="appimage"
+      local package
+      download_release_asset linux "$arch" "$kind"
+      package="$DOWNLOADED_ASSET_PATH"
+      if [ "$LINUX_PACKAGE" = "appimage" ]; then
+        install_linux_appimage "$package"
+      else
+        install_linux_native_package "$package"
+      fi
+      ;;
+    *)
+      die "Unsupported OS '$os_name'. On Windows, use install.ps1 instead."
+      ;;
+  esac
+
+  say "Done. To update later, rerun this installer or use Settings -> Updates."
+}
+
+build_from_source() {
+  local os_name
+  os_name="$(uname -s)"
+  case "$os_name" in
+    Darwin|Linux) ;;
+    *) die "Unsupported OS '$os_name'. On Windows, use install.ps1 instead." ;;
+  esac
+
+  say "Source-build mode enabled. Checking build prerequisites..."
+  local missing=()
+  need git  || missing+=("git - install from https://git-scm.com or your package manager")
+  need curl || missing+=("curl - install via your package manager")
+  need make || missing+=("make - macOS: xcode-select --install; Debian/Ubuntu: sudo apt install build-essential")
+
+  if [ "$os_name" = "Darwin" ] && ! xcode-select -p >/dev/null 2>&1; then
+    missing+=("Xcode Command Line Tools - run: xcode-select --install")
+  fi
+  need cargo || missing+=("Rust stable - run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh")
+
+  if need node; then
+    local node_major
+    node_major="$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')"
+    if [ "$node_major" -lt 22 ]; then
+      missing+=("Node.js >= 22 (found $(node --version))")
     fi
   else
-    DEB="$(find "$BUNDLE_DIR/deb" -maxdepth 1 -name '*.deb' 2>/dev/null | head -1 || true)"
-    RPM="$(find "$BUNDLE_DIR/rpm" -maxdepth 1 -name '*.rpm' 2>/dev/null | head -1 || true)"
-    say "No AppImage produced. Install the package for your distro yourself:"
-    [ -n "$DEB" ] && say "  sudo apt install '$SRC_DIR/$DEB'"
-    [ -n "$RPM" ] && say "  sudo dnf install '$SRC_DIR/$RPM'"
-    [ -n "$DEB$RPM" ] || die "No installable bundle found under $BUNDLE_DIR"
+    missing+=("Node.js >= 22")
   fi
-fi
 
-say "Done. To update later, re-run the same install command — it fetches the"
-say "newest tag into $SRC_DIR and rebuilds."
+  if [ "$os_name" = "Linux" ]; then
+    if need pkg-config && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+      missing+=("Tauri libraries - Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf")
+    fi
+  fi
+
+  if ! need uv; then
+    if consent "uv is missing. Install it now (user-local, from astral.sh)?"; then
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      export PATH="$HOME/.local/bin:$PATH"
+      need uv || die "uv installed but is not on PATH. Restart your shell and rerun."
+    else
+      missing+=("uv - run: curl -LsSf https://astral.sh/uv/install.sh | sh")
+    fi
+  fi
+
+  if ! need corepack && ! need npx && { ! need pnpm || [ "$(pnpm --version 2>/dev/null)" != "$PINNED_PNPM_VERSION" ]; }; then
+    missing+=("pnpm $PINNED_PNPM_VERSION - install Node's npx/corepack or a matching pnpm binary")
+  fi
+
+  if [ ${#missing[@]} -gt 0 ]; then
+    warn "Missing source-build prerequisites:"
+    for hint in "${missing[@]}"; do warn "  - $hint"; done
+    die "Install the tools above, then rerun with --build-from-source."
+  fi
+
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: source build would clone/update $REPO_URL at ${REF:-latest release tag}"
+    say "DRY-RUN: source build would run uv sync, install PyInstaller, pnpm $PINNED_PNPM_VERSION install, and make desktop-build"
+    return 0
+  fi
+
+  if [ -z "$REF" ]; then
+    say "Resolving newest release tag from GitHub..."
+    REF="$(git ls-remote --tags --refs "$REPO_URL" 'v*' | awk -F/ '{print $NF}' | sort -V | tail -1)"
+    [ -n "$REF" ] || die "Could not resolve a release tag from $REPO_URL"
+  fi
+
+  if [ -d "$SRC_DIR/.git" ]; then
+    say "Updating source workspace at $SRC_DIR..."
+    git -C "$SRC_DIR" fetch --tags origin
+    git -C "$SRC_DIR" checkout --quiet "$REF"
+  else
+    say "Cloning FlintTrade ($REF) into $SRC_DIR..."
+    mkdir -p "$(dirname "$SRC_DIR")"
+    git clone --branch "$REF" --depth 1 "$REPO_URL" "$SRC_DIR"
+  fi
+
+  cd "$SRC_DIR"
+  say "Installing Python dependencies..."
+  uv sync
+  uv pip install pyinstaller
+  say "Installing JS workspace dependencies with pnpm $PINNED_PNPM_VERSION..."
+  pnpm_run install --frozen-lockfile
+  say "Building desktop app from source..."
+  make desktop-build
+
+  local bundle_dir="packages/apps/desktop/src-tauri/target/release/bundle"
+  [ -d "$bundle_dir" ] || die "Build finished but no bundle directory exists at $bundle_dir"
+  if [ "$os_name" = "Darwin" ]; then
+    local app_path
+    app_path="$(find "$bundle_dir/macos" -maxdepth 1 -name '*.app' | head -1)"
+    [ -n "$app_path" ] || die "No .app produced under $bundle_dir/macos"
+    local dest="/Applications"
+    [ -w "$dest" ] || dest="$HOME/Applications"
+    mkdir -p "$dest"
+    rm -rf "$dest/$(basename "$app_path")"
+    ditto "$app_path" "$dest/$(basename "$app_path")"
+    if [ "$NO_LAUNCH" != "1" ]; then open "$dest/$(basename "$app_path")"; fi
+  else
+    local appimage
+    appimage="$(find "$bundle_dir/appimage" -maxdepth 1 -name '*.AppImage' 2>/dev/null | head -1 || true)"
+    [ -n "$appimage" ] || die "No AppImage produced under $bundle_dir"
+    install_linux_appimage "$appimage"
+  fi
+}
+
+if [ "$BUILD_FROM_SOURCE" = "1" ]; then
+  build_from_source
+else
+  install_binary_release
+fi

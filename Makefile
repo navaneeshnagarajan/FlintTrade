@@ -18,6 +18,7 @@
 SHELL := /usr/bin/env bash
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,$(shell which python3 2>/dev/null || which python 2>/dev/null))
 NPM := $(shell which npm 2>/dev/null)
+PNPM ?= npx --yes pnpm@9.15.0
 FLINTTRADE_DIR := $(shell pwd)
 FLINTTRADE_PYTHONPATH := packages/core/core/src
 
@@ -159,14 +160,29 @@ desktop-backend: ## Freeze the backend into a Tauri sidecar (current OS/arch)
 
 desktop-build: ## Build native desktop installers for this OS (frontend + sidecar + bundle)
 	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
-	@pnpm install --frozen-lockfile
-	@cd packages/apps/desktop && pnpm tauri build
+	@CI=true $(PNPM) install --frozen-lockfile
+	@set -e; \
+	  build_stamp="$$(mktemp)"; \
+	  trap 'rm -f "$$build_stamp"' EXIT; \
+	  touch "$$build_stamp"; \
+	  set +e; \
+	  (cd packages/apps/desktop && CI=true $(PNPM) tauri build); \
+	  build_status="$$?"; \
+	  set -e; \
+	  if [ "$$build_status" -ne 0 ]; then \
+	    if [ "$$(uname -s)" = "Darwin" ]; then \
+	      echo -e "$(YELLOW)Tauri DMG cosmetics failed; creating a headless-safe DMG from the fresh .app bundle.$(RESET)"; \
+	      bash scripts/package/create-macos-dmg.sh --stamp "$$build_stamp"; \
+	    else \
+	      exit "$$build_status"; \
+	    fi; \
+	  fi
 	@echo -e "$(GREEN)✓ Installers under packages/apps/desktop/src-tauri/target/release/bundle/$(RESET)"
 
 desktop-dev: ## Run the desktop app in dev mode (builds the sidecar first)
 	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
-	@pnpm install --frozen-lockfile
-	@cd packages/apps/desktop && pnpm tauri dev
+	@CI=true $(PNPM) install --frozen-lockfile
+	@cd packages/apps/desktop && $(PNPM) tauri dev
 
 # ======================================================================
 # Maintenance

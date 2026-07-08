@@ -44,7 +44,7 @@ export async function openExternalUrl(url: string): Promise<void> {
  * Invoke a named desktop-shell command over Tauri IPC.
  *
  * Only commands explicitly granted to the remote main window in
- * `capabilities/main-remote.json` (e.g. `updater_state`, `run_self_update`)
+ * `capabilities/main-remote.json` (e.g. `updater_state`, `run_binary_update`)
  * are reachable — everything else is denied by the shell's ACL. Rejects in a
  * plain browser, so callers must gate desktop-only UI on `isDesktopShell()`.
  */

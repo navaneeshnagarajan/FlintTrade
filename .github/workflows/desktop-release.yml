@@ -168,6 +168,21 @@ jobs:
           TARGET_TRIPLE: ${{ matrix.target }}
         run: bash packaging/build-backend.sh
 
+      # --- Signing/notarisation hooks ------------------------------------
+      - name: Report signing mode
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          if [[ "${{ matrix.target }}" == *apple* && -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            echo "macOS signing identity is configured; Tauri may sign according to bundle settings."
+          elif [[ "${{ matrix.target }}" == *windows* && -n "${WINDOWS_CERTIFICATE_THUMBPRINT:-}" ]]; then
+            echo "Windows signing certificate is configured; Tauri may sign according to bundle settings."
+          else
+            echo "No signing secret configured for ${{ matrix.label }}; continuing with an unsigned beta installer."
+          fi
+
       # --- Bundle the Tauri desktop app ----------------------------------
       - name: Build desktop installers
         shell: bash
@@ -190,7 +205,7 @@ jobs:
           BUNDLE="packages/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
           # Copy every produced installer, ignoring missing per-OS types.
           find "$BUNDLE" -type f \
-            \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.msi' -o -name '*.exe' \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
             -exec cp {} "$OUT/" \; 2>/dev/null || true
           COUNT="$(find "$OUT" -type f | wc -l | tr -d ' ')"
@@ -209,14 +224,162 @@ jobs:
           path: dist-installers/*
           if-no-files-found: error
 
-      # --- Attach to the GitHub Release when a release tag is supplied -----
+  publish:
+    name: Publish release manifest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Flatten installer artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-installers
+          find release-artifacts -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp {} dist-installers/ \;
+          COUNT="$(find dist-installers -type f | wc -l | tr -d ' ')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No installer artifacts were downloaded." >&2
+            find release-artifacts -maxdepth 3 -type f -print >&2 || true
+            exit 1
+          fi
+          echo "Publishing installers:"; ls -lah dist-installers
+
+      - name: Generate desktop manifest and checksums
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from urllib.parse import quote
+
+          root = Path("dist-installers")
+          tag = os.environ["TAG_NAME"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          version = tag[1:] if tag.startswith("v") else tag
+          prerelease = "-" in version
+          channel = "beta" if prerelease else "stable"
+
+          def sha256(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          def asset_kind(name: str) -> tuple[str, str, str] | None:
+              lower = name.lower()
+              arch = None
+              if any(token in lower for token in ("aarch64", "arm64")):
+                  arch = "arm64"
+              elif any(token in lower for token in ("x86_64", "amd64", "x64")):
+                  arch = "x64"
+              if arch is None:
+                  return None
+
+              if lower.endswith(".dmg"):
+                  return ("macos", arch, "dmg")
+              if lower.endswith(".exe") and "setup" in lower:
+                  return ("windows", arch, "nsis")
+              if lower.endswith(".appimage"):
+                  return ("linux", arch, "appimage")
+              if lower.endswith(".deb"):
+                  return ("linux", arch, "deb")
+              if lower.endswith(".rpm"):
+                  return ("linux", arch, "rpm")
+              return None
+
+          assets = []
+          sums = []
+          for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+              if not path.is_file():
+                  continue
+              digest = sha256(path)
+              sums.append(f"{digest}  {path.name}\n")
+              parsed = asset_kind(path.name)
+              if parsed is None:
+                  continue
+              os_name, arch, kind = parsed
+              assets.append(
+                  {
+                      "os": os_name,
+                      "arch": arch,
+                      "kind": kind,
+                      "name": path.name,
+                      "size": path.stat().st_size,
+                      "url": f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(path.name)}",
+                      "sha256": digest,
+                  }
+              )
+
+          if not assets:
+              raise SystemExit("No desktop installer assets could be parsed for the release manifest.")
+
+          expected = {
+              ("macos", "arm64", "dmg"),
+              ("macos", "x64", "dmg"),
+              ("windows", "x64", "nsis"),
+              ("linux", "x64", "appimage"),
+              ("linux", "arm64", "appimage"),
+              ("linux", "x64", "deb"),
+              ("linux", "arm64", "deb"),
+              ("linux", "x64", "rpm"),
+              ("linux", "arm64", "rpm"),
+          }
+          seen: dict[tuple[str, str, str], str] = {}
+          duplicates = []
+          for asset in assets:
+              key = (asset["os"], asset["arch"], asset["kind"])
+              if key in seen:
+                  duplicates.append((key, seen[key], asset["name"]))
+              seen[key] = asset["name"]
+          if duplicates:
+              detail = ", ".join(f"{key}: {first} and {second}" for key, first, second in duplicates)
+              raise SystemExit(f"Duplicate desktop installer assets detected: {detail}")
+          missing = sorted(expected - set(seen))
+          if missing:
+              detail = ", ".join("/".join(item) for item in missing)
+              raise SystemExit(f"Missing required desktop installer assets: {detail}")
+
+          (root / "SHA256SUMS.txt").write_text("".join(sums), encoding="utf-8")
+          manifest = {
+              "tag": tag,
+              "version": version,
+              "channel": channel,
+              "prerelease": prerelease,
+              "published_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "html_url": f"https://github.com/{repo}/releases/tag/{quote(tag)}",
+              "assets": assets,
+          }
+          (root / "flinttrade-desktop-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          cat dist-installers/flinttrade-desktop-manifest.json
+
       - name: Publish to release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: dist-installers/*
           draft: true
-          prerelease: true
+          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           overwrite_files: true
           fail_on_unmatched_files: true

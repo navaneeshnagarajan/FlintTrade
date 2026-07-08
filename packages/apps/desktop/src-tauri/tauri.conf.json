@@ -39,18 +39,29 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/flinttrade-backend"],
-    "resources": [],
+    "resources": {
+      "../../../../scripts/install/flinttrade-install.sh": "scripts/install/flinttrade-install.sh",
+      "../../../../scripts/install/flinttrade-install.ps1": "scripts/install/flinttrade-install.ps1"
+    },
     "copyright": "Copyright © FlintTrade contributors. Licensed AGPL-3.0.",
     "licenseFile": "../../../../LICENSE",
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "librsvg2-2"
+        ]
       }
     },
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
     "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
       "nsis": {
         "installMode": "perMachine"
       }

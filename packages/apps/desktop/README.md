@@ -28,7 +28,23 @@ See [docs/DESKTOP.md](../../../docs/DESKTOP.md) for the full desktop guide.
 
 ## Install
 
-This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
+End users should install from the published release assets:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/install.ps1 | iex
+```
+
+The scripts download the matching `.dmg`, `.exe`, `.AppImage`, `.deb`, or
+`.rpm` from `/api/desktop-release` by default. Source builds are an explicit
+advanced path via `--build-from-source` / `-BuildFromSource`.
+
+Contributors working in this package should install via the workspace from the repo root:
 
 ```bash
 pnpm install

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-binary-update"
+description = "Enables the run_binary_update command without any pre-configured scope."
+commands.allow = ["run_binary_update"]
+
+[[permission]]
+identifier = "deny-run-binary-update"
+description = "Denies the run_binary_update command without any pre-configured scope."
+commands.deny = ["run_binary_update"]
