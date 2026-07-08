@@ -31,7 +31,7 @@ def _manifest(tmp_path: Path) -> str:
                         "kind": "dmg",
                         "name": "FlintTrade_9.9.9-beta.1_aarch64.dmg",
                         "size": 1,
-                        "url": "https://example.invalid/mac.dmg",
+                        "url": "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade_9.9.9-beta.1_aarch64.dmg",
                     },
                     {
                         "os": "macos",
@@ -39,7 +39,7 @@ def _manifest(tmp_path: Path) -> str:
                         "kind": "dmg",
                         "name": "FlintTrade_9.9.9-beta.1_x64.dmg",
                         "size": 1,
-                        "url": "https://example.invalid/mac-x64.dmg",
+                        "url": "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade_9.9.9-beta.1_x64.dmg",
                     },
                     {
                         "os": "linux",
@@ -47,7 +47,7 @@ def _manifest(tmp_path: Path) -> str:
                         "kind": "appimage",
                         "name": "FlintTrade_9.9.9-beta.1_amd64.AppImage",
                         "size": 1,
-                        "url": "https://example.invalid/linux.AppImage",
+                        "url": "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade_9.9.9-beta.1_amd64.AppImage",
                     },
                     {
                         "os": "linux",
@@ -55,7 +55,7 @@ def _manifest(tmp_path: Path) -> str:
                         "kind": "deb",
                         "name": "FlintTrade_9.9.9-beta.1_amd64.deb",
                         "size": 1,
-                        "url": "https://example.invalid/linux.deb",
+                        "url": "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade_9.9.9-beta.1_amd64.deb",
                     },
                     {
                         "os": "linux",
@@ -63,7 +63,7 @@ def _manifest(tmp_path: Path) -> str:
                         "kind": "rpm",
                         "name": "FlintTrade-9.9.9-beta.1-1.x86_64.rpm",
                         "size": 1,
-                        "url": "https://example.invalid/linux.rpm",
+                        "url": "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade-9.9.9-beta.1-1.x86_64.rpm",
                     },
                 ],
             }
@@ -104,6 +104,7 @@ def _run_unix_installer_dry_run(tmp_path: Path, *, os_name: str, machine: str, p
             "PATH": _fake_uname(tmp_path, os_name, machine),
             "HOME": str(tmp_path),
             "FLINTTRADE_DESKTOP_RELEASE_API": _manifest(tmp_path),
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
         },
         text=True,
         capture_output=True,
@@ -160,6 +161,11 @@ def test_unix_installer_binary_install_verifies_sha256(tmp_path: Path) -> None:
             "PATH": _fake_uname(tmp_path, "Linux", "x86_64"),
             "HOME": str(tmp_path),
             "FLINTTRADE_DESKTOP_RELEASE_API": manifest.as_uri(),
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
+            # Offline coverage of the download+verify path: allow the local
+            # file:// asset URL (production stays pinned to the GitHub release
+            # path; see download_release_asset).
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
         },
         text=True,
         capture_output=True,
@@ -167,6 +173,107 @@ def test_unix_installer_binary_install_verifies_sha256(tmp_path: Path) -> None:
 
     assert "Verified SHA-256 checksum" in result.stdout
     assert (tmp_path / ".local" / "bin" / "flinttrade.AppImage").exists()
+
+
+def test_unix_installer_aborts_on_checksum_mismatch(tmp_path: Path) -> None:
+    """A tampered asset (digest ≠ file) must abort the install, never run it.
+
+    Guards the security-critical reject branch (flinttrade-install.sh
+    ``verify_sha256`` → ``die "Checksum mismatch"``). A broken or inverted
+    check would otherwise ship green off the success-path test alone.
+    """
+    appimage = tmp_path / "FlintTrade_9.9.9-beta.1_amd64.AppImage"
+    appimage.write_bytes(b"real payload")
+    wrong_digest = "0" * 64  # deliberately not the file's sha256
+    manifest = tmp_path / "tampered.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "tag": "v9.9.9-beta.1",
+                "version": "9.9.9-beta.1",
+                "channel": "beta",
+                "prerelease": True,
+                "published_at": "2026-07-08T00:00:00Z",
+                "html_url": "https://github.com/navaneeshnagarajan/FlintTrade/releases",
+                "assets": [
+                    {
+                        "os": "linux",
+                        "arch": "x64",
+                        "kind": "appimage",
+                        "name": appimage.name,
+                        "size": appimage.stat().st_size,
+                        "url": appimage.as_uri(),
+                        "sha256": wrong_digest,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(SH), "--no-launch"],
+        check=False,
+        cwd=ROOT,
+        env={
+            "PATH": _fake_uname(tmp_path, "Linux", "x86_64"),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_DESKTOP_RELEASE_API": manifest.as_uri(),
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "Checksum mismatch" in (result.stdout + result.stderr)
+    # The installer must NOT have been placed from a tampered download.
+    assert not (tmp_path / ".local" / "bin" / "flinttrade.AppImage").exists()
+
+
+def test_unix_installer_refuses_asset_url_outside_official_release_path(tmp_path: Path) -> None:
+    """A tampered manifest pointing an installer at a foreign host is refused."""
+    manifest = tmp_path / "evil.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "tag": "v9.9.9-beta.1",
+                "version": "9.9.9-beta.1",
+                "channel": "beta",
+                "prerelease": True,
+                "published_at": "2026-07-08T00:00:00Z",
+                "html_url": "https://github.com/navaneeshnagarajan/FlintTrade/releases",
+                "assets": [
+                    {
+                        "os": "linux",
+                        "arch": "x64",
+                        "kind": "appimage",
+                        "name": "FlintTrade_9.9.9-beta.1_amd64.AppImage",
+                        "size": 1,
+                        "url": "https://evil.example/FlintTrade_9.9.9-beta.1_amd64.AppImage",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(SH), "--no-launch"],
+        check=False,
+        cwd=ROOT,
+        env={
+            "PATH": _fake_uname(tmp_path, "Linux", "x86_64"),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_DESKTOP_RELEASE_API": manifest.as_uri(),
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "outside the official release path" in (result.stdout + result.stderr)
 
 
 def test_unix_installer_refuses_warning_manifest(tmp_path: Path) -> None:
@@ -180,6 +287,7 @@ def test_unix_installer_refuses_warning_manifest(tmp_path: Path) -> None:
             "PATH": _fake_uname(tmp_path, "Linux", "x86_64"),
             "HOME": str(tmp_path),
             "FLINTTRADE_DESKTOP_RELEASE_API": manifest.as_uri(),
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
         },
         text=True,
         capture_output=True,

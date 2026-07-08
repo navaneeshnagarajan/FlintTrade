@@ -146,6 +146,12 @@ function Install-BinaryRelease {
         Fail "-Channel must be beta or stable."
     }
     $asset = Get-ReleaseAsset
+    # The downloaded file is executed, so it MUST come from the official
+    # repository's release-download path — never a host a tampered manifest chose.
+    $trustedPrefix = "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/"
+    if (-not ([string]$asset.url).StartsWith($trustedPrefix)) {
+        Fail "Refusing asset URL outside the official release path: $($asset.url)"
+    }
     $installer = Join-Path ([System.IO.Path]::GetTempPath()) $asset.name
     if ($DryRun) {
         Say "DRY-RUN: would download $($asset.name)"

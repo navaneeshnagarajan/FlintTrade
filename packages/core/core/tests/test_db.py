@@ -74,11 +74,20 @@ def test_open_sqlite_concurrent_legacy_recovery_no_spurious_raise(tmp_path: Path
     Guards the rename race (Window A): a thread that loses the quarantine
     race must retry under the lock and succeed, not re-raise at the instant
     the winner has renamed the legacy file but not yet recreated it.
+
+    Thread count is deliberately modest. The race is fully saturated with a
+    single winner plus a couple of lock losers exercising the double-checked
+    retry — extra threads add no race coverage. They DO add simultaneous
+    first-time WAL access, each of which memory-maps SQLite's ``-shm``
+    shared-memory index; a large stampede of concurrent ``xShmMap`` calls on a
+    just-recreated database has SIGBUS-crashed the whole pytest-xdist worker
+    on resource-constrained CI (``Fatal Python error: Bus error``). Eight
+    threads reliably interleave the rename race without that crash regime.
     """
     db = tmp_path / "activity.db"
     db.write_bytes(_FAKE_DUCKDB_HEADER + b"\x00" * 4096)
 
-    n_threads = 24
+    n_threads = 8
     barrier = threading.Barrier(n_threads)
     errors: list[Exception] = []
     errors_lock = threading.Lock()

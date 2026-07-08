@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_DESKTOP_RELEASE,
+  TRUSTED_ASSET_URL_PREFIX,
   assetForPlatform,
   formatBytes,
+  isDesktopReleaseManifest,
+  isTrustedAssetUrl,
   manifestFromGitHubRelease,
   parseDesktopReleaseAsset,
   selectDesktopRelease,
+  sha256FromDigest,
 } from './desktop-release';
+
+const REPO_RELEASE = `${TRUSTED_ASSET_URL_PREFIX}v0.6.0-beta.1`;
 
 const betaAssets = DEFAULT_DESKTOP_RELEASE.assets.map((asset) => ({
   name: asset.name,
@@ -33,19 +39,80 @@ describe('desktop release asset parsing', () => {
     );
   });
 
-  it('ignores source archives and checksum assets', () => {
+  it('ignores source archives and checksum assets (official-repo URLs)', () => {
     expect(
       parseDesktopReleaseAsset({
         name: 'Source code.zip',
-        browser_download_url: 'https://example.invalid/source.zip',
+        browser_download_url: `${REPO_RELEASE}/source.zip`,
       }),
     ).toBeNull();
     expect(
       parseDesktopReleaseAsset({
         name: 'SHA256SUMS.txt',
-        browser_download_url: 'https://example.invalid/SHA256SUMS.txt',
+        browser_download_url: `${REPO_RELEASE}/SHA256SUMS.txt`,
       }),
     ).toBeNull();
+  });
+
+  it('refuses an installer asset whose URL is not the official release path', () => {
+    // A tampered manifest pointing a real installer name at an attacker host
+    // must be rejected — the installer scripts RUN this file.
+    expect(
+      parseDesktopReleaseAsset({
+        name: 'FlintTrade_0.6.0-beta.1_x64-setup.exe',
+        browser_download_url: 'https://evil.example/FlintTrade_0.6.0-beta.1_x64-setup.exe',
+      }),
+    ).toBeNull();
+    // A different GitHub repo is also refused (prefix pin, not just host).
+    expect(
+      parseDesktopReleaseAsset({
+        name: 'FlintTrade_0.6.0-beta.1_x64.dmg',
+        browser_download_url:
+          'https://github.com/someone-else/evil/releases/download/v1/FlintTrade_0.6.0-beta.1_x64.dmg',
+      }),
+    ).toBeNull();
+  });
+
+  it('surfaces the GitHub asset digest as a bare sha256 so the installer can verify it', () => {
+    const hex = 'a'.repeat(64);
+    const parsed = parseDesktopReleaseAsset({
+      name: 'FlintTrade_0.6.0-beta.1_x64-setup.exe',
+      browser_download_url: `${REPO_RELEASE}/FlintTrade_0.6.0-beta.1_x64-setup.exe`,
+      digest: `sha256:${hex.toUpperCase()}`,
+    });
+    expect(parsed?.sha256).toBe(hex);
+  });
+
+  it('omits sha256 when GitHub provides no (or a malformed) digest', () => {
+    const base = {
+      name: 'FlintTrade_0.6.0-beta.1_x64-setup.exe',
+      browser_download_url: `${REPO_RELEASE}/FlintTrade_0.6.0-beta.1_x64-setup.exe`,
+    };
+    expect(parseDesktopReleaseAsset(base)?.sha256).toBeUndefined();
+    expect(parseDesktopReleaseAsset({ ...base, digest: 'md5:deadbeef' })?.sha256).toBeUndefined();
+    expect(sha256FromDigest('sha256:tooshort')).toBeUndefined();
+  });
+});
+
+describe('trusted asset URL pinning', () => {
+  it('accepts only the official repository release-download prefix', () => {
+    expect(isTrustedAssetUrl(`${REPO_RELEASE}/x.dmg`)).toBe(true);
+    expect(isTrustedAssetUrl('https://github.com/other/repo/releases/download/v1/x.dmg')).toBe(false);
+    expect(isTrustedAssetUrl('https://evil.example/x.dmg')).toBe(false);
+    expect(isTrustedAssetUrl('http://github.com/navaneeshnagarajan/FlintTrade/releases/download/v1/x.dmg')).toBe(false);
+    expect(isTrustedAssetUrl(undefined)).toBe(false);
+  });
+
+  it('rejects a manifest carrying an untrusted asset URL', () => {
+    const good = { ...DEFAULT_DESKTOP_RELEASE };
+    expect(isDesktopReleaseManifest(good)).toBe(true);
+    const tampered = {
+      ...DEFAULT_DESKTOP_RELEASE,
+      assets: DEFAULT_DESKTOP_RELEASE.assets.map((a, i) =>
+        i === 0 ? { ...a, url: 'https://evil.example/setup.exe' } : a,
+      ),
+    };
+    expect(isDesktopReleaseManifest(tampered)).toBe(false);
   });
 });
 

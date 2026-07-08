@@ -183,8 +183,18 @@ select_asset_object() {
 }
 
 manifest_url() {
+  # The manifest is fetched over the network and drives which asset is
+  # installed, so require HTTPS (no plaintext http:// that a MITM could
+  # rewrite). A local file:// manifest is permitted only under the test hook.
   case "$MANIFEST_BASE_URL" in
-    file://*) printf '%s' "$MANIFEST_BASE_URL"; return 0 ;;
+    https://*) : ;;
+    file://*)
+      if [ "${FLINTTRADE_ALLOW_LOCAL_ASSET:-0}" = "1" ]; then
+        printf '%s' "$MANIFEST_BASE_URL"; return 0
+      fi
+      die "Refusing non-HTTPS release manifest URL: $MANIFEST_BASE_URL"
+      ;;
+    *) die "Refusing non-HTTPS release manifest URL: $MANIFEST_BASE_URL" ;;
   esac
   local sep="?"
   case "$MANIFEST_BASE_URL" in
@@ -234,6 +244,19 @@ download_release_asset() {
   asset_sha="$(json_object_field_optional "$object" sha256)"
   [ -n "$asset_url" ] || die "Release manifest did not include an asset URL."
   [ -n "$asset_name" ] || die "Release manifest did not include an asset name."
+  # The downloaded file is executed/installed, so it MUST come from the official
+  # repository's release-download path — never a host a tampered manifest chose.
+  # FLINTTRADE_ALLOW_LOCAL_ASSET=1 additionally permits a local file:// URL; it
+  # is a test-only hook (offline checksum-path coverage) and never relaxes to a
+  # remote host, so it cannot be abused to fetch from an attacker's server.
+  case "$asset_url" in
+    https://github.com/navaneeshnagarajan/FlintTrade/releases/download/*) : ;;
+    file://*)
+      [ "${FLINTTRADE_ALLOW_LOCAL_ASSET:-0}" = "1" ] \
+        || die "Refusing non-release asset URL: $asset_url"
+      ;;
+    *) die "Refusing asset URL outside the official release path: $asset_url" ;;
+  esac
 
   if [ "$DRY_RUN" = "1" ]; then
     say "DRY-RUN: would download $asset_name"

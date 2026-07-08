@@ -27,6 +27,31 @@ export interface GitHubReleaseAsset {
   name?: string;
   size?: number;
   browser_download_url?: string;
+  /** GitHub's per-asset content digest, e.g. "sha256:<64 hex>", when present. */
+  digest?: string;
+}
+
+/**
+ * Asset downloads MUST originate from the official repository's release-download
+ * path. The installer scripts fetch this URL and RUN the resulting installer, so
+ * a manifest that smuggled an arbitrary host here would be remote code execution
+ * on the operator's machine. Pinning the prefix (not just the host) also rejects
+ * any other GitHub repo. `browser_download_url` from the GitHub API is always on
+ * this prefix; the install scripts enforce the same check independently.
+ */
+export const TRUSTED_ASSET_URL_PREFIX =
+  'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/';
+
+/** True only for an official-repo release-download URL. */
+export function isTrustedAssetUrl(url: unknown): url is string {
+  return typeof url === 'string' && url.startsWith(TRUSTED_ASSET_URL_PREFIX);
+}
+
+/** Extract a bare 64-hex sha256 from GitHub's "sha256:<hex>" digest field. */
+export function sha256FromDigest(digest: string | undefined): string | undefined {
+  if (!digest) return undefined;
+  const match = /^sha256:([a-f0-9]{64})$/i.exec(digest.trim());
+  return match ? match[1].toLowerCase() : undefined;
 }
 
 export interface GitHubRelease {
@@ -130,27 +155,32 @@ export const DEFAULT_DESKTOP_RELEASE: DesktopReleaseManifest = {
 export function parseDesktopReleaseAsset(asset: GitHubReleaseAsset): DesktopReleaseAsset | null {
   const name = asset.name ?? '';
   const url = asset.browser_download_url ?? '';
-  if (!name || !url) return null;
+  // Refuse to surface any asset whose download URL is not on the official
+  // repository's release path — the installer runs what this URL points to.
+  if (!name || !isTrustedAssetUrl(url)) return null;
 
   const size = asset.size ?? 0;
+  const sha256 = sha256FromDigest(asset.digest);
+  const withDigest = <T extends DesktopReleaseAsset>(base: T): T =>
+    sha256 ? { ...base, sha256 } : base;
   if (/\.dmg$/i.test(name)) {
     const arch = /_(?:aarch64|arm64)\.dmg$/i.test(name) ? 'arm64' : 'x64';
-    return { os: 'macos', arch, kind: 'dmg', name, size, url };
+    return withDigest({ os: 'macos', arch, kind: 'dmg', name, size, url });
   }
   if (/_x64-setup\.exe$/i.test(name)) {
-    return { os: 'windows', arch: 'x64', kind: 'nsis', name, size, url };
+    return withDigest({ os: 'windows', arch: 'x64', kind: 'nsis', name, size, url });
   }
   if (/\.AppImage$/i.test(name)) {
     const arch = /_(?:aarch64|arm64)\.AppImage$/i.test(name) ? 'arm64' : 'x64';
-    return { os: 'linux', arch, kind: 'appimage', name, size, url };
+    return withDigest({ os: 'linux', arch, kind: 'appimage', name, size, url });
   }
   if (/\.deb$/i.test(name)) {
     const arch = /_(?:aarch64|arm64)\.deb$/i.test(name) ? 'arm64' : 'x64';
-    return { os: 'linux', arch, kind: 'deb', name, size, url };
+    return withDigest({ os: 'linux', arch, kind: 'deb', name, size, url });
   }
   if (/\.rpm$/i.test(name)) {
     const arch = /\.(?:aarch64|arm64)\.rpm$/i.test(name) ? 'arm64' : 'x64';
-    return { os: 'linux', arch, kind: 'rpm', name, size, url };
+    return withDigest({ os: 'linux', arch, kind: 'rpm', name, size, url });
   }
   return null;
 }
@@ -183,7 +213,7 @@ export function isDesktopReleaseManifest(value: unknown): value is DesktopReleas
         candidate.kind === 'rpm') &&
       typeof candidate.name === 'string' &&
       typeof candidate.size === 'number' &&
-      typeof candidate.url === 'string' &&
+      isTrustedAssetUrl(candidate.url) &&
       (candidate.sha256 === undefined || /^[a-f0-9]{64}$/i.test(candidate.sha256))
     );
   });
