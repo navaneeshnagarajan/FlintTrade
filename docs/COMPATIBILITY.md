@@ -9,7 +9,6 @@
 | Service | Role | Minimum | Latest tested | Upstream |
 |---|---|---|---|---|
 | **OpenAlgo** | Optional broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
-| **OpenClaw** | Optional AI agent gateway (Telegram / WhatsApp) | (any) | `8c4ecf42` (2026-04-19) | [openclaw/openclaw](https://github.com/openclaw/openclaw) |
 
 **OpenAlgo minimum (v2.0.0):** required only when you enable the optional
 OpenAlgo-compatible integration path. FlintTrade expects OpenAlgo's v2 API
@@ -18,8 +17,10 @@ with strategy id, `optionchain` greeks endpoint, and rate-limit headers
 (`X-RateLimit-Remaining`). v1 deployments will fail the OpenAlgo integration
 sanity check.
 
-**OpenClaw — optional:** only needed when AI-agent features are enabled
-in `~/.flinttrade/workspace.json`. Default install does not require it.
+**AI-agent features are native.** FlintTrade drives agent backends in-process
+via the `flinttrade_ai.agent_backends` registry (Claude Code, Cerebras, Codex,
+and catalogued CLI/ACP runtimes). There is no external agent gateway to install
+— the former OpenClaw bridge was removed and reimplemented natively.
 
 **AlgoMirror is not on this list.** Its multi-account mirroring patterns are
 reimplemented natively in `packages/services/ditto/` (PositionMirror,
@@ -130,7 +131,6 @@ they exist for contributors who want to run the integration test paths.
 
 ```
 .local/external/openalgo/
-.local/external/openclaw/
 ```
 
 Install / refresh:

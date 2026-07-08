@@ -81,7 +81,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `engine` | services | Py | 5-layer `SafetySystem`, `gate_order`, order router, scheduler, mode guard, sandbox executor, strategies |
 | `screener` | services | Py | Option chain, OI/PCR/max-pain, IV smile, futures quadrant, portfolio Greeks, RRG, FII/DII |
 | `backtest` | services | Py | Event-driven simulator, 94 template files (132 registered strategy classes), walk-forward, Monte Carlo (library-only), VectorBT (optional extra, not installed by default) |
-| `ai` | services | Py | Multi-provider LLM client, ChromaDB RAG, ML signals, multi-agent team, sentiment, OpenClaw bridge |
+| `ai` | services | Py | Multi-provider LLM client (incl. Cerebras + Claude Code OAuth), ChromaDB RAG, ML signals, multi-agent team, sentiment, `agent_backends` registry (Codex streaming; Hermes ACP + Antigravity catalogued) |
 | `ditto` | services | Py | Multi-account mirror, margin calc, trailing SL, risk manager (AlgoMirror patterns reimplemented natively) |
 | `automation` | services | Py | Cron, Telegram bot (kill switch), post-market analysis, voice orders |
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
@@ -125,7 +125,7 @@ Apply to anyone touching the order/data path (the OpenAlgo bridge adapter):
 
 ## External test deps (not bundled)
 
-OpenAlgo and OpenClaw are external services (formerly submodules). For local testing, `scripts/setup-test-deps.sh` clones them into `.local/external/` (gitignored). AlgoMirror is intentionally absent: its patterns are reimplemented natively in `packages/services/ditto/` (our own code).
+OpenAlgo is an external service (formerly a submodule). For local testing, `scripts/setup-test-deps.sh` clones it into `.local/external/` (gitignored). AlgoMirror is intentionally absent: its patterns are reimplemented natively in `packages/services/ditto/` (our own code). OpenClaw was dropped in the AI-backends rework — the `agent_backends` layer (Codex/Hermes/Antigravity + the LLM providers) replaced its external-gateway bridge.
 
 ## Working style (this repo)
 

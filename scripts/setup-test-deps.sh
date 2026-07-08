@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Clone (or update) the external test-dependencies into .local/external/.
+# Clone (or update) the external test-dependency into .local/external/.
 #
-# These three projects are NOT shipped with FlintTrade — they are
-# independent services that FlintTrade integrates with at runtime. This
-# script is a convenience for contributors who want to run the
-# integration test paths locally; production users install OpenAlgo /
-# OpenClaw / AlgoMirror via their own preferred method (their docs).
+# OpenAlgo is NOT shipped with FlintTrade — it is an independent service
+# that FlintTrade optionally integrates with at runtime. This script is a
+# convenience for contributors who want to run the OpenAlgo integration
+# test paths locally; production users install OpenAlgo via their own
+# preferred method (its docs).
 #
-# By default each repo is cloned at the commit pinned in
+# By default the repo is cloned at the commit pinned in
 # docs/COMPATIBILITY.md (the FlintTrade-tested version). Pass --latest
 # to clone HEAD of main instead — useful when you intend to bump the
 # pin.
@@ -44,14 +44,12 @@ mkdir -p "$EXTERNAL_DIR"
 dep_repo() {
     case "$1" in
         openalgo) echo "https://github.com/marketcalls/openalgo.git" ;;
-        openclaw) echo "https://github.com/openclaw/openclaw.git" ;;
         *) return 1 ;;
     esac
 }
 dep_pin() {
     case "$1" in
         openalgo) echo "7e48b2e8b9b682347c2985f6d7339541bcee70c7" ;;
-        openclaw) echo "8c4ecf42dfcf8f0265081e2801d221a70dc96886" ;;
         *) return 1 ;;
     esac
 }
@@ -103,13 +101,13 @@ update_existing() {
 case "$MODE" in
     pinned|latest)
         echo "==> Setup-test-deps: $MODE mode"
-        for name in openalgo openclaw; do
+        for name in openalgo; do
             clone_pinned "$name" "$(dep_repo "$name")" "$(dep_pin "$name")"
         done
         ;;
     update)
         echo "==> Setup-test-deps: --update mode"
-        for name in openalgo openclaw; do
+        for name in openalgo; do
             update_existing "$name"
         done
         ;;
@@ -117,7 +115,7 @@ esac
 
 echo ""
 echo "Done. Test deps are at:"
-for name in openalgo openclaw; do
+for name in openalgo; do
     dst="$EXTERNAL_DIR/$name"
     if [ -d "$dst/.git" ]; then
         echo "  $dst ($(cd "$dst" && git rev-parse --short HEAD))"

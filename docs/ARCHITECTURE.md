@@ -456,17 +456,15 @@ make clean      # remove build artefacts
 make update     # update Python + Node deps
 ```
 
-OpenAlgo and OpenClaw are external services; they are NOT git submodules
-and are NOT bundled. For local development, run
-`scripts/setup-test-deps.sh` once per machine to clone local-dev copies
-into `.local/external/`.
+OpenAlgo is an external service; it is NOT a git submodule and is NOT
+bundled. For local development, run `scripts/setup-test-deps.sh` once per
+machine to clone a local-dev copy into `.local/external/`.
 
 ### External test dependencies
 
 | Service | Local-dev path | Source | Role |
 |---|---|---|---|
 | OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | Broker gateway. |
-| OpenClaw | `.local/external/openclaw/` | [openclaw/openclaw](https://github.com/openclaw/openclaw) | AI agent gateway. |
 
 AlgoMirror is intentionally absent — its mirroring patterns are reimplemented
 natively in `packages/services/ditto/` (our own code; the upstream repo is not
@@ -481,7 +479,7 @@ tracked, pulled, or called at runtime).
 | `infra/scripts/openalgo/stop-openalgo.sh` | Stop OpenAlgo gracefully. |
 | `infra/scripts/status.sh` | Service status, ports, disk usage. |
 | `infra/scripts/health-check.sh` | Health check (exit 0/1). |
-| `scripts/setup-test-deps.sh` | Clone OpenAlgo and OpenClaw to `.local/external/`. |
+| `scripts/setup-test-deps.sh` | Clone OpenAlgo to `.local/external/`. |
 | `scripts/reset-flinttrade-state.sh` | Wipe the FlintTrade workspace for a fresh-user test. |
 
 ### Docker

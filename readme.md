@@ -146,7 +146,7 @@ and 1 Rust/PyO3 tick engine.
 | `packages/integrations/gateway` | Python | Native broker gateway, adapter pattern, credential vault, WebSocket bridge |
 | `packages/integrations/webhooks` | Python | TradingView, ChartInk, GoCharting, custom webhooks, visual flow builder |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
-| `packages/services/automation` | Python | Cron jobs, Telegram bot, OpenClaw bridge, post-market analysis |
+| `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis, voice-order intent extraction |
 | `packages/services/backtest` | Python | Event-driven simulator, 94 strategy templates, walk-forward optimiser |
 | `packages/services/ditto` | Python | Multi-account mirroring, margin calculator, trailing stop-loss |
 | `packages/services/engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |

@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # we absorbed, and what commit/date we last checked. The external repos
 # (openalgo, openclaw) used to be git submodules under infra/; they are
 # now plain reference clones under .local/external/ and only present
-# locally if the user ran scripts/setup-test-deps.sh. AlgoMirror is
+# locally if the user ran scripts/setup-test-deps.sh. (OpenClaw was dropped in
+# the AI-backends rework — the `agent_backends` layer replaced its gateway
+# bridge.) AlgoMirror is
 # absent: its mirroring patterns are fully absorbed into packages/services/ditto/
 # and the repo is no longer pulled or tracked.
 
@@ -46,23 +48,6 @@ ABSORBED_REPOS: list[dict] = [
             "Zebu OAuth migration (TOTP -> OAuth 2.0)",
             "Flattrade V2 API endpoint migration",
             "Telegram alert service refactor (sync HTTP, no asyncio)",
-        ],
-    },
-    {
-        "name": "openclaw",
-        "github": "openclaw/openclaw",
-        "local_path": ".local/external/openclaw",
-        "type": "reference",
-        "absorbed": [
-            "Agent gateway pattern -> packages/services/automation/src/openclaw_bridge.py",
-            "Telegram/WhatsApp transport -> packages/services/automation/src/telegram_bot.py",
-        ],
-        "last_absorbed_commit": "abce6407",
-        "missing_since": [
-            "Plugin SDK namespaces",
-            "Exec approval system",
-            "WhatsApp reply quoting",
-            "Device token rotation",
         ],
     },
     {
@@ -173,7 +158,7 @@ def check_repo(repo: dict) -> dict:
         result["notes"] = "Directory not found"
         return result
 
-    # External test-deps under .local/external/ (openalgo, openclaw) are
+    # External test-deps under .local/external/ (openalgo) are
     # tracked specially: if a .git directory is present, we can compute
     # drift against origin/main. They no longer exist for end users — only
     # for contributors who ran scripts/setup-test-deps.sh.

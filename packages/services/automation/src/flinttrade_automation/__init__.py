@@ -1,4 +1,4 @@
-"""FlintTrade automation package — cron, Telegram, OpenClaw, post-market, n8n, flows."""
+"""FlintTrade automation package — cron, Telegram, post-market, n8n, flows."""
 
 from flinttrade_core.version import APP_VERSION
 
