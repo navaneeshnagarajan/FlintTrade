@@ -172,3 +172,18 @@ def test_endpoints_503_when_uninitialised(app_no_journal):
         assert c.get("/api/v1/journal/entries").status_code == 503
         assert c.get("/api/v1/journal/search?q=x").status_code == 503
         assert c.get("/api/v1/journal/stats").status_code == 503
+
+
+def test_import_malformed_rows_returns_201_not_500(client):
+    # Untrusted rows (non-dict, null side) must be skipped and reported, never
+    # crash the route (the store validates per-row).
+    resp = client.post(
+        "/api/v1/journal/import",
+        json={"trades": [123, None, {"symbol": "A", "action": None, "quantity": 1, "price": 1.0}]},
+    )
+    assert resp.status_code == 201
+    assert resp.get_json()["data"]["count"] == 1  # only the valid dict row imports
+
+
+def test_import_non_list_body_returns_400(client):
+    assert client.post("/api/v1/journal/import", json={"trades": "nope"}).status_code == 400

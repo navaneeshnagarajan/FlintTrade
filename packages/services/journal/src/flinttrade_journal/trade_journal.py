@@ -38,15 +38,18 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import functools
 import io
 import json
 import logging
 import os
 import sqlite3
+import threading
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -55,6 +58,28 @@ from flinttrade_core.db import open_sqlite
 logger = logging.getLogger("flinttrade.journal.trade_journal")
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+_T = TypeVar("_T")
+
+
+def _locked(method: Callable[..., _T]) -> Callable[..., _T]:
+    """Serialise a :class:`TradeJournal` method on the instance lock.
+
+    A single sqlite3 connection is shared across Flask's request threads (the
+    journal is one app-wide singleton). ``check_same_thread=False`` avoids the
+    cross-thread open error, but CPython's sqlite3 does NOT serialise the
+    prepare→bind→step cycle, so two threads driving the same connection corrupt
+    each other's statement state (SQLITE_MISUSE, garbage reads). A reentrant
+    lock makes every public operation atomic — and composite methods (update →
+    get, import → list + add) re-acquire it safely.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: TradeJournal, *args: Any, **kwargs: Any) -> _T:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 # ---------------------------------------------------------------------------
 # Schema DDL
@@ -497,6 +522,8 @@ class TradeJournal:
             path = str(db_path) if db_path is not None else str(_default_journal_path())
             self._conn = open_sqlite(path)
         self._conn.row_factory = sqlite3.Row
+        # Serialises the shared connection across Flask request threads (see _locked).
+        self._lock = threading.RLock()
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
@@ -513,6 +540,7 @@ class TradeJournal:
     # Schema initialisation
     # ------------------------------------------------------------------
 
+    @_locked
     def initialise(self) -> None:
         """Create the journal tables, indexes, FTS index, and sync triggers.
 
@@ -537,6 +565,7 @@ class TradeJournal:
                 [(entry_id, t) for t in unique],
             )
 
+    @_locked
     def add_entry(self, entry: JournalEntry) -> str:
         """Insert a new journal entry (with its tags; FTS syncs via trigger).
 
@@ -558,6 +587,7 @@ class TradeJournal:
         logger.info("Journal entry added: id=%s symbol=%s", entry.id, entry.symbol)
         return entry.id
 
+    @_locked
     def get_entry(self, entry_id: str) -> JournalEntry | None:
         """Fetch a single entry by its UUID.
 
@@ -575,6 +605,7 @@ class TradeJournal:
             return None
         return _row_to_entry(dict(row))
 
+    @_locked
     def list_entries(self, filters: JournalFilters | None = None) -> list[JournalEntry]:
         """List journal entries, optionally filtered.
 
@@ -591,11 +622,17 @@ class TradeJournal:
         clauses: list[str] = []
         params: list[Any] = []
 
+        # Compare the stored LOCAL (IST) date prefix, falling back to created_at
+        # when entry_time is absent. substr(...,1,10) avoids SQLite date()'s
+        # UTC conversion (which shifted pre-05:30-IST entries a day earlier), and
+        # the COALESCE keeps entries with no entry_time (e.g. manually logged via
+        # the widget) from being silently dropped by every date-range filter.
+        _date_expr = "substr(COALESCE(entry_time, created_at), 1, 10)"
         if filters.start_date:
-            clauses.append("date(entry_time) >= ?")
+            clauses.append(f"{_date_expr} >= ?")
             params.append(filters.start_date)
         if filters.end_date:
-            clauses.append("date(entry_time) <= ?")
+            clauses.append(f"{_date_expr} <= ?")
             params.append(filters.end_date)
         if filters.symbol:
             clauses.append("symbol = ?")
@@ -629,6 +666,7 @@ class TradeJournal:
         rows = self._conn.execute(sql, params).fetchall()
         return [_row_to_entry(dict(r)) for r in rows]
 
+    @_locked
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> JournalEntry | None:
         """Partially update an existing entry.
 
@@ -650,8 +688,10 @@ class TradeJournal:
         # Merge updates — re-validate through the model to trigger validators.
         current_data = existing.model_dump()
         current_data.update(updates)
-        # Clear pnl so the model_validator recomputes it when exit_price changes.
-        if "exit_price" in updates or "entry_price" in updates or "quantity" in updates:
+        # Clear pnl so the model_validator recomputes it when any input to the
+        # P&L formula changes — including `side`, whose flip inverts the sign
+        # (omitting it left a closed BUY→SELL correction showing the old profit).
+        if updates.keys() & {"exit_price", "entry_price", "quantity", "side"}:
             current_data.pop("pnl", None)
             current_data.pop("pnl_pct", None)
         current_data["updated_at"] = datetime.now(IST)
@@ -673,6 +713,7 @@ class TradeJournal:
         logger.info("Journal entry updated: id=%s", entry_id)
         return updated
 
+    @_locked
     def delete_entry(self, entry_id: str) -> bool:
         """Delete a journal entry by UUID.
 
@@ -695,6 +736,7 @@ class TradeJournal:
     # Full-text search
     # ------------------------------------------------------------------
 
+    @_locked
     def search(self, query: str, *, limit: int = 100, offset: int = 0) -> list[JournalEntry]:
         """Full-text search entries by symbol / notes / tags / strategy.
 
@@ -735,6 +777,7 @@ class TradeJournal:
     # Statistics
     # ------------------------------------------------------------------
 
+    @_locked
     def get_stats(
         self,
         start_date: str | None = None,
@@ -807,6 +850,7 @@ class TradeJournal:
     # Export / Import
     # ------------------------------------------------------------------
 
+    @_locked
     def export_csv(
         self,
         start_date: str | None = None,
@@ -844,6 +888,7 @@ class TradeJournal:
 
         return buf.getvalue()
 
+    @_locked
     def import_from_tradebook(self, trades: list[dict[str, Any]]) -> list[str]:
         """Auto-create journal entries from OpenAlgo tradebook rows.
 
@@ -867,11 +912,21 @@ class TradeJournal:
         created_ids: list[str] = []
 
         for trade in trades:
-            symbol = trade.get("symbol", "")
-            exchange = trade.get("exchange", "NSE")
-            side = trade.get("action", trade.get("side", "BUY")).upper()
-            quantity = int(trade.get("quantity", trade.get("qty", 0)))
-            price = float(trade.get("price", trade.get("trade_price", 0.0)))
+            # Untrusted input (a webhook / API caller can post arbitrary JSON):
+            # a non-dict row, a null side, or a non-numeric qty/price must skip
+            # this row, never raise — malformed input is a skipped row, not a 500.
+            if not isinstance(trade, dict):
+                logger.warning("Skipping non-object tradebook row: %r", trade)
+                continue
+            try:
+                symbol = str(trade.get("symbol") or "")
+                exchange = str(trade.get("exchange") or "NSE")
+                side = str(trade.get("action") or trade.get("side") or "BUY").upper()
+                quantity = int(trade.get("quantity") or trade.get("qty") or 0)
+                price = float(trade.get("price") or trade.get("trade_price") or 0.0)
+            except (TypeError, ValueError):
+                logger.warning("Skipping malformed tradebook row: %r", trade)
+                continue
 
             # Parse timestamp from tradebook field names OpenAlgo uses
             raw_ts = trade.get("timestamp") or trade.get("time") or trade.get("order_time")

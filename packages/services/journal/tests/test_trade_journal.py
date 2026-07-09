@@ -528,3 +528,84 @@ class TestJournalSearch:
             journal.initialise()
             journal.add_entry(_entry(symbol="INFY"))
             assert len(journal.list_entries()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression guards for the G31 adversarial-verify findings
+# ---------------------------------------------------------------------------
+
+
+class TestJournalVerifyRegressions:
+    """Guards for the four defects found by the G31 adversarial verify."""
+
+    def test_side_only_update_recomputes_pnl(self):
+        # A BUY→SELL correction on a closed trade must flip the P&L sign, not
+        # keep the old profit (the recompute guard once omitted `side`).
+        _, journal = _make_journal()
+        eid = journal.add_entry(_entry(side="BUY", entry_price=100.0, exit_price=120.0, quantity=50))
+        assert journal.get_entry(eid).pnl == pytest.approx(1000.0)
+        updated = journal.update_entry(eid, {"side": "SELL"})
+        assert updated is not None
+        assert updated.pnl == pytest.approx(-1000.0)
+
+    def test_date_filter_includes_entries_without_entry_time(self):
+        # Widget-created entries have no entry_time; a date-range filter must
+        # fall back to created_at, not silently drop every such entry.
+        from flinttrade_journal.trade_journal import JournalFilters
+
+        _, journal = _make_journal()
+        journal.add_entry(_entry(symbol="NOTIME"))  # entry_time defaults to None-in-DB
+        today = datetime.now(IST).date().isoformat()
+        got = journal.list_entries(JournalFilters(start_date=today, end_date=today))
+        assert any(e.symbol == "NOTIME" for e in got)
+
+    def test_date_filter_uses_local_ist_date_not_utc(self):
+        # An entry at 02:00 IST must match its own IST date, not shift a day
+        # earlier via SQLite date()'s UTC conversion.
+        from flinttrade_journal.trade_journal import JournalFilters
+
+        _, journal = _make_journal()
+        journal.add_entry(_entry(symbol="EARLY", entry_time=datetime(2026, 4, 7, 2, 0, tzinfo=IST)))
+        got = journal.list_entries(JournalFilters(start_date="2026-04-07", end_date="2026-04-07"))
+        assert any(e.symbol == "EARLY" for e in got)
+
+    def test_import_skips_malformed_rows_without_raising(self):
+        # Untrusted import input: non-dict rows, a null side, and a non-numeric
+        # quantity must be skipped, never raise (a webhook could post anything).
+        _, journal = _make_journal()
+        created = journal.import_from_tradebook([
+            123, None, "x",
+            {"symbol": "A", "action": None, "quantity": 1, "price": 1.0},
+            {"symbol": "B", "quantity": "abc", "price": 1.0},
+            {"symbol": "C", "exchange": "NSE", "action": "BUY", "quantity": 5, "price": 100.0},
+        ])
+        # A (null side → default BUY) and C import; the three non-dicts and B skip.
+        assert len(created) == 2
+
+    def test_concurrent_access_is_thread_safe(self):
+        # The journal is one shared connection across Flask threads; without the
+        # instance lock, concurrent ops corrupt statement state (SQLITE_MISUSE,
+        # garbage reads). This reproduces the load and asserts zero failures.
+        import threading
+
+        _, journal = _make_journal()
+        errors: list[str] = []
+
+        def worker(n: int) -> None:
+            try:
+                for i in range(10):
+                    eid = journal.add_entry(_entry(symbol=f"T{n}", quantity=n + 1, notes=f"{n}-{i}"))
+                    journal.get_entry(eid)
+                    journal.list_entries()
+                    journal.search("T")
+                    journal.get_stats()
+                    journal.update_entry(eid, {"notes": f"u{n}-{i}"})
+            except Exception as exc:  # noqa: BLE001 — capture any thread failure
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
