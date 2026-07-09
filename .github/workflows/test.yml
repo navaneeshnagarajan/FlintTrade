@@ -191,7 +191,7 @@ jobs:
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/layout/ src/hooks/__tests__/useGlobalKeys.test.ts src/hooks/__tests__/useFeatureGate.test.ts src/hooks/__tests__/useSkillContent.test.ts src/hooks/__tests__/useTradingStoreSync.test.ts
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check
@@ -252,7 +252,7 @@ jobs:
           FAIL=0
           # TradeIdea excluded: OOMs at 4GB+ heap (vitest module resolution overhead).
           # Passes locally with --max-old-space-size=8192. CI runner limited to 7GB total.
-          for d in StrategyTemplates TickSpeed Ticker Watchlist; do
+          for d in StrategyTemplates TickSpeed Ticker Watchlist AIBackends AITeam Obsidian TradeJournal; do
             echo "::group::Testing $d"
             npx vitest run --pool=forks --maxWorkers=1 --no-file-parallelism "src/widgets/utility/$d/" || FAIL=1
             echo "::endgroup::"
@@ -274,8 +274,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Run analysis + routes + tools + components tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/analysis/ src/routes/ src/tools/ src/components/
+      - name: Run analysis + routes + tools + components + chrome + orders/account tests
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
