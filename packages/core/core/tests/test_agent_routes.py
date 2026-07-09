@@ -196,6 +196,7 @@ def test_start_uses_configured_execution_default_when_target_omitted(live_auth):
 
     class _Router:
         _config = _Config()
+        default_selector = "upstox:U1"  # public accessor the routes now read
 
     app = _make_app(broker_router=_Router())
     resp = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())

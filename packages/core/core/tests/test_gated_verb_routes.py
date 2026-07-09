@@ -123,6 +123,7 @@ def test_gated_target_uses_execution_default_only_when_target_omitted() -> None:
 
     class _Router:
         _config = _Config()
+        default_selector = "upstox:U1"  # public accessor the routes now read
 
     app = _app(broker_router=_Router())
     with app.app_context():
