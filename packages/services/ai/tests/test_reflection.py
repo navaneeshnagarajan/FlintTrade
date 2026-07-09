@@ -102,6 +102,14 @@ class TestTradeOutcomeDataclass:
         assert outcome.analysis_summary == ""
 
 
+def test_legacy_module_reexports_canonical_types() -> None:
+    from flinttrade_ai.reflection import TradeOutcome as LegacyTradeOutcome
+    from flinttrade_ai.reflection import TradeReflector as LegacyTradeReflector
+
+    assert LegacyTradeOutcome is TradeOutcome
+    assert LegacyTradeReflector is TradeReflector
+
+
 class TestReflectReturnsLesson:
     """reflect_one() must return the lesson string from the LLM."""
 
