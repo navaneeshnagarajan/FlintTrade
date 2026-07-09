@@ -292,3 +292,20 @@ jobs:
             grep -rn "$p" --include="*.py" --include="*.js" --include="*.toml" . 2>/dev/null | grep -v ".env.example" && FOUND=1
           done
           [ "$FOUND" -eq 1 ] && exit 1 || echo "✅ No secrets"
+
+  # The Rust ticks crate (tick-level backtest simulator) carries real unit tests
+  # that no other job runs — cargo audit (supply-chain.yml) checks advisories,
+  # not behaviour. This lane compiles and runs them. paths-ignore skips the
+  # whole workflow on doc-only pushes; on a code push this is a per-push Rust
+  # compile, kept cheap by the cargo cache.
+  rust-ticks-tests:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/core/ticks
+      - run: cargo test --manifest-path packages/core/ticks/Cargo.toml

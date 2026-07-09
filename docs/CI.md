@@ -15,7 +15,7 @@ workflow YAML should read this once.
 
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
-| `test.yml` | push to `main` / `dev`; non-draft PR | 7 Linux jobs (~70 minutes wall-clock) | The main quality gate. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
+| `test.yml` | push to `main` / `dev`; non-draft PR | 8 Linux jobs (~70 minutes wall-clock) | The main quality gate. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
 | `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and workflow files) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Skipped unless a site-relevant path changes. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | 1 macOS + 1 Windows | Catches slow-burn platform regressions before they accumulate. |
@@ -24,9 +24,9 @@ workflow YAML should read this once.
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
 | `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |
 
-### The seven per-push Ubuntu jobs
+### The eight per-push Ubuntu jobs
 
-`test.yml` splits the Python and TypeScript test suites across seven
+`test.yml` splits the Python, TypeScript, and Rust test suites across eight
 parallel jobs to keep wall-clock time low:
 
 1. `python-tests` — full pytest suite.
@@ -41,8 +41,13 @@ parallel jobs to keep wall-clock time low:
    `widgets/account/`.
 7. `secrets-check` — an inline two-pattern grep scan (NOT gitleaks) over the
    tree.
+8. `rust-ticks-tests` — `cargo test` on the `packages/core/ticks` crate (the
+   tick-level backtest simulator). This is the only job that runs the crate's
+   unit tests; `cargo audit` in `supply-chain.yml` checks advisories, not
+   behaviour. Cached via `Swatinem/rust-cache` so the per-push compile stays
+   cheap.
 
-All seven must be green for the workflow to be reported as passing. The shard
+All eight must be green for the workflow to be reported as passing. The shard
 path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
 (in `python-tests`) fails CI if any terminal `*.test.ts(x)` file runs in no
 shard — so coverage stays complete apart from the allowlisted `TradeIdea`.

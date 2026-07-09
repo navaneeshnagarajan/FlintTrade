@@ -43,7 +43,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
 
 # ======================================================================
 # Setup
@@ -124,12 +124,23 @@ dev: ## Start terminal dev server + FlintTrade backend
 # Testing and quality
 # ======================================================================
 
-test: ## Run all tests
+test: ## Run all tests (Python + Rust ticks crate)
 ifeq ($(OS),Windows_NT)
 	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/ditto/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -v --tb=short --import-mode=importlib
 else
 	@$(PYTHON) -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib
 endif
+	@$(MAKE) --no-print-directory ticks-test
+
+ticks-test: ## Run the Rust ticks-crate tests (skipped when cargo is absent)
+	@# Portable manifest path (cargo accepts forward slashes on Windows too);
+	@# guarded on cargo presence so a Python-only contributor's `make test`
+	@# does not hard-fail. A real test failure still propagates (no `|| echo`).
+	@if command -v cargo >/dev/null 2>&1; then \
+		cargo test --manifest-path packages/core/ticks/Cargo.toml; \
+	else \
+		echo "cargo not found — skipping Rust ticks tests"; \
+	fi
 
 test-fast: ## Run tests, stop on first failure
 ifeq ($(OS),Windows_NT)
@@ -235,7 +246,10 @@ full-check: ## Run full health check (tests + lint + typecheck)
 	@set -o pipefail; $(PYTHON) -m ruff check packages/*/*/src/ --statistics 2>&1 | tail -5
 	@echo -e "$(YELLOW)--- Terminal ---$(RESET)"
 	@cd packages/apps/terminal && set -o pipefail; npm run typecheck 2>&1 | tail -2
-	@cd packages/apps/terminal && set -o pipefail; npm run test:vitest 2>&1 | tail -3
+	@# Match CI's vitest form: fork-per-file isolation caps peak memory at the
+	@# heaviest single file (an unbounded whole-suite run OOMs on TradeIdea).
+	@# 8192 MB is the heap even TradeIdea passes at locally (CI has to shard).
+	@cd packages/apps/terminal && set -o pipefail; NODE_OPTIONS=--max-old-space-size=8192 npx vitest run --pool=forks --maxWorkers=1 --no-file-parallelism 2>&1 | tail -3
 	@echo -e "$(GREEN)=== Done ===$(RESET)"
 
 audit: ## Check repo absorption status

@@ -38,6 +38,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
   aggregates matrix artifacts, publishes `flinttrade-desktop-manifest.json`,
   publishes `SHA256SUMS.txt`, and keeps unsigned beta installers honestly
   labelled while leaving signing/notarisation hooks env-gated for future certs.
+- **Rust ticks crate is now tested in CI** — a `rust-ticks-tests` job
+  (`test.yml`, eighth per-push Ubuntu job) runs `cargo test` on the
+  `packages/core/ticks` crate. Its unit tests ran in no CI job before (`cargo
+  audit` in `supply-chain.yml` checks advisories, not behaviour). A guarded
+  `make ticks-test` target runs the same tests locally (skipped when `cargo` is
+  absent) and `make test` now chains it.
 - **Gated bracket orders** — `POST /api/v1/orders/bracket` (entry + stop-loss
   or target exit) is now live: every leg traverses SafetySystem L1–L5 →
   `gate_order` → `BrokerRouter` via injected dispatchers (the service holds no
@@ -263,6 +269,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`make full-check` no longer OOMs on the vitest stage** — it ran the entire
+  terminal suite unbounded in one 4 GB process, which OOMs on the same heavy
+  widgets CI has to shard around. It now uses CI's form (`--pool=forks
+  --maxWorkers=1 --no-file-parallelism`, fork-per-file isolation caps peak
+  memory at the heaviest single file) with an 8 GB heap.
 - **Practice fills no longer fabricate a position at price 0.0** — both paper
   engines (`flinttrade_data.SandboxEngine` — the Practice dispatch target — and
   `flinttrade_engine.SandboxEngine` — the strategy/router sandbox) rejected
