@@ -29,6 +29,33 @@ pytestmark = pytest.mark.skipif(
 
 
 # ---------------------------------------------------------------------------
+# Public surface
+# ---------------------------------------------------------------------------
+
+# Every symbol the pymodule registers (lib.rs) must be re-exported from the
+# package so the whole compiled surface is importable, not just the four core
+# simulator types. If maturin adds a class/function, add it here and in
+# __init__.py.
+_EXPECTED_SURFACE = {
+    "TickSimulator", "Bar", "Trade", "SimulationResult", "Tick", "Signal",
+    "BacktestResult", "simulate", "simulate_correlated", "confidence_intervals",
+    "SessionConfig", "SessionState", "SessionTracker", "OptionType",
+    "OptionStrategyType", "OptionsConfig", "OptionsStrategy", "Greeks",
+    "black_scholes_greeks", "LegConfig", "SpreadConfig", "SpreadBacktest",
+    "run_spreads_batch", "straddle_config", "strangle_config",
+    "iron_condor_config", "PairsStrategy", "run_batch",
+}
+
+
+def test_package_reexports_full_compiled_surface() -> None:
+    import tick_engine
+
+    assert set(tick_engine.__all__) == _EXPECTED_SURFACE
+    missing = [name for name in tick_engine.__all__ if not hasattr(tick_engine, name)]
+    assert not missing, f"__all__ names not importable from the package: {missing}"
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

@@ -38,6 +38,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
   aggregates matrix artifacts, publishes `flinttrade-desktop-manifest.json`,
   publishes `SHA256SUMS.txt`, and keeps unsigned beta installers honestly
   labelled while leaving signing/notarisation hooks env-gated for future certs.
+- **Tick-engine full surface importable from Python** — the `tick_engine`
+  package re-exported only the four core simulator types while the compiled
+  crate registers 28 (Monte Carlo, session tracker, options + spread
+  backtesters, pairs). All 28 are now re-exported, with the crate's dormant
+  status (built and tested, no production consumer yet) documented in the
+  package docstring and pinned by a surface-completeness test.
 - **Rust ticks crate is now tested in CI** — a `rust-ticks-tests` job
   (`test.yml`, eighth per-push Ubuntu job) runs `cargo test` on the
   `packages/core/ticks` crate. Its unit tests ran in no CI job before (`cargo
