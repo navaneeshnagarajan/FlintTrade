@@ -2,7 +2,7 @@
 
 Provides a self-contained, configurable RAG chain:
 
-    DocumentLoader  → load .md / .txt / .pdf files from a directory.
+    DocumentLoader  → load .md / .txt / .py / .pdf files from a directory.
     TextChunker     → split documents into overlapping chunks.
     EmbeddingProvider → sentence-transformers or OpenAI-compatible embeddings.
     VectorStore     → ChromaDB-backed similarity search.
@@ -19,7 +19,7 @@ Design:
 
 Adapted from: openalgo-chatbot/openalgo_documentation_chatbot.py
 Extended with:
-  - Configurable chunk_size / overlap (512 / 64 per spec).
+  - Context-preserving chunk_size / overlap defaults (1000 / 200).
   - PDF support via pypdf (not PyPDF2 — maintained fork).
   - EmbeddingProvider abstraction so OpenAI embeddings can be swapped in.
   - Pydantic config models.
@@ -43,12 +43,16 @@ logger = logging.getLogger("flinttrade.ai.rag_pipeline")
 # Default constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CHUNK_SIZE = 512       # tokens (approximate, ~4 chars / token)
-_DEFAULT_CHUNK_OVERLAP = 64     # token overlap between adjacent chunks
+_DEFAULT_CHUNK_SIZE = 1000  # tokens (approximate, ~4 chars / token)
+_DEFAULT_CHUNK_OVERLAP = 200  # token overlap between adjacent chunks
 _DEFAULT_TOP_K = 5
-_DEFAULT_SIMILARITY_THRESHOLD = 0.0  # no filtering by default
-_DEFAULT_COLLECTION = "flinttrade_rag"
+_DEFAULT_SIMILARITY_THRESHOLD = 0.7
+_DEFAULT_COLLECTION = "flinttrade_docs"
 _DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+_EMBEDDING_MODE_METADATA_KEY = "flinttrade_embedding_mode"
+_DISTANCE_SPACE_METADATA_KEY = "flinttrade_distance_space"
+_EMBEDDING_MODE_EXTERNAL = "external"
+_EMBEDDING_MODE_CHROMA = "chroma"
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -162,6 +166,41 @@ class RAGResult:
         return bool(self.answer) and not self.error
 
 
+# Backwards-compatible input model. The old API used an empty doc-type default;
+# the canonical loader keeps ``general`` as its explicit normalised default.
+@dataclass
+class Document(LoadedDocument):
+    """Legacy document input accepted by the canonical pipeline."""
+
+    doc_type: str = ""
+
+
+@dataclass
+class LegacyRetrievedChunk(RetrievedChunk):
+    """Legacy retrieved chunk with the former empty doc-type default."""
+
+    doc_type: str = ""
+
+
+@dataclass(init=False)
+class RAGResponse(RAGResult):
+    """Legacy response constructor preserving ``answer, chunks, query, error``."""
+
+    def __init__(
+        self,
+        answer: str = "",
+        chunks_used: list[RetrievedChunk] | None = None,
+        query: str = "",
+        error: str = "",
+    ) -> None:
+        super().__init__(
+            answer=answer,
+            query=query,
+            chunks_used=list(chunks_used or []),
+            error=error,
+        )
+
+
 # ---------------------------------------------------------------------------
 # DomainFilter — topic guard for the RAG pipeline
 # ---------------------------------------------------------------------------
@@ -197,37 +236,139 @@ class DomainFilter:
         # → "I can only help with trading and market-related questions."
     """
 
-    TRADING_KEYWORDS: frozenset[str] = frozenset({
-        # Indian markets & instruments
-        "nifty", "banknifty", "sensex", "nse", "bse", "mcx",
-        "nfo", "fut", "ce", "pe", "otm", "itm", "atm",
-        # Order types & execution
-        "order", "buy", "sell", "trade", "position", "holding",
-        "orderbook", "tradebook", "bracket", "cover", "limit", "market",
-        "sl", "stoploss", "stop-loss", "target", "entry", "exit",
-        # Options concepts
-        "option", "options", "call", "put", "strike", "expiry", "expiration",
-        "premium", "theta", "delta", "gamma", "vega", "rho", "iv",
-        "implied volatility", "greeks", "hedging", "hedge",
-        "straddle", "strangle", "spread", "iron condor", "butterfly",
-        # Technical analysis
-        "chart", "candle", "indicator", "rsi", "macd", "ema", "sma",
-        "bollinger", "atr", "adx", "momentum", "volume", "support", "resistance",
-        "breakout", "breakdown", "trend", "signal",
-        # Portfolio & risk
-        "portfolio", "pnl", "profit", "loss", "drawdown", "sharpe",
-        "margin", "risk", "exposure", "allocation", "rebalance",
-        # Market data & finance
-        "market", "price", "ltp", "ohlc", "ohlcv", "quote", "depth",
-        "oi", "open interest", "pcr", "max pain", "vix", "fii", "dii",
-        "sector", "equity", "fund", "etf", "mutual fund", "sip",
-        "broker", "api", "backtest", "strategy", "algo", "automation",
-        "ticker", "symbol", "exchange", "intraday", "swing", "positional",
-    })
-
-    REFUSAL_MESSAGE: str = (
-        "I can only help with trading and market-related questions."
+    TRADING_KEYWORDS: frozenset[str] = frozenset(
+        {
+            # Indian markets & instruments
+            "nifty",
+            "banknifty",
+            "sensex",
+            "nse",
+            "bse",
+            "mcx",
+            "nfo",
+            "fut",
+            "ce",
+            "pe",
+            "otm",
+            "itm",
+            "atm",
+            # Order types & execution
+            "order",
+            "buy",
+            "sell",
+            "trade",
+            "position",
+            "holding",
+            "orderbook",
+            "tradebook",
+            "bracket",
+            "cover",
+            "limit",
+            "market",
+            "sl",
+            "stoploss",
+            "stop-loss",
+            "target",
+            "entry",
+            "exit",
+            # Options concepts
+            "option",
+            "options",
+            "call",
+            "put",
+            "strike",
+            "expiry",
+            "expiration",
+            "premium",
+            "theta",
+            "delta",
+            "gamma",
+            "vega",
+            "rho",
+            "iv",
+            "implied volatility",
+            "greeks",
+            "hedging",
+            "hedge",
+            "straddle",
+            "strangle",
+            "spread",
+            "iron condor",
+            "butterfly",
+            # Technical analysis
+            "chart",
+            "candle",
+            "indicator",
+            "rsi",
+            "macd",
+            "ema",
+            "sma",
+            "bollinger",
+            "atr",
+            "adx",
+            "momentum",
+            "volume",
+            "support",
+            "resistance",
+            "breakout",
+            "breakdown",
+            "trend",
+            "signal",
+            # Portfolio & risk
+            "portfolio",
+            "pnl",
+            "profit",
+            "loss",
+            "drawdown",
+            "sharpe",
+            "margin",
+            "risk",
+            "exposure",
+            "allocation",
+            "rebalance",
+            # Market data & finance
+            "market",
+            "price",
+            "ltp",
+            "ohlc",
+            "ohlcv",
+            "quote",
+            "depth",
+            "oi",
+            "open interest",
+            "pcr",
+            "max pain",
+            "vix",
+            "fii",
+            "dii",
+            "sector",
+            "equity",
+            "fund",
+            "etf",
+            "mutual fund",
+            "sip",
+            "broker",
+            "api",
+            "backtest",
+            "strategy",
+            "algo",
+            "automation",
+            "ticker",
+            "symbol",
+            "exchange",
+            "intraday",
+            "swing",
+            "positional",
+            "adjust",
+            "adjustment",
+            "roll",
+            "rolling",
+            "trail",
+            "trailing",
+        }
     )
+
+    REFUSAL_MESSAGE: str = "I can only help with trading and market-related questions."
 
     def __init__(
         self,
@@ -235,17 +376,12 @@ class DomainFilter:
         semantic_threshold: float = 0.35,
         embedding_provider: "EmbeddingProvider | None" = None,
     ) -> None:
-        base = (
-            self.TRADING_KEYWORDS | {k.lower() for k in extra_keywords}
-            if extra_keywords
-            else self.TRADING_KEYWORDS
-        )
+        base = self.TRADING_KEYWORDS | {k.lower() for k in extra_keywords} if extra_keywords else self.TRADING_KEYWORDS
         # Pre-compile one regex per keyword using word boundaries so that
         # short abbreviations like "iv", "pe", "ce" do not match within
         # unrelated English words (e.g. "recipe", "sentence", "live").
         self._keyword_patterns: list[re.Pattern[str]] = [
-            re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
-            for kw in base
+            re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE) for kw in base
         ]
         self._semantic_threshold = semantic_threshold
         self._embedding_provider = embedding_provider
@@ -283,18 +419,14 @@ class DomainFilter:
         if self._embedding_provider is not None:
             try:
                 if self._seed_embeddings is None:
-                    self._seed_embeddings = self._embedding_provider.embed(
-                        self._seed_phrases
-                    )
+                    self._seed_embeddings = self._embedding_provider.embed(self._seed_phrases)
                 query_vec = self._embedding_provider.embed([query])[0]
-                max_sim = max(
-                    self._cosine(query_vec, seed)
-                    for seed in self._seed_embeddings
-                )
+                max_sim = max(self._cosine(query_vec, seed) for seed in self._seed_embeddings)
                 if max_sim >= self._semantic_threshold:
                     return True
-            except Exception:  # noqa: BLE001
-                pass  # Embedding failure does not block the query
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Domain-filter embeddings unavailable; allowing retrieval: %s", exc)
+                return True
 
         return False
 
@@ -315,7 +447,7 @@ class DomainFilter:
 
 
 class DocumentLoader:
-    """Load documents from .md, .txt, and .pdf files.
+    """Load documents from .md, .txt, .py, and .pdf files.
 
     PDF support requires the ``pypdf`` package (``pip install pypdf``).
     Falls back gracefully to empty content if pypdf is not installed.
@@ -326,14 +458,21 @@ class DocumentLoader:
         docs = loader.load_directory("docs/")
     """
 
-    SUPPORTED = {".md", ".txt", ".pdf"}
+    SUPPORTED = {".md", ".txt", ".py", ".pdf"}
 
-    def load_file(self, file_path: str | Path, doc_type: str = "") -> LoadedDocument | None:
+    def load_file(
+        self,
+        file_path: str | Path,
+        doc_type: str = "",
+        *,
+        allow_unsupported_text: bool = False,
+    ) -> LoadedDocument | None:
         """Load a single file and return a LoadedDocument.
 
         Args:
             file_path: Path to the file to load.
             doc_type:  Override document type tag. Auto-detected if empty.
+            allow_unsupported_text: Read an explicitly selected suffix as UTF-8 text.
 
         Returns:
             LoadedDocument, or None if the file is unsupported / unreadable.
@@ -342,11 +481,11 @@ class DocumentLoader:
         if not path.exists():
             logger.warning("File not found: %s", file_path)
             return None
-        if path.suffix.lower() not in self.SUPPORTED:
+        if path.suffix.lower() not in self.SUPPORTED and not allow_unsupported_text:
             logger.debug("Unsupported file type: %s", path.suffix)
             return None
 
-        content = self._read(path)
+        content = self._read(path, allow_unsupported_text=allow_unsupported_text)
         if not content.strip():
             return None
 
@@ -357,12 +496,14 @@ class DocumentLoader:
         self,
         dir_path: str | Path,
         recursive: bool = True,
+        extensions: tuple[str, ...] | None = None,
     ) -> list[LoadedDocument]:
         """Load all supported files in a directory.
 
         Args:
             dir_path:  Root directory to scan.
             recursive: Whether to recurse into subdirectories.
+            extensions: Optional caller-selected subset of supported suffixes.
 
         Returns:
             List of successfully loaded documents.
@@ -373,10 +514,12 @@ class DocumentLoader:
             return []
 
         pattern = "**/*" if recursive else "*"
+        caller_selected = extensions is not None
+        selected = {suffix.lower() for suffix in extensions} if caller_selected else self.SUPPORTED
         docs: list[LoadedDocument] = []
         for path in root.glob(pattern):
-            if path.is_file() and path.suffix.lower() in self.SUPPORTED:
-                doc = self.load_file(path)
+            if path.is_file() and path.suffix.lower() in selected:
+                doc = self.load_file(path, allow_unsupported_text=caller_selected)
                 if doc is not None:
                     docs.append(doc)
 
@@ -387,9 +530,9 @@ class DocumentLoader:
     # Internal
     # ------------------------------------------------------------------
 
-    def _read(self, path: Path) -> str:
+    def _read(self, path: Path, *, allow_unsupported_text: bool = False) -> str:
         suffix = path.suffix.lower()
-        if suffix in {".md", ".txt"}:
+        if suffix in {".md", ".txt", ".py"} or allow_unsupported_text:
             return path.read_text(encoding="utf-8", errors="replace")
         if suffix == ".pdf":
             return self._read_pdf(path)
@@ -401,9 +544,7 @@ class DocumentLoader:
             import pypdf  # type: ignore[import]
 
             reader = pypdf.PdfReader(str(path))
-            return "\n".join(
-                page.extract_text() or "" for page in reader.pages
-            )
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
         except ImportError:
             logger.warning("pypdf not installed — skipping PDF: %s", path.name)
             return ""
@@ -511,6 +652,20 @@ def _content_hash(text: str, length: int = 16) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
 
 
+def content_hash(text: str) -> str:
+    """Return the canonical 16-character content hash."""
+    return _content_hash(text)
+
+
+def chunk_text(
+    text: str,
+    chunk_size: int = _DEFAULT_CHUNK_SIZE,
+    overlap: int = _DEFAULT_CHUNK_OVERLAP,
+) -> list[str]:
+    """Split text with the canonical chunker using the public legacy API."""
+    return TextChunker(chunk_size=chunk_size, overlap=overlap).chunk_text(text)
+
+
 # ---------------------------------------------------------------------------
 # EmbeddingProvider
 # ---------------------------------------------------------------------------
@@ -572,13 +727,13 @@ class EmbeddingProvider:
     def _embed_sentence_transformers(self, texts: list[str]) -> list[list[float]]:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
-        except ImportError:
-            raise RuntimeError("sentence-transformers not installed — pip install sentence-transformers")
 
-        if self._st_model is None:
-            self._st_model = SentenceTransformer(self._model)
-        embeddings = self._st_model.encode(texts, show_progress_bar=False)
-        return [vec.tolist() for vec in embeddings]
+            if self._st_model is None:
+                self._st_model = SentenceTransformer(self._model)
+            embeddings = self._st_model.encode(texts, show_progress_bar=False)
+            return [vec.tolist() for vec in embeddings]
+        except Exception as exc:  # noqa: BLE001 - signal Chroma's built-in fallback
+            raise RuntimeError("sentence-transformers unavailable; use Chroma default embeddings") from exc
 
     def _embed_openai(self, texts: list[str]) -> list[list[float]]:
         try:
@@ -622,6 +777,7 @@ class VectorStore:
         self._embedding_provider = embedding_provider or EmbeddingProvider()
         self._client: Any = None
         self._collection: Any = None
+        self._embedding_mode: str | None = None
 
     def upsert(self, chunks: list[TextChunk]) -> int:
         """Insert or update chunks in the vector store.
@@ -635,6 +791,7 @@ class VectorStore:
         if not chunks:
             return 0
         coll = self._get_collection()
+        embedding_mode = self._resolve_embedding_mode(coll)
 
         ids = [c.chunk_id for c in chunks]
         documents = [c.content for c in chunks]
@@ -648,13 +805,25 @@ class VectorStore:
             for c in chunks
         ]
 
-        # Use pre-computed embeddings only if provider isn't the ChromaDB default.
-        try:
-            embeddings = self._embedding_provider.embed(documents)
-            coll.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
-        except RuntimeError:
-            # Fall back to ChromaDB's default embedding function.
+        if embedding_mode == _EMBEDDING_MODE_CHROMA:
             coll.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        else:
+            try:
+                embeddings = self._embedding_provider.embed(documents)
+                if len(embeddings) != len(documents):
+                    raise ValueError("embedding provider returned an unexpected vector count")
+            except Exception as exc:  # noqa: BLE001 - choose one stable mode for an empty collection
+                if embedding_mode == _EMBEDDING_MODE_EXTERNAL:
+                    raise RuntimeError(
+                        "Embedding provider unavailable for a collection encoded with external embeddings"
+                    ) from exc
+                logger.warning("Embedding provider unavailable; fixing collection mode to Chroma embeddings: %s", exc)
+                self._persist_embedding_mode(coll, _EMBEDDING_MODE_CHROMA)
+                coll.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            else:
+                if embedding_mode is None:
+                    self._persist_embedding_mode(coll, _EMBEDDING_MODE_EXTERNAL)
+                coll.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
 
         logger.info("Upserted %d chunks into collection '%s'", len(chunks), self._collection_name)
         return len(chunks)
@@ -679,31 +848,58 @@ class VectorStore:
         """
         coll = self._get_collection()
         where = {"doc_type": doc_type} if doc_type else None
+        embedding_mode = self._resolve_embedding_mode(coll)
 
-        try:
-            query_emb = self._embedding_provider.embed([query])
-            results = coll.query(
-                query_embeddings=query_emb,
-                n_results=min(top_k, max(coll.count(), 1)),
-                where=where,
-            )
-        except RuntimeError:
+        if embedding_mode == _EMBEDDING_MODE_CHROMA:
             results = coll.query(
                 query_texts=[query],
                 n_results=min(top_k, max(coll.count(), 1)),
                 where=where,
             )
+        else:
+            try:
+                query_embeddings = self._embedding_provider.embed([query])
+                if len(query_embeddings) != 1:
+                    raise ValueError("embedding provider returned an unexpected query vector count")
+            except Exception as exc:  # noqa: BLE001 - never mix embedding spaces in a populated collection
+                if embedding_mode == _EMBEDDING_MODE_EXTERNAL:
+                    raise RuntimeError(
+                        "Embedding provider unavailable for a collection encoded with external embeddings"
+                    ) from exc
+                logger.warning("Query embedding unavailable; fixing collection mode to Chroma embeddings: %s", exc)
+                self._persist_embedding_mode(coll, _EMBEDDING_MODE_CHROMA)
+                results = coll.query(
+                    query_texts=[query],
+                    n_results=min(top_k, max(coll.count(), 1)),
+                    where=where,
+                )
+            else:
+                if embedding_mode is None:
+                    self._persist_embedding_mode(coll, _EMBEDDING_MODE_EXTERNAL)
+                results = coll.query(
+                    query_embeddings=query_embeddings,
+                    n_results=min(top_k, max(coll.count(), 1)),
+                    where=where,
+                )
 
         documents = results.get("documents", [[]])[0]
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
 
         chunks: list[RetrievedChunk] = []
+        distance_space = self._distance_space(coll)
         for i, text in enumerate(documents):
             meta = metadatas[i] if i < len(metadatas) else {}
             dist = distances[i] if i < len(distances) else 1.0
-            score = max(0.0, 1.0 - dist)
+            raw_score = 1.0 - (dist / 2.0) if distance_space == "l2" else 1.0 - dist
+            score = min(1.0, max(0.0, raw_score))
             if score < similarity_threshold:
+                logger.debug(
+                    "Dropped chunk from '%s' (score=%.3f < threshold=%.3f)",
+                    meta.get("source", ""),
+                    score,
+                    similarity_threshold,
+                )
                 continue
             chunks.append(
                 RetrievedChunk(
@@ -728,6 +924,7 @@ class VectorStore:
         client = self._get_client()
         client.delete_collection(self._collection_name)
         self._collection = None
+        self._embedding_mode = None
 
     # ------------------------------------------------------------------
     # Internal
@@ -751,6 +948,10 @@ class VectorStore:
             client = self._get_client()
             self._collection = client.get_or_create_collection(
                 name=self._collection_name,
+                metadata={
+                    "hnsw:space": "cosine",
+                    _DISTANCE_SPACE_METADATA_KEY: "cosine",
+                },
             )
             logger.info(
                 "ChromaDB collection '%s' ready (%d chunks)",
@@ -758,6 +959,52 @@ class VectorStore:
                 self._collection.count(),
             )
         return self._collection
+
+    def _resolve_embedding_mode(self, collection: Any) -> str | None:
+        """Return the persisted embedding mode, inferring old collections safely."""
+        if self._embedding_mode is not None:
+            return self._embedding_mode
+
+        metadata = getattr(collection, "metadata", None)
+        if isinstance(metadata, dict):
+            mode = metadata.get(_EMBEDDING_MODE_METADATA_KEY)
+            if mode in {_EMBEDDING_MODE_EXTERNAL, _EMBEDDING_MODE_CHROMA}:
+                self._embedding_mode = str(mode)
+                return self._embedding_mode
+
+        if collection.count() > 0:
+            raise RuntimeError(
+                "RAG collection embedding mode is unknown; clear and reindex it before querying or writing"
+            )
+        return None
+
+    def _persist_embedding_mode(self, collection: Any, mode: str) -> None:
+        """Persist the one embedding space used by this collection."""
+        raw_metadata = getattr(collection, "metadata", None)
+        metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        metadata[_DISTANCE_SPACE_METADATA_KEY] = self._distance_space(collection)
+        metadata[_EMBEDDING_MODE_METADATA_KEY] = mode
+        metadata.pop("hnsw:space", None)
+        try:
+            collection.modify(metadata=metadata)
+        except Exception as exc:  # noqa: BLE001 - mode persistence is required to prevent mixed vectors
+            raise RuntimeError("Could not persist the RAG collection embedding mode") from exc
+        self._embedding_mode = mode
+
+    @staticmethod
+    def _distance_space(collection: Any) -> str:
+        """Read the collection distance metric across Chroma API generations."""
+        configuration = getattr(collection, "configuration", None)
+        if isinstance(configuration, dict):
+            hnsw = configuration.get("hnsw")
+            if isinstance(hnsw, dict) and hnsw.get("space") in {"cosine", "l2", "ip"}:
+                return str(hnsw["space"])
+        metadata = getattr(collection, "metadata", None)
+        if isinstance(metadata, dict):
+            for key in (_DISTANCE_SPACE_METADATA_KEY, "hnsw:space"):
+                if metadata.get(key) in {"cosine", "l2", "ip"}:
+                    return str(metadata[key])
+        return "l2"
 
 
 # ---------------------------------------------------------------------------
@@ -776,7 +1023,7 @@ class RAGPipeline:
         from flinttrade_ai.llm_client import LLMClient
 
         pipeline = RAGPipeline(
-            config=PipelineConfig(chunk_size=512, chunk_overlap=64),
+            config=PipelineConfig(chunk_size=1000, chunk_overlap=200),
             llm_client=LLMClient(...),
         )
         pipeline.index_directory("docs/")
@@ -803,6 +1050,7 @@ class RAGPipeline:
             api_base=self.config.openai_api_base,
             api_key=self.config.openai_api_key,
         )
+        self._embedding_provider = _embedding
 
         self._llm = llm_client
         self._loader = loader or DocumentLoader()
@@ -817,9 +1065,10 @@ class RAGPipeline:
         )
         # Domain filter — guards query() against off-topic questions.
         # Receives the same embedding provider for optional semantic check.
-        self._domain_filter: DomainFilter | None = None
-        if enable_domain_filter:
-            self._domain_filter = domain_filter or DomainFilter(
+        self._domain_filter_enabled = enable_domain_filter
+        self._domain_filter = domain_filter
+        if self._domain_filter is None and enable_domain_filter:
+            self._domain_filter = DomainFilter(
                 embedding_provider=_embedding,
             )
 
@@ -842,31 +1091,56 @@ class RAGPipeline:
             return 0
         return self._index_document(doc)
 
-    def index_document(self, content: str, source: str = "", doc_type: str = "general") -> int:
+    def index_document(
+        self,
+        content: str | LoadedDocument,
+        source: str = "",
+        doc_type: str = "general",
+        metadata: dict[str, str] | None = None,
+    ) -> int:
         """Index raw text content directly (no file I/O).
 
         Args:
-            content:  Text content to index.
+            content:  Text content or a loaded/legacy document object.
             source:   Arbitrary source identifier.
             doc_type: Document type tag.
+            metadata: Optional metadata when indexing raw text.
 
         Returns:
             Number of chunks indexed.
         """
-        doc = LoadedDocument(content=content, source=source, doc_type=doc_type)
+        if isinstance(content, LoadedDocument):
+            doc = content
+        else:
+            doc = LoadedDocument(
+                content=content,
+                source=source,
+                doc_type=doc_type,
+                metadata=metadata or {},
+            )
         return self._index_document(doc)
 
-    def index_directory(self, dir_path: str | Path, recursive: bool = True) -> int:
+    def index_directory(
+        self,
+        dir_path: str | Path,
+        recursive: bool = True,
+        extensions: tuple[str, ...] | None = None,
+    ) -> int:
         """Load and index all supported files in a directory.
 
         Args:
             dir_path:  Root directory to scan.
             recursive: Whether to recurse into subdirectories.
+            extensions: Optional caller-selected subset of supported suffixes.
 
         Returns:
             Total number of chunks indexed.
         """
-        docs = self._loader.load_directory(dir_path, recursive=recursive)
+        docs = self._loader.load_directory(
+            dir_path,
+            recursive=recursive,
+            extensions=extensions,
+        )
         total = sum(self._index_document(doc) for doc in docs)
         logger.info("Indexed %d total chunks from %s", total, dir_path)
         return total
@@ -894,11 +1168,7 @@ class RAGPipeline:
             List of RetrievedChunk objects sorted by descending similarity.
         """
         k = top_k if top_k is not None else self.config.top_k
-        threshold = (
-            similarity_threshold
-            if similarity_threshold is not None
-            else self.config.similarity_threshold
-        )
+        threshold = similarity_threshold if similarity_threshold is not None else self.config.similarity_threshold
         return self._store.search(query, top_k=k, doc_type=doc_type, similarity_threshold=threshold)
 
     # ------------------------------------------------------------------
@@ -912,6 +1182,9 @@ class RAGPipeline:
         doc_type: str | None = None,
         system_prompt: str = "",
         similarity_threshold: float | None = None,
+        *,
+        domain_filter: DomainFilter | None = None,
+        enable_domain_filter: bool | None = None,
     ) -> RAGResult:
         """Full RAG chain: retrieve relevant chunks then generate an answer.
 
@@ -921,6 +1194,8 @@ class RAGPipeline:
             doc_type:            Optional document type filter.
             system_prompt:       Override the default LLM system prompt.
             similarity_threshold: Override the similarity threshold.
+            domain_filter:       Optional filter override for this query.
+            enable_domain_filter: Enable or bypass filtering for this query.
 
         Returns:
             RAGResult with the generated answer and source chunks.
@@ -929,23 +1204,34 @@ class RAGPipeline:
             return RAGResult(query=question, error="No LLM client configured")
 
         # Domain filter pre-check — refuse off-topic questions before retrieval.
-        if self._domain_filter is not None and not self._domain_filter.is_on_topic(question):
+        active_filter = domain_filter or self._domain_filter
+        filter_enabled = (
+            self._domain_filter_enabled or domain_filter is not None
+            if enable_domain_filter is None
+            else enable_domain_filter
+        )
+        if filter_enabled and active_filter is None:
+            active_filter = DomainFilter(embedding_provider=self._embedding_provider)
+        if filter_enabled and active_filter is not None and not active_filter.is_on_topic(question):
             logger.info("Domain filter rejected query: %r", question[:80])
             return RAGResult(
                 query=question,
                 answer=DomainFilter.REFUSAL_MESSAGE,
             )
 
-        chunks = self.retrieve(question, top_k, doc_type, similarity_threshold)
+        try:
+            chunks = self.retrieve(question, top_k, doc_type, similarity_threshold)
+        except RuntimeError as exc:
+            logger.error("RAG retrieval failed: %s", exc)
+            return RAGResult(query=question, error="RAG retrieval failed")
         if not chunks:
             return RAGResult(query=question, error="No relevant documents found")
 
         context = "\n\n---\n\n".join(c.content for c in chunks)
         system = system_prompt or (
-            "You are a FlintTrade trading assistant. "
-            "Answer using ONLY the provided context. "
-            "If the answer is not in the context, say so. "
-            "Be concise and cite sources where possible."
+            "You are a FlintTrade trading assistant. Answer the question using ONLY the "
+            "provided context. If the context doesn't contain the answer, say so. "
+            "Be concise and specific. Reference source documents when possible."
         )
 
         try:
@@ -974,6 +1260,10 @@ class RAGPipeline:
         """Total number of indexed chunks."""
         return self._store.count()
 
+    def delete_collection(self) -> None:
+        """Delete the canonical collection; it is recreated lazily on next use."""
+        self._store.delete_collection()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -983,3 +1273,121 @@ class RAGPipeline:
         if not chunks:
             return 0
         return self._store.upsert(chunks)
+
+
+class RAGEngine(RAGPipeline):
+    """Compatibility façade for callers of the former ``rag.RAGEngine``.
+
+    All work delegates to :class:`RAGPipeline`; this class only translates the
+    old constructor and ``n_results`` method keyword onto the canonical API.
+    """
+
+    def __init__(
+        self,
+        llm_client: Any | None = None,
+        collection_name: str = _DEFAULT_COLLECTION,
+        persist_directory: str | None = None,
+        embedding_model: str = _DEFAULT_EMBEDDING_MODEL,
+        *,
+        domain_filter: DomainFilter | None = None,
+        enable_domain_filter: bool = False,
+    ) -> None:
+        super().__init__(
+            config=PipelineConfig(
+                collection_name=collection_name,
+                persist_directory=persist_directory or "",
+                embedding_model=embedding_model,
+            ),
+            llm_client=llm_client,
+            domain_filter=domain_filter,
+            enable_domain_filter=enable_domain_filter,
+        )
+
+    def index_document(self, doc: LoadedDocument) -> int:
+        """Index a document supplied through the former dataclass API."""
+        return super().index_document(doc)
+
+    def index_file(self, file_path: str | Path, doc_type: str = "") -> int:
+        """Index any explicitly supplied text path as the former engine did."""
+        doc = self._loader.load_file(
+            file_path,
+            doc_type,
+            allow_unsupported_text=True,
+        )
+        if doc is None:
+            return 0
+        return self._index_document(doc)
+
+    def _get_collection(self) -> Any:
+        """Return the canonical store collection through the legacy accessor."""
+        return self._store._get_collection()
+
+    def index_directory(
+        self,
+        dir_path: str | Path,
+        extensions: tuple[str, ...] = (".md", ".txt", ".py", ".pdf"),
+    ) -> int:
+        """Index the caller-selected legacy extension set recursively."""
+        return super().index_directory(
+            dir_path,
+            recursive=True,
+            extensions=extensions,
+        )
+
+    def retrieve(
+        self,
+        query: str,
+        n_results: int = _DEFAULT_TOP_K,
+        doc_type: str | None = None,
+        similarity_threshold: float = _DEFAULT_SIMILARITY_THRESHOLD,
+        *,
+        top_k: int | None = None,
+    ) -> list[LegacyRetrievedChunk]:
+        """Translate the legacy ``n_results`` argument to canonical ``top_k``."""
+        chunks = super().retrieve(
+            query,
+            top_k=n_results if top_k is None else top_k,
+            doc_type=doc_type,
+            similarity_threshold=similarity_threshold,
+        )
+        return [
+            LegacyRetrievedChunk(
+                content=chunk.content,
+                source=chunk.source,
+                doc_type=chunk.doc_type,
+                score=chunk.score,
+                metadata=dict(chunk.metadata),
+            )
+            for chunk in chunks
+        ]
+
+    def query(
+        self,
+        question: str,
+        n_results: int = _DEFAULT_TOP_K,
+        doc_type: str | None = None,
+        system_prompt: str = "",
+        similarity_threshold: float = _DEFAULT_SIMILARITY_THRESHOLD,
+        *,
+        top_k: int | None = None,
+        domain_filter: DomainFilter | None = None,
+        enable_domain_filter: bool | None = None,
+    ) -> RAGResponse:
+        """Translate the legacy query signature onto :class:`RAGPipeline`."""
+        result = super().query(
+            question,
+            top_k=n_results if top_k is None else top_k,
+            doc_type=doc_type,
+            system_prompt=system_prompt,
+            similarity_threshold=similarity_threshold,
+            domain_filter=domain_filter,
+            enable_domain_filter=enable_domain_filter,
+        )
+        return RAGResponse(
+            answer=result.answer,
+            chunks_used=result.chunks_used,
+            query=result.query,
+            error=result.error,
+        )
+
+    _infer_doc_type = staticmethod(DocumentLoader._infer_type)

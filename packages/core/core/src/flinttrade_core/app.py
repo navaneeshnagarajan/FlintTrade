@@ -102,7 +102,7 @@ from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
 # core↔engine circular import.  See PLC0415 comments throughout this file.
 # Heavy optional modules are imported lazily inside FlintTradeApp.__init__()
 # to avoid a 2-5 s startup penalty when ChromaDB / LLM / Telegram deps load.
-# CronManager, TelegramBot, LLMClient, LLMConfig, RAGEngine
+# CronManager, TelegramBot, LLMClient, LLMConfig, RAGPipeline
 
 # Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
 _GATEWAY_SRC = str(Path(_REPO_ROOT) / "packages" / "integrations" / "gateway" / "src")
@@ -271,6 +271,49 @@ def _index_rag_docs_safely(rag: Any) -> None:
         logger.info("RAG background indexing completed (%s document chunks)", count)
     except Exception as exc:
         logger.warning("RAG background indexing failed: %s", exc)
+
+
+def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
+    """Construct the canonical RAG runtime when enabled and installed."""
+    if not _rag_runtime_enabled():
+        logger.info("RAG runtime disabled (set FLINTTRADE_RAG_ENABLED=true to enable)")
+        return None
+
+    rag_dir = flinttrade_dir / "rag"
+    rag_dir.mkdir(exist_ok=True)
+    try:
+        import chromadb  # noqa: F401, PLC0415
+
+        from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
+        from flinttrade_ai.rag_pipeline import PipelineConfig, RAGPipeline  # noqa: PLC0415
+
+        try:
+            config = LLMConfig.from_env()
+            llm_configured = bool(config.provider)
+        except Exception:
+            llm_configured = False
+        llm_client = LLMClient() if llm_configured else None
+        rag = RAGPipeline(
+            config=PipelineConfig(persist_directory=str(rag_dir)),
+            llm_client=llm_client,
+        )
+        if rag.document_count() == 0:
+            if _rag_auto_index_enabled():
+                logger.info("RAG database empty — indexing docs/ directory in background...")
+                threading.Thread(
+                    target=lambda: _index_rag_docs_safely(rag),
+                    daemon=True,
+                    name="rag-indexer",
+                ).start()
+            else:
+                logger.info(
+                    "RAG database empty — automatic docs indexing disabled "
+                    "(set FLINTTRADE_RAG_AUTO_INDEX=true to enable)",
+                )
+        return rag
+    except Exception as exc:
+        logger.warning("RAG initialisation failed: %s", exc)
+        return None
 
 
 def _reconnect_saved_accounts(
@@ -1191,7 +1234,7 @@ def create_flask_app(
         registry: BrokerRegistry for multi-broker account management.
         credential_store: CredentialStore for encrypted credential persistence.
         contract_manager: ContractManager for broker symbol contract data.
-        rag: RAGEngine instance for knowledge base queries.
+        rag: RAGPipeline instance for knowledge base queries.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -1510,6 +1553,9 @@ def create_flask_app(
 
     # Store RAG instance
     app.config["RAG"] = rag
+    app.config["RAG_STATUS"] = (
+        "ready" if rag is not None else "disabled" if not _rag_runtime_enabled() else "unavailable"
+    )
 
     # Register gateway blueprint (mounts at /v1/)
     app.register_blueprint(gateway_bp)
@@ -2883,44 +2929,11 @@ class FlintTradeApp:
         self.registry = BrokerRegistry()
 
         # RAG — knowledge base (persistent).
-        # LLMClient and RAGEngine are imported lazily here to avoid loading
+        # LLMClient and RAGPipeline are imported lazily here to avoid loading
         # ChromaDB, sentence-transformers, and the LLM HTTP client at module
         # level, which would add 2-5 s to startup time even when the AI
         # features are not yet used.
-        if _rag_runtime_enabled():
-            rag_dir = flinttrade_dir / "rag"
-            rag_dir.mkdir(exist_ok=True)
-            try:
-                from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
-                from flinttrade_ai.rag import RAGEngine  # noqa: PLC0415
-
-                try:
-                    _cfg = LLMConfig.from_env()
-                    _llm_ok = bool(_cfg.provider)
-                except Exception:
-                    _llm_ok = False
-                llm_client = LLMClient() if _llm_ok else None
-                self.rag = RAGEngine(llm_client=llm_client, persist_directory=str(rag_dir))
-                if self.rag.document_count() == 0:
-                    if _rag_auto_index_enabled():
-                        logger.info("RAG database empty — indexing docs/ directory in background...")
-                        # Index documentation in background — do not block startup.
-                        threading.Thread(
-                            target=lambda: _index_rag_docs_safely(self.rag),
-                            daemon=True,
-                            name="rag-indexer",
-                        ).start()
-                    else:
-                        logger.info(
-                            "RAG database empty — automatic docs indexing disabled "
-                            "(set FLINTTRADE_RAG_AUTO_INDEX=true to enable)",
-                        )
-            except Exception as exc:
-                logger.warning("RAG initialisation failed: %s", exc)
-                self.rag = None
-        else:
-            logger.info("RAG runtime disabled (set FLINTTRADE_RAG_ENABLED=true to enable)")
-            self.rag = None
+        self.rag = _initialise_rag_runtime(flinttrade_dir)
 
         # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
         self._tick_recorder: Any | None = None

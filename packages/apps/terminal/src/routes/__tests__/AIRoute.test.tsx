@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -35,6 +36,7 @@ vi.mock("@/lib/motion", () => ({
     duration: { fast: 0.1, normal: 0.2, slow: 0.3 },
     ease: { enter: [0, 0, 1, 1], exit: [0, 0, 1, 1] },
     transitions: { fade: { duration: 0.2 } },
+    stagger: () => ({ duration: 0 }),
   },
   EASE_ENTER: [0.22, 1, 0.36, 1],
   EASE_EXIT: [0.0, 0.0, 0.58, 1.0],
@@ -44,6 +46,10 @@ vi.mock("@/lib/motion", () => ({
 
 vi.mock("@/components/help/SpotlightTour", () => ({
   SpotlightTour: () => null,
+}));
+
+vi.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@/lib/tourDefinitions", () => ({
@@ -84,6 +90,8 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import AIRoute from "../AIRoute";
+import { queryKnowledge } from "@/services/ftApi";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -126,5 +134,104 @@ describe("AIRoute", () => {
     const nav = screen.getByRole("navigation", { name: /ai section navigation/i });
     expect(nav).not.toHaveClass("absolute");
     expect(nav).not.toHaveClass("bottom-5");
+  });
+
+  it("renders the generated knowledge answer even when no source chunks are returned", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(queryKnowledge).mockResolvedValue({
+      answer: "I can only help with trading and market-related questions.",
+      results: [],
+    });
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    await user.type(screen.getByLabelText("Knowledge base query"), "Tell me a bedtime story");
+    await user.click(screen.getByRole("button", { name: "Query" }));
+
+    expect(
+      await screen.findByText("I can only help with trading and market-related questions."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Knowledge base not indexed. Index your docs in AI Settings."))
+      .not.toBeInTheDocument();
+  });
+
+  it("renders a generated answer with its source chunks", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(queryKnowledge).mockResolvedValue({
+      answer: "Theta measures option time decay.",
+      results: [{ content: "Theta falls as expiry approaches.", source: "options.md", score: 0.91 }],
+    });
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    await user.type(screen.getByLabelText("Knowledge base query"), "What is theta?");
+    await user.click(screen.getByRole("button", { name: "Query" }));
+
+    expect(await screen.findByText("Theta measures option time decay.")).toBeInTheDocument();
+    expect(screen.getByText("options.md")).toBeInTheDocument();
+    expect(screen.getByText("Theta falls as expiry approaches.")).toBeInTheDocument();
+  });
+
+  it("renders a neutral empty state when no indexed document matches", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(queryKnowledge).mockResolvedValue({ answer: "", results: [] });
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    await user.type(screen.getByLabelText("Knowledge base query"), "Unknown adjustment");
+    await user.click(screen.getByRole("button", { name: "Query" }));
+
+    expect(await screen.findByText("No matching documents.")).toBeInTheDocument();
+    expect(screen.queryByText(/AI Settings/)).not.toBeInTheDocument();
+  });
+
+  it("renders actionable guidance when the RAG runtime is unavailable", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(queryKnowledge).mockRejectedValue(new Error("RAG engine not available"));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    await user.type(screen.getByLabelText("Knowledge base query"), "What is theta?");
+    await user.click(screen.getByRole("button", { name: "Query" }));
+
+    expect(
+      await screen.findByText("Knowledge service unavailable. Install the FlintTrade RAG dependencies and restart."),
+    ).toBeInTheDocument();
+  });
+
+  it("distinguishes a disabled RAG runtime from missing dependencies", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(queryKnowledge).mockRejectedValue(new Error("RAG runtime disabled"));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    await user.type(screen.getByLabelText("Knowledge base query"), "What is theta?");
+    await user.click(screen.getByRole("button", { name: "Query" }));
+
+    expect(
+      await screen.findByText("Knowledge service is disabled. Enable FLINTTRADE_RAG_ENABLED and restart."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Install the FlintTrade RAG dependencies/)).not.toBeInTheDocument();
+  });
+
+  it("accepts the older response envelope when answer is absent", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(queryKnowledge).mockResolvedValue({
+      results: [{ content: "Legacy source content.", source: "legacy.md", score: 0.8 }],
+    });
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    await user.type(screen.getByLabelText("Knowledge base query"), "Legacy query");
+    await user.click(screen.getByRole("button", { name: "Query" }));
+
+    expect(await screen.findByText("legacy.md")).toBeInTheDocument();
+    expect(screen.getByText("Legacy source content.")).toBeInTheDocument();
   });
 });

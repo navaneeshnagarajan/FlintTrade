@@ -396,8 +396,8 @@ def rag_query() -> tuple[Any, int]:
         top_k (int, optional): Number of results to return (default 5).
 
     Returns:
-        JSON with ``status`` and ``data.results`` — a list of
-        ``{content, source, score}`` objects.
+        JSON with ``status``, the generated ``data.answer``, and
+        ``data.results`` source objects shaped as ``{content, source, score}``.
     """
     body = request.get_json(silent=True) or {}
     query: str = body.get("query", "").strip()
@@ -412,12 +412,20 @@ def rag_query() -> tuple[Any, int]:
     try:
         rag = current_app.config.get("RAG")
         if rag is None:
+            message = (
+                "RAG runtime disabled"
+                if current_app.config.get("RAG_STATUS") == "disabled"
+                else "RAG engine not available"
+            )
             return jsonify({
                 "status": "error",
-                "message": "RAG engine not available",
+                "message": message,
             }), 503
 
-        response = rag.query(query, n_results=top_k)
+        response = rag.query(query, top_k=top_k)
+
+        if response.error == "No relevant documents found":
+            return jsonify({"status": "success", "data": {"answer": "", "results": []}}), 200
 
         if response.error:
             return jsonify({"status": "error", "message": "RAG query failed"}), 502
@@ -430,7 +438,7 @@ def rag_query() -> tuple[Any, int]:
             }
             for chunk in response.chunks_used
         ]
-        return jsonify({"status": "success", "data": {"results": results}}), 200
+        return jsonify({"status": "success", "data": {"answer": response.answer, "results": results}}), 200
     except Exception:
         logger.exception("rag_query error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

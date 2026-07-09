@@ -232,6 +232,14 @@ class TestRagQuery:
         assert resp.status_code == 503
         assert resp.get_json()["status"] == "error"
 
+    def test_disabled_rag_runtime_returns_a_distinct_reason(self, app, client) -> None:
+        app.config["RAG_STATUS"] = "disabled"
+
+        resp = client.post("/api/v1/rag/query", json={"query": "What is theta?"})
+
+        assert resp.status_code == 503
+        assert resp.get_json()["message"] == "RAG runtime disabled"
+
     def test_missing_query_returns_400(self, client) -> None:
         """Empty query field returns HTTP 400.
 
@@ -255,6 +263,7 @@ class TestRagQuery:
         chunk.score = 0.92
 
         rag_response = MagicMock()
+        rag_response.answer = "Theta is time decay."
         rag_response.error = None
         rag_response.chunks_used = [chunk]
 
@@ -264,10 +273,27 @@ class TestRagQuery:
 
         resp = client.post("/api/v1/rag/query", json={"query": "What is theta?", "top_k": 3})
         assert resp.status_code == 200
+        mock_rag.query.assert_called_once_with("What is theta?", top_k=3)
         data = resp.get_json()
         assert data["status"] == "success"
+        assert data["data"]["answer"] == "Theta is time decay."
         assert len(data["data"]["results"]) == 1
         assert data["data"]["results"][0]["content"] == "Theta is time decay."
+
+    def test_no_relevant_documents_returns_a_successful_empty_result(self, app, client) -> None:
+        rag_response = MagicMock(
+            answer="",
+            error="No relevant documents found",
+            chunks_used=[],
+        )
+        mock_rag = MagicMock()
+        mock_rag.query.return_value = rag_response
+        app.config["RAG"] = mock_rag
+
+        resp = client.post("/api/v1/rag/query", json={"query": "Unknown adjustment"})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"] == {"answer": "", "results": []}
 
     def test_invalid_top_k_returns_400(self, client) -> None:
         """Non-integer top_k returns HTTP 400.

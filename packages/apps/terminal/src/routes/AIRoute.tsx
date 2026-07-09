@@ -541,6 +541,7 @@ function KnowledgeSection() {
   }
 
   const results = mutation.data?.results ?? [];
+  const answer = mutation.data?.answer ?? "";
 
   return (
     <div className="space-y-4">
@@ -593,8 +594,11 @@ function KnowledgeSection() {
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>
               {mutation.error instanceof Error &&
-              mutation.error.message.toLowerCase().includes("chroma")
-                ? "RAG engine not configured — install chromadb and configure in Settings."
+              mutation.error.message.toLowerCase().includes("rag runtime disabled")
+                ? "Knowledge service is disabled. Enable FLINTTRADE_RAG_ENABLED and restart."
+                : mutation.error instanceof Error &&
+                    /rag engine not available|chroma/i.test(mutation.error.message)
+                  ? "Knowledge service unavailable. Install the FlintTrade RAG dependencies and restart."
                 : mutation.error instanceof Error
                   ? mutation.error.message
                   : "RAG query failed."}
@@ -603,12 +607,20 @@ function KnowledgeSection() {
         </Card>
       )}
 
-      {mutation.isSuccess && results.length === 0 && (
+      {mutation.isSuccess && answer && (
+        <Card className="bg-surface-card border border-border-default rounded-lg p-4">
+          <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+            {answer}
+          </p>
+        </Card>
+      )}
+
+      {mutation.isSuccess && results.length === 0 && !answer && (
         <Card className="bg-surface-card border border-border-default rounded-lg p-6 text-center">
           <BookOpen className="w-7 h-7 text-text-muted mx-auto mb-2" />
-          <p className="text-sm text-text-secondary">No results found.</p>
+          <p className="text-sm text-text-secondary">No matching documents.</p>
           <p className="text-xs text-text-muted mt-1">
-            Knowledge base not indexed. Index your docs in AI Settings.
+            No indexed document matched this query.
           </p>
         </Card>
       )}

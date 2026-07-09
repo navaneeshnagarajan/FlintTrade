@@ -8,7 +8,15 @@ from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRank
 from .analyst_chain import AnalysisState, AnalystChain
 from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TradeRecommendation
 from .multi_agent import AgentTeam, AutonomousResearchLoop, ResearchIteration, default_agents
-from .rag_pipeline import DomainFilter
+from .rag_pipeline import (
+    Document,
+    DomainFilter,
+    LegacyRetrievedChunk as RetrievedChunk,
+    PipelineConfig,
+    RAGEngine,
+    RAGPipeline,
+    RAGResponse,
+)
 from .news_scraper import NewsScraper, NewsArticle
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
@@ -32,7 +40,6 @@ from .agent_backends import (
     register_backend,
 )
 from .memory import MemoryItem, MemoryLayer, MemoryQueryResult, TradedMemory
-from .rag import Document, RAGEngine, RAGResponse, RetrievedChunk
 from .sentiment import (
     AggregatedSentiment,
     SentimentAnalyzer,
@@ -79,6 +86,8 @@ __all__ = [
     "LLMProvider",
     # RAG
     "RAGEngine",
+    "RAGPipeline",
+    "PipelineConfig",
     "Document",
     "RetrievedChunk",
     "RAGResponse",

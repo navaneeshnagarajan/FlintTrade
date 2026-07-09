@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import logging
+import sys
+from types import ModuleType, SimpleNamespace
+
+from flinttrade_ai.llm_client import LLMConfig
+from flinttrade_ai.rag_pipeline import RAGPipeline
 
 from flinttrade_core import app as app_module
 
@@ -51,3 +56,24 @@ def test_rag_background_indexer_logs_failures(caplog) -> None:
 
     assert "RAG background indexing failed" in caplog.text
     assert "embedding cache unavailable" in caplog.text
+
+
+def test_runtime_constructs_the_canonical_rag_pipeline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
+    monkeypatch.setitem(sys.modules, "chromadb", ModuleType("chromadb"))
+    monkeypatch.setattr(LLMConfig, "from_env", classmethod(lambda cls: SimpleNamespace(provider="")))
+    monkeypatch.setattr(RAGPipeline, "document_count", lambda self: 1)
+
+    rag = app_module._initialise_rag_runtime(tmp_path)
+
+    assert type(rag) is RAGPipeline
+    assert rag.config.persist_directory == str(tmp_path / "rag")
+
+
+def test_runtime_fails_closed_when_chromadb_is_missing(monkeypatch, tmp_path, caplog) -> None:
+    monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
+    monkeypatch.setitem(sys.modules, "chromadb", None)
+    caplog.set_level(logging.WARNING)
+
+    assert app_module._initialise_rag_runtime(tmp_path) is None
+    assert "RAG initialisation failed" in caplog.text

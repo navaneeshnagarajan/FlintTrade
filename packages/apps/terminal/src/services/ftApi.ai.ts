@@ -41,6 +41,11 @@ export interface RAGResult {
   score: number;
 }
 
+export interface RAGQueryResponse {
+  answer?: string;
+  results: RAGResult[];
+}
+
 export interface AgentRoleConfig {
   name: string;
   role_type:
@@ -111,7 +116,7 @@ export const analyzeSentiment = (text: string) =>
   post<SentimentResult>("sentiment/analyse", { text });
 
 export const queryKnowledge = (query: string, top_k?: number) =>
-  post<{ results: RAGResult[] }>("rag/query", {
+  post<RAGQueryResponse>("rag/query", {
     query,
     top_k: top_k ?? 5,
   });

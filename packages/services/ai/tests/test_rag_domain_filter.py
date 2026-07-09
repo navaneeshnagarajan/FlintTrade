@@ -143,20 +143,27 @@ class TestDomainFilterSemanticFallback:
         assert mock_provider.embed.called
 
     def test_embedding_failure_does_not_raise(self) -> None:
-        """If the embedding provider raises, is_on_topic falls back to False."""
+        """If semantic embeddings are unavailable, retrieval remains available."""
         mock_provider = MagicMock()
         mock_provider.embed.side_effect = RuntimeError("embed failed")
 
         f = DomainFilter(embedding_provider=mock_provider)
         result = f.is_on_topic("completely unrelated text about cooking")
 
-        assert result is False  # keyword miss + embed fail → off-topic
+        assert result is True
 
     def test_no_embedding_provider_skips_semantic(self) -> None:
         """Without an embedding provider, only keyword check is used."""
         f = DomainFilter(embedding_provider=None)
         # Off-topic — no keyword match, no semantic check
         assert not f.is_on_topic("How do I bake bread?")
+
+    def test_adjusting_a_strategy_leg_is_recognised_without_semantic_similarity(self) -> None:
+        provider = MagicMock()
+        f = DomainFilter(embedding_provider=provider)
+
+        assert f.is_on_topic("How do I adjust the second leg?")
+        provider.embed.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
