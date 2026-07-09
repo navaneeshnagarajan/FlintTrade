@@ -445,7 +445,7 @@ sections:
 | **AI** | `llm.provider`, `llm.host`, `llm.model` | LLM client (LM Studio, OpenAI, Anthropic, Ollama, Groq). |
 | **Notifications** | `telegram.*`, `whatsapp.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L thresholds for auto-pause and auto-kill. |
-| **Order safety** | `sebi.audit_retention_days`, `sebi.rate_limit_*` | Local audit retention, per-endpoint rate limits, and kill-switch settings. |
+| **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
 
 ### Layer 2: `.env` (advanced dev/server fallback)
 

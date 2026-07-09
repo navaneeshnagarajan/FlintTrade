@@ -1456,7 +1456,7 @@ These entries were shipped during the 0.1.0-alpha window (2026-03-19 / 2026-03-2
 - EMACrossover — first concrete strategy with position reversal
 
 ### Added — Data & Historical
-- SEBI audit trail (JSONL append-only, gzip rotation, 5-year retention)
+- Audit trail (JSONL append-only, gzip rotation; operator-controlled retention)
 - DuckDB storage — ticks, trades, daily summaries
 - Multi-source downloader, free NSE data, DuckDB pipeline, expiry manager
 
