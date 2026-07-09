@@ -81,6 +81,12 @@ class TestMemoryEntry:
         entry = MemoryEntry(content="x", category="signal", importance=0.5)
         assert entry.last_accessed is None
 
+    def test_legacy_import_path_reexports_canonical_model(self) -> None:
+        from flinttrade_ai.memory_manager import MemoryEntry as LegacyMemoryEntry
+
+        assert LegacyMemoryEntry is MemoryEntry
+
+
 # ---------------------------------------------------------------------------
 # MemoryManager.add
 # ---------------------------------------------------------------------------
