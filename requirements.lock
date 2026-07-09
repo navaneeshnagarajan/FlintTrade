@@ -521,10 +521,6 @@ duckdb==1.5.3 \
     #   flinttrade-historical
     #   flinttrade-journal
     #   flinttrade-screener
-feedparser==6.0.12 \
-    --hash=sha256:64f76ce90ae3e8ef5d1ede0f8d3b50ce26bcce71dd8ae5e82b1cd2d4a5f94228 \
-    --hash=sha256:6bbff10f5a52662c00a2e3f86a38928c37c48f77b3c511aedcd51de933549324
-    # via flinttrade-ai
 flask==3.1.3 \
     --hash=sha256:0ef0e52b8a9cd932855379197dd8f94047b359ca0a78695144304cb45f87c9eb \
     --hash=sha256:f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c
@@ -691,9 +687,7 @@ h11==0.16.0 \
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55 \
     --hash=sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8
-    # via
-    #   httpx
-    #   python-telegram-bot
+    # via httpx
 httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
@@ -706,7 +700,6 @@ httpx==0.28.1 \
     #   flinttrade-gateway
     #   flinttrade-screener
     #   flinttrade-webhooks
-    #   python-telegram-bot
 idna==3.16 \
     --hash=sha256:cc246e3a3f89580c3a951b5ad298ca4638078b2cdd4f115654332b5c26daded5 \
     --hash=sha256:d7a6da03db833450fca25d2358ac9ff06cd624577a4aea3a596d5c0f77b8e03d
@@ -1188,6 +1181,7 @@ numpy==2.4.6 \
     #   flinttrade-screener
     #   lightgbm
     #   matplotlib
+    #   neo-api-client
     #   pandas
     #   quantstats
     #   scipy
@@ -1249,6 +1243,7 @@ pandas==2.3.3 \
     #   flinttrade-ai
     #   flinttrade-backtest
     #   growwapi
+    #   neo-api-client
     #   openchart
     #   quantstats
     #   seaborn
@@ -1549,7 +1544,9 @@ pygments==2.20.0 \
 pyjwt==2.13.0 \
     --hash=sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423 \
     --hash=sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728
-    # via flinttrade-core
+    # via
+    #   flinttrade-core
+    #   neo-api-client
 pynacl==1.6.2 \
     --hash=sha256:018494d6d696ae03c7e656e5e74cdfd8ea1326962cc401bcf018f1ed8436811c \
     --hash=sha256:04316d1fc625d860b6c162fff704eb8426b1a8bcd3abacea11142cbd99a6b574 \
@@ -1605,10 +1602,6 @@ python-dotenv==1.2.2 \
     --hash=sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a \
     --hash=sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3
     # via flinttrade-core
-python-telegram-bot==22.7 \
-    --hash=sha256:784b59ea3852fe4616ad63b4a0264c755637f5d725e87755ecdee28300febf61 \
-    --hash=sha256:d72eed532cf763758cd9331b57a6d790aff0bb4d37d8f4e92149436fe21c6475
-    # via flinttrade-automation
 pytz==2026.2 \
     --hash=sha256:04156e608bee23d3792fd45c94ae47fae1036688e75032eea2e3bf0323d1f126 \
     --hash=sha256:0e60b47b29f21574376f218fe21abc009894a2321ea16c6754f3cad6eb7cdd6a
@@ -1671,6 +1664,7 @@ requests==2.34.2 \
     #   dhanhq
     #   growwapi
     #   jugaad-data
+    #   neo-api-client
     #   openchart
     #   yfinance
 rich==15.0.0 \
@@ -1742,14 +1736,12 @@ sentry-sdk==2.60.0 \
     --hash=sha256:0bd25e54e78ca02d0be512529fa644bbbf9e8470d7b26371294012d4ca93c978 \
     --hash=sha256:28a536c03291c8bcb363cf35c611b32738ec118ff64d8d6383b096448ac4c803
     # via flinttrade-core
-sgmllib3k==1.0.0 \
-    --hash=sha256:7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9
-    # via feedparser
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
     # via
     #   catboost
+    #   neo-api-client
     #   python-dateutil
     #   upstox-python-sdk
 soupsieve==2.8.3 \
@@ -1831,7 +1823,9 @@ watchdog==6.0.0 \
 websocket-client==1.9.0 \
     --hash=sha256:9e813624b6eb619999a97dc7958469217c3176312b3a16a4bd1bc7e08a46ec98 \
     --hash=sha256:af248a825037ef591efbf6ed20cc5faa03d3b47b9e5a2230a529eeee1c1fc3ef
-    # via upstox-python-sdk
+    # via
+    #   neo-api-client
+    #   upstox-python-sdk
 websockets==16.0 \
     --hash=sha256:152284a83a00c59b759697b7f9e9cddf4e3c7861dd0d964b472b70f78f89e80e \
     --hash=sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec \
