@@ -236,4 +236,4 @@ class TradeLogger:
         """Get trades for a date range, optionally filtered by strategy."""
         if strategy:
             return self._storage.get_trades_by_strategy(strategy, start_date, end_date)
-        return self._storage.get_trades_by_date(start_date)
+        return self._storage.get_trades_by_date_range(start_date, end_date)

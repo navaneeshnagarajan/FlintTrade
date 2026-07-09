@@ -91,3 +91,37 @@ def test_orderflow_live_aggregator(app):
     with app.test_client() as c:
         resp = c.get("/api/v1/data/orderflow?symbol=NIFTY")
     assert resp.status_code == 200
+
+
+def test_orderflow_live_reports_real_bin_width_not_requested(app):
+    """G28a: the live path must report the aggregator's real bin width, not echo
+    the requested interval (which would relabel fixed 5-min bins as 1m/15m)."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    bucket = SimpleNamespace(
+        timestamp_bin=1_700_000_000, price_level=100.0,
+        buy_volume=5, sell_volume=3, delta=2,
+    )
+    aggregator = MagicMock()
+    aggregator.time_bin_seconds = 300
+    aggregator.get_footprint.return_value = [bucket]
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as c:
+        resp = c.get("/api/v1/data/orderflow?symbol=NIFTY&interval=60")  # request 1m
+    assert resp.status_code == 200
+    data = resp.get_json()["data"]
+    assert data["is_live"] is True
+    assert data["interval"] == 300          # the aggregator's true width, not 60
+    assert data["requested_interval"] == 60  # the request is echoed separately
+
+
+def test_orderflow_synthetic_reports_requested_interval(app):
+    """The synthetic fallback genuinely honours the requested interval."""
+    with app.test_client() as c:
+        resp = c.get("/api/v1/data/orderflow?symbol=NIFTY&interval=900")
+    data = resp.get_json()["data"]
+    assert data["is_live"] is False
+    assert data["interval"] == 900
+    assert data["requested_interval"] == 900

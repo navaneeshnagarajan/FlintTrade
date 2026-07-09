@@ -51,7 +51,6 @@ import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
-import { PnLSummary } from "./PnLSummary";
 
 // ---------------------------------------------------------------------------
 // Theme helper — reads CSS custom properties at call time so charts re-read
@@ -516,9 +515,6 @@ function MTMMonitorWidget(_props: WidgetProps) {
           SL
         </span>
       </div>
-
-      {/* P&L Tracker — backend data (auto-refreshes every 10s in market hours) */}
-      <PnLSummary />
     </div>
   );
 }

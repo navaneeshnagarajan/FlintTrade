@@ -1618,10 +1618,6 @@ def create_flask_app(
         logger.warning("Trade journal unavailable; /api/v1/journal returns 503", exc_info=True)
         app.config["JOURNAL"] = None
 
-    # Register P&L tracker blueprint (/api/v1/pnl-tracker/*)
-    from flinttrade_data.pnl_routes import pnl_bp  # noqa: PLC0415
-    app.register_blueprint(pnl_bp)
-
     # Register Order Flow blueprint (synthetic footprint data)
     from flinttrade_data.orderflow_routes import orderflow_bp  # noqa: PLC0415
     app.register_blueprint(orderflow_bp)
@@ -1968,10 +1964,6 @@ def create_flask_app(
     # Register Leverage / Margin blueprint (/api/v1/leverage/margin/current)
     from flinttrade_engine.leverage_routes import leverage_bp  # noqa: PLC0415
     app.register_blueprint(leverage_bp)
-
-    # Register PNL by Symbols blueprint (/api/v1/pnl/symbols)
-    from flinttrade_data.pnl_symbols_routes import pnl_symbols_bp  # noqa: PLC0415
-    app.register_blueprint(pnl_symbols_bp)
 
     # Register Chart Preferences blueprint (/api/v1/chart)
     from .chart_prefs_routes import chart_prefs_bp  # noqa: PLC0415

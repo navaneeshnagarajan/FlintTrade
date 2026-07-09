@@ -19,8 +19,6 @@ import {
   getStrategies,
   runBacktest,
   getSafetyConfig,
-  getPnLSummary,
-  getPnlSymbols,
   getSecuritySettings,
   analyzeSentiment,
   getCronJobs,
@@ -279,67 +277,6 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result.daily_loss_pause_pct).toBe(2);
     expect(result.daily_loss_kill_pct).toBe(5);
     expect(result.kill_switch_active).toBe(false);
-  });
-
-  // ---- getPnLSummary shape ----
-
-  it("getPnLSummary() returns correct shape", async () => {
-    const summary = {
-      realized: 5000,
-      unrealized: -200,
-      total: 4800,
-      max_total: 6000,
-      min_total: 0,
-      trade_count: 10,
-      data_points: 100,
-    };
-
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: summary }),
-    );
-
-    const result = await getPnLSummary();
-
-    expect(result).toHaveProperty("realized", 5000);
-    expect(result).toHaveProperty("unrealized", -200);
-    expect(result).toHaveProperty("total", 4800);
-    expect(result).toHaveProperty("max_total", 6000);
-    expect(result).toHaveProperty("min_total", 0);
-    expect(result).toHaveProperty("trade_count");
-    expect(result).toHaveProperty("data_points");
-  });
-
-  it("getPnlSymbols() uses the FlintTrade backend route with date filters", async () => {
-    const response = {
-      status: "success",
-      date_from: "2026-07-01",
-      date_to: "2026-07-05",
-      series_count: 2,
-      period: {
-        realized_pnl: 1200,
-        unrealized_pnl: -50,
-        total_pnl: 1150,
-        trade_count: 3,
-      },
-      overall_summary: {
-        realized: 1200,
-        unrealized: -50,
-        total: 1150,
-        max_total: 1500,
-        min_total: -100,
-        trade_count: 3,
-        data_points: 2,
-      },
-    };
-
-    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
-
-    const result = await getPnlSymbols("2026-07-01", "2026-07-05");
-
-    expect(result).toEqual(response);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/ft-api/api/v1/pnl/symbols?date_from=2026-07-01&date_to=2026-07-05");
-    expect(init.method).toBeUndefined();
   });
 
   // ---- getSecuritySettings fields ----

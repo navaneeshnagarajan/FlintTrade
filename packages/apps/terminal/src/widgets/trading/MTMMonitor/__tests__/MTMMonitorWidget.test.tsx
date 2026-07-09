@@ -95,10 +95,6 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(true),
 }));
 
-// Mock PnLSummary sub-component (it makes its own API call)
-vi.mock("../PnLSummary", () => ({
-  PnLSummary: () => <div data-testid="pnl-summary">PnL Summary</div>,
-}));
 
 // Mock settingsStore riskLimits
 vi.mock("@/stores/settingsStore", () => ({
@@ -173,13 +169,6 @@ describe("MTMMonitorWidget", () => {
     expect(screen.getByText("Max MTM")).toBeInTheDocument();
     expect(screen.getByText("Min MTM")).toBeInTheDocument();
     expect(screen.getByText("Max DD")).toBeInTheDocument();
-  });
-
-  it("renders the PnLSummary sub-component", () => {
-    mockUsePositions.mockReturnValue({ data: [] });
-    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
-
-    expect(screen.getByTestId("pnl-summary")).toBeInTheDocument();
   });
 
   it("shows chart legend items", () => {

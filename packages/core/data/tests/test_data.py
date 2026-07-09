@@ -253,6 +253,21 @@ class TestStorageManager:
         assert csv_str == ""
         storage.close()
 
+    def test_export_no_strategy_honours_end_date_range(self):
+        # Regression (G28b): the all-strategies export once dropped end_date and
+        # returned only the start day. It must span the inclusive range and
+        # exclude days outside it.
+        storage = self._make_storage()
+        for day, oid, sym in ((1, "D1", "AAA"), (2, "D2", "BBB"), (3, "D3", "CCC")):
+            storage.insert_trade(
+                ts=datetime(2026, 3, day, 10, 0, 0), orderid=oid, symbol=sym,
+                exchange="NSE", action="BUY", quantity=1, price=100.0, strategy="Flint",
+            )
+        csv_str = storage.export_trades_csv("2026-03-01", "2026-03-02")  # no strategy
+        assert "AAA" in csv_str and "BBB" in csv_str  # both in-range days present
+        assert "CCC" not in csv_str  # day outside the range excluded
+        storage.close()
+
     def test_context_manager(self):
         from flinttrade_data.storage import StorageManager
         with StorageManager(":memory:") as storage:

@@ -103,7 +103,6 @@ import {
   getChartPreferences,
   updateChartPreferences,
   getAnalyzerStatus,
-  getPnlSymbols,
   sendTelegram,
   ping,
   searchSymbol,
@@ -1282,40 +1281,6 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(url).not.toContain("/api/v1/analyzer?");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ apikey: "test-key-123" });
-  });
-
-  it("keeps P&L symbols on the FlintTrade backend instead of requiring an OpenAlgo key", async () => {
-    mockConnectionState.apiKey = "";
-    const response = {
-      status: "success",
-      date_from: null,
-      date_to: null,
-      series_count: 1,
-      period: {
-        realized_pnl: 500,
-        unrealized_pnl: 25,
-        total_pnl: 525,
-        trade_count: 2,
-      },
-      overall_summary: {
-        realized: 500,
-        unrealized: 25,
-        total: 525,
-        max_total: 525,
-        min_total: 0,
-        trade_count: 2,
-        data_points: 1,
-      },
-    };
-    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
-
-    const result = await getPnlSymbols();
-
-    expect(result).toEqual(response);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/ft-api/api/v1/pnl/symbols");
-    expect(init.method).toBeUndefined();
-    expect(init.body).toBeUndefined();
   });
 
   it("keeps chart preferences on the FlintTrade backend instead of requiring an OpenAlgo key", async () => {

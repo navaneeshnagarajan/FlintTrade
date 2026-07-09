@@ -454,11 +454,11 @@ class StorageManager:
     def export_trades_csv(
         self, start_date: str, end_date: str, strategy: str | None = None,
     ) -> str:
-        """Export trades to CSV string."""
+        """Export trades to CSV string over the inclusive [start_date, end_date] range."""
         trades = (
             self.get_trades_by_strategy(strategy, start_date, end_date)
             if strategy
-            else self.get_trades_by_date(start_date)
+            else self.get_trades_by_date_range(start_date, end_date)
         )
         if not trades:
             return ""

@@ -149,17 +149,16 @@ def _generate_synthetic_buckets(
 def _live_buckets_to_response(
     live_buckets: list[Any],
     symbol: str,
-    interval: int,
 ) -> list[dict[str, Any]]:
     """Convert OrderFlowAggregatorV2 FootprintBucket list to response format.
 
     Groups flat price-level buckets (one per price level per bin) into the
-    nested cells-dict structure that the frontend expects.
+    nested cells-dict structure that the frontend expects. Buckets are already
+    binned by the aggregator's fixed width (the caller reports that width).
 
     Args:
         live_buckets: List of FootprintBucket from the aggregator.
         symbol: Symbol (for logging).
-        interval: Bin width in seconds.
 
     Returns:
         List of bucket dicts with ``time_label``, ``cells``, ``poc_price``,
@@ -261,6 +260,11 @@ def orderflow_endpoint() -> tuple[Any, int]:
     symbol_upper = symbol.upper()
     is_live = False
     buckets: list[dict[str, Any]] = []
+    # The bin width actually represented by the returned buckets. The synthetic
+    # path honours the requested interval; the live aggregator bins at a fixed
+    # width, so we report ITS real width rather than echoing the request — a
+    # 1m/15m selection must not relabel fixed 5-minute footprint bins.
+    effective_interval = interval
 
     # Try live aggregator first
     try:
@@ -268,7 +272,8 @@ def orderflow_endpoint() -> tuple[Any, int]:
         if aggregator is not None:
             live_data = aggregator.get_footprint(symbol_upper, n_bins=bins)
             if live_data:
-                buckets = _live_buckets_to_response(live_data, symbol_upper, interval)
+                buckets = _live_buckets_to_response(live_data, symbol_upper)
+                effective_interval = int(getattr(aggregator, "time_bin_seconds", interval))
                 is_live = True
     except Exception as exc:
         logger.debug("Live aggregator unavailable for %s: %s", symbol_upper, exc)
@@ -282,6 +287,7 @@ def orderflow_endpoint() -> tuple[Any, int]:
             count=min(bins, 20),
         )
         is_live = False
+        effective_interval = interval
 
     return jsonify({
         "status": "success",
@@ -289,7 +295,8 @@ def orderflow_endpoint() -> tuple[Any, int]:
             "buckets": buckets,
             "symbol": symbol_upper,
             "exchange": exchange,
-            "interval": interval,
+            "interval": effective_interval,
+            "requested_interval": interval,
             "is_live": is_live,
         },
     }), 200

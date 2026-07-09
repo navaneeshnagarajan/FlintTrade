@@ -66,10 +66,6 @@ import {
   listLiveNativeReadAccounts,
   selectNativeReadAccount,
 } from "@/services/brokerAccountsApi";
-import {
-  getPnlSymbols as getFtPnlSymbols,
-  type PnLSymbolsResponse,
-} from "@/services/ftApi.data";
 import { get as getFtApi, post as postFtApi } from "./ftApi.helpers";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
@@ -1815,5 +1811,3 @@ export const updateChartPreferences = (prefs: object) => postFtApi<object>("char
 export const getOptionGreeks = (params: OptionGreeksParams) => post<Greeks>("optiongreeks", params);
 export const getAnalyzerStatus = () => post<{ enabled: boolean }>("analyzer/status", {});
 export const toggleAnalyzer = (enable: boolean) => post<{ enabled: boolean }>("analyzer/toggle", { enable });
-export type { PnLSymbolsResponse };
-export const getPnlSymbols = getFtPnlSymbols;

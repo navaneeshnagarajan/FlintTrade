@@ -251,18 +251,17 @@ Source: `packages/services/engine/src/flinttrade_engine/strategy_routes.py`. Bac
 | `strategies/<id>/logs` (**GET**) | Tail a strategy's logs. |
 | `strategies/<id>/schedule` (**POST**) · `strategies/scheduled` (**GET**) | Cron-schedule a strategy. |
 
-### Trade journal & P&L (`/ft-api/api/v1/trades/*`, `…/pnl-tracker/*`)
+### Trade journal (`/ft-api/api/v1/trades/*`)
 
-Source: `packages/core/core/src/flinttrade_core/operations_routes.py` (journal),
-`packages/core/data/src/flinttrade_data/pnl_routes.py` (P&L). Every executed live
-order is appended to a shared DuckDB store by the gated order dispatch, so the
-journal populates in Live mode.
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`. Every
+executed live order is appended to a shared DuckDB store by the gated order
+dispatch, so the journal populates in Live mode. (Live P&L is computed
+client-side in the MTM Monitor widget from real positions; the previously
+documented in-memory `pnl-tracker` endpoints were unfed and were removed.)
 
 | Endpoint | Purpose |
 |---|---|
 | `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
-| `pnl-tracker` (**GET**) | Realised/unrealised P&L time series (optionally `?since=<unix>`). |
-| `pnl-tracker/summary` (**GET**) | Aggregated P&L summary (realised, unrealised, totals, trade count). |
 
 ### Auth (`/ft-api/v1/auth/*`)
 
