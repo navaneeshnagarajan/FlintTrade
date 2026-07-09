@@ -732,6 +732,11 @@ class TestLegacyRAGCompatibility:
     def test_canonical_retrieved_chunk_default_remains_general(self) -> None:
         assert RetrievedChunk(content="context").doc_type == "general"
 
+    def test_legacy_module_is_a_reexport_shim(self) -> None:
+        from flinttrade_ai.rag import RAGEngine as LegacyRAGEngine
+
+        assert LegacyRAGEngine is RAGEngine
+
     def test_response_positional_field_order_matches_the_legacy_contract(self) -> None:
         chunk = LegacyRetrievedChunk(content="context")
 
@@ -743,6 +748,11 @@ class TestLegacyRAGCompatibility:
 
     def test_retrieved_chunk_legacy_default_is_empty_doc_type(self) -> None:
         assert LegacyRetrievedChunk(content="context").doc_type == ""
+
+    def test_legacy_module_exports_the_legacy_chunk_type(self) -> None:
+        from flinttrade_ai.rag import RetrievedChunk as LegacyExport
+
+        assert LegacyExport is LegacyRetrievedChunk
 
     def test_engine_constructor_maps_legacy_options_to_pipeline_config(self) -> None:
         engine = RAGEngine(

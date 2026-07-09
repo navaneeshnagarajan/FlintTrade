@@ -280,6 +280,25 @@ class TestRagQuery:
         assert len(data["data"]["results"]) == 1
         assert data["data"]["results"][0]["content"] == "Theta is time decay."
 
+    def test_rag_query_accepts_the_legacy_facade(self, app, client) -> None:
+        """The compatibility RAGEngine accepts the route's canonical top_k keyword."""
+        from flinttrade_ai.rag import RAGEngine
+
+        rag = RAGEngine(llm_client=MagicMock())
+        rag._store.search = MagicMock(return_value=[])
+        app.config["RAG"] = rag
+
+        resp = client.post("/api/v1/rag/query", json={"query": "What is theta?", "top_k": 3})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"] == {"answer": "", "results": []}
+        rag._store.search.assert_called_once_with(
+            "What is theta?",
+            top_k=3,
+            doc_type=None,
+            similarity_threshold=0.7,
+        )
+
     def test_no_relevant_documents_returns_a_successful_empty_result(self, app, client) -> None:
         rag_response = MagicMock(
             answer="",
