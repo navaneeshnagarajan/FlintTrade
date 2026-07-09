@@ -195,6 +195,22 @@ export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
   return parseResponse<T>(resp, endpoint);
 }
 
+/**
+ * PATCH against the backend's ``/api/v1/...`` family with partial-update
+ * semantics. Mirrors {@link put} but issues an HTTP ``PATCH`` — the verb the
+ * annotated-journal routes use for partial entry edits — with the same auth
+ * headers and ``{status, data}`` unwrapping.
+ */
+export async function patch<T>(endpoint: string, body: object = {}): Promise<T> {
+  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
+    method: "PATCH",
+    headers: buildHeaders(true),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) await throwHttpError(resp, endpoint);
+  return parseResponse<T>(resp, endpoint);
+}
+
 export async function del<T>(endpoint: string): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "DELETE",

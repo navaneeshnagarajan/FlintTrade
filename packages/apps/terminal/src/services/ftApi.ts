@@ -12,6 +12,7 @@ export * from "./ftApi.automation";
 export * from "./ftApi.trading";
 export * from "./ftApi.analysis";
 export * from "./ftApi.data";
+export * from "./ftApi.journal";
 export * from "./ftApi.admin";
 export * from "./ftApi.ditto";
 export * from "./ftApi.invest";

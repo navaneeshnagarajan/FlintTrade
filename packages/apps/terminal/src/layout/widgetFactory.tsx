@@ -161,6 +161,9 @@ const lazyWidgets = {
 
   // Wave 36 — historical option-chain archive
   historicalchain: lazy(() => import("@/widgets/analysis/HistoricalChain/HistoricalChainWidget")),
+
+  // Annotated trade journal (SQLite + FTS5 store)
+  tradejournal: lazy(() => import("@/widgets/utility/TradeJournal/TradeJournalWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -273,6 +276,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "tradeidea", name: "Trade Ideas", icon: "Lightbulb", category: "Utility", description: "AI-generated trade ideas based on screener signals and market regime" },
   { id: "tickspeed", name: "Tick Speed", icon: "Gauge", category: "Utility", description: "Tick arrival rate gauge for detecting unusual activity in F&O instruments" },
   { id: "marketsummary", name: "Market Summary", icon: "LayoutDashboard", category: "Utility", description: "Snapshot of market breadth, FII/DII data, and sector rotation for the day" },
+  { id: "tradejournal", name: "Trade Journal", icon: "NotebookPen", category: "Utility", description: "Annotated trade journal with full-text search: log entries with notes, tags, setup/execution quality, and see win-rate and P&L stats" },
 ];
 
 // ---------------------------------------------------------------------------

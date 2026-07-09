@@ -104,4 +104,14 @@ export const queryKeys = {
     all: ["signals"] as const,
     list: () => [...queryKeys.signals.all, "list"] as const,
   },
+
+  // -------------------------------------------------------------------------
+  // Trade journal (annotated SQLite + FTS5 store)
+  // -------------------------------------------------------------------------
+  journal: {
+    all: ["journal"] as const,
+    list: (search: string, side: string, strategy: string) =>
+      [...queryKeys.journal.all, "list", search, side, strategy] as const,
+    stats: () => [...queryKeys.journal.all, "stats"] as const,
+  },
 } as const;
