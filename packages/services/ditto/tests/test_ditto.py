@@ -10,15 +10,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from flinttrade_ditto.account_manager import decrypt_value, encrypt_value
-
-
-@pytest.fixture(autouse=True)
-def _set_encryption_key(monkeypatch):
-    """Provide a valid Fernet key for all tests that use AccountManager."""
-    from cryptography.fernet import Fernet
-    monkeypatch.setenv("DITTO_ENCRYPTION_KEY", Fernet.generate_key().decode())
-
 # ======================================================================
 # Helpers
 # ======================================================================
@@ -52,7 +43,7 @@ class TestAccountManager:
 
     def test_add_and_list(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1", name="Personal"))
         mgr.add_account(_make_account("a2", name="Family"))
         accounts = mgr.list_accounts()
@@ -61,7 +52,7 @@ class TestAccountManager:
 
     def test_remove_account(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1"))
         mgr.remove_account("a1")
         assert len(mgr.list_accounts()) == 0
@@ -69,7 +60,7 @@ class TestAccountManager:
 
     def test_get_account(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1", name="Test"))
         acc = mgr.get_account("a1")
         assert acc is not None
@@ -78,13 +69,13 @@ class TestAccountManager:
 
     def test_get_nonexistent(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         assert mgr.get_account("nope") is None
         mgr.close()
 
     def test_enabled_filter(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1", enabled=True))
         mgr.add_account(_make_account("a2", enabled=False))
         assert len(mgr.get_enabled_accounts()) == 1
@@ -92,7 +83,7 @@ class TestAccountManager:
 
     def test_enable_disable(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1"))
         mgr.disable_account("a1")
         assert len(mgr.get_enabled_accounts()) == 0
@@ -102,7 +93,7 @@ class TestAccountManager:
 
     def test_groups(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1", group="family"))
         mgr.add_account(_make_account("a2", group="personal"))
         mgr.add_account(_make_account("a3", group="family"))
@@ -112,7 +103,7 @@ class TestAccountManager:
 
     def test_master_account(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1", is_master=False))
         mgr.add_account(_make_account("a2", is_master=True))
         master = mgr.get_master_account()
@@ -122,7 +113,7 @@ class TestAccountManager:
 
     def test_health_check_mock(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         acc = _make_account("a1")
         mgr.add_account(acc)
 
@@ -135,35 +126,6 @@ class TestAccountManager:
         assert health.reachable
         assert health.account_id == "a1"
         mgr.close()
-
-    def test_encryption_roundtrip(self):
-        from cryptography.fernet import Fernet
-        key = Fernet.generate_key().decode()
-        plaintext = "my_secret_api_key"
-        encrypted = encrypt_value(plaintext, key)
-        assert encrypted != plaintext
-        decrypted = decrypt_value(encrypted, key)
-        assert decrypted == plaintext
-
-    def test_encrypt_decrypt_env_key(self, monkeypatch):
-        from cryptography.fernet import Fernet
-        key = Fernet.generate_key().decode()
-        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key)
-        plaintext = "secret_env_key"
-        encrypted = encrypt_value(plaintext)
-        assert encrypted != plaintext
-        decrypted = decrypt_value(encrypted)
-        assert decrypted == plaintext
-
-    def test_encrypt_no_key_raises(self, monkeypatch):
-        monkeypatch.delenv("DITTO_ENCRYPTION_KEY", raising=False)
-        with pytest.raises(ValueError, match="DITTO_ENCRYPTION_KEY environment variable is required"):
-            encrypt_value("test")
-
-    def test_decrypt_no_key_raises(self, monkeypatch):
-        monkeypatch.delenv("DITTO_ENCRYPTION_KEY", raising=False)
-        with pytest.raises(ValueError, match="DITTO_ENCRYPTION_KEY environment variable is required"):
-            decrypt_value("test")
 
 
 # ======================================================================
@@ -681,43 +643,6 @@ class TestPackageExports:
         assert os.path.exists(os.path.join(pkg_dir, "src", "flinttrade_ditto", "__init__.py"))
         assert os.path.exists(os.path.join(pkg_dir, "README.md"))
 
-class TestEncryptionDecryptionExtra:
-    def test_encrypt_value_default_key(self, monkeypatch):
-        from flinttrade_ditto.account_manager import encrypt_value, decrypt_value
-        from cryptography.fernet import Fernet
-        key = Fernet.generate_key().decode()
-        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key)
-
-        plaintext = "secret"
-        # Test without passing key
-        encrypted = encrypt_value(plaintext)
-        assert encrypted != plaintext
-        decrypted = decrypt_value(encrypted)
-        assert decrypted == plaintext
-
-    def test_encrypt_value_bytes_key(self, monkeypatch):
-        from flinttrade_ditto.account_manager import encrypt_value, decrypt_value
-        from cryptography.fernet import Fernet
-        key = Fernet.generate_key()
-        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key.decode())
-
-        plaintext = "secret2"
-        # Test with explicitly passing key
-        encrypted = encrypt_value(plaintext, key=key.decode())
-        assert encrypted != plaintext
-        decrypted = decrypt_value(encrypted, key=key.decode())
-        assert decrypted == plaintext
-
-    def test_get_fernet_import_error(self, monkeypatch):
-        import sys
-        from flinttrade_ditto.account_manager import _get_fernet
-
-        # Force ImportError
-        monkeypatch.setitem(sys.modules, 'cryptography.fernet', None)
-
-        with pytest.raises(ImportError, match="cryptography required — pip install cryptography"):
-            _get_fernet("some_key")
-
 class TestDefaultDB:
     def test_default_db_with_env_var(self, monkeypatch):
         from flinttrade_ditto.account_manager import _default_db
@@ -767,13 +692,13 @@ class TestDefaultDB:
 class TestAccountManagerExtra:
     def test_enter_exit(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        with AccountManager(db_path=str(tmp_path / "test.sqlite")) as mgr:
+        with AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw") as mgr:
             mgr.add_account(_make_account("a1"))
             assert len(mgr.list_accounts()) == 1
 
     def test_get_account_not_in_cache(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1"))
         # Clear cache to force DB lookup
         mgr._cache.clear()
@@ -784,7 +709,7 @@ class TestAccountManagerExtra:
 
     def test_health_check_http_error(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         acc = _make_account("a1")
 
         mock_resp = MagicMock()
@@ -799,7 +724,7 @@ class TestAccountManagerExtra:
 
     def test_health_check_exception(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         acc = _make_account("a1")
 
         mgr._http = MagicMock()
@@ -813,7 +738,7 @@ class TestAccountManagerExtra:
 
     def test_health_check_all(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
         mgr.add_account(_make_account("a1", enabled=True))
         mgr.add_account(_make_account("a2", enabled=False)) # Should be skipped
 
@@ -828,19 +753,15 @@ class TestAccountManagerExtra:
         assert results[0].reachable
         mgr.close()
 
-    def test_row_to_account_decryption_failure(self, tmp_path):
+    def test_api_key_missing_from_vault_returns_empty(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
-        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), encryption_key="wrong_key")
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw")
 
-        # Create a valid account first (encrypted with a different key for testing)
-        from cryptography.fernet import Fernet
-        key1 = Fernet.generate_key()
-        f1 = Fernet(key1)
-        enc_api_key = f1.encrypt(b"my_api_key").decode()
-
-        row = ("a1", "Test", "http://host", enc_api_key, 1, 1.0, "default", 50000.0, 0)
+        # Metadata row (new 8-column schema, no api_key column) with no matching
+        # vault credential → api_key is sourced from the vault as "".
+        row = ("a1", "Test", "http://host", 1, 1.0, "default", 50000.0, 0)
 
         acc = mgr._row_to_account(row)
         assert acc.account_id == "a1"
-        assert acc.api_key == "" # Failed to decrypt
+        assert acc.api_key == ""  # vault holds no credential for this account
         mgr.close()

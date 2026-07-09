@@ -626,7 +626,7 @@ class TestAccountsStatus:
         ]
         monkeypatch.setattr(
             "flinttrade_ditto.account_manager.AccountManager",
-            lambda: self._FakeAM(statuses),
+            lambda **_kw: self._FakeAM(statuses),
         )
 
         resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
@@ -644,7 +644,7 @@ class TestAccountsStatus:
     def test_merges_native_account_status(self, flask_app, client, monkeypatch):
         monkeypatch.setattr(
             "flinttrade_ditto.account_manager.AccountManager",
-            lambda: self._FakeAM([]),
+            lambda **_kw: self._FakeAM([]),
         )
         session = type("Session", (), {"expires_at": 4_102_444_800.0})()
         original_store = flask_app.config.get("CREDENTIAL_STORE")

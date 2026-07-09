@@ -973,6 +973,22 @@ def _ditto_manager_error(exc: Exception) -> tuple[Any, int]:
         "message": "Account service unavailable",
     }), 503
 
+
+def _ditto_manager() -> Any | None:
+    """Build a Ditto AccountManager bound to the canonical credential vault.
+
+    Returns ``None`` when the Ditto vault is not configured (the caller then
+    returns 503) — Ditto account api_keys are stored in the vault, so the
+    manager cannot operate without it.
+    """
+    store = current_app.config.get("DITTO_CREDENTIAL_STORE")
+    if store is None:
+        return None
+    from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
+
+    return AccountManager(credential_store=store)
+
+
 @operations_bp.route("/ditto/accounts", methods=["GET"])
 def ditto_accounts() -> tuple[Any, int]:
     """List all managed accounts with status.
@@ -982,9 +998,9 @@ def ditto_accounts() -> tuple[Any, int]:
     rather than fabricating accounts.
     """
     try:
-        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
-
-        mgr = AccountManager()
+        mgr = _ditto_manager()
+        if mgr is None:
+            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
         raw = mgr.list_accounts()
         accounts = [_ditto_account_response(acct) for acct in raw]
         return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
@@ -1006,10 +1022,10 @@ def accounts_status() -> tuple[Any, int]:
     statuses: list[dict[str, Any]] = []
     ditto_failed = False
     try:
-        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
-
-        with AccountManager() as mgr:
-            statuses.extend({"source": "openalgo", **s.to_dict()} for s in mgr.account_status_all())
+        mgr = _ditto_manager()
+        if mgr is not None:
+            with mgr:
+                statuses.extend({"source": "openalgo", **s.to_dict()} for s in mgr.account_status_all())
     except Exception as exc:
         ditto_failed = True
         logger.warning("Account status fetch failed: %s", exc)
@@ -1142,7 +1158,7 @@ def ditto_account_create() -> tuple[Any, int]:
         }), 400
 
     try:
-        from flinttrade_ditto.account_manager import AccountManager, BrokerAccount  # noqa: PLC0415
+        from flinttrade_ditto.account_manager import BrokerAccount  # noqa: PLC0415
 
         account = BrokerAccount(
             account_id=account_id,
@@ -1155,7 +1171,9 @@ def ditto_account_create() -> tuple[Any, int]:
             max_loss_daily=max_loss_daily,
             is_master=bool(data.get("is_master", False)),
         )
-        mgr = AccountManager()
+        mgr = _ditto_manager()
+        if mgr is None:
+            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
         mgr.add_account(account)
         return jsonify({
             "status": "success",
@@ -1179,9 +1197,9 @@ def ditto_account_disable(account_id: str) -> tuple[Any, int]:
 
 def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int]:
     try:
-        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
-
-        mgr = AccountManager()
+        mgr = _ditto_manager()
+        if mgr is None:
+            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
         account = mgr.get_account(account_id)
         if account is None:
             return jsonify({
@@ -1205,9 +1223,9 @@ def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int
 def ditto_account_delete(account_id: str) -> tuple[Any, int]:
     """Remove a Ditto managed account."""
     try:
-        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
-
-        mgr = AccountManager()
+        mgr = _ditto_manager()
+        if mgr is None:
+            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
         account = mgr.get_account(account_id)
         if account is None:
             return jsonify({

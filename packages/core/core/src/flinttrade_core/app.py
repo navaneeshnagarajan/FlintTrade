@@ -1481,6 +1481,19 @@ def create_flask_app(
     app.config["CONTRACT_MANAGER"] = contract_manager
     app.config["OAUTH_STATES"] = {}
 
+    # Ditto multi-account api_keys live in a Ditto-scoped vault (the canonical
+    # CredentialStore crypto: per-row salt + PBKDF2 from the master password),
+    # NOT the shared native store — whose boot reconnect would otherwise try to
+    # authenticate each ditto:openalgo row as a bridge session. Optional: a
+    # missing vault must never block startup (Ditto routes 503 without it).
+    try:
+        app.config["DITTO_CREDENTIAL_STORE"] = CredentialStore(
+            _workspace_dir() / "ditto_credentials.db", _get_master_password()
+        )
+    except Exception as exc:  # noqa: BLE001 - Ditto is optional
+        logger.warning("Ditto credential vault unavailable: %s", exc)
+        app.config["DITTO_CREDENTIAL_STORE"] = None
+
     # --- Broker router (selector-bound principal; contract §13 / §11.4) ---
     # Best-effort like the other startup steps: a malformed brokers block must
     # NOT brick the app — the operator needs the UI up to fix it. On failure we

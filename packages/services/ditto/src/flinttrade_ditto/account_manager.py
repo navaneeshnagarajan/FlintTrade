@@ -1,8 +1,16 @@
-"""Multi-account manager — registry, health checks, groups, encrypted storage.
+"""Multi-account manager — registry, health checks, groups.
 
 Each broker account corresponds to a separate OpenAlgo instance running on a
 different port. Ditto manages them as a unified pool for position mirroring.
-API keys are encrypted at rest using Fernet symmetric encryption.
+
+API keys are stored in the **canonical credential vault**
+(:class:`flinttrade_gateway.credentials.CredentialStore` — Fernet with a per-row
+random salt + a PBKDF2-derived key from the operator's master password), keyed by
+``(adapter_id="openalgo", account_id)`` in a Ditto-scoped vault file. Non-secret
+account metadata (host, group, weight, limits, flags) lives in the local
+``ditto_accounts.sqlite``. The former Ditto-only ``DITTO_ENCRYPTION_KEY`` Fernet
+store was folded into the vault on 2026-07-09 (map U5) — there is no longer a
+separate weak-crypto credential store.
 """
 
 from __future__ import annotations
@@ -13,22 +21,34 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from flinttrade_core.db import open_sqlite
 
+if TYPE_CHECKING:
+    from flinttrade_gateway.credentials import CredentialStore
+
 logger = logging.getLogger("flinttrade.ditto.accounts")
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+# Vault routing key for Ditto-managed OpenAlgo accounts. Ditto accounts are
+# OpenAlgo instances, so they are stored under the openalgo adapter — but in a
+# Ditto-scoped vault FILE, never the shared native-broker store (whose boot
+# reconnect would otherwise try to authenticate them as bridge sessions).
+_DITTO_ADAPTER_ID = "openalgo"
+
+
 def _default_db() -> str:
-    """Resolve SQLite path: env override > workspace > fallback."""
+    """Resolve the metadata SQLite path: env override > workspace > fallback."""
     env = os.getenv("DATA_DIR")
     if env:
         return env + "/ditto_accounts.sqlite"
     try:
-        from flinttrade_core.workspace import Workspace
+        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
+
         return str(Workspace().fast_data_dir / "ditto_accounts.sqlite")
     except Exception:
         return str(Path.home() / ".flinttrade" / "data" / "ditto_accounts.sqlite")
@@ -96,40 +116,7 @@ class AccountStatus:
 
 
 # ---------------------------------------------------------------------------
-# Fernet encryption for API keys at rest
-# ---------------------------------------------------------------------------
-
-
-def _get_fernet(key: str | None = None):
-    """Get a Fernet instance for encrypting/decrypting API keys."""
-    try:
-        from cryptography.fernet import Fernet
-    except ImportError:
-        raise ImportError("cryptography required — pip install cryptography")
-
-    encryption_key = key or os.getenv("DITTO_ENCRYPTION_KEY", "")
-    if not encryption_key:
-        raise ValueError(
-            "DITTO_ENCRYPTION_KEY environment variable is required. "
-            "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
-        )
-    return Fernet(encryption_key.encode() if isinstance(encryption_key, str) else encryption_key)
-
-
-def encrypt_value(plaintext: str, key: str | None = None) -> str:
-    """Encrypt a string value."""
-    f = _get_fernet(key)
-    return f.encrypt(plaintext.encode()).decode()
-
-
-def decrypt_value(ciphertext: str, key: str | None = None) -> str:
-    """Decrypt a string value."""
-    f = _get_fernet(key)
-    return f.decrypt(ciphertext.encode()).decode()
-
-
-# ---------------------------------------------------------------------------
-# SQLite schema
+# SQLite schema — NON-SECRET account metadata only (api_key lives in the vault)
 # ---------------------------------------------------------------------------
 
 _SCHEMA = """
@@ -137,7 +124,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     account_id TEXT PRIMARY KEY,
     name TEXT DEFAULT '',
     openalgo_host TEXT NOT NULL,
-    api_key_encrypted TEXT NOT NULL,
     enabled INTEGER DEFAULT 1,
     allocation_weight REAL DEFAULT 1.0,
     account_group TEXT DEFAULT 'default',
@@ -157,37 +143,51 @@ CREATE TABLE IF NOT EXISTS accounts (
 class AccountManager:
     """Manage multiple OpenAlgo broker accounts.
 
+    Secrets are read/written through an injected
+    :class:`~flinttrade_gateway.credentials.CredentialStore` (the canonical
+    vault). Pass either a ``credential_store`` or a ``master_password`` (used to
+    open a Ditto-scoped vault next to the metadata DB). Reads that need the
+    api_key (health/status) re-source it from the vault.
+
     Usage::
 
-        mgr = AccountManager()
+        mgr = AccountManager(credential_store=store)
         mgr.add_account(BrokerAccount(
             account_id="acc1",
             openalgo_host="http://your-openalgo-host:5001",
             api_key="your-api-key-1",
-            name="Personal",
-            group="personal", allocation_weight=1.0,
+            name="Personal", group="personal", allocation_weight=1.0,
         ))
-        mgr.add_account(BrokerAccount(
-            account_id="acc2",
-            openalgo_host="http://your-openalgo-host:5002",
-            api_key="your-api-key-2",
-            name="Family",
-            group="family", allocation_weight=2.0,
-        ))
-        health = mgr.health_check_all()
         active = mgr.get_enabled_accounts()
     """
 
     def __init__(
         self,
         db_path: str | None = None,
-        encryption_key: str | None = None,
+        credential_store: CredentialStore | None = None,
+        master_password: str | None = None,
     ) -> None:
         self._db_path = db_path or _default_db()
-        self._enc_key = encryption_key
         self._conn: sqlite3.Connection | None = None
         self._cache: dict[str, BrokerAccount] = {}
         self._http = httpx.Client(timeout=10.0)
+        self._cred = self._resolve_credential_store(credential_store, master_password)
+
+    def _resolve_credential_store(
+        self, credential_store: CredentialStore | None, master_password: str | None
+    ) -> CredentialStore:
+        if credential_store is not None:
+            return credential_store
+        if master_password:
+            from flinttrade_gateway.credentials import CredentialStore  # noqa: PLC0415
+
+            vault_path = Path(self._db_path).parent / "ditto_credentials.db"
+            vault_path.parent.mkdir(parents=True, exist_ok=True)
+            return CredentialStore(vault_path, master_password)
+        raise ValueError(
+            "AccountManager requires a credential_store or master_password — "
+            "Ditto account API keys are stored in the canonical vault."
+        )
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -195,7 +195,50 @@ class AccountManager:
             self._conn = open_sqlite(self._db_path, durability="normal")
             self._conn.execute(_SCHEMA)
             self._conn.commit()
+            self._migrate_legacy_api_key_column(self._conn)
         return self._conn
+
+    def _migrate_legacy_api_key_column(self, conn: sqlite3.Connection) -> None:
+        """Fold a legacy ``api_key_encrypted`` column into the vault, then drop it.
+
+        Pre-2026-07-09 databases stored the api_key as Fernet ciphertext keyed by
+        ``DITTO_ENCRYPTION_KEY``. Best-effort migrate each into the vault (when the
+        legacy key is still available to decrypt it), then drop the column so new
+        writes never touch weak-crypto storage again.
+        """
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}
+        if "api_key_encrypted" not in cols:
+            return
+        legacy_key = os.getenv("DITTO_ENCRYPTION_KEY", "")
+        migrated = 0
+        for account_id, ciphertext in conn.execute(
+            "SELECT account_id, api_key_encrypted FROM accounts"
+        ).fetchall():
+            if not ciphertext or not legacy_key:
+                continue
+            try:
+                from cryptography.fernet import Fernet  # noqa: PLC0415
+
+                plaintext = Fernet(legacy_key.encode()).decrypt(ciphertext.encode()).decode()
+            except Exception:
+                continue
+            try:
+                self._cred.store(
+                    account_id,
+                    broker=_DITTO_ADAPTER_ID,
+                    label=account_id,
+                    credentials={"api_key": plaintext},
+                    adapter_id=_DITTO_ADAPTER_ID,
+                )
+                migrated += 1
+            except Exception:  # noqa: BLE001 - migration is best-effort
+                logger.warning("Could not migrate legacy Ditto api_key into the vault")
+        conn.execute("ALTER TABLE accounts DROP COLUMN api_key_encrypted")
+        conn.commit()
+        logger.info(
+            "Migrated %d legacy Ditto api_key(s) into the vault; dropped api_key_encrypted",
+            migrated,
+        )
 
     def close(self) -> None:
         if self._conn:
@@ -214,20 +257,25 @@ class AccountManager:
     # ------------------------------------------------------------------
 
     def add_account(self, account: BrokerAccount) -> None:
-        """Register a new broker account."""
+        """Register a new broker account (secret → vault, metadata → sqlite)."""
+        self._cred.store(
+            account.account_id,
+            broker=_DITTO_ADAPTER_ID,
+            label=account.name or account.account_id,
+            credentials={"api_key": account.api_key},
+            adapter_id=_DITTO_ADAPTER_ID,
+        )
         conn = self._get_conn()
         now = datetime.now(IST).isoformat()
-        encrypted_key = encrypt_value(account.api_key, self._enc_key)
-
         conn.execute(
             """INSERT OR REPLACE INTO accounts
-               (account_id, name, openalgo_host, api_key_encrypted, enabled,
+               (account_id, name, openalgo_host, enabled,
                 allocation_weight, account_group, max_loss_daily, is_master,
                 created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 account.account_id, account.name, account.openalgo_host,
-                encrypted_key, int(account.enabled), account.allocation_weight,
+                int(account.enabled), account.allocation_weight,
                 account.group, account.max_loss_daily, int(account.is_master),
                 now, now,
             ],
@@ -237,11 +285,15 @@ class AccountManager:
         logger.info("Account added: %s", account.display)
 
     def remove_account(self, account_id: str) -> None:
-        """Remove a broker account."""
+        """Remove a broker account (metadata + vault credential)."""
         conn = self._get_conn()
         conn.execute("DELETE FROM accounts WHERE account_id = ?", [account_id])
         conn.commit()
         self._cache.pop(account_id, None)
+        try:
+            self._cred.remove_for(_DITTO_ADAPTER_ID, account_id)
+        except Exception:  # noqa: BLE001 - vault row may already be absent
+            logger.info("No vault credential to remove for Ditto account")
 
     def get_account(self, account_id: str) -> BrokerAccount | None:
         """Get a single account by ID."""
@@ -361,24 +413,27 @@ class AccountManager:
     # Internal
     # ------------------------------------------------------------------
 
-    def _row_to_account(self, row: tuple) -> BrokerAccount:
-        """Convert a SQLite row to BrokerAccount."""
+    def _api_key_for(self, account_id: str) -> str:
+        """Read an account's api_key from the vault (empty string if absent)."""
         try:
-            api_key = decrypt_value(row[3], self._enc_key)
+            creds = self._cred.retrieve_for(_DITTO_ADAPTER_ID, account_id)
         except Exception:
-            api_key = ""
-            logger.warning("Could not decrypt Ditto account auth material")
+            logger.warning("Could not read Ditto account auth material from the vault")
+            return ""
+        return str(creds.get("api_key", ""))
 
+    def _row_to_account(self, row: sqlite3.Row | tuple) -> BrokerAccount:
+        """Convert a metadata row to a BrokerAccount (api_key sourced from vault)."""
         account = BrokerAccount(
             account_id=row[0],
             name=row[1] or "",
             openalgo_host=row[2],
-            api_key=api_key,
-            enabled=bool(row[4]),
-            allocation_weight=float(row[5]),
-            group=row[6] or "default",
-            max_loss_daily=float(row[7]),
-            is_master=bool(row[8]),
+            api_key=self._api_key_for(row[0]),
+            enabled=bool(row[3]),
+            allocation_weight=float(row[4]),
+            group=row[5] or "default",
+            max_loss_daily=float(row[6]),
+            is_master=bool(row[7]),
         )
         self._cache[account.account_id] = account
         return account

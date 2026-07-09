@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from cryptography.fernet import Fernet
 
 from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
 
@@ -33,7 +32,7 @@ class _FakeHttp:
 
 @pytest.fixture
 def mgr(tmp_path):
-    m = AccountManager(db_path=str(tmp_path / "acc.db"), encryption_key=Fernet.generate_key().decode())
+    m = AccountManager(db_path=str(tmp_path / "acc.db"), master_password="test-master-pw")
     m.add_account(BrokerAccount(account_id="A1", openalgo_host="http://host:5000", api_key="k", name="Acc 1"))
     yield m
     m.close()
