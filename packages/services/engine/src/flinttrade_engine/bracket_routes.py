@@ -84,9 +84,7 @@ def _resolve_target(params: Mapping[str, Any]) -> tuple[str, str]:
         return adapter_id, account_id
 
     router = current_app.config.get("BROKER_ROUTER")
-    selector = str(
-        getattr(getattr(getattr(router, "_config", None), "execution", None), "default", "") or ""
-    ).strip()
+    selector = str(getattr(router, "default_selector", None) or "").strip()
     if selector:
         try:
             from .request_context import parse_selector  # noqa: PLC0415

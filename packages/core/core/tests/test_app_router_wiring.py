@@ -25,6 +25,8 @@ def test_build_broker_router_from_default_config() -> None:
     assert isinstance(router._config, RoutingConfig)
     assert isinstance(router._session_provider, AuthenticatingSessionProvider)
     assert router._config.execution.default == "openalgo:default"
+    # Public accessor mirrors the private config (used by order/bracket routes).
+    assert router.default_selector == "openalgo:default"
 
 
 def test_build_broker_router_invalid_config_raises() -> None:

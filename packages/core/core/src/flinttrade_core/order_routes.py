@@ -1555,9 +1555,7 @@ _SUPER_ORDER_LEGS = frozenset({"ENTRY_LEG", "TARGET_LEG", "STOP_LOSS_LEG"})
 def _configured_execution_target() -> tuple[str, str]:
     """Return the router's configured execution default, or OpenAlgo/default."""
     router = current_app.config.get("BROKER_ROUTER")
-    config = getattr(router, "_config", None)
-    execution = getattr(config, "execution", None)
-    selector = str(getattr(execution, "default", "") or "").strip()
+    selector = str(getattr(router, "default_selector", None) or "").strip()
     if selector:
         try:
             from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415

@@ -336,9 +336,7 @@ class TestPrincipalDerivation:
     def test_default_selector_from_router_config(self, service) -> None:
         """Without body fields, ``brokers.execution.default`` sets the target."""
         flask_app = _make_app(service)
-        flask_app.config["BROKER_ROUTER"] = SimpleNamespace(
-            _config=SimpleNamespace(execution=SimpleNamespace(default="dhan:acct-live"))
-        )
+        flask_app.config["BROKER_ROUTER"] = SimpleNamespace(default_selector="dhan:acct-live")
         with flask_app.test_client() as c:
             c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
         principal = self._placed_principal(service)
@@ -348,9 +346,7 @@ class TestPrincipalDerivation:
     def test_malformed_default_selector_falls_back(self, service) -> None:
         """A selector without a colon is ignored — fallback is openalgo:default."""
         flask_app = _make_app(service)
-        flask_app.config["BROKER_ROUTER"] = SimpleNamespace(
-            _config=SimpleNamespace(execution=SimpleNamespace(default="no-colon-here"))
-        )
+        flask_app.config["BROKER_ROUTER"] = SimpleNamespace(default_selector="no-colon-here")
         with flask_app.test_client() as c:
             c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
         principal = self._placed_principal(service)

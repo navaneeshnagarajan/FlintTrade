@@ -72,6 +72,8 @@ def _router_with_execution_default(selector: str) -> MagicMock:
 
     router = MagicMock()
     router._config = _Config()
+    # Mirror the real BrokerRouter.default_selector accessor the routes now read.
+    router.default_selector = selector
     return router
 
 

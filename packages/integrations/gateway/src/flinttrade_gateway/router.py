@@ -217,6 +217,25 @@ class BrokerRouter:
         """
         return self._rate_limiter
 
+    @property
+    def default_selector(self) -> str | None:
+        """The configured ``brokers.execution.default`` selector, or ``None``.
+
+        Exposed read-only so order-route target resolution (core order routes,
+        engine bracket routes) can read the running execution default without
+        reaching into the private ``_config`` chain. The raw selector string is
+        returned; callers parse it themselves (the gateway must not import
+        ``parse_selector`` from the engine layer) and keep their own
+        ``("openalgo", "default")`` fallback. Returns ``None`` when no config is
+        bound or the default is unset/empty.
+        """
+        if self._config is None:
+            return None
+        selector = getattr(getattr(self._config, "execution", None), "default", None)
+        if not selector:
+            return None
+        return str(selector).strip() or None
+
     async def _throttle(self, adapter_id: str, kind: str) -> None:
         if self._rate_limiter is not None:
             await self._rate_limiter.acquire(adapter_id, kind)
