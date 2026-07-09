@@ -6,7 +6,6 @@ No live OpenAlgo connection required — all routing is mocked.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -18,7 +17,7 @@ from flinttrade_engine.split_orders import (
     SplitValidationError,
     _validate_split_params,
 )
-from flinttrade_core.models import OrderResponse
+from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
 
 
 # ---------------------------------------------------------------------------
@@ -34,24 +33,34 @@ def _run(coro):
         loop.close()
 
 
-def _make_decision(passed: bool = True, order_id: str = "C001", error: str = "") -> MagicMock:
-    decision = MagicMock()
-    decision.passed = passed
-    decision.error = error
-    decision.order_response = OrderResponse(status="COMPLETE", orderid=order_id) if passed else None
-    return decision
+_PRINCIPAL = BracketPrincipal(
+    actor_id="tester", jti="jti-1", adapter_id="openalgo", account_id="default"
+)
 
 
-def _make_executor(decisions: list[MagicMock] | None = None) -> tuple[SplitOrderExecutor, MagicMock]:
-    router = MagicMock()
-    router.route_order = AsyncMock(
-        side_effect=decisions or [_make_decision()]
-    )
-    return SplitOrderExecutor(router=router), router
+def _place_leg_from(outcomes: list):  # type: ignore[no-untyped-def]
+    """Build a fake gated ``place_leg(order, principal)``.
+
+    Each outcome is an order-id ``str`` (success) or a ``BracketOrderError`` to
+    raise (safety block / gate refusal / dispatch fault).
+    """
+    it = iter(outcomes)
+
+    def place_leg(order, principal):  # type: ignore[no-untyped-def]
+        outcome = next(it)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return place_leg
+
+
+def _make_executor(outcomes: list | None = None) -> SplitOrderExecutor:
+    return SplitOrderExecutor(place_leg=_place_leg_from(outcomes or ["C001"]))
 
 
 def _exec_split(
-    decisions: list[MagicMock],
+    outcomes: list,
     total_quantity: int = 300,
     chunk_size: int = 75,
     delay_seconds: float = 0.0,
@@ -60,14 +69,15 @@ def _exec_split(
     price: float = 0.0,
     trigger_price: float = 0.0,
 ) -> SplitResult:
-    executor, _ = _make_executor(decisions)
+    executor = _make_executor(outcomes)
     return _run(
         executor.execute_split(
             symbol="NIFTY25MAYFUT",
             exchange="NFO",
             total_quantity=total_quantity,
             chunk_size=chunk_size,
-            action=action,
+            action=action,  # type: ignore[arg-type]
+            principal=_PRINCIPAL,
             delay_seconds=delay_seconds,
             order_type=order_type,
             price=price,
@@ -136,16 +146,14 @@ class TestChunkingArithmetic:
 
     def test_even_division(self):
         """300 / 75 = 4 full chunks, no remainder."""
-        decisions = [_make_decision(True, f"C{i}") for i in range(4)]
-        result = _exec_split(decisions, total_quantity=300, chunk_size=75)
+        result = _exec_split([f"C{i}" for i in range(4)], total_quantity=300, chunk_size=75)
         assert result.success
         assert len(result.chunks) == 4
         assert all(c.quantity == 75 for c in result.chunks)
 
     def test_with_remainder(self):
         """310 / 75 = 4 full + 1 partial (10)."""
-        decisions = [_make_decision(True, f"C{i}") for i in range(5)]
-        result = _exec_split(decisions, total_quantity=310, chunk_size=75)
+        result = _exec_split([f"C{i}" for i in range(5)], total_quantity=310, chunk_size=75)
         assert result.success
         assert len(result.chunks) == 5
         full_chunks = result.chunks[:4]
@@ -155,16 +163,14 @@ class TestChunkingArithmetic:
 
     def test_single_chunk_equal_total(self):
         """chunk_size == total_quantity → exactly 1 chunk."""
-        decisions = [_make_decision(True, "SOLO")]
-        result = _exec_split(decisions, total_quantity=50, chunk_size=50)
+        result = _exec_split(["SOLO"], total_quantity=50, chunk_size=50)
         assert result.success
         assert len(result.chunks) == 1
         assert result.chunks[0].quantity == 50
 
     def test_placed_quantity_sum(self):
         """placed_quantity should equal total_quantity on full success."""
-        decisions = [_make_decision(True, f"Q{i}") for i in range(4)]
-        result = _exec_split(decisions, total_quantity=300, chunk_size=75)
+        result = _exec_split([f"Q{i}" for i in range(4)], total_quantity=300, chunk_size=75)
         assert result.placed_quantity == 300
 
 
@@ -177,8 +183,7 @@ class TestSplitFailureHandling:
     """Execution stops on first failed chunk; partial results are preserved."""
 
     def test_first_chunk_failure_returns_error(self):
-        decisions = [_make_decision(False, error="Risk blocked")]
-        result = _exec_split(decisions, total_quantity=300, chunk_size=75)
+        result = _exec_split([BracketOrderError("Risk blocked")], total_quantity=300, chunk_size=75)
         assert not result.success
         assert result.placed_count == 0
         assert len(result.chunks) == 1
@@ -186,34 +191,30 @@ class TestSplitFailureHandling:
 
     def test_partial_success_stops_at_failure(self):
         """Two chunks succeed, third fails — only 2 chunks in result."""
-        decisions = [
-            _make_decision(True, "C1"),
-            _make_decision(True, "C2"),
-            _make_decision(False, error="Halt"),
-        ]
-        result = _exec_split(decisions, total_quantity=225, chunk_size=75)
+        result = _exec_split(
+            ["C1", "C2", BracketOrderError("Halt")], total_quantity=225, chunk_size=75
+        )
         assert not result.success
         assert result.placed_count == 2
         assert result.failed_count == 1
         assert len(result.chunks) == 3
 
-    def test_router_exception_is_handled(self):
-        async def explode(order, **_kw):
+    def test_dispatch_exception_is_handled(self):
+        def explode(order, principal):  # type: ignore[no-untyped-def]
             raise ConnectionError("broker down")
 
-        router = MagicMock()
-        router.route_order = explode
-        executor = SplitOrderExecutor(router=router)
+        executor = SplitOrderExecutor(place_leg=explode)
         result = _run(
             executor.execute_split(
-                symbol="X", exchange="NSE", total_quantity=100, chunk_size=50, action="BUY"
+                symbol="X", exchange="NSE", total_quantity=100, chunk_size=50,
+                action="BUY", principal=_PRINCIPAL,
             )
         )
         assert not result.success
         assert "broker down" in result.error
 
     def test_validation_failure_returns_error_result(self):
-        executor, _ = _make_executor()
+        executor = _make_executor()
         result = _run(
             executor.execute_split(
                 symbol="",  # invalid
@@ -221,6 +222,7 @@ class TestSplitFailureHandling:
                 total_quantity=100,
                 chunk_size=50,
                 action="BUY",
+                principal=_PRINCIPAL,
             )
         )
         assert not result.success

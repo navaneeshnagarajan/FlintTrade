@@ -44,6 +44,19 @@ Versioning: [Semantic Versioning](https://semver.org/).
   backtesters, pairs). All 28 are now re-exported, with the crate's dormant
   status (built and tested, no production consumer yet) documented in the
   package docstring and pinned by a surface-completeness test.
+- **Basket and split orders are now live, fully gated** — the
+  `/api/v1/orders/{basket,split,options-strategy}` routes returned 503 because
+  their executors were deliberately never wired: the executors placed each
+  leg/chunk through `OrderRouter.route_order` (SafetySystem only — no
+  `gate_order`/HMAC/`BrokerRouter`), so wiring them would have opened an ungated
+  live-order path. Both executors now dispatch every leg (and every basket
+  rollback leg) through the same gated `build_gated_leg_dispatchers` `place_leg`
+  as a bracket leg (SafetySystem L1–L5 → `gate_order` one-shot HMAC
+  `SafetyContext` → `BrokerRouter` → adapter), hold no broker client, and are
+  wired in `create_flask_app` bound to the request's session-JWT principal.
+  `basket_orders.py`/`split_orders.py` were removed from the
+  `test_no_legacy_order_path` raw-route allowlist and pinned by new gated tests
+  (they graduated exactly as `BRACKET_SERVICE` did).
 - **Rust ticks crate is now tested in CI** — a `rust-ticks-tests` job
   (`test.yml`, eighth per-push Ubuntu job) runs `cargo test` on the
   `packages/core/ticks` crate. Its unit tests ran in no CI job before (`cargo

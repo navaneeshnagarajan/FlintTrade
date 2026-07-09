@@ -1990,6 +1990,17 @@ def create_flask_app(
     )
     app.register_blueprint(bracket_bp)
 
+    # Wire the advanced-order executors (basket / split) that back the engine
+    # order_bp routes (/api/v1/orders/{basket,split,options-strategy}). Each
+    # routes every leg/chunk through the SAME gated dispatcher as a bracket leg
+    # (build_gated_leg_dispatchers -> gate_order -> BrokerRouter), so they hold
+    # no broker client and no ungated path exists. Pinned by
+    # test_executors_stay_gated and gateway/tests/test_no_legacy_order_path.py.
+    from flinttrade_engine.basket_orders import BasketOrderExecutor  # noqa: PLC0415
+    from flinttrade_engine.split_orders import SplitOrderExecutor  # noqa: PLC0415
+    app.config["BASKET_EXECUTOR"] = BasketOrderExecutor(place_leg=_bracket_place_leg)
+    app.config["SPLIT_EXECUTOR"] = SplitOrderExecutor(place_leg=_bracket_place_leg)
+
     # Register Position Sizer blueprint (/api/v1/position/*)
     from flinttrade_engine.position_sizer_routes import position_bp  # noqa: PLC0415
     app.register_blueprint(position_bp)

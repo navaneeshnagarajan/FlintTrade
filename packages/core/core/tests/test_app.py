@@ -392,3 +392,23 @@ class TestNaNSerialisation:
         )
         values = json.loads(resp.data)["data"]["rsi_14"]
         assert values[0] is None
+
+
+class TestAdvancedExecutorsGated:
+    """The wired basket/split executors dispatch ONLY through the gated chain."""
+
+    def test_basket_and_split_executors_are_gated_and_wired(self, client: Any) -> None:
+        app = client.application
+        basket = app.config.get("BASKET_EXECUTOR")
+        split = app.config.get("SPLIT_EXECUTOR")
+
+        # Both wired — the engine order_bp routes would 503 otherwise.
+        assert basket is not None
+        assert split is not None
+
+        # Each holds the gated place_leg dispatcher (build_gated_leg_dispatchers)
+        # and NO raw router/client — a raw write is structurally impossible.
+        assert callable(getattr(basket, "_place_leg", None))
+        assert callable(getattr(split, "_place_leg", None))
+        assert not hasattr(basket, "_router")
+        assert not hasattr(split, "_router")

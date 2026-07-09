@@ -71,8 +71,9 @@ _RAW_ORDER_ALLOWLIST = {
 _RAW_ROUTE_ORDER_ALLOWLIST = {
     "packages/services/engine/src/flinttrade_engine/router.py",
     "packages/services/engine/src/flinttrade_engine/smart_router.py",
-    "packages/services/engine/src/flinttrade_engine/basket_orders.py",
-    "packages/services/engine/src/flinttrade_engine/split_orders.py",
+    # basket_orders.py + split_orders.py graduated 2026-07-09 (G13): each leg/
+    # chunk now dispatches through the gated build_gated_leg_dispatchers place_leg
+    # (gate_order -> BrokerRouter), so they carry no raw ``.route_order(`` call.
     "packages/services/engine/src/flinttrade_engine/strategies/ema_crossover.py",
     "packages/services/ai/src/flinttrade_ai/autonomous_agent.py",
 }

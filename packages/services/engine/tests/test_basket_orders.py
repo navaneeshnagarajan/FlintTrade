@@ -6,7 +6,6 @@ All broker/router interactions are mocked — no live OpenAlgo required.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -19,7 +18,7 @@ from flinttrade_engine.basket_orders import (
     _leg_to_order,
     _validate_legs,
 )
-from flinttrade_core.models import OrderResponse
+from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
 
 
 # ---------------------------------------------------------------------------
@@ -27,33 +26,46 @@ from flinttrade_core.models import OrderResponse
 # ---------------------------------------------------------------------------
 
 
-def _make_decision(passed: bool = True, order_id: str = "ORD001", error: str = "") -> MagicMock:
-    """Build a mock RoutingDecision."""
-    decision = MagicMock()
-    decision.passed = passed
-    decision.error = error
-    if passed:
-        decision.order_response = OrderResponse(status="COMPLETE", orderid=order_id)
-    else:
-        decision.order_response = None
-    return decision
+_PRINCIPAL = BracketPrincipal(
+    actor_id="tester", jti="jti-1", adapter_id="openalgo", account_id="default"
+)
 
 
-def _make_executor(decisions: list[MagicMock] | None = None) -> tuple[BasketOrderExecutor, MagicMock]:
-    """Build a BasketOrderExecutor with a mocked router.
+def _place_leg_from(outcomes: list):  # type: ignore[no-untyped-def]
+    """Build a fake gated ``place_leg(order, principal)``.
+
+    Each outcome is an order-id ``str`` (success) or a ``BracketOrderError`` to
+    raise (safety block / gate refusal / dispatch fault) — mirroring the real
+    gated dispatcher. Every call is recorded on ``place_leg.calls`` as
+    ``(order, principal)``.
+    """
+    it = iter(outcomes)
+    calls: list = []
+
+    def place_leg(order, principal):  # type: ignore[no-untyped-def]
+        calls.append((order, principal))
+        outcome = next(it)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    place_leg.calls = calls  # type: ignore[attr-defined]
+    return place_leg
+
+
+def _make_executor(outcomes: list | None = None):  # type: ignore[no-untyped-def]
+    """Build a BasketOrderExecutor backed by a fake gated place_leg.
 
     Args:
-        decisions: Ordered list of RoutingDecision mocks to return on successive calls.
+        outcomes: Ordered per-call outcomes — an order-id str (success) or a
+            BracketOrderError to raise.
 
     Returns:
-        (executor, mock_router)
+        (executor, place_leg) — ``place_leg.calls`` records every dispatch.
     """
-    router = MagicMock()
-    router.route_order = AsyncMock(
-        side_effect=decisions if decisions else [_make_decision()]
-    )
-    executor = BasketOrderExecutor(router=router, rollback_delay_seconds=0.0)
-    return executor, router
+    place_leg = _place_leg_from(outcomes if outcomes is not None else ["ORD001"])
+    executor = BasketOrderExecutor(place_leg=place_leg, rollback_delay_seconds=0.0)
+    return executor, place_leg
 
 
 def _run(coro):
@@ -161,9 +173,8 @@ class TestBasketExecutorSuccess:
     """Full success: all legs placed, no rollback."""
 
     def test_single_leg_success(self):
-        decisions = [_make_decision(True, "ORD1")]
-        executor, router = _make_executor(decisions)
-        result = _run(executor.execute([_leg()], strategy="s1"))
+        executor, place_leg = _make_executor(["ORD1"])
+        result = _run(executor.execute([_leg()], _PRINCIPAL, strategy="s1"))
 
         assert result.success
         assert result.placed_count == 1
@@ -172,44 +183,43 @@ class TestBasketExecutorSuccess:
         assert result.order_ids == ["ORD1"]
         assert len(result.legs) == 1
         assert result.legs[0].success
+        # Dispatched through the gated place_leg, bound to the request principal.
+        assert len(place_leg.calls) == 1
+        assert place_leg.calls[0][1] is _PRINCIPAL
 
     def test_two_legs_success(self):
-        decisions = [_make_decision(True, "O1"), _make_decision(True, "O2")]
-        executor, router = _make_executor(decisions)
+        executor, _ = _make_executor(["O1", "O2"])
         legs = [_leg(action="BUY"), _leg(action="SELL")]
-        result = _run(executor.execute(legs, strategy="two"))
+        result = _run(executor.execute(legs, _PRINCIPAL, strategy="two"))
 
         assert result.success
         assert result.placed_count == 2
         assert set(result.order_ids) == {"O1", "O2"}
 
     def test_buy_legs_placed_before_sell_legs(self):
-        """BUY legs must be routed before SELL legs."""
+        """BUY legs must be placed before SELL legs."""
         call_log: list[str] = []
 
-        async def record_route(order, **_kw):
+        def place_leg(order, principal):  # type: ignore[no-untyped-def]
             call_log.append(str(order.action))
-            return _make_decision(True, "X")
+            return "X"
 
-        router = MagicMock()
-        router.route_order = record_route
-        executor = BasketOrderExecutor(router=router, rollback_delay_seconds=0.0)
+        executor = BasketOrderExecutor(place_leg=place_leg, rollback_delay_seconds=0.0)
 
         legs = [
             _leg(symbol="A", action="SELL"),
             _leg(symbol="B", action="BUY"),
         ]
-        _run(executor.execute(legs))
+        _run(executor.execute(legs, _PRINCIPAL))
 
         buy_idx = next(i for i, a in enumerate(call_log) if "BUY" in a)
         sell_idx = next(i for i, a in enumerate(call_log) if "SELL" in a)
         assert buy_idx < sell_idx
 
     def test_result_order_ids_property(self):
-        decisions = [_make_decision(True, f"ID{i}") for i in range(3)]
-        executor, _ = _make_executor(decisions)
+        executor, _ = _make_executor([f"ID{i}" for i in range(3)])
         legs = [_leg() for _ in range(3)]
-        result = _run(executor.execute(legs))
+        result = _run(executor.execute(legs, _PRINCIPAL))
         assert len(result.order_ids) == 3
 
 
@@ -222,23 +232,20 @@ class TestBasketExecutorRollback:
     """Atomicity: failure triggers rollback of already-placed legs."""
 
     def test_first_leg_fails_no_rollback_needed(self):
-        decisions = [_make_decision(passed=False, error="Risk limit")]
-        executor, router = _make_executor(decisions)
-        result = _run(executor.execute([_leg()]))
+        executor, _ = _make_executor([BracketOrderError("Risk limit")])
+        result = _run(executor.execute([_leg()], _PRINCIPAL))
 
         assert not result.success
         assert result.failed_leg_index == 0
         assert result.rolled_back is False  # nothing to roll back
 
     def test_second_leg_fails_triggers_rollback(self):
-        decisions = [
-            _make_decision(True, "PLACED1"),          # leg 0 placed
-            _make_decision(False, error="No margin"),  # leg 1 fails
-            _make_decision(True, "ROLLBACK1"),         # rollback order for leg 0
-        ]
-        executor, router = _make_executor(decisions)
+        # leg 0 placed, leg 1 blocked by the gate, rollback order for leg 0.
+        executor, _ = _make_executor(
+            ["PLACED1", BracketOrderError("No margin"), "ROLLBACK1"]
+        )
         legs = [_leg(action="BUY"), _leg(action="SELL")]
-        result = _run(executor.execute(legs))
+        result = _run(executor.execute(legs, _PRINCIPAL))
 
         assert not result.success
         assert result.rolled_back is True
@@ -248,33 +255,31 @@ class TestBasketExecutorRollback:
         assert placed_leg.rolled_back is True
         assert placed_leg.rollback_order_id == "ROLLBACK1"
 
-    def test_router_exception_triggers_rollback(self):
-        async def side_effect(order, **_kw):
+    def test_leg_exception_triggers_rollback(self):
+        # An unexpected (non-BracketOrderError) fault on a later leg still rolls
+        # back the placed leg.
+        def place_leg(order, principal):  # type: ignore[no-untyped-def]
             if "BUY" in str(order.action):
-                return _make_decision(True, "O1")
+                return "O1"
             raise RuntimeError("Network error")
 
-        router = MagicMock()
-        router.route_order = side_effect
-        executor = BasketOrderExecutor(router=router, rollback_delay_seconds=0.0)
+        executor = BasketOrderExecutor(place_leg=place_leg, rollback_delay_seconds=0.0)
         legs = [_leg(action="BUY"), _leg(action="SELL")]
-        result = _run(executor.execute(legs))
+        result = _run(executor.execute(legs, _PRINCIPAL))
 
         assert not result.success
         assert result.rolled_back is True
 
     def test_all_legs_fail_no_rollback(self):
-        decisions = [_make_decision(False, error="blocked")]
-        executor, _ = _make_executor(decisions)
-        result = _run(executor.execute([_leg()]))
+        executor, _ = _make_executor([BracketOrderError("blocked")])
+        result = _run(executor.execute([_leg()], _PRINCIPAL))
         assert not result.success
         assert result.rolled_back is False
 
     def test_failed_leg_not_in_rollback(self):
         """The leg that fails must not have rolled_back=True (nothing was placed)."""
-        decisions = [_make_decision(False, error="safety block")]
-        executor, _ = _make_executor(decisions)
-        result = _run(executor.execute([_leg()]))
+        executor, _ = _make_executor([BracketOrderError("safety block")])
+        result = _run(executor.execute([_leg()], _PRINCIPAL))
 
         failed_leg = result.legs[0]
         assert not failed_leg.success

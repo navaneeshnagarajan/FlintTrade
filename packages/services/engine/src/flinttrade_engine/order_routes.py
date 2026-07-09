@@ -34,6 +34,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 from flinttrade_core.rate_limiter import rate_limit
 
+from .bracket_routes import _request_principal
 from .mode_guard import require_live_unlocked
 
 logger = logging.getLogger("flinttrade.engine.order_routes")
@@ -170,7 +171,7 @@ def place_basket() -> Response:
                 {"status": "error", "message": f"Leg {i} parse error"}
             ), 400
 
-    result = _run_async(executor.execute(legs, strategy=strategy))
+    result = _run_async(executor.execute(legs, _request_principal(body), strategy=strategy))
 
     response_data: dict[str, Any] = {
         "status": "success" if result.success else "error",
@@ -268,6 +269,7 @@ def place_split() -> Response:
             total_quantity=total_qty,
             chunk_size=chunk_size,
             action=action,  # type: ignore[arg-type]
+            principal=_request_principal(body),
             delay_seconds=delay_seconds,
             order_type=order_type,
             price=price,
@@ -407,7 +409,7 @@ def place_options_strategy() -> Response:
     except (KeyError, ValueError, TypeError):
         return jsonify({"status": "error", "message": "Strategy build error"}), 400
 
-    result = _run_async(executor.execute(legs, strategy=basket_strategy))
+    result = _run_async(executor.execute(legs, _request_principal(body), strategy=basket_strategy))
 
     response_data: dict[str, Any] = {
         "status": "success" if result.success else "error",

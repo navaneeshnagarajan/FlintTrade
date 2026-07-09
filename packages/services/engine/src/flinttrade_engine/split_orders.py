@@ -8,8 +8,8 @@ A :class:`SplitResult` is always returned describing per-chunk outcomes.
 
 Usage::
 
-    router = OrderRouter(client=client, safety=safety)
-    executor = SplitOrderExecutor(router=router)
+    place_leg, _ = build_gated_leg_dispatchers(app)
+    executor = SplitOrderExecutor(place_leg=place_leg)
 
     result = await executor.execute_split(
         symbol="NIFTY25MAYFUT",
@@ -17,6 +17,7 @@ Usage::
         total_quantity=300,
         chunk_size=75,
         action="BUY",
+        principal=principal,
         delay_seconds=0.5,
         order_type="MARKET",
         strategy="impact_reducer",
@@ -40,7 +41,11 @@ from flinttrade_core.models import (
     PriceType,
     Product,
 )
-from flinttrade_engine.router import OrderRouter
+from flinttrade_engine.bracket_order import (
+    BracketOrderError as GatedDispatchError,
+    BracketPrincipal as OrderPrincipal,
+    PlaceLegFn,
+)
 
 logger = logging.getLogger("flinttrade.engine.split_orders")
 
@@ -269,12 +274,21 @@ class SplitOrderExecutor:
     Useful for illiquid instruments where a single large order may cause
     significant market impact.
 
+    Every chunk is placed through the injected ``place_leg`` dispatcher, which
+    routes it through the same gated chain as a human ``/place`` order
+    (SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter`` → adapter). The
+    executor holds no broker client, so a raw/ungated write from the split path
+    is structurally impossible (contract §8.1).
+
     Args:
-        router: The :class:`~flinttrade_engine.router.OrderRouter` to use.
+        place_leg: The gated per-leg dispatcher
+            (``flinttrade_engine.bracket_order.build_gated_leg_dispatchers``);
+            raises :class:`~flinttrade_engine.bracket_order.BracketOrderError`
+            on any safety block, gate refusal, or dispatch fault.
     """
 
-    def __init__(self, router: OrderRouter) -> None:
-        self._router = router
+    def __init__(self, place_leg: PlaceLegFn) -> None:
+        self._place_leg = place_leg
 
     async def execute_split(
         self,
@@ -283,6 +297,7 @@ class SplitOrderExecutor:
         total_quantity: int,
         chunk_size: int,
         action: Literal["BUY", "SELL"],
+        principal: OrderPrincipal,
         delay_seconds: float = 1.0,
         order_type: str = "MARKET",
         price: float = 0.0,
@@ -302,6 +317,8 @@ class SplitOrderExecutor:
             total_quantity: Total quantity to buy or sell.
             chunk_size: Maximum units per individual order.
             action: ``"BUY"`` or ``"SELL"``.
+            principal: The selector-bound identity every gated chunk write is
+                bound to (from the verified session JWT).
             delay_seconds: Seconds to sleep between consecutive chunks.
             order_type: ``"MARKET"``, ``"LIMIT"``, ``"SL"``, or ``"SL-M"``.
             price: Limit/SL price (required for LIMIT/SL types).
@@ -361,23 +378,10 @@ class SplitOrderExecutor:
             )
 
             try:
-                decision = await self._router.route_order(order)
-            except Exception as exc:
-                logger.exception("Unexpected error placing chunk %d of %s", idx, symbol)
+                order_id = self._place_leg(order, principal)
+            except GatedDispatchError as exc:
+                # Safety block, gate refusal, or dispatch fault — chunk NOT placed.
                 first_error = str(exc)
-                all_success = False
-                chunk_results.append(
-                    ChunkResult(
-                        chunk_index=idx,
-                        quantity=qty,
-                        success=False,
-                        error=str(exc),
-                    )
-                )
-                break
-
-            if not decision.passed:
-                first_error = decision.error or "Safety check blocked chunk order"
                 all_success = False
                 chunk_results.append(
                     ChunkResult(
@@ -395,8 +399,20 @@ class SplitOrderExecutor:
                     first_error,
                 )
                 break
+            except Exception as exc:
+                logger.exception("Unexpected error placing chunk %d of %s", idx, symbol)
+                first_error = str(exc)
+                all_success = False
+                chunk_results.append(
+                    ChunkResult(
+                        chunk_index=idx,
+                        quantity=qty,
+                        success=False,
+                        error=str(exc),
+                    )
+                )
+                break
 
-            order_id = decision.order_response.orderid if decision.order_response else ""
             chunk_results.append(
                 ChunkResult(chunk_index=idx, quantity=qty, success=True, order_id=order_id)
             )

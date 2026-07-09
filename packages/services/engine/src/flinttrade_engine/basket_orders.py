@@ -11,14 +11,14 @@ behaviour) to avoid margin shortfall on entry.
 
 Usage::
 
-    router = OrderRouter(client=client, safety=safety)
-    executor = BasketOrderExecutor(router=router)
+    place_leg, _ = build_gated_leg_dispatchers(app)
+    executor = BasketOrderExecutor(place_leg=place_leg)
 
     legs = [
         BasketLeg("NIFTY25MAYFUT", "NFO", "BUY", 50, "MARKET"),
         BasketLeg("BANKNIFTY25MAYFUT", "NFO", "SELL", 25, "LIMIT", price=52000.0),
     ]
-    result = await executor.execute(legs, strategy="my_strategy")
+    result = await executor.execute(legs, principal, strategy="my_strategy")
     if result.success:
         print("All legs placed:", result.order_ids)
     else:
@@ -40,7 +40,11 @@ from flinttrade_core.models import (
     PriceType,
     Product,
 )
-from flinttrade_engine.router import OrderRouter
+from flinttrade_engine.bracket_order import (
+    BracketOrderError as GatedDispatchError,
+    BracketPrincipal as OrderPrincipal,
+    PlaceLegFn,
+)
 
 logger = logging.getLogger("flinttrade.engine.basket_orders")
 
@@ -256,28 +260,35 @@ def _leg_to_order(leg: BasketLeg, strategy: str) -> Order:
 class BasketOrderExecutor:
     """Executes a basket of orders atomically with rollback on failure.
 
-    When a leg fails after one or more legs have been placed, the executor
-    attempts to cancel/close all previously placed legs by sending the
-    inverse action through the same router.
+    Every leg — entry and rollback alike — is placed through the injected
+    ``place_leg`` dispatcher, which routes it through the SAME gated chain as a
+    human ``/place`` order: SafetySystem L1–L5 → ``gate_order`` (one-shot HMAC
+    ``SafetyContext``) → ``BrokerRouter`` → adapter. The executor holds NO broker
+    client and no router, so a raw/ungated write from the basket path is
+    structurally impossible (contract §8.1).
 
     Args:
-        router: The :class:`~flinttrade_engine.router.OrderRouter` to use
-            for order placement.
+        place_leg: The gated per-leg dispatcher
+            (``flinttrade_engine.bracket_order.build_gated_leg_dispatchers``);
+            ``place_leg(order, principal)`` returns the broker order id and
+            raises :class:`~flinttrade_engine.bracket_order.BracketOrderError`
+            on any safety block, gate refusal, or dispatch fault.
         rollback_delay_seconds: Seconds to wait between rollback orders
             (default 0.05 s to avoid rate limiting).
     """
 
     def __init__(
         self,
-        router: OrderRouter,
+        place_leg: PlaceLegFn,
         rollback_delay_seconds: float = 0.05,
     ) -> None:
-        self._router = router
+        self._place_leg = place_leg
         self._rollback_delay = rollback_delay_seconds
 
     async def execute(
         self,
         legs: list[BasketLeg],
+        principal: OrderPrincipal,
         strategy: str = "basket",
     ) -> BasketResult:
         """Place all legs atomically; roll back placed legs on any failure.
@@ -288,6 +299,8 @@ class BasketOrderExecutor:
 
         Args:
             legs: Ordered list of :class:`BasketLeg` objects to execute.
+            principal: The selector-bound identity every gated leg write is
+                bound to (from the verified session JWT).
             strategy: Strategy tag forwarded to every order.
 
         Returns:
@@ -323,26 +336,11 @@ class BasketOrderExecutor:
             order = _leg_to_order(leg, strategy)
 
             try:
-                decision = await self._router.route_order(order)
-            except Exception as exc:
-                logger.exception("Unexpected error routing leg %d (%s)", orig_idx, leg.symbol)
+                order_id = self._place_leg(order, principal)
+            except GatedDispatchError as exc:
+                # Safety block, gate refusal, or dispatch fault — leg NOT placed.
                 failed_index = orig_idx
                 first_error = str(exc)
-                leg_results.append(
-                    LegResult(
-                        leg_index=orig_idx,
-                        symbol=leg.symbol,
-                        action=leg.action,
-                        quantity=leg.quantity,
-                        success=False,
-                        error=str(exc),
-                    )
-                )
-                break
-
-            if not decision.passed:
-                failed_index = orig_idx
-                first_error = decision.error or "Safety check blocked order"
                 leg_results.append(
                     LegResult(
                         leg_index=orig_idx,
@@ -361,8 +359,22 @@ class BasketOrderExecutor:
                     first_error,
                 )
                 break
+            except Exception as exc:
+                logger.exception("Unexpected error placing leg %d (%s)", orig_idx, leg.symbol)
+                failed_index = orig_idx
+                first_error = str(exc)
+                leg_results.append(
+                    LegResult(
+                        leg_index=orig_idx,
+                        symbol=leg.symbol,
+                        action=leg.action,
+                        quantity=leg.quantity,
+                        success=False,
+                        error=str(exc),
+                    )
+                )
+                break
 
-            order_id = decision.order_response.orderid if decision.order_response else ""
             placed.append((orig_idx, leg, order_id))
             leg_results.append(
                 LegResult(
@@ -393,7 +405,7 @@ class BasketOrderExecutor:
                 failed_index,
             )
             rolled_back = True
-            await self._rollback(placed, strategy, leg_results)
+            await self._rollback(placed, principal, strategy, leg_results)
 
         # Re-sort leg_results by original index for deterministic output
         leg_results.sort(key=lambda r: r.leg_index)
@@ -415,16 +427,19 @@ class BasketOrderExecutor:
     async def _rollback(
         self,
         placed: list[tuple[int, BasketLeg, str]],
+        principal: OrderPrincipal,
         strategy: str,
         leg_results: list[LegResult],
     ) -> None:
         """Attempt to close all placed legs by sending the inverse action.
 
         The rollback iterates in reverse placement order (LIFO).  Each rollback
-        order is a MARKET order for the opposite action.
+        order is a MARKET order for the opposite action, placed through the same
+        gated dispatcher as the entry legs.
 
         Args:
             placed: List of (original_index, leg, order_id) for placed legs.
+            principal: The identity every gated rollback write is bound to.
             strategy: Strategy tag to use on rollback orders.
             leg_results: Mutable list to update with rollback outcomes.
         """
@@ -449,8 +464,7 @@ class BasketOrderExecutor:
             )
 
             try:
-                rb_decision = await self._router.route_order(rollback_order)
-                rb_order_id = rb_decision.order_response.orderid if rb_decision.order_response else ""
+                rb_order_id = self._place_leg(rollback_order, principal)
                 if orig_idx in result_by_idx:
                     result_by_idx[orig_idx].rolled_back = True
                     result_by_idx[orig_idx].rollback_order_id = rb_order_id
