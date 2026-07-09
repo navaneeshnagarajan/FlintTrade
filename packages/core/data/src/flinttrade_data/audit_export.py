@@ -231,7 +231,7 @@ class AuditExporter:
         except ImportError as exc:
             raise AuditExportError(
                 "reportlab is required for PDF export. "
-                "Install it with: pip install 'flint-data[export]'"
+                "Install it with: pip install 'flinttrade-data[export]'"
             ) from exc
 
         events = self._load_events(from_date, to_date)

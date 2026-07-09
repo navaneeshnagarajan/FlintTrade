@@ -28,6 +28,23 @@ def test_audit_stats_route_requires_audit_read():
     assert _scope(audit_routes.audit_stats) == "admin.audit.read"
 
 
+def test_audit_events_route_requires_audit_read():
+    assert _scope(audit_routes.audit_events) == "admin.audit.read"
+
+
+def test_audit_verify_route_requires_audit_read():
+    assert _scope(audit_routes.audit_verify) == "admin.audit.read"
+
+
+def test_audit_events_export_route_requires_audit_read():
+    # The gated-audit CSV/PDF export — the auth boundary A3 exists to enforce.
+    assert _scope(audit_routes.audit_events_export) == "admin.audit.read"
+
+
+def test_audit_events_summary_route_requires_audit_read():
+    assert _scope(audit_routes.audit_events_summary) == "admin.audit.read"
+
+
 def test_activity_route_requires_activity_scope():
     assert _scope(activity_routes.get_activity) == "admin.activity"
 

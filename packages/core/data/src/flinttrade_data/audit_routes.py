@@ -12,10 +12,18 @@ Two distinct logs are served here:
   by ``/events``; this is the source the Automate → Execution Logs viewer reads.
 
 External URLs (frontend / Vite proxy calls these):
-    GET /ft-api/v1/audit/log     — Paginated, filterable operator action log.
-    GET /ft-api/v1/audit/export  — CSV export of the operator action log.
-    GET /ft-api/v1/audit/stats   — Action-type counts for the admin dashboard.
-    GET /ft-api/v1/audit/events  — Gated-execution audit for a single day (newest-first).
+    GET /ft-api/v1/audit/log             — Paginated, filterable operator action log.
+    GET /ft-api/v1/audit/export          — CSV export of the operator action log.
+    GET /ft-api/v1/audit/stats           — Action-type counts for the admin dashboard.
+    GET /ft-api/v1/audit/events          — Gated-execution audit for a single day (newest-first).
+    GET /ft-api/v1/audit/events/export   — CSV/PDF export of the gated-execution audit over a date range.
+    GET /ft-api/v1/audit/events/summary  — Summary statistics for the gated-execution audit over a date range.
+    GET /ft-api/v1/audit/verify          — Verify the gated-execution audit hash chain.
+
+The ``/log``, ``/export``, ``/stats`` endpoints serve the operator **action log**;
+``/events``, ``/events/export``, ``/events/summary``, ``/verify`` serve the
+**gated-execution audit** (via :class:`~flinttrade_data.audit_export.AuditExporter`
+for the range export/summary). All are scope-guarded (``admin.audit.read``).
 
 The WSGI prefix stripper in app.py translates /ft-api/v1/* → /v1/* before
 Flask dispatch, so the blueprint is registered at /v1/audit (not /ft-api/v1/audit).
@@ -34,7 +42,9 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import datetime
+import tempfile
+from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -43,6 +53,12 @@ from flask import Blueprint, Response, current_app, jsonify, make_response, requ
 from flinttrade_core.auth_scopes import require_scope
 
 _IST = ZoneInfo("Asia/Kolkata")
+
+# Upper bound on a single gated-audit report span. Generous (two years) — well
+# beyond any realistic single export — so it never blocks a legitimate request,
+# but bounds the eager per-day expansion so a fat-fingered ``to=9999-...`` cannot
+# spin the worker on a multi-million-day loop.
+_MAX_REPORT_DAYS = 731
 
 logger = logging.getLogger("flinttrade.data.audit_routes")
 
@@ -81,6 +97,44 @@ def _coerce_num(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _parse_report_range() -> tuple[tuple[date, date] | None, tuple[Response, int] | None]:
+    """Parse the ``from``/``to`` day range for a gated-audit report.
+
+    Both are required ``YYYY-MM-DD`` dates and ``from`` must be on or before
+    ``to`` (the exporter reads whole days inclusively).
+
+    Returns:
+        ``((from_date, to_date), None)`` on success, or ``(None, (response, status))``
+        with a 400 JSON error describing the problem.
+    """
+    from_raw = request.args.get("from") or ""
+    to_raw = request.args.get("to") or ""
+    if not from_raw or not to_raw:
+        return None, (
+            jsonify({"status": "error", "message": "'from' and 'to' dates (YYYY-MM-DD) are required"}),
+            400,
+        )
+    try:
+        from_date = date.fromisoformat(from_raw)
+        to_date = date.fromisoformat(to_raw)
+    except ValueError:
+        return None, (
+            jsonify({"status": "error", "message": "Dates must be in YYYY-MM-DD format"}),
+            400,
+        )
+    if from_date > to_date:
+        return None, (
+            jsonify({"status": "error", "message": "'from' must be on or before 'to'"}),
+            400,
+        )
+    if (to_date - from_date).days + 1 > _MAX_REPORT_DAYS:
+        return None, (
+            jsonify({"status": "error", "message": f"date range must not exceed {_MAX_REPORT_DAYS} days"}),
+            400,
+        )
+    return (from_date, to_date), None
 
 
 # ---------------------------------------------------------------------------
@@ -424,3 +478,117 @@ def audit_verify() -> tuple[Response, int]:
         return jsonify({"status": "error", "message": "Audit chain verification failed to run"}), 500
 
     return jsonify({"status": "success", "data": result}), 200
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/events/export
+# ---------------------------------------------------------------------------
+
+
+@audit_bp.route("/events/export", methods=["GET"])
+@require_scope("admin.audit.read")
+def audit_events_export() -> tuple[Response, int]:
+    """Export the gated-execution audit over a date range as CSV or PDF.
+
+    Serves the hash-chain :class:`~flinttrade_data.audit_logger.AuditLogger`
+    (order placements + per-layer safety verdicts) via
+    :class:`~flinttrade_data.audit_export.AuditExporter`, distinct from the
+    operator action log at :func:`audit_export`. PDF needs the optional
+    ``reportlab`` dependency; without it the PDF branch returns 500.
+
+    Query parameters:
+        format  (str): ``"csv"`` (default) or ``"pdf"``.
+        from    (str): First day (inclusive), ``YYYY-MM-DD``.
+        to      (str): Last day (inclusive), ``YYYY-MM-DD``.
+
+    Returns:
+        A ``text/csv`` or ``application/pdf`` attachment, or a JSON error
+        (400 bad dates, 503 audit not initialised, 500 export failure).
+    """
+    audit = _get_audit()
+    if audit is None:
+        return jsonify({"status": "error", "message": "Audit log not initialised"}), 503
+
+    rng, err = _parse_report_range()
+    if rng is None:
+        return err  # type: ignore[return-value] — err is set whenever rng is None
+    from_date, to_date = rng
+
+    fmt = (request.args.get("format") or "csv").strip().lower()
+    if fmt not in ("csv", "pdf"):
+        return jsonify({"status": "error", "message": "format must be 'csv' or 'pdf'"}), 400
+
+    from flinttrade_data.audit_export import AuditExporter, AuditExportError  # noqa: PLC0415
+
+    exporter = AuditExporter(audit)
+    suffix = ".pdf" if fmt == "pdf" else ".csv"
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            if fmt == "pdf":
+                exporter.to_pdf(from_date, to_date, tmp_path)
+            else:
+                exporter.to_csv(from_date, to_date, tmp_path)
+            payload = tmp_path.read_bytes()
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    except AuditExportError as exc:
+        logger.warning("Gated audit %s export failed: %s", fmt, exc.message)
+        return jsonify({"status": "error", "message": "Audit export failed"}), 500
+    except Exception:  # noqa: BLE001 — a corrupt/tampered day file must fail loud, not 500 uncaught
+        # The gated audit is tamper-evident: a torn/corrupt day makes read_day
+        # raise (JSONDecodeError/OSError), which is NOT an AuditExportError. The
+        # /events viewer degrades such a day to empty, but an export must not
+        # silently emit an incomplete report — fail with a controlled, logged
+        # error and let the operator run /verify to locate the break.
+        logger.exception("Gated audit %s export failed to read the audit log", fmt)
+        return jsonify({"status": "error", "message": "Audit export failed"}), 500
+
+    range_str = f"{from_date.isoformat()}_{to_date.isoformat()}"
+    content_type = "application/pdf" if fmt == "pdf" else "text/csv; charset=utf-8"
+    response = make_response(payload)
+    response.headers["Content-Type"] = content_type
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=flinttrade_gated_audit_{range_str}.{fmt}"
+    )
+    response.headers["Content-Length"] = str(len(payload))
+    return response, 200
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/events/summary
+# ---------------------------------------------------------------------------
+
+
+@audit_bp.route("/events/summary", methods=["GET"])
+@require_scope("admin.audit.read")
+def audit_events_summary() -> tuple[Response, int]:
+    """Return summary statistics for the gated-execution audit over a date range.
+
+    Args (query):
+        from    (str): First day (inclusive), ``YYYY-MM-DD``.
+        to      (str): Last day (inclusive), ``YYYY-MM-DD``.
+
+    Returns:
+        ``{"status": "success", "data": {total_events, events_by_type,
+        orders_placed, orders_rejected, safety_triggers}}``; 400 on bad dates,
+        503 when the audit log is not initialised.
+    """
+    audit = _get_audit()
+    if audit is None:
+        return jsonify({"status": "error", "message": "Audit log not initialised"}), 503
+
+    rng, err = _parse_report_range()
+    if rng is None:
+        return err  # type: ignore[return-value] — err is set whenever rng is None
+    from_date, to_date = rng
+
+    from flinttrade_data.audit_export import AuditExporter  # noqa: PLC0415
+
+    try:
+        stats = AuditExporter(audit).summary_stats(from_date, to_date)
+    except Exception:  # noqa: BLE001 — a corrupt/tampered day file must fail loud, not 500 uncaught
+        logger.exception("Gated audit summary failed to read the audit log")
+        return jsonify({"status": "error", "message": "Audit summary failed"}), 500
+    return jsonify({"status": "success", "data": stats}), 200

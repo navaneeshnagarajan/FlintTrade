@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
@@ -279,3 +279,148 @@ def test_audit_verify_run_failure_is_500(client, app):
     resp = client.get("/v1/audit/verify")
     assert resp.status_code == 500
     assert resp.get_json()["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/events/export  (gated-execution audit CSV/PDF range export)
+# ---------------------------------------------------------------------------
+
+
+def test_audit_events_export_csv_ok(client, app):
+    """200 CSV attachment built from the gated audit over a day range."""
+    resp = client.get("/v1/audit/events/export?format=csv&from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.content_type
+    assert "attachment" in resp.headers["Content-Disposition"]
+    # The exporter read the requested day from the gated AuditLogger.
+    app.config["AUDIT"].read_day.assert_called_with("2026-04-19")
+    body = resp.get_data(as_text=True)
+    assert "event_type" in body  # CSV header
+    assert "ORDER_PLACED" in body
+
+
+def test_audit_events_export_defaults_to_csv(client):
+    """No format param defaults to CSV."""
+    resp = client.get("/v1/audit/events/export?from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.content_type
+
+
+def test_audit_events_export_pdf_error_is_500(client):
+    """A PDF export failure (e.g. reportlab absent) surfaces as 500, not a stack trace."""
+    from flinttrade_data.audit_export import AuditExportError
+
+    with patch(
+        "flinttrade_data.audit_export.AuditExporter.to_pdf",
+        side_effect=AuditExportError("reportlab unavailable"),
+    ):
+        resp = client.get("/v1/audit/events/export?format=pdf&from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 500
+    assert resp.get_json()["status"] == "error"
+
+
+def test_audit_events_export_pdf_ok_when_reportlab_present(client):
+    """When reportlab is installed the PDF branch streams an application/pdf attachment."""
+    pytest.importorskip("reportlab")
+    resp = client.get("/v1/audit/events/export?format=pdf&from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 200
+    assert "application/pdf" in resp.content_type
+    assert resp.get_data()[:4] == b"%PDF"
+
+
+def test_audit_events_export_missing_dates_400(client):
+    """Missing 'from'/'to' returns 400."""
+    assert client.get("/v1/audit/events/export?format=csv").status_code == 400
+    assert client.get("/v1/audit/events/export?from=2026-04-19").status_code == 400
+
+
+def test_audit_events_export_inverted_dates_400(client):
+    """'from' after 'to' returns 400."""
+    resp = client.get("/v1/audit/events/export?from=2026-04-30&to=2026-04-01")
+    assert resp.status_code == 400
+    assert "on or before" in resp.get_json()["message"]
+
+
+def test_audit_events_export_bad_date_format_400(client):
+    """A non-ISO date returns 400."""
+    resp = client.get("/v1/audit/events/export?from=19-04-2026&to=2026-04-30")
+    assert resp.status_code == 400
+
+
+def test_audit_events_export_bad_format_400(client):
+    """An unsupported format returns 400."""
+    resp = client.get("/v1/audit/events/export?format=xlsx&from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 400
+
+
+def test_audit_events_export_no_audit_503(app_no_log):
+    """503 when the gated AuditLogger is not configured."""
+    with app_no_log.test_client() as c:
+        resp = c.get("/v1/audit/events/export?format=csv&from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/events/summary  (gated-execution audit stats)
+# ---------------------------------------------------------------------------
+
+
+def test_audit_events_summary_ok(client):
+    """200 with the gated-audit summary stats over a day range."""
+    resp = client.get("/v1/audit/events/summary?from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "success"
+    data = body["data"]
+    # _audit_events(): one SAFETY_CHECK (PASS) + one ORDER_PLACED.
+    assert data["total_events"] == 2
+    assert data["orders_placed"] == 1
+    assert data["orders_rejected"] == 0
+    assert data["events_by_type"]["ORDER_PLACED"] == 1
+
+
+def test_audit_events_summary_missing_dates_400(client):
+    """Missing dates on the summary endpoint returns 400."""
+    assert client.get("/v1/audit/events/summary").status_code == 400
+
+
+def test_audit_events_summary_inverted_dates_400(client):
+    """'from' after 'to' on the summary endpoint returns 400."""
+    resp = client.get("/v1/audit/events/summary?from=2026-05-01&to=2026-04-01")
+    assert resp.status_code == 400
+
+
+def test_audit_events_summary_no_audit_503(app_no_log):
+    """503 when the gated AuditLogger is not configured."""
+    with app_no_log.test_client() as c:
+        resp = c.get("/v1/audit/events/summary?from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 503
+
+
+def test_audit_events_export_corrupt_day_is_controlled_500(client, app):
+    """A corrupt/tampered day file (read_day raises) is a controlled 500, not an uncaught escape."""
+    app.config["AUDIT"].read_day.side_effect = ValueError("corrupt hash chain")
+    resp = client.get("/v1/audit/events/export?format=csv&from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 500
+    assert resp.get_json()["status"] == "error"
+
+
+def test_audit_events_summary_corrupt_day_is_controlled_500(client, app):
+    """A corrupt/tampered day file surfaces as a controlled 500 on the summary route too."""
+    app.config["AUDIT"].read_day.side_effect = ValueError("corrupt hash chain")
+    resp = client.get("/v1/audit/events/summary?from=2026-04-19&to=2026-04-19")
+    assert resp.status_code == 500
+    assert resp.get_json()["status"] == "error"
+
+
+def test_audit_events_export_range_too_wide_400(client):
+    """A range beyond the max span (guards against a fat-fingered to=9999-...) returns 400."""
+    resp = client.get("/v1/audit/events/export?format=csv&from=2020-01-01&to=2026-01-01")
+    assert resp.status_code == 400
+    assert "exceed" in resp.get_json()["message"]
+
+
+def test_audit_events_summary_range_too_wide_400(client):
+    """The span cap applies to the summary endpoint via the shared helper."""
+    resp = client.get("/v1/audit/events/summary?from=0001-01-01&to=9999-12-31")
+    assert resp.status_code == 400

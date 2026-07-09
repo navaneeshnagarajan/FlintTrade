@@ -1,10 +1,21 @@
-"""Flask routes for audit log export.
+"""Flask routes for audit log export (dormant standalone blueprint).
 
 Admin endpoints:
 
 - ``GET /admin/audit/export?format=csv&from=2026-04-01&to=2026-04-30``
 - ``GET /admin/audit/export?format=pdf&from=...&to=...``
 - ``GET /admin/audit/summary?from=...&to=...``
+
+.. note::
+    **Superseded, not deleted.** The reachable, registered form of this
+    capability lives on ``flinttrade_data.audit_routes.audit_bp`` as
+    ``GET /v1/audit/events/export`` and ``GET /v1/audit/events/summary`` — same
+    ``AuditExporter`` engine, but on the canonical ``/v1/audit`` surface with
+    the shared response convention. This standalone blueprint is kept
+    (merge-not-delete) as an alternative mount point (its ``/admin/audit/*``
+    namespace does not collide with ``/v1/audit/*``). It is NOT registered by
+    ``create_flask_app``. Its routes are now scope-guarded like the registered
+    ones, so wiring it does not open an unauthenticated audit-export path.
 
 Usage (register on an existing Flask app)::
 
@@ -20,6 +31,8 @@ from datetime import date
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, send_file
+
+from flinttrade_core.auth_scopes import require_scope
 
 logger = logging.getLogger("flinttrade.data.audit_export_routes")
 
@@ -64,6 +77,7 @@ def create_audit_export_blueprint(audit_logger: object) -> Blueprint:
             ) from exc
 
     @bp.route("/admin/audit/export", methods=["GET"])
+    @require_scope("admin.audit.read")
     def export_audit() -> Response:
         """Export audit logs as CSV or PDF file download.
 
@@ -125,6 +139,7 @@ def create_audit_export_blueprint(audit_logger: object) -> Blueprint:
             return jsonify({"status": "error", "message": "Audit export failed"}), 500  # type: ignore[return-value]
 
     @bp.route("/admin/audit/summary", methods=["GET"])
+    @require_scope("admin.audit.read")
     def audit_summary() -> Response:
         """Return summary statistics for an audit date range.
 

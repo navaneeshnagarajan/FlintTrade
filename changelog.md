@@ -38,6 +38,24 @@ Versioning: [Semantic Versioning](https://semver.org/).
   aggregates matrix artifacts, publishes `flinttrade-desktop-manifest.json`,
   publishes `SHA256SUMS.txt`, and keeps unsigned beta installers honestly
   labelled while leaving signing/notarisation hooks env-gated for future certs.
+- **Authenticated gated-audit export (CSV/PDF) + summary** — the
+  gated-execution audit (order placements + per-layer safety verdicts) can now
+  be exported over a date range as CSV or PDF and summarised, via
+  `GET /api/v1/audit/events/export?format=csv|pdf&from=&to=` and
+  `GET /api/v1/audit/events/summary?from=&to=`, both scope-guarded by
+  `admin.audit.read`. This is the registered, reachable form of a capability
+  that previously existed only in a built-but-unregistered blueprint whose
+  routes were **unauthenticated** — the PDF/summary capability (via
+  `AuditExporter`) is now behind the same auth as every other audit endpoint.
+  The standalone blueprint is kept as a dormant alternative (merge-not-delete)
+  but its routes are now scope-guarded too, so it can never re-introduce an
+  unauthenticated export path. PDF needs the optional `[export]` extra
+  (reportlab) and degrades to a clean 500 without it. Hardened per an
+  adversarial review: a corrupt/tampered audit day fails with a controlled,
+  logged error (not an uncaught 500) rather than silently emitting an
+  incomplete report; the date range is capped; and the auth boundary on every
+  audit route is now pinned by a marker test so dropping `@require_scope` fails
+  CI.
 - **Tick-engine full surface importable from Python** — the `tick_engine`
   package re-exported only the four core simulator types while the compiled
   crate registers 28 (Monte Carlo, session tracker, options + spread
