@@ -2860,6 +2860,10 @@ class FlintTradeApp:
         )
         # Wire Telegram into cron so jobs can send alerts
         self.cron.telegram_bot = self.telegram
+        # Start the native long-polling loop so inbound commands — the /kill
+        # kill switch above all — are actually reachable. No-op unless Telegram
+        # is enabled and fully configured (token + authorised chat id).
+        self.telegram.start_background()
 
         # Gateway — broker registry + credential store + contract manager
         flinttrade_dir = _workspace_dir()
@@ -3191,6 +3195,12 @@ class FlintTradeApp:
 
         # Stop cron
         self.cron.stop()
+
+        # Stop the Telegram polling loop before the shared client closes, so it
+        # is not left long-polling and dispatching commands against a torn-down
+        # backend during shutdown.
+        if getattr(self, "telegram", None) is not None:
+            self.telegram.stop()
 
         # Stop tick capture (signal the loop to exit, then cancel the task)
         if self._tick_recorder is not None:

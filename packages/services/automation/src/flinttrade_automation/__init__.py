@@ -12,7 +12,7 @@ from .post_market import (
     StrategyPerformance,
     TradeEntry,
 )
-from .telegram_bot import BotConfig, CommandResult, TelegramBot
+from .telegram_bot import BotConfig, CommandResult, TelegramApiError, TelegramBot, TelegramClient
 from .totp_login import LoginResult, is_trading_day
 from .whatsapp_alerts import WhatsAppAlerter, WhatsAppConfig
 from .whatsapp_alerter import AlertRouter, AlertRouterConfig, WhatsAppAlerter as WhatsAppBridgeAlerter
@@ -46,6 +46,8 @@ __all__ = [
     "JobStatus",
     # Telegram
     "TelegramBot",
+    "TelegramClient",
+    "TelegramApiError",
     "BotConfig",
     "CommandResult",
     # Post-market

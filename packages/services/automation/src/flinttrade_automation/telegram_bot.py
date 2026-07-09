@@ -10,8 +10,13 @@ Commands:
   /pnl      — today's P&L breakdown
   /health   — OpenAlgo connection, WebSocket, disk space
 
-Restricted to TELEGRAM_CHAT_ID from .env — only the owner can send commands.
-Uses python-telegram-bot library.
+Restricted to the configured chat id — only the owner can send commands.
+
+Native Bot API: FlintTrade talks to ``api.telegram.org`` directly over HTTPS
+(:class:`TelegramClient`) — no ``python-telegram-bot`` dependency. Inbound
+commands are received by a background long-polling loop (:meth:`TelegramBot.
+start_background`) so the kill switch and all commands are reachable while the
+app runs; outbound alerts use the same client.
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ import asyncio
 import logging
 import os
 import shutil
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -27,6 +34,61 @@ from typing import Any, Callable
 logger = logging.getLogger("flinttrade.automation.telegram")
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+# The command menu Telegram shows in the client UI (setMyCommands).
+_BOT_COMMANDS: list[dict[str, str]] = [
+    {"command": "status", "description": "Positions, funds, running strategies"},
+    {"command": "positions", "description": "Detailed open positions with P&L"},
+    {"command": "orders", "description": "Pending orders"},
+    {"command": "pnl", "description": "Today's P&L breakdown"},
+    {"command": "health", "description": "Backend, WebSocket, and disk health"},
+    {"command": "pause", "description": "Pause a strategy: /pause <name>"},
+    {"command": "resume", "description": "Resume a strategy: /resume <name>"},
+    {"command": "kill", "description": "EMERGENCY: cancel all, close all, stop strategies"},
+]
+
+
+class TelegramApiError(RuntimeError):
+    """A Telegram Bot API call returned ``ok: false`` or transport failed."""
+
+
+class TelegramClient:
+    """Minimal native Telegram Bot API client (no python-telegram-bot).
+
+    Wraps the handful of Bot API methods FlintTrade needs over plain HTTPS, so
+    the bot has no heavyweight third-party runtime dependency.
+    """
+
+    def __init__(self, token: str, *, base_url: str = "https://api.telegram.org") -> None:
+        self._base = f"{base_url}/bot{token}"
+
+    def _call(self, method: str, params: dict[str, Any] | None = None, *, timeout: float = 35.0) -> Any:
+        import httpx  # noqa: PLC0415 — keep httpx import lazy/local like send_message
+
+        resp = httpx.post(f"{self._base}/{method}", json=params or {}, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            raise TelegramApiError(str(data.get("description", "unknown error")))
+        return data.get("result")
+
+    def get_updates(self, offset: int | None = None, *, timeout: int = 30) -> list[dict[str, Any]]:
+        """Long-poll for new updates (messages only). Blocks up to ``timeout`` s."""
+        params: dict[str, Any] = {"timeout": timeout, "allowed_updates": ["message"]}
+        if offset is not None:
+            params["offset"] = offset
+        result = self._call("getUpdates", params, timeout=timeout + 10)
+        return result if isinstance(result, list) else []
+
+    def send_message(self, chat_id: str | int, text: str, *, parse_mode: str = "Markdown") -> Any:
+        return self._call("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": parse_mode})
+
+    def set_my_commands(self, commands: list[dict[str, str]]) -> Any:
+        return self._call("setMyCommands", {"commands": commands})
+
+    def delete_webhook(self) -> Any:
+        """Remove any webhook — long-polling and webhooks are mutually exclusive."""
+        return self._call("deleteWebhook", {"drop_pending_updates": False})
 
 
 @dataclass
@@ -155,6 +217,19 @@ def format_health(health_data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _row_from(obj: Any, *fields: str) -> dict[str, Any]:
+    """Coerce a broker model (pydantic or plain object) to a flat dict.
+
+    Prefers ``model_dump()``; else reads the named attributes — so the Telegram
+    formatters stay decoupled from the client's concrete model classes.
+    """
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return obj
+    return {f: getattr(obj, f, None) for f in fields}
+
+
 # ---------------------------------------------------------------------------
 # TelegramBot
 # ---------------------------------------------------------------------------
@@ -197,9 +272,11 @@ class TelegramBot:
         self.audit = audit_logger
         self._handlers: dict[str, Callable[..., Any]] = {}
         self._command_log: list[CommandResult] = []
-        # Populated in start() once python-telegram-bot is available.
-        self._bot: Any | None = None
         self._chat_id: str = self.config.chat_id
+        # Native long-polling state (see run_polling / start_background / stop).
+        self._running: bool = False
+        self._poll_thread: threading.Thread | None = None
+        self._poll_timeout: int = 30
 
     @property
     def command_log(self) -> list[CommandResult]:
@@ -296,7 +373,7 @@ class TelegramBot:
             try:
                 coro = self.router.client.cancel_all_orders(strategy="Flint")
                 if asyncio.iscoroutine(coro):
-                    self._run_async(coro)
+                    self._client_sync(coro)
                 orders_cancelled = True
             except Exception as exc:
                 errors.append(f"cancel_all_orders: {exc}")
@@ -308,7 +385,7 @@ class TelegramBot:
             try:
                 coro = self.router.client.close_position(strategy="Flint")
                 if asyncio.iscoroutine(coro):
-                    self._run_async(coro)
+                    self._client_sync(coro)
                 positions_closed = True
             except Exception as exc:
                 errors.append(f"close_position: {exc}")
@@ -372,7 +449,7 @@ class TelegramBot:
         if self.router and self.router.client:
             try:
                 # Positions — async client, try to get result
-                positions = self._run_async(self.router.client.positionbook())
+                positions = self._client_sync(self.router.client.positionbook())
                 if positions:
                     lines.append(format_positions(
                         [p.model_dump() if hasattr(p, "model_dump") else {"symbol": p.symbol, "quantity": p.quantity, "pnl": p.pnl} for p in positions]
@@ -383,7 +460,7 @@ class TelegramBot:
                 lines.append("No open positions.")
 
             try:
-                funds = self._run_async(self.router.client.funds())
+                funds = self._client_sync(self.router.client.funds())
                 lines.append(f"\n*Funds:* ₹{funds.available_balance} available")
             except Exception as exc:
                 logger.exception("suppressed: %s", exc)
@@ -412,13 +489,37 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     def _cmd_positions(self) -> str:
-        return self._cmd_status()
+        """Detailed open-position list with per-position P&L.
+
+        Distinct from /status (which also shows funds + strategies): this is the
+        focused position book. Previously it aliased /status, so /positions and
+        /status returned the same blob.
+        """
+        if self.router and self.router.client:
+            try:
+                positions = self._client_sync(self.router.client.positionbook())
+                return format_positions([_row_from(p, "symbol", "quantity", "pnl", "ltp") for p in (positions or [])])
+            except Exception as exc:
+                logger.error("Telegram /positions failed: %s", exc)
+                return "Could not fetch positions."
+        if self._handlers.get("get_positions"):
+            positions = self._handlers["get_positions"]()
+            return format_positions(positions if isinstance(positions, list) else [])
+        return "Position handler not configured"
 
     # ------------------------------------------------------------------
     # /orders — pending orders
     # ------------------------------------------------------------------
 
     def _cmd_orders(self) -> str:
+        """Pending orders — from the broker order book in wired mode."""
+        if self.router and self.router.client:
+            try:
+                orders = self._client_sync(self.router.client.orderbook())
+                return format_orders([_row_from(o, "symbol", "action", "quantity", "price") for o in (orders or [])])
+            except Exception as exc:
+                logger.error("Telegram /orders failed: %s", exc)
+                return "Could not fetch orders."
         handler = self._handlers.get("get_orders")
         if not handler:
             return "Orders handler not configured"
@@ -485,7 +586,12 @@ class TelegramBot:
 
     @staticmethod
     def _run_async(coro: Any) -> Any:
-        """Run an async coroutine from sync context."""
+        """Run an async coroutine from sync context (ad-hoc loop).
+
+        Only for coroutines that own no loop-affine state. Broker-client calls
+        MUST go through :meth:`_client_sync` — the OpenAlgo client pools httpx
+        connections affine to one loop, which this closes between calls.
+        """
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -496,6 +602,25 @@ class TelegramBot:
             return loop.run_until_complete(coro)
         except Exception:
             return asyncio.run(coro)
+
+    def _client_sync(self, coro: Any) -> Any:
+        """Run a broker-client coroutine on the client's OWN persistent loop.
+
+        :class:`~flinttrade_core.openalgo_client.OpenAlgoClient` pools httpx
+        connections affine to a single event loop and exposes ``run_sync`` for
+        exactly this. Driving it through :meth:`_run_async`'s ad-hoc
+        ``asyncio.run`` loops closes the loop between calls, so the *second*
+        broker call in a command (e.g. ``/kill``'s ``close_position`` after
+        ``cancel_all_orders``, or ``/status``'s ``funds`` after ``positionbook``)
+        would fail with "Event loop is closed" — a safety-critical false
+        negative on the kill switch. Falls back to :meth:`_run_async` for a plain
+        client without ``run_sync`` (e.g. test doubles).
+        """
+        client = self.router.client if self.router else None
+        run_sync = getattr(client, "run_sync", None)
+        if callable(run_sync):
+            return run_sync(coro)
+        return self._run_async(coro)
 
     # ------------------------------------------------------------------
     # Send message (used by alerter)
@@ -536,15 +661,11 @@ class TelegramBot:
         """
         prefix = {"P0": "\U0001f6a8", "P1": "\u26a0\ufe0f", "P2": "\u2139\ufe0f"}.get(severity, "\U0001f4e2")
         text = f"{prefix} *FlintTrade Alert*\n{message}"
-        try:
-            if self._bot and self._chat_id:
-                await self._bot.send_message(
-                    chat_id=self._chat_id,
-                    text=text,
-                    parse_mode="Markdown",
-                )
-        except Exception:
-            logger.exception("Failed to send Telegram alert: %s", message)
+        # Native send (no python-telegram-bot). send_message guards the token /
+        # chat id and swallows transport errors, returning False on failure \u2014 so
+        # a P0 kill-switch alert is at least logged rather than silently lost.
+        if not self.send_message(text):
+            logger.warning("Telegram alert not delivered: %s", message)
 
     async def alert_broker_disconnect(self, broker_name: str = "broker") -> None:
         """Send a P1 alert when a broker connection is lost.
@@ -586,34 +707,101 @@ class TelegramBot:
         await self.send_alert(f"Error rate {rate:.1%} over {window}", "P2")
 
     # ------------------------------------------------------------------
-    # Polling loop (uses python-telegram-bot)
+    # Native long-polling loop (no python-telegram-bot)
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
-        """Start the Telegram bot polling loop (blocking)."""
+    def start_background(self) -> bool:
+        """Start the long-polling loop in a daemon thread.
+
+        No-op (returns ``False``) unless the bot is enabled AND has both a token
+        and an authorised chat id — an unconfigured or open bot must never poll.
+        Idempotent: a second call while already running returns ``True``.
+        """
+        if not (self.config.enabled and self.config.token and self.config.chat_id):
+            logger.info("Telegram bot not started (disabled or unconfigured)")
+            return False
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            return True
+        self._running = True
+        self._poll_thread = threading.Thread(
+            target=self.run_polling, name="telegram-poll", daemon=True
+        )
+        self._poll_thread.start()
+        logger.info("Telegram bot polling started (kill switch reachable)")
+        return True
+
+    def stop(self) -> None:
+        """Signal the polling loop to exit after its current long-poll returns."""
+        self._running = False
+
+    def run_polling(self, client: TelegramClient | None = None) -> None:
+        """Long-poll ``getUpdates`` and dispatch commands until :meth:`stop`.
+
+        Blocking — :meth:`start_background` runs this in a thread. Every update is
+        authorised inside :meth:`handle_command`; an unauthorised chat triggers
+        no action AND gets no reply (so the bot is not a spammable reflector).
+        Pending updates queued while the app was down are drained on startup, so
+        a stale ``/kill`` from hours ago never replays. Transient API/network
+        errors back off and retry rather than killing the loop.
+
+        Never log the raw exception here: httpx errors embed the request URL,
+        which contains the bot token — log only the exception type.
+        """
         if not self.config.token:
-            logger.error("TELEGRAM_BOT_TOKEN not set — cannot start bot")
+            logger.error("Telegram token not set — cannot start polling")
             return
+        client = client or TelegramClient(self.config.token)
+        # A webhook would starve getUpdates; register the command menu best-effort.
+        for setup, label in ((client.delete_webhook, "delete_webhook"),
+                             (lambda: client.set_my_commands(_BOT_COMMANDS), "set_my_commands")):
+            try:
+                setup()
+            except Exception as exc:  # noqa: BLE001 — best-effort; never leak the token in the message
+                logger.warning("Telegram %s failed: %s", label, type(exc).__name__)
 
+        # Drain updates queued while the app was down so only commands sent AFTER
+        # the bot comes online are acted on (no stale /kill or /pause replay).
+        offset: int | None = None
         try:
-            from telegram import Update
-            from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-        except ImportError:
-            raise ImportError("python-telegram-bot required — pip install python-telegram-bot")
+            pending = client.get_updates(offset=None, timeout=0)
+            if pending:
+                offset = int(pending[-1].get("update_id", 0)) + 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Telegram initial drain failed: %s", type(exc).__name__)
 
-        app = ApplicationBuilder().token(self.config.token).build()
-        self._bot = app.bot
+        while self._running:
+            try:
+                updates = client.get_updates(offset=offset, timeout=self._poll_timeout)
+            except Exception as exc:  # noqa: BLE001 — a transient failure must not kill the loop
+                logger.warning("Telegram getUpdates failed: %s", type(exc).__name__)
+                time.sleep(3)
+                continue
+            for update in updates:
+                offset = int(update.get("update_id", 0)) + 1
+                message = update.get("message") or {}
+                text = message.get("text")
+                if not isinstance(text, str) or not text:
+                    continue
+                chat_id = (message.get("chat") or {}).get("id", "")
+                username = (message.get("from") or {}).get("username", "")
+                result = self.handle_command(text, chat_id, username=username)
+                if not result.authorized:
+                    continue  # never reply to an unauthorised chat (no reflector)
+                self._reply(client, chat_id, result.response)
+        logger.info("Telegram polling loop stopped")
 
-        async def _handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-            if not update.message or not update.message.text:
-                return
-            chat_id = update.message.chat_id
-            username = update.effective_user.username if update.effective_user else ""
-            result = self.handle_command(update.message.text, chat_id, username=username)
-            await update.message.reply_text(result.response, parse_mode="Markdown")
+    @staticmethod
+    def _reply(client: TelegramClient, chat_id: str | int, text: str) -> None:
+        """Send a reply, falling back to plain text if Markdown fails to parse.
 
-        for cmd_name in ("status", "positions", "orders", "kill", "pause", "resume", "pnl", "health"):
-            app.add_handler(CommandHandler(cmd_name, _handler))
-
-        logger.info("Telegram bot starting...")
-        app.run_polling()
+        An unbalanced ``_`` / ``*`` / ``[`` (e.g. a strategy named ``iron_condor``)
+        makes Telegram reject Markdown; retry without formatting so the operator
+        still gets the message rather than silence.
+        """
+        try:
+            client.send_message(chat_id, text)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                client.send_message(chat_id, text, parse_mode="")
+            except Exception:  # noqa: BLE001 — a send failure must not kill the loop
+                logger.warning("Telegram reply failed: %s", type(exc).__name__)

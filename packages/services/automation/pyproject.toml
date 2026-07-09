@@ -8,7 +8,6 @@ dependencies = [
     "flinttrade-ai",
     "httpx>=0.27.0",
     "flask>=3.0",
-    "python-telegram-bot>=21.0",
     "apscheduler>=3.10.0",
     "pyotp>=2.9.0",
 ]

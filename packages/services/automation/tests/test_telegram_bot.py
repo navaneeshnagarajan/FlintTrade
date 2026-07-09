@@ -259,8 +259,8 @@ class TestHandleCommandRouting:
         result = bot.handle_command("/resume", chat_id="12345")
         assert "Usage" in result.response
 
-    def test_positions_delegates_to_status(self):
-        """positions command is an alias for status."""
+    def test_positions_returns_detailed_position_list(self):
+        """/positions is the focused position book, not a /status alias."""
         bot = self._bot()
         bot.set_handler("get_positions", lambda: [
             {"symbol": "TCS", "quantity": "5", "pnl": "200", "ltp": "3500"},
@@ -268,6 +268,7 @@ class TestHandleCommandRouting:
         result = bot.handle_command("/positions", chat_id="12345")
         assert result.command == "positions"
         assert "TCS" in result.response
+        assert "Open Positions" in result.response  # format_positions header
 
     def test_unknown_command_response(self):
         bot = self._bot()
@@ -516,3 +517,260 @@ class TestKillSwitchErrors:
         bot.handle_command("/kill", chat_id="12345", username="")
         call_kwargs = mock_audit.log_event.call_args[1]
         assert call_kwargs["triggered_by"] == "operator"
+
+
+# ---------------------------------------------------------------------------
+# Native Bot API client + long-polling loop (G30)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, result):
+        self._result = result
+        self.status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"ok": True, "result": self._result}
+
+
+class TestTelegramClient:
+    def test_client_calls_are_native_bot_api(self):
+        from flinttrade_automation.telegram_bot import TelegramClient
+        import httpx
+
+        seen = []
+
+        def fake_post(url, json=None, timeout=None):
+            seen.append((url.rsplit("/", 1)[-1], json))
+            if url.endswith("getUpdates"):
+                return _FakeResp([{"update_id": 5}])
+            return _FakeResp(True)
+
+        with patch.object(httpx, "post", fake_post):
+            c = TelegramClient("TOKEN")
+            c.delete_webhook()
+            c.set_my_commands([{"command": "status", "description": "s"}])
+            updates = c.get_updates(offset=3, timeout=1)
+            c.send_message("999", "hi")
+
+        methods = [m for m, _ in seen]
+        assert methods == ["deleteWebhook", "setMyCommands", "getUpdates", "sendMessage"]
+        assert updates == [{"update_id": 5}]
+        # getUpdates carried the offset; sendMessage carried the chat + text.
+        assert dict(seen)["getUpdates"]["offset"] == 3
+        assert dict(seen)["sendMessage"] == {"chat_id": "999", "text": "hi", "parse_mode": "Markdown"}
+
+    def test_client_raises_on_not_ok(self):
+        from flinttrade_automation.telegram_bot import TelegramClient, TelegramApiError
+        import httpx
+
+        class NotOk(_FakeResp):
+            def json(self):
+                return {"ok": False, "description": "bad token"}
+
+        with patch.object(httpx, "post", lambda *a, **k: NotOk(None)):
+            import pytest
+            with pytest.raises(TelegramApiError, match="bad token"):
+                TelegramClient("TOKEN").send_message("1", "x")
+
+
+def _mock_client(*, poll_updates=None):
+    """A MagicMock TelegramClient whose get_updates returns [] on the startup
+    drain (timeout=0) and ``poll_updates`` on the live long-poll."""
+    client = MagicMock()
+    batches = list(poll_updates or [])
+
+    def get_updates(offset=None, timeout=30):
+        if timeout == 0:  # startup drain — nothing pending
+            return []
+        return batches.pop(0) if batches else []
+
+    client.get_updates.side_effect = get_updates
+    return client
+
+
+class TestPollingLoop:
+    def _bot(self, **kw):
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+        return TelegramBot(config=BotConfig(token="T", chat_id="999", enabled=True), **kw)
+
+    def _msg(self, text, chat=999, user="owner", uid=10):
+        return {"update_id": uid, "message": {"text": text, "chat": {"id": chat}, "from": {"username": user}}}
+
+    def test_start_background_no_op_when_unconfigured(self):
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+        assert TelegramBot(config=BotConfig(enabled=False)).start_background() is False
+        assert TelegramBot(config=BotConfig(token="T", enabled=True)).start_background() is False  # no chat_id
+        assert TelegramBot(config=BotConfig(chat_id="1", enabled=True)).start_background() is False  # no token
+
+    def test_run_polling_dispatches_and_replies(self):
+        bot = self._bot()
+        client = _mock_client(poll_updates=[[self._msg("/status")]])
+        captured = {}
+        orig = bot.handle_command
+
+        def wrapped(text, chat_id="", username=""):
+            captured["args"] = (text, str(chat_id), username)
+            bot.stop()
+            return orig(text, chat_id, username=username)
+
+        bot.handle_command = wrapped
+        bot._running = True
+        bot.run_polling(client=client)
+
+        assert captured["args"] == ("/status", "999", "owner")
+        client.send_message.assert_called_once()
+        assert client.send_message.call_args[0][0] == 999  # replied to the sender
+
+    def test_startup_drain_skips_pending_updates(self):
+        # A /kill queued while the app was down (returned by the timeout=0 drain)
+        # must NOT be dispatched — only commands sent after startup are acted on.
+        bot = self._bot()
+        client = MagicMock()
+        stale = [self._msg("/kill", uid=7)]
+
+        def get_updates(offset=None, timeout=30):
+            if timeout == 0:
+                return stale  # pending at startup
+            bot.stop()
+            return []
+
+        client.get_updates.side_effect = get_updates
+        dispatched = []
+        bot.handle_command = lambda *a, **k: dispatched.append(a) or type(bot).handle_command(bot, *a, **k)
+        bot._running = True
+        bot.run_polling(client=client)
+        assert dispatched == []  # the stale /kill was drained, never dispatched
+
+    def test_run_polling_survives_getupdates_error(self):
+        bot = self._bot()
+        client = MagicMock()
+        calls = {"n": 0}
+
+        def flaky(offset=None, timeout=30):
+            if timeout == 0:
+                return []  # drain
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("network blip")
+            bot.stop()
+            return []
+
+        client.get_updates.side_effect = flaky
+        with patch("flinttrade_automation.telegram_bot.time.sleep", lambda _s: None):
+            bot._running = True
+            bot.run_polling(client=client)
+        assert calls["n"] == 2  # retried after the error rather than dying
+
+    def test_unauthorised_chat_gets_no_reply_and_no_action(self):
+        bot = self._bot()  # authorised chat is 999
+        client = _mock_client(poll_updates=[[self._msg("/kill", chat=111, user="attacker", uid=1)]])
+        killed = MagicMock()
+        bot.set_handler("kill_switch", killed)
+        seen = {}
+        real = bot.handle_command
+
+        def wrapped(text, chat_id="", username=""):
+            r = real(text, chat_id, username=username)
+            seen["auth"] = r.authorized
+            bot.stop()
+            return r
+
+        bot.handle_command = wrapped
+        bot._running = True
+        bot.run_polling(client=client)
+        assert seen["auth"] is False
+        killed.assert_not_called()  # kill switch NOT fired for an unauthorised chat
+        client.send_message.assert_not_called()  # and NO reply echoed back (no reflector)
+
+    def test_reply_falls_back_to_plain_on_markdown_error(self):
+        from flinttrade_automation.telegram_bot import TelegramApiError, TelegramBot
+        client = MagicMock()
+        client.send_message.side_effect = [TelegramApiError("can't parse entities"), {"message_id": 1}]
+        TelegramBot._reply(client, 999, "Strategy 'iron_condor' paused")
+        assert client.send_message.call_count == 2
+        # the retry dropped Markdown parsing
+        assert client.send_message.call_args_list[1].kwargs.get("parse_mode") == ""
+
+    def test_setup_failure_does_not_log_the_token(self, caplog):
+        # deleteWebhook raising an httpx error whose str embeds the bot URL must
+        # not leak the token — only the exception type is logged.
+        import logging
+
+        from flinttrade_automation.telegram_bot import TelegramBot
+        bot = TelegramBot.__new__(TelegramBot)
+        from flinttrade_automation.telegram_bot import BotConfig
+        bot.config = BotConfig(token="123:SECRETTOKEN", chat_id="9", enabled=True)
+        bot._running = False  # exit immediately after setup
+        bot._poll_timeout = 30
+        client = MagicMock()
+        client.delete_webhook.side_effect = RuntimeError("... for url 'https://api.telegram.org/bot123:SECRETTOKEN/x'")
+        client.get_updates.return_value = []
+        with caplog.at_level(logging.WARNING):
+            bot.run_polling(client=client)
+        assert "SECRETTOKEN" not in caplog.text
+
+
+class TestWiredCommands:
+    """/positions and /orders read the broker book via the client's run_sync."""
+
+    def _wired_bot(self, positions=None, orders=None):
+        import asyncio
+
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
+        client = MagicMock()
+
+        async def _pb():
+            return positions or []
+
+        async def _ob():
+            return orders or []
+
+        client.positionbook.side_effect = _pb
+        client.orderbook.side_effect = _ob
+
+        # The real OpenAlgoClient exposes run_sync (its own persistent loop); the
+        # bot MUST use it, not ad-hoc asyncio.run. Run the coroutine faithfully.
+        def _run_sync(coro):
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
+        client.run_sync.side_effect = _run_sync
+        router = MagicMock()
+        router.client = client
+        return TelegramBot(config=BotConfig(token="T", chat_id="9", enabled=True), router=router), client
+
+    def test_positions_wired_uses_run_sync(self):
+        bot, client = self._wired_bot(positions=[{"symbol": "INFY", "quantity": 10, "pnl": 500, "ltp": 1500}])
+        result = bot.handle_command("/positions", chat_id="9")
+        assert "INFY" in result.response
+        assert "Open Positions" in result.response
+        client.run_sync.assert_called()  # went through the client's own loop, not asyncio.run
+
+    def test_orders_wired_uses_run_sync(self):
+        bot, client = self._wired_bot(orders=[{"symbol": "SBIN", "action": "BUY", "quantity": 100, "price": 800}])
+        result = bot.handle_command("/orders", chat_id="9")
+        assert "SBIN" in result.response
+        assert "Pending Orders" in result.response
+        client.run_sync.assert_called()
+
+
+class TestSendAlertNative:
+    def test_send_alert_uses_native_send_message(self):
+        # Regression: send_alert once referenced self._bot (removed with
+        # python-telegram-bot); it must now go through the native send_message.
+        import asyncio
+
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+        bot = TelegramBot(config=BotConfig(token="T", chat_id="9", enabled=True))
+        with patch.object(bot, "send_message", return_value=True) as send:
+            asyncio.run(bot.send_alert("kill switch fired", severity="P0"))
+        send.assert_called_once()
+        assert "kill switch fired" in send.call_args[0][0]
