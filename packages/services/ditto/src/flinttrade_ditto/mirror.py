@@ -602,12 +602,20 @@ class PositionMirror:
         mirror_config: MirrorConfig | None = None,
         broker_router: Any | None = None,
         actor_id: str = "ditto",
+        trading_mode: str = "live",
     ) -> None:
         self._accounts = accounts or []
         self._mode = mode
         self._max_workers = max_workers
         self._mirror_config = mirror_config
         self._history: list[MirrorResult] = []
+        # The operator's three-mode trading state (live/practice/explore) — NOT
+        # the AllocationMode above. The gated dispatch targets a live OpenAlgo
+        # account directly (it does not consult the Practice SandboxEngine), so a
+        # non-live mode fails closed rather than routing a paper mirror to a live
+        # broker. Threaded from the caller's session; defaults to "live" because
+        # a mirror is inherently a live-account feature.
+        self._trading_mode = trading_mode
         # Every mirrored order dispatches through the safety-gated BrokerRouter
         # (G6): gate_order -> router.place_order (account-bound HMAC + ACL +
         # one-shot consume). There is NO ungated path — without an injected
@@ -775,6 +783,22 @@ class PositionMirror:
         from flinttrade_engine.safety import gate_order  # noqa: PLC0415
         from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
+        # Fail closed on a non-live operator mode. This path dispatches straight
+        # to a live OpenAlgo account and never routes to the Practice
+        # SandboxEngine, so honouring a "practice"/"explore" mode here would send
+        # a paper mirror to a live broker — refuse instead.
+        if self._trading_mode != "live":
+            result.error = (
+                f"Mirror refused: operator mode is {self._trading_mode!r}, not 'live'. "
+                "The gated mirror dispatch is live-account only."
+            )
+            logger.warning(
+                "Mirror to %s refused: non-live operator mode %r",
+                account.account_id,
+                self._trading_mode,
+            )
+            return result
+
         try:
             mirror_order = order.model_copy(update={"quantity": quantity})
         except AttributeError:
@@ -784,7 +808,7 @@ class PositionMirror:
             jti=f"ditto-{uuid.uuid4().hex}",
             actor_type="agent",
             actor_id=self._actor_id,
-            mode="live",
+            mode=self._trading_mode,
             selector=f"openalgo:{account.account_id}",
         )
         try:

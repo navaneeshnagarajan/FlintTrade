@@ -164,6 +164,25 @@ class TestGatedMirrorDispatch:
         assert result.successful == 2
         assert result.failed == 0
 
+    def test_non_live_operator_mode_fails_closed(self, _explode_httpx: None) -> None:
+        """A Practice/Explore operator mode refuses the mirror — no router call.
+
+        The gated dispatch targets a live OpenAlgo account directly (never the
+        Practice SandboxEngine), so a non-live mode must not reach the router.
+        """
+        router = _FakeRouter()
+        accounts = [_make_account("acc_a"), _make_account("acc_b")]
+        mirror = PositionMirror(
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, trading_mode="practice"
+        )
+
+        result = mirror.execute(_make_order(qty="3"))
+
+        assert router.calls == []  # nothing dispatched to a live broker
+        assert result.successful == 0
+        assert result.failed == 2
+        assert all("not 'live'" in (r.error or "") for r in result.results)
+
     def test_hint_resolves_openalgo_and_account_id(
         self, _explode_httpx: None
     ) -> None:
