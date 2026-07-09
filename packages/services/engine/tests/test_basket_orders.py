@@ -5,8 +5,6 @@ All broker/router interactions are mocked — no live OpenAlgo required.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from flinttrade_engine.basket_orders import (
@@ -68,12 +66,11 @@ def _make_executor(outcomes: list | None = None):  # type: ignore[no-untyped-def
     return executor, place_leg
 
 
-def _run(coro):
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+def _run(result):
+    # BasketOrderExecutor.execute is synchronous (place_leg marshals broker I/O
+    # onto the client's owner loop itself), so this is a passthrough kept only to
+    # avoid churning every call site.
+    return result
 
 
 def _leg(

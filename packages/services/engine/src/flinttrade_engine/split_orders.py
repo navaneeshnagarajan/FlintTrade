@@ -28,8 +28,8 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
@@ -290,7 +290,7 @@ class SplitOrderExecutor:
     def __init__(self, place_leg: PlaceLegFn) -> None:
         self._place_leg = place_leg
 
-    async def execute_split(
+    def execute_split(
         self,
         symbol: str,
         exchange: str,
@@ -363,7 +363,7 @@ class SplitOrderExecutor:
 
         for idx, qty in enumerate(chunk_quantities, start=1):
             if idx > 1 and delay_seconds > 0:
-                await asyncio.sleep(delay_seconds)
+                time.sleep(delay_seconds)
 
             order = _build_chunk_order(
                 symbol=symbol,

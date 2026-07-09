@@ -2,29 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from flask import Flask
 
 import flinttrade_engine.order_routes as mod
-
-
-def _async_returns(value: Any):
-    """Mock-side-effect for _run_async that consumes the inbound coroutine.
-
-    The route handler does ``_run_async(executor.execute(...))`` — Python
-    creates the AsyncMock coroutine first, then passes it to _run_async.
-    A bare ``return_value=...`` patch on _run_async leaves the coroutine
-    unawaited, which Python's GC later flags as a RuntimeWarning at some
-    unrelated location (often werkzeug's URL routing). Closing the
-    coroutine here suppresses the leak at the source.
-    """
-    def _impl(coro):
-        if hasattr(coro, "close"):
-            coro.close()
-        return value
-    return _impl
 
 
 # ---------------------------------------------------------------------------
@@ -105,21 +87,19 @@ def test_basket_ok():
     """201 on successful basket execution."""
     result = _basket_result(success=True)
     ex = MagicMock()
-    ex.execute = AsyncMock(return_value=result)
+    ex.execute = MagicMock(return_value=result)  # executor is synchronous
 
     legs = [
         {"symbol": "NIFTY25MAYFUT", "exchange": "NFO", "action": "BUY", "quantity": 50},
     ]
 
     with _make_app(basket_executor=ex).test_client() as c:
-        with patch(
-            "flinttrade_engine.order_routes._run_async",
-            side_effect=_async_returns(result),
-        ):
-            resp = c.post("/api/v1/orders/basket", json={"legs": legs})
+        resp = c.post("/api/v1/orders/basket", json={"legs": legs})
 
     assert resp.status_code == 201
     assert resp.get_json()["status"] == "success"
+    # The route builds the request principal and passes it to the gated executor.
+    assert ex.execute.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -150,24 +130,22 @@ def test_split_ok():
     """201 on successful split execution."""
     result = _split_result(success=True)
     ex = MagicMock()
+    ex.execute_split = MagicMock(return_value=result)  # executor is synchronous
 
     with _make_app(split_executor=ex).test_client() as c:
-        with patch(
-            "flinttrade_engine.order_routes._run_async",
-            side_effect=_async_returns(result),
-        ):
-            resp = c.post(
-                "/api/v1/orders/split",
-                json={
-                    "symbol": "NIFTY25MAYFUT",
-                    "exchange": "NFO",
-                    "action": "BUY",
-                    "total_qty": 300,
-                    "chunk_size": 75,
-                },
-            )
+        resp = c.post(
+            "/api/v1/orders/split",
+            json={
+                "symbol": "NIFTY25MAYFUT",
+                "exchange": "NFO",
+                "action": "BUY",
+                "total_qty": 300,
+                "chunk_size": 75,
+            },
+        )
 
     assert resp.status_code == 201
+    assert ex.execute_split.call_count == 1
 
 
 # ---------------------------------------------------------------------------

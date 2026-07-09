@@ -56,7 +56,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
   wired in `create_flask_app` bound to the request's session-JWT principal.
   `basket_orders.py`/`split_orders.py` were removed from the
   `test_no_legacy_order_path` raw-route allowlist and pinned by new gated tests
-  (they graduated exactly as `BRACKET_SERVICE` did).
+  (they graduated exactly as `BRACKET_SERVICE` did). The executors are
+  synchronous like the bracket service (the gated `place_leg` marshals broker
+  I/O onto the client's owner loop itself), so they work under the bare-WSGI /
+  gunicorn deployment too — an adversarial-review finding where the previous
+  async wrapping would have failed every leg closed when no client was bound.
 - **Rust ticks crate is now tested in CI** — a `rust-ticks-tests` job
   (`test.yml`, eighth per-push Ubuntu job) runs `cargo test` on the
   `packages/core/ticks` crate. Its unit tests ran in no CI job before (`cargo

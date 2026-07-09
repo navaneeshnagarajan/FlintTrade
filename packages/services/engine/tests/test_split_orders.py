@@ -5,8 +5,6 @@ No live OpenAlgo connection required — all routing is mocked.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from flinttrade_engine.split_orders import (
@@ -25,12 +23,11 @@ from flinttrade_engine.bracket_order import BracketOrderError, BracketPrincipal
 # ---------------------------------------------------------------------------
 
 
-def _run(coro):
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+def _run(result):
+    # SplitOrderExecutor.execute_split is synchronous (place_leg marshals broker
+    # I/O onto the client's owner loop itself); passthrough kept to avoid churning
+    # every call site.
+    return result
 
 
 _PRINCIPAL = BracketPrincipal(

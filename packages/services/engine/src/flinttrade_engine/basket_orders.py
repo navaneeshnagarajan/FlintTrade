@@ -27,8 +27,8 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
@@ -285,7 +285,7 @@ class BasketOrderExecutor:
         self._place_leg = place_leg
         self._rollback_delay = rollback_delay_seconds
 
-    async def execute(
+    def execute(
         self,
         legs: list[BasketLeg],
         principal: OrderPrincipal,
@@ -405,7 +405,7 @@ class BasketOrderExecutor:
                 failed_index,
             )
             rolled_back = True
-            await self._rollback(placed, principal, strategy, leg_results)
+            self._rollback(placed, principal, strategy, leg_results)
 
         # Re-sort leg_results by original index for deterministic output
         leg_results.sort(key=lambda r: r.leg_index)
@@ -424,7 +424,7 @@ class BasketOrderExecutor:
     # Internal rollback
     # ------------------------------------------------------------------
 
-    async def _rollback(
+    def _rollback(
         self,
         placed: list[tuple[int, BasketLeg, str]],
         principal: OrderPrincipal,
@@ -448,7 +448,7 @@ class BasketOrderExecutor:
 
         for orig_idx, leg, _ in reversed(placed):
             if self._rollback_delay > 0:
-                await asyncio.sleep(self._rollback_delay)
+                time.sleep(self._rollback_delay)
 
             inverse_action = "SELL" if leg.action == "BUY" else "BUY"
             rollback_order = Order(
