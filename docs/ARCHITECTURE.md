@@ -155,8 +155,8 @@ llms files.
 The terminal is a single React 19 + TypeScript application built with
 Vite 6. Layout is managed by [Dockview v5.1](https://dockview.dev/),
 which provides drag-and-drop panels, tabs, floating windows, and
-serialisable layouts. Users compose their workspace from 101 widgets
-(26 trading + 49 analysis + 26 utility) split across 12 routes.
+serialisable layouts. Users compose their workspace from 102 widgets
+(26 trading + 49 analysis + 27 utility) split across 12 routes.
 
 ### State architecture
 
@@ -394,7 +394,7 @@ when the app UI is not available.
 ### How packages read config
 
 ```python
-from packages.core.src.config import FlintTradeConfig
+from flinttrade_core.config import FlintTradeConfig
 
 config = FlintTradeConfig.from_env()
 config.settings.openalgo_host     # from workspace.json, with .env fallback
@@ -425,8 +425,9 @@ fallbacks.
 ### Server-side mode enforcement
 
 Every order-path endpoint asks `mode_guard` whether the JWT permits a
-live action. Trying to place a live order on a Practice JWT returns
-`MODE_NOT_ALLOWED` immediately — the request never reaches OpenAlgo.
+live action. Trying to place a live order on a Practice JWT is rejected 403
+immediately with code `practice_unsupported` (Explore mode yields
+`mode_blocked`) — the request never reaches OpenAlgo.
 
 ### OpenAlgo X-API-Key
 

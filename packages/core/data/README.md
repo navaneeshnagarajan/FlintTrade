@@ -1,6 +1,6 @@
 # Data
 
-> Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, QuestDB writer, and Excel bridge.
+> Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, and a (dormant) QuestDB writer.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -8,7 +8,7 @@
 
 ## Public surface
 
-- `src/flinttrade_data/tick_recorder.py — real-time tick capture to DuckDB / QuestDB`
+- `src/flinttrade_data/tick_recorder.py — real-time tick capture to DuckDB`
 - `src/flinttrade_data/audit_logger.py — append-only audit trail`
 - `src/flinttrade_data/questdb_bridge.py — ILP-based ingestion`
 

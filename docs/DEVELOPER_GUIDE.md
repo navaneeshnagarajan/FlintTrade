@@ -31,7 +31,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
-| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
+| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 96 strategy templates | `packages/services/backtest/tests/` |
 | `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
 | `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |
@@ -89,7 +89,7 @@ make lint           # ruff check across packages/*/src/
 python -m pytest packages/core/core/tests/test_app.py -v
 
 # Single test
-python -m pytest packages/core/core/tests/test_app.py::test_health_endpoint -v
+python -m pytest packages/core/core/tests/test_app.py::TestInputValidation::test_missing_bars_returns_400 -v
 
 # Single package
 python -m pytest packages/services/screener/tests/
@@ -199,7 +199,7 @@ Dockview panel.
    the component with mocked atoms and assert the rendered output.
 5. **(Optional) add to a workspace preset.** Edit
    `packages/apps/terminal/src/layout/workspacePresets.ts` if your widget
-   belongs in one of the 13 default presets.
+   belongs in one of the 14 default presets.
 6. **Update [USER_GUIDE.md](USER_GUIDE.md)** if the widget changes the
    user-visible workspace tour.
 
@@ -319,7 +319,8 @@ without presenting them as live-ready.
 
 - **Strict mode**. No `any`, no `@ts-ignore`, no `@ts-nocheck`.
 - **Path alias** `@` → `packages/apps/terminal/src/`. Configured in
-  `tsconfig.json`, `vite.config.ts`, and `vitest.config.ts`.
+  `tsconfig.json` and `vite.config.ts` (the Vitest config lives inside
+  `vite.config.ts`, so it inherits the alias).
 - **Functional components** with hooks. No class components.
 - **lucide-react** for icons. **date-fns** for dates. **zod** for any
   runtime validation.

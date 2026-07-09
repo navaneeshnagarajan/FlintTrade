@@ -9,7 +9,7 @@
 ## Public surface
 
 - `src/flinttrade_automation/cron_manager.py — workspace.json-backed scheduled jobs`
-- `src/flinttrade_automation/telegram_bot.py — passive notifications + emergency kill switch`
+- `src/flinttrade_automation/telegram_bot.py — native two-way Telegram bot (own Bot API client, inbound command long-polling) + notifications + reachable emergency kill switch`
 - `src/flinttrade_automation/voice_order_bridge.py — speech-to-intent for hands-free order placement`
 
 (See the source for the full surface.)

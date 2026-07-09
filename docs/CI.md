@@ -30,15 +30,22 @@ workflow YAML should read this once.
 parallel jobs to keep wall-clock time low:
 
 1. `python-tests` — full pytest suite.
-2. `node-core-tests` — Vitest for non-widget terminal code.
-3. `node-widget-tests-1` — Vitest for the first widget shard.
-4. `node-widget-tests-2a` — second widget shard, half A.
-5. `node-widget-tests-2b` — second widget shard, half B.
-6. `node-widget-tests-3` — third widget shard.
-7. `secrets-check` — runs `gitleaks` against the diff to catch leaked
-   credentials early.
+2. `node-core-tests` — Vitest for non-widget terminal code (`lib`, `stores`,
+   `atoms`, `services`, `test-utils`, `hooks`, `layout`, `admin`, `__tests__`).
+3. `node-widget-tests-1` — `src/widgets/trading/` + utility widgets A–H.
+4. `node-widget-tests-2a` — utility widgets M–S.
+5. `node-widget-tests-2b` — utility widgets S–W + AIBackends/AITeam/Obsidian/
+   TradeJournal (`TradeIdea` excluded — OOMs the 7 GB runner).
+6. `node-widget-tests-3` — `src/widgets/analysis/`, `routes/`, `tools/`,
+   `components/`, `chrome/`, and the safety-relevant `widgets/orders/` +
+   `widgets/account/`.
+7. `secrets-check` — an inline two-pattern grep scan (NOT gitleaks) over the
+   tree.
 
-All seven must be green for the workflow to be reported as passing.
+All seven must be green for the workflow to be reported as passing. The shard
+path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
+(in `python-tests`) fails CI if any terminal `*.test.ts(x)` file runs in no
+shard — so coverage stays complete apart from the allowlisted `TradeIdea`.
 
 ### Why Ubuntu-only for per-push
 
@@ -137,12 +144,15 @@ runner. Map the failed job to its local command:
 | Job | Local command |
 |---|---|
 | `python-tests` | `make test` |
-| `node-core-tests` | `cd packages/apps/terminal && npx vitest run --exclude 'src/widgets/**'` |
-| `node-widget-tests-1` | `cd packages/apps/terminal && npx vitest run src/widgets/trading/` |
-| `node-widget-tests-2a` | `cd packages/apps/terminal && npx vitest run src/widgets/analysis/ --shard=1/2` |
-| `node-widget-tests-2b` | `cd packages/apps/terminal && npx vitest run src/widgets/analysis/ --shard=2/2` |
-| `node-widget-tests-3` | `cd packages/apps/terminal && npx vitest run src/widgets/utility/` |
-| `secrets-check` | `gitleaks detect --source . --no-banner` |
+| `node-core-tests` | `cd packages/apps/terminal && npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/` |
+| `node-widget-tests-1` | `... npx vitest run src/widgets/trading/ src/widgets/utility/{AIAdvisor,Alerts,AuditTrail,Calculator,CurrencyConverter,EarningsCalendar,EconomicCalendar,ExpiryCountdown,FundingRate,GlobalIndices,Health}/` |
+| `node-widget-tests-2a` | `... npx vitest run src/widgets/utility/{MarketClock,MarketSummary,News,PositionSizing,ProfitTarget,Scanner}/` |
+| `node-widget-tests-2b` | `... npx vitest run` over `src/widgets/utility/{StrategyTemplates,TickSpeed,Ticker,Watchlist,AIBackends,AITeam,Obsidian,TradeJournal}/` (one dir per invocation; `TradeIdea` excluded) |
+| `node-widget-tests-3` | `... npx vitest run src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/` |
+| `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
+
+The exact per-shard path lists live in `.github/workflows/test.yml`; treat that
+as the source of truth (the shard-coverage guard keeps it complete).
 
 ### Step 4 — fix and push
 
@@ -157,9 +167,9 @@ same commit.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `pytest` reports `ImportError: cannot import name 'X'` | New module not added to `__init__.py`, or import is relative inside `packages/*/src/`. | Use absolute imports; add to `__init__.py` if it is a public surface. |
-| `vitest` reports `Cannot find module '@/...'` | Path alias not honoured in the test config. | Ensure `vitest.config.ts` reads the same alias as `tsconfig.json`. |
+| `vitest` reports `Cannot find module '@/...'` | Path alias not honoured in the test config. | Ensure `vite.config.ts` (which holds the Vitest `test:` config) reads the same `@` alias as `tsconfig.json`. |
 | `ruff` fails with new lint codes | Newer ruff rule activated. | Run `ruff check --fix` locally, commit the autofix. |
-| `gitleaks` flags a "secret" that is a public sample | Sample API key without a `# pragma: allowlist secret` marker. | Add the marker, or move the sample under a `tests/fixtures/` path. |
+| `secrets-check` flags a "secret" that is a public sample | The inline grep matched a `BROKER_API_KEY=` or `sk-…` pattern. | Move the sample under `tests/fixtures/` or restructure it so it does not match the two grep patterns (there is no allowlist pragma — it is a raw grep, not gitleaks). |
 | Cross-platform job fails on Sunday but Linux is green | Path-separator or filesystem-case issue. | Reproduce in a Linux VM with `WIN_COMPAT=1` env, or switch to `pathlib`. |
 | Workflow is queued for a long time | Runner contention or workflow concurrency cancellation chain. | Wait. If a real outage, GitHub Status will say so. |
 

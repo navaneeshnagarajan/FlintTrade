@@ -1,5 +1,4 @@
-# flint-automation dependencies
+# flint-automation dependencies (pyproject.toml is the canonical manifest)
 pyotp>=2.9
 jugaad-data>=0.1
-python-telegram-bot>=21.0
 apscheduler>=3.10

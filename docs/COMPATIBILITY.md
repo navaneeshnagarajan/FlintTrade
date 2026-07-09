@@ -78,7 +78,9 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
   at `/api/v1/orders/gtt-{place,modify,cancel}`.
 - **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
 - **WhatsApp bot** — `POST /api/v1/whatsapp/notify`. FlintTrade exposes
-  the outbound test endpoint at `/ft-api/v1/alerts/whatsapp/test`.
+  the outbound test endpoint at `/ft-api/api/v1/alerts/whatsapp/test`
+  (blueprint prefix `/api/v1`, so the WSGI `/ft-api` strip resolves it to
+  `/api/v1/alerts/whatsapp/test`).
 - **opengreeks** — Rust-based replacement for `py_vollib`. Same response
   shape, ~12× faster on option-chain refresh. No FlintTrade change.
 
