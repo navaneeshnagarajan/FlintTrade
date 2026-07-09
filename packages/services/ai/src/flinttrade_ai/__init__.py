@@ -39,7 +39,21 @@ from .agent_backends import (
     list_backends,
     register_backend,
 )
-from .memory import MemoryItem, MemoryLayer, MemoryQueryResult, TradedMemory
+from .memory import (
+    CATEGORY_IMPORTANCE,
+    HierarchicalMemoryManager,
+    MemoryBackend,
+    MemoryBackendConfig,
+    MemoryBackendKind,
+    MemoryEntry,
+    MemoryItem,
+    MemoryLayer,
+    MemoryManager,
+    MemoryQueryResult,
+    MemoryTier,
+    TradedMemory,
+    create_memory_backend,
+)
 from .sentiment import (
     AggregatedSentiment,
     SentimentAnalyzer,
@@ -73,7 +87,6 @@ from .regime_detector import (
 )
 from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
 from .strategy_refiner import RefinementSuggestion, StrategyRefiner
-from .memory_manager import MemoryEntry, MemoryManager, CATEGORY_IMPORTANCE
 from .trade_reflection import ReflectionConfig, ReflectionResult, TradeReflector
 from .news_scheduler import NewsEvent, NewsScheduler, PollType, ScheduledJob
 
@@ -117,6 +130,15 @@ __all__ = [
     "MemoryLayer",
     "MemoryItem",
     "MemoryQueryResult",
+    "MemoryEntry",
+    "MemoryManager",
+    "HierarchicalMemoryManager",
+    "MemoryTier",
+    "MemoryBackendConfig",
+    "MemoryBackendKind",
+    "MemoryBackend",
+    "CATEGORY_IMPORTANCE",
+    "create_memory_backend",
     # Analyst chain
     "AnalystChain",
     "AnalysisState",
@@ -185,10 +207,6 @@ __all__ = [
     # Strategy refiner
     "StrategyRefiner",
     "RefinementSuggestion",
-    # Memory manager (FinMem pattern — lightweight in-process)
-    "MemoryManager",
-    "MemoryEntry",
-    "CATEGORY_IMPORTANCE",
     # Trade reflection (LLM-TradeBot pattern — batch analysis)
     "TradeReflector",
     "ReflectionConfig",

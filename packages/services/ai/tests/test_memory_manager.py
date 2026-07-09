@@ -9,12 +9,13 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from flinttrade_ai.memory_manager import (
+from flinttrade_ai.memory import (
     CATEGORY_IMPORTANCE,
     HierarchicalMemoryManager,
     MemoryEntry,
     MemoryManager,
     MemoryTier,
+    compound_score as shared_compound_score,
 )
 
 
@@ -79,7 +80,6 @@ class TestMemoryEntry:
     def test_last_accessed_defaults_none(self) -> None:
         entry = MemoryEntry(content="x", category="signal", importance=0.5)
         assert entry.last_accessed is None
-
 
 # ---------------------------------------------------------------------------
 # MemoryManager.add
@@ -167,6 +167,25 @@ class TestCompoundScore:
         e_boosted = _make_entry(importance=0.5, hours_ago=24.0, access_count=50)
         now = datetime.now(timezone.utc)
         assert mgr.compound_score(e_boosted, 0.5, now) > mgr.compound_score(e_new, 0.5, now)
+
+    def test_manager_delegates_to_shared_compound_score(self, mgr: MemoryManager) -> None:
+        entry = _make_entry(importance=0.7, hours_ago=12.0, access_count=2)
+        now = datetime.now(timezone.utc)
+        hours_old = max(0.0, (now - entry.timestamp).total_seconds() / 3600.0)
+
+        expected = shared_compound_score(
+            similarity=0.6,
+            recency_delta=hours_old,
+            importance=entry.importance,
+            decay_rate=mgr._decay_rate,
+            access_count=entry.access_count,
+            importance_weight=mgr._importance_weight,
+            recency_weight=mgr._recency_weight,
+            similarity_weight=mgr._relevance_weight,
+            importance_scale="normalised",
+        )
+
+        assert mgr.compound_score(entry, relevance=0.6, now=now) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +419,29 @@ class TestHierarchicalRetrieve:
         results = hmgr.query("NIFTY entry", top_k=10)
         assert len(results) == 3
 
+    def test_uses_shared_score_with_tier_decay_profile(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("NIFTY scored entry", category="signal", tier=MemoryTier.MEDIUM)
+        entry = hmgr.get_by_id(entry_id)
+        assert entry is not None
+        entry.timestamp = datetime.now(timezone.utc) - timedelta(hours=12)
+        now = datetime.now(timezone.utc)
+        hours_old = max(0.0, (now - entry.timestamp).total_seconds() / 3600.0)
+        decay_rate = hmgr._decay_rates[MemoryTier.MEDIUM]
+
+        expected = shared_compound_score(
+            similarity=0.6,
+            recency_delta=hours_old,
+            importance=entry.importance,
+            decay_rate=decay_rate,
+            access_count=entry.access_count,
+            importance_weight=hmgr._importance_weight,
+            recency_weight=hmgr._recency_weight,
+            similarity_weight=hmgr._relevance_weight,
+            importance_scale="normalised",
+        )
+
+        assert hmgr._compound_score(entry, 0.6, decay_rate, now) == pytest.approx(expected)
+
 
 class TestHierarchicalPromotion:
     def test_promotes_working_to_medium(self, hmgr: HierarchicalMemoryManager) -> None:
@@ -527,3 +569,58 @@ class TestHierarchicalBackwardCompatibility:
         hmgr.add("test entry for context", category="analysis")
         context = hmgr.summarise_context("test entry")
         assert len(context) > 0
+
+
+class TestHierarchicalCommonBackendInterface:
+    def test_symbol_scoped_add_retrieve_context_and_clear(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("NIFTY breakout", category="signal", symbol="NIFTY")
+        hmgr.add("TCS breakout", category="signal", symbol="TCS")
+
+        entries = hmgr.retrieve("breakout", top_k=5, symbol="NIFTY")
+        context = hmgr.summarise_context("NIFTY", "breakout", max_tokens=100)
+
+        assert [entry.symbol for entry in entries] == ["NIFTY"]
+        assert "NIFTY breakout" in context
+        assert "TCS breakout" not in context
+
+        hmgr.clear("NIFTY")
+        assert hmgr.retrieve("breakout", symbol="NIFTY") == []
+        assert len(hmgr.retrieve("breakout", symbol="TCS")) == 1
+
+    @pytest.mark.parametrize("manager_type", [MemoryManager, HierarchicalMemoryManager])
+    def test_context_accepts_common_symbol_keyword(self, manager_type) -> None:
+        manager = manager_type()
+        manager.add("NIFTY breakout", category="signal", symbol="NIFTY")
+        manager.add("TCS breakout", category="signal", symbol="TCS")
+
+        context = manager.summarise_context(
+            symbol="NIFTY",
+            query="breakout",
+            max_tokens=100,
+        )
+
+        assert "NIFTY breakout" in context
+        assert "TCS breakout" not in context
+
+    @pytest.mark.parametrize("manager_type", [MemoryManager, HierarchicalMemoryManager])
+    def test_context_retains_legacy_query_keyword(self, manager_type) -> None:
+        manager = manager_type()
+        manager.add("NIFTY breakout", category="signal")
+
+        context = manager.summarise_context(query="NIFTY")
+
+        assert "NIFTY breakout" in context
+
+    @pytest.mark.parametrize("manager_type", [MemoryManager, HierarchicalMemoryManager])
+    def test_non_positive_top_k_has_no_access_side_effect(self, manager_type) -> None:
+        manager = manager_type()
+        entry_ids = [
+            manager.add("NIFTY breakout one", category="signal"),
+            manager.add("NIFTY breakout two", category="signal"),
+        ]
+
+        assert manager.retrieve("NIFTY", top_k=-1) == []
+        for entry_id in entry_ids:
+            entry = manager.get_by_id(entry_id)
+            assert entry is not None
+            assert entry.access_count == 0

@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 import os
 import uuid
+from datetime import datetime, timezone
+from typing import get_type_hints
 
 import numpy as np
 import pytest
@@ -17,10 +19,18 @@ import pytest
 chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
 
 from flinttrade_ai.memory import (  # noqa: E402 — must follow chromadb importorskip
+    CATEGORY_IMPORTANCE,
+    HierarchicalMemoryManager,
+    MemoryBackend,
+    MemoryBackendConfig,
+    MemoryBackendKind,
+    MemoryEntry,
+    MemoryItem,
     MemoryLayer,
     MemoryQueryResult,
     TradedMemory,
     compound_score,
+    create_memory_backend,
     exponential_decay,
     initial_importance,
 )
@@ -43,7 +53,7 @@ class _DeterministicEmbeddingFunction:
 
     @staticmethod
     def supported_spaces() -> list[str]:
-        return ["l2"]
+        return ["l2", "cosine"]
 
     @staticmethod
     def get_config() -> dict[str, str]:
@@ -174,6 +184,112 @@ class TestCompoundScore:
         result = compound_score(similarity=0.0, recency_delta=365, importance=0.0)
         assert result >= 0.0
 
+    def test_compound_score_defaults_to_legacy_percent_scale_at_one(self) -> None:
+        result = compound_score(similarity=0.0, recency_delta=0, importance=1.0)
+        assert result == pytest.approx(0.02)
+
+
+class TestUnifiedMemoryEntry:
+    """The persistent and in-process backends share one canonical model."""
+
+    def test_memory_item_is_a_compatibility_alias(self) -> None:
+        assert MemoryItem is MemoryEntry
+
+    def test_legacy_persistent_shape_normalises_percent_importance(self) -> None:
+        entry = MemoryItem(
+            id="legacy-id",
+            symbol="NIFTY",
+            text="Legacy memory",
+            layer=MemoryLayer.SHORT,
+            importance=65.0,
+            recency_delta=3,
+            access_count=1,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        assert entry.content == "Legacy memory"
+        assert entry.text == "Legacy memory"
+        assert entry.importance == pytest.approx(0.65)
+        assert entry.importance_percent == pytest.approx(65.0)
+
+    def test_legacy_persistent_shape_treats_one_as_one_percent(self) -> None:
+        entry = MemoryItem(
+            id="legacy-one",
+            symbol="NIFTY",
+            text="One percent memory",
+            layer=MemoryLayer.SHORT,
+            importance=1.0,
+            recency_delta=0,
+            access_count=0,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        assert entry.importance == pytest.approx(0.01)
+
+    def test_legacy_positional_constructor_remains_available(self) -> None:
+        timestamp = datetime.now(timezone.utc)
+        entry = MemoryItem(
+            "legacy-positional",
+            "NIFTY",
+            "Positional memory",
+            MemoryLayer.SHORT,
+            1.0,
+            2,
+            3,
+            timestamp,
+            {"source": "legacy"},
+        )
+
+        assert entry.id == "legacy-positional"
+        assert entry.text == "Positional memory"
+        assert entry.importance == pytest.approx(0.01)
+        assert entry.metadata == {"source": "legacy"}
+
+    def test_symbol_does_not_change_importance_units(self) -> None:
+        with pytest.raises(Exception):
+            MemoryEntry(
+                content="Ambiguous importance",
+                symbol="NIFTY",
+                category="signal",
+                importance=5.0,
+            )
+
+    def test_legacy_last_accessed_metadata_remains_caller_data(self, memory: TradedMemory) -> None:
+        entry = memory._item_from_meta(
+            "legacy-metadata",
+            "Legacy metadata memory",
+            {
+                "symbol": "NIFTY",
+                "layer": MemoryLayer.SHORT.value,
+                "importance": 50.0,
+                "recency_delta": 0,
+                "access_count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "last_accessed": "manual-caller-metadata",
+            },
+        )
+
+        assert entry.last_accessed is None
+        assert entry.metadata["last_accessed"] == "manual-caller-metadata"
+
+    def test_legacy_category_metadata_remains_caller_data(self, memory: TradedMemory) -> None:
+        entry = memory._item_from_meta(
+            "legacy-category",
+            "Legacy category memory",
+            {
+                "symbol": "NIFTY",
+                "layer": MemoryLayer.SHORT.value,
+                "importance": 50.0,
+                "recency_delta": 0,
+                "access_count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "category": "manual-caller-category",
+            },
+        )
+
+        assert entry.category == "analysis"
+        assert entry.metadata["category"] == "manual-caller-category"
+
 
 class TestInitialImportance:
     """Tests for layer-differentiated initial importance sampling."""
@@ -190,9 +306,7 @@ class TestInitialImportance:
         for layer, (lo, hi) in expected_ranges.items():
             for _ in range(20):
                 value = initial_importance(layer)
-                assert lo <= value <= hi, (
-                    f"{layer.value} importance {value:.2f} outside [{lo}, {hi}]"
-                )
+                assert lo <= value <= hi, f"{layer.value} importance {value:.2f} outside [{lo}, {hi}]"
 
     def test_add_memory_layer_importance_range(self, memory: TradedMemory) -> None:
         # Arrange — add memories across layers and verify stored importance
@@ -206,9 +320,7 @@ class TestInitialImportance:
             collection = memory._get_collection(layer)
             result = collection.get(ids=[mem_id])
             importance = float(result["metadatas"][0]["importance"])
-            assert lo <= importance <= hi, (
-                f"{layer.value}: importance {importance:.2f} outside [{lo}, {hi}]"
-            )
+            assert lo <= importance <= hi, f"{layer.value}: importance {importance:.2f} outside [{lo}, {hi}]"
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +365,183 @@ class TestAddMemory:
         result = collection.get(ids=[mem_id])
         # Assert
         assert int(result["metadatas"][0]["recency_delta"]) == 0
+
+    def test_category_can_seed_initial_importance(self, memory: TradedMemory) -> None:
+        mem_id = memory.add_memory(
+            "NIFTY",
+            "Completed trade outcome",
+            MemoryLayer.REFLECTION,
+            category="trade",
+        )
+        collection = memory._get_collection(MemoryLayer.REFLECTION)
+        stored = collection.get(ids=[mem_id])["metadatas"][0]
+
+        assert stored["_flinttrade_category"] == "trade"
+        assert float(stored["importance"]) == pytest.approx(CATEGORY_IMPORTANCE["trade"] * 100.0)
+
+    def test_add_memory_importance_scale_is_explicit(self, memory: TradedMemory) -> None:
+        normalised_id = memory.add_memory(
+            "NIFTY",
+            "normalised importance",
+            MemoryLayer.SHORT,
+            importance=1.01,
+        )
+        percent_id = memory.add_memory(
+            "NIFTY",
+            "percent importance",
+            MemoryLayer.SHORT,
+            importance=1.0,
+            importance_scale="percent",
+        )
+        collection = memory._get_collection(MemoryLayer.SHORT)
+
+        normalised = collection.get(ids=[normalised_id])["metadatas"][0]
+        percent = collection.get(ids=[percent_id])["metadatas"][0]
+        assert float(normalised["importance"]) == pytest.approx(100.0)
+        assert float(percent["importance"]) == pytest.approx(1.0)
+
+    def test_invalid_importance_scale_is_rejected(self, memory: TradedMemory) -> None:
+        with pytest.raises(ValueError, match="importance_scale"):
+            memory.add_memory(
+                "NIFTY",
+                "invalid scale",
+                MemoryLayer.SHORT,
+                importance=0.5,
+                importance_scale="invalid",  # type: ignore[arg-type]
+            )
+        with pytest.raises(ValueError, match="importance_scale"):
+            compound_score(
+                similarity=0.5,
+                recency_delta=0,
+                importance=0.5,
+                importance_scale="invalid",  # type: ignore[arg-type]
+            )
+
+    def test_common_add_and_retrieve_interface(self, memory: TradedMemory) -> None:
+        mem_id = memory.add(
+            "NIFTY breakout confirmed",
+            category="signal",
+            symbol="NIFTY",
+            layer=MemoryLayer.SHORT,
+        )
+
+        entries = memory.retrieve(
+            "breakout confirmed",
+            top_k=1,
+            symbol="NIFTY",
+            layer=MemoryLayer.SHORT,
+        )
+
+        assert [entry.id for entry in entries] == [mem_id]
+        assert entries[0].category == "signal"
+        assert entries[0].importance == pytest.approx(CATEGORY_IMPORTANCE["signal"])
+
+    def test_common_add_clamps_importance_like_in_process_backend(self, memory: TradedMemory) -> None:
+        memory.add(
+            "NIFTY high importance",
+            category="signal",
+            importance=5.0,
+            symbol="NIFTY",
+            layer=MemoryLayer.SHORT,
+        )
+
+        entry = memory.retrieve(
+            "high importance",
+            symbol="NIFTY",
+            layer=MemoryLayer.SHORT,
+            top_k=1,
+        )[0]
+
+        assert entry.importance == pytest.approx(1.0)
+
+    def test_common_retrieve_keeps_cross_layer_query_ranking(
+        self,
+        memory: TradedMemory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        weak_match = MemoryEntry(
+            content="weak match",
+            symbol="NIFTY",
+            layer=MemoryLayer.SHORT,
+            category="signal",
+            importance=1.0,
+        )
+        strong_match = MemoryEntry(
+            content="strong match",
+            symbol="NIFTY",
+            layer=MemoryLayer.LONG,
+            category="analysis",
+            importance=0.1,
+        )
+        weak_match._retrieval_score = 0.2
+        strong_match._retrieval_score = 0.9
+
+        def fake_get_memories(
+            symbol: str | None,
+            query: str,
+            layer: MemoryLayer,
+            n: int = 3,
+            *,
+            _update_access: bool = True,
+        ) -> MemoryQueryResult:
+            del symbol, n, _update_access
+            items = {
+                MemoryLayer.SHORT: [weak_match],
+                MemoryLayer.LONG: [strong_match],
+            }.get(layer, [])
+            return MemoryQueryResult(items=items, query=query, layer=layer)
+
+        monkeypatch.setattr(memory, "get_memories", fake_get_memories)
+        monkeypatch.setattr(memory, "_record_retrieval", lambda entry: None)
+
+        entries = memory.retrieve("strong match", top_k=2, symbol="NIFTY")
+
+        assert [entry.content for entry in entries] == ["strong match", "weak match"]
+
+    def test_common_retrieve_reinforces_only_global_top_k(self, memory: TradedMemory) -> None:
+        short_id = memory.add_memory(
+            "NIFTY",
+            "shared query short",
+            MemoryLayer.SHORT,
+            importance=1.0,
+        )
+        long_id = memory.add_memory(
+            "NIFTY",
+            "shared query long",
+            MemoryLayer.LONG,
+            importance=0.01,
+        )
+
+        entries = memory.retrieve("shared query", top_k=1, symbol="NIFTY")
+
+        short_meta = memory._get_collection(MemoryLayer.SHORT).get(ids=[short_id])["metadatas"][0]
+        long_meta = memory._get_collection(MemoryLayer.LONG).get(ids=[long_id])["metadatas"][0]
+        assert entries[0].id == short_id
+        assert int(short_meta["access_count"]) == 1
+        assert int(long_meta["access_count"]) == 0
+
+    def test_empty_symbol_is_an_exact_scope(self, memory: TradedMemory) -> None:
+        unscoped_id = memory.add(
+            "shared empty-symbol query",
+            category="signal",
+            symbol="",
+            layer=MemoryLayer.SHORT,
+        )
+        memory.add(
+            "NIFTY empty-symbol query",
+            category="signal",
+            symbol="NIFTY",
+            layer=MemoryLayer.SHORT,
+        )
+
+        entries = memory.retrieve(
+            "empty-symbol query",
+            symbol="",
+            layer=MemoryLayer.SHORT,
+            top_k=5,
+        )
+
+        assert [entry.id for entry in entries] == [unscoped_id]
 
 
 class TestGetMemories:
@@ -316,6 +605,45 @@ class TestGetMemories:
         collection = memory._get_collection(MemoryLayer.SHORT)
         result = collection.get(ids=[mem_id])
         assert int(result["metadatas"][0]["access_count"]) >= 1
+
+    def test_importance_and_category_round_trip_across_retrievals(self, memory: TradedMemory) -> None:
+        mem_id = memory.add_memory(
+            "NIFTY",
+            "round-trip signal",
+            MemoryLayer.SHORT,
+            category="signal",
+        )
+        collection = memory._get_collection(MemoryLayer.SHORT)
+        before = collection.get(ids=[mem_id])["metadatas"][0]
+
+        first = memory.get_memories("NIFTY", "round-trip signal", MemoryLayer.SHORT, n=1)
+        second = memory.get_memories("NIFTY", "round-trip signal", MemoryLayer.SHORT, n=1)
+        after = collection.get(ids=[mem_id])["metadatas"][0]
+
+        assert first.items[0].importance == pytest.approx(CATEGORY_IMPORTANCE["signal"])
+        assert second.items[0].importance == pytest.approx(CATEGORY_IMPORTANCE["signal"])
+        assert float(after["importance"]) == pytest.approx(float(before["importance"]))
+        assert after["_flinttrade_category"] == "signal"
+        assert after["_flinttrade_last_accessed_at"]
+
+    def test_l2_distance_uses_bounded_inverse_conversion(self, memory: TradedMemory) -> None:
+        assert memory._distance_to_similarity(0.0) == pytest.approx(1.0)
+        assert memory._distance_to_similarity(3.0) == pytest.approx(0.25)
+
+    def test_reopened_collection_uses_its_configured_metric(self) -> None:
+        prefix = f"metric_{uuid.uuid4().hex[:8]}"
+        _EPHEMERAL_CLIENT.get_or_create_collection(
+            name=f"{prefix}_{MemoryLayer.SHORT.value}",
+            embedding_function=_TEST_EMBEDDING_FN,
+            configuration={"hnsw": {"space": "cosine"}},
+        )
+        memory = make_memory(collection_prefix=prefix)
+
+        memory._get_collection(MemoryLayer.SHORT)
+        space = memory._distance_spaces[MemoryLayer.SHORT]
+
+        assert space == "cosine"
+        assert memory._distance_to_similarity(1.0, space=space) == pytest.approx(0.0)
 
 
 class TestDifferentLayers:
@@ -492,10 +820,7 @@ class TestStep:
 
     def test_step_ages_across_all_layers(self, memory: TradedMemory) -> None:
         # Arrange — one memory per layer
-        ids_by_layer = {
-            layer: memory.add_memory("NIFTY", f"step test {layer.value}", layer)
-            for layer in MemoryLayer
-        }
+        ids_by_layer = {layer: memory.add_memory("NIFTY", f"step test {layer.value}", layer) for layer in MemoryLayer}
         # Act
         memory.step(days=2)
         # Assert — all layers aged
@@ -533,6 +858,81 @@ class TestClearSymbol:
         result = memory.get_memories("NIFTY", "should stay", MemoryLayer.SHORT, n=5)
         assert len(result.items) == 1
         assert result.items[0].symbol == "NIFTY"
+
+
+class TestPersistentContextAndPruning:
+    def test_summarise_context_searches_all_layers_for_symbol(self, memory: TradedMemory) -> None:
+        memory.add_memory("NIFTY", "NIFTY breakout signal", MemoryLayer.SHORT, category="signal")
+        memory.add_memory("NIFTY", "NIFTY reflection lesson", MemoryLayer.REFLECTION, category="trade")
+        memory.add_memory("TCS", "TCS unrelated breakout", MemoryLayer.SHORT, category="signal")
+
+        context = memory.summarise_context("NIFTY", "breakout lesson", max_tokens=200)
+
+        assert context.startswith("[Memory Context]")
+        assert "NIFTY breakout signal" in context
+        assert "NIFTY reflection lesson" in context
+        assert "TCS unrelated breakout" not in context
+
+    def test_prune_supports_score_importance_window_and_symbol_scope(self, memory: TradedMemory) -> None:
+        stale_id = memory.add_memory("NIFTY", "stale", MemoryLayer.SHORT)
+        weak_id = memory.add_memory("NIFTY", "weak", MemoryLayer.SHORT)
+        keep_id = memory.add_memory("NIFTY", "keep", MemoryLayer.SHORT)
+        other_id = memory.add_memory("TCS", "other symbol", MemoryLayer.SHORT)
+        collection = memory._get_collection(MemoryLayer.SHORT)
+
+        def update(memory_id: str, **values: object) -> None:
+            metadata = collection.get(ids=[memory_id])["metadatas"][0]
+            collection.update(ids=[memory_id], metadatas=[{**metadata, **values}])
+
+        update(stale_id, recency_delta=90, importance=90.0)
+        update(weak_id, recency_delta=0, importance=1.0)
+        update(keep_id, recency_delta=0, importance=90.0)
+        update(other_id, recency_delta=90, importance=1.0)
+
+        removed = memory.prune(
+            min_score=0.05,
+            min_importance=0.05,
+            max_recency_days=30,
+            symbol="NIFTY",
+        )
+
+        remaining = set(collection.get()["ids"])
+        assert removed == 2
+        assert stale_id not in remaining
+        assert weak_id not in remaining
+        assert keep_id in remaining
+        assert other_id in remaining
+
+    def test_clear_common_interface_can_scope_by_symbol(self, memory: TradedMemory) -> None:
+        memory.add_memory("NIFTY", "remove", MemoryLayer.SHORT)
+        memory.add_memory("TCS", "keep", MemoryLayer.SHORT)
+
+        memory.clear("NIFTY")
+
+        assert memory.get_memories("NIFTY", "remove", MemoryLayer.SHORT).items == []
+        assert len(memory.get_memories("TCS", "keep", MemoryLayer.SHORT).items) == 1
+
+    def test_clear_common_interface_removes_every_layer(self, memory: TradedMemory) -> None:
+        for layer in MemoryLayer:
+            memory.add_memory("NIFTY", f"remove {layer.value}", layer)
+
+        memory.clear()
+
+        for layer in MemoryLayer:
+            assert memory._get_collection(layer).count() == 0
+
+
+class TestMemoryBackendFactory:
+    def test_factory_has_runtime_resolvable_protocol_annotation(self) -> None:
+        assert get_type_hints(create_memory_backend)["return"] is MemoryBackend
+
+    def test_selects_persistent_backend_from_config(self) -> None:
+        backend = create_memory_backend(MemoryBackendConfig(backend=MemoryBackendKind.PERSISTENT, persist_dir=None))
+        assert isinstance(backend, TradedMemory)
+
+    def test_selects_hierarchical_backend_from_config(self) -> None:
+        backend = create_memory_backend(MemoryBackendConfig(backend=MemoryBackendKind.HIERARCHICAL))
+        assert isinstance(backend, HierarchicalMemoryManager)
 
 
 class TestPersistence:
