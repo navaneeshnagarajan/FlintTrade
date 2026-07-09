@@ -1,4 +1,4 @@
-"""Tests for the RSS-based news scraper (flinttrade_ai.news_scraper).
+"""Tests for the canonical RSS-based sentiment news layer.
 
 Uses monkeypatched httpx responses to avoid hitting real RSS feeds.
 """
@@ -9,12 +9,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from flinttrade_ai.news_scraper import (
+from flinttrade_ai.sentiment import (
     NewsScraper,
     NewsArticle,
     RSS_SOURCES,
     _parse_rss_xml,
     _strip_html,
+    parse_feed,
 )
 
 # ---------------------------------------------------------------------------
@@ -82,8 +83,11 @@ def _mock_response(text: str, status_code: int = 200) -> MagicMock:
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         import httpx
+
         resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=resp,
+            "error",
+            request=MagicMock(),
+            response=resp,
         )
     return resp
 
@@ -102,6 +106,7 @@ class TestParseRssXml:
         assert articles[0].title == "NIFTY closes above 22500 for first time"
         assert articles[0].source == "test"
         assert articles[0].link == "https://example.com/nifty-22500"
+        assert articles[0].content_hash
 
     def test_parses_atom_entries(self) -> None:
         articles = _parse_rss_xml(_ATOM_XML, "livemint")
@@ -148,7 +153,7 @@ class TestNewsScraper:
     def _make_scraper(self) -> NewsScraper:
         return NewsScraper(timeout=5.0, cache_ttl=900.0)
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_fetch_headlines(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -162,13 +167,13 @@ class TestNewsScraper:
         assert len(articles) == 2
         assert articles[0].title == "NIFTY closes above 22500 for first time"
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_fetch_headlines_unknown_source_raises(self, mock_client_cls: MagicMock) -> None:
         scraper = self._make_scraper()
         with pytest.raises(ValueError, match="Unknown source"):
             scraper.fetch_headlines("nonexistent")
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_fetch_headlines_with_url(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -180,7 +185,7 @@ class TestNewsScraper:
         articles = scraper.fetch_headlines("https://custom.example.com/rss")
         assert len(articles) == 3
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_search_news(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -194,7 +199,7 @@ class TestNewsScraper:
         assert len(results) >= 1
         assert any("NIFTY" in r.title for r in results)
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_get_latest(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -208,7 +213,7 @@ class TestNewsScraper:
         assert len(latest) > 0
         assert all(isinstance(a, NewsArticle) for a in latest)
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_cache_prevents_refetch(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -223,7 +228,7 @@ class TestNewsScraper:
         # httpx.Client should only be created once (cached second time)
         assert mock_client_cls.call_count == 1
 
-    @patch("flinttrade_ai.news_scraper.httpx.Client")
+    @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_article_to_dict(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -241,6 +246,38 @@ class TestNewsScraper:
         assert "summary" in d
         assert "published" in d
         assert "source" in d
+        assert d["content_hash"]
+
+    @patch("flinttrade_ai.sentiment.httpx.Client")
+    def test_parse_feed_uses_cached_stdlib_engine(self, mock_client_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = _mock_response(_RSS_XML)
+        mock_client_cls.return_value = mock_client
+
+        first = parse_feed("https://custom.example.com/rss")
+        second = parse_feed("https://custom.example.com/rss")
+
+        assert len(first) == len(second) == 3
+        assert mock_client_cls.call_count == 1
+
+    @patch("flinttrade_ai.sentiment.httpx.Client")
+    def test_parse_feed_does_not_truncate_large_feeds(self, mock_client_cls: MagicMock) -> None:
+        items = "".join(
+            f"<item><title>Headline {index}</title><link>https://example.com/{index}</link></item>"
+            for index in range(25)
+        )
+        xml = f"<rss version='2.0'><channel>{items}</channel></rss>"
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = _mock_response(xml)
+        mock_client_cls.return_value = mock_client
+
+        articles = parse_feed("https://custom.example.com/large-rss")
+
+        assert len(articles) == 25
 
     def test_rss_sources_defined(self) -> None:
         """Verify all three Indian financial RSS sources are configured."""
@@ -248,3 +285,10 @@ class TestNewsScraper:
         assert "economictimes" in RSS_SOURCES
         assert "livemint" in RSS_SOURCES
         assert len(RSS_SOURCES) >= 3
+
+    def test_package_root_exports_canonical_news_types(self) -> None:
+        from flinttrade_ai import NewsArticle as ExportedArticle
+        from flinttrade_ai import NewsScraper as ExportedScraper
+
+        assert ExportedArticle is NewsArticle
+        assert ExportedScraper is NewsScraper

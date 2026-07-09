@@ -61,6 +61,7 @@ class TestNewsSummary:
 
     def test_success_when_content_present(self):
         from flinttrade_ai.news_summarizer import NewsSummary
+
         summary = NewsSummary(
             summary_type="premarket",
             content="Market is bullish today.",
@@ -70,11 +71,13 @@ class TestNewsSummary:
 
     def test_not_success_when_empty(self):
         from flinttrade_ai.news_summarizer import NewsSummary
+
         summary = NewsSummary(summary_type="premarket", content="")
         assert not summary.success
 
     def test_not_success_when_error(self):
         from flinttrade_ai.news_summarizer import NewsSummary
+
         summary = NewsSummary(
             summary_type="premarket",
             content="Some content",
@@ -94,6 +97,7 @@ class TestMarketNewsSummarizerInit:
     def test_creates_with_default_llm(self):
         from flinttrade_ai.llm_client import LLMClient, LLMConfig
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="test")
         client = LLMClient(config=cfg)
         summarizer = MarketNewsSummarizer(llm_client=client)
@@ -102,6 +106,7 @@ class TestMarketNewsSummarizerInit:
 
     def test_creates_with_none_llm(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         summarizer = MarketNewsSummarizer(llm_client=None)
         assert summarizer.llm is not None
         summarizer.llm.close()
@@ -113,46 +118,36 @@ class TestMarketNewsSummarizerInit:
 
 
 class TestFetchNews:
-    """Test news fetching with mocked feedparser."""
+    """Test news fetching through the canonical RSS parser."""
 
     def test_fetch_returns_articles(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+        from flinttrade_ai.sentiment import NewsArticle
 
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
+        article = NewsArticle(
+            title="Test Article",
+            summary="Test summary",
+            link="https://example.com",
+            published="2026-03-31",
+            source="Test Source",
+        )
 
-        # Mock feedparser
-        mock_feed = MagicMock()
-        mock_feed.feed.get.return_value = "Test Source"
-        mock_feed.entries = [
-            MagicMock(
-                get=lambda key, default="": {
-                    "title": "Test Article",
-                    "summary": "Test summary",
-                    "link": "https://example.com",
-                    "published": "2026-03-31",
-                }.get(key, default),
-            ),
-        ]
+        with patch("flinttrade_ai.news_summarizer.parse_feed", return_value=[article]) as parse:
+            articles = summarizer.fetch_news(sources=["https://example.com/rss"])
 
-        with patch.dict("sys.modules", {"feedparser": MagicMock(parse=MagicMock(return_value=mock_feed))}):
-            import importlib
-            import flinttrade_ai.news_summarizer as ns
-            importlib.reload(ns)
+        assert articles == [article.to_dict()]
+        parse.assert_called_once_with("https://example.com/rss")
 
-        # Test the module-level function without feedparser installed
-        # Just verify the summarizer handles empty gracefully
-        articles = summarizer.fetch_news(sources=["https://example.com/rss"])
-        # feedparser may or may not be installed in test env
-        assert isinstance(articles, list)
-
-    def test_fetch_handles_missing_feedparser(self):
+    def test_fetch_handles_empty_canonical_feed(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
-        # If feedparser is not installed, should return empty list
-        articles = summarizer.fetch_news()
-        assert isinstance(articles, list)
+        with patch("flinttrade_ai.news_summarizer.parse_feed", return_value=[]):
+            articles = summarizer.fetch_news()
+        assert articles == []
 
 
 # ======================================================================
@@ -219,7 +214,8 @@ class TestSummarizePostmarket:
         mock_llm = MagicMock()
         mock_llm.chat.return_value = LLMResponse(
             content="Post-market summary: NIFTY closed at 22050.",
-            model="test", provider="test",
+            model="test",
+            provider="test",
         )
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -244,7 +240,8 @@ class TestSummarizePostmarket:
         mock_llm = MagicMock()
         mock_llm.chat.return_value = LLMResponse(
             content="Post-market summary.",
-            model="test", provider="test",
+            model="test",
+            provider="test",
         )
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
         result = summarizer.summarize_postmarket(SAMPLE_ARTICLES)
@@ -265,7 +262,9 @@ class TestSummarizeSector:
 
         mock_llm = MagicMock()
         mock_llm.chat.return_value = LLMResponse(
-            content=llm_content, model="test", provider="test",
+            content=llm_content,
+            model="test",
+            provider="test",
         )
         return MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -303,6 +302,7 @@ class TestGetStockNews:
 
     def test_filter_by_symbol(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -312,6 +312,7 @@ class TestGetStockNews:
 
     def test_filter_no_matches(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -320,6 +321,7 @@ class TestGetStockNews:
 
     def test_filter_case_insensitive(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -338,16 +340,19 @@ class TestGetStockNewsByKeywords:
 
     def test_multiple_keywords(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
         result = summarizer.get_stock_news_by_keywords(
-            ["TCS", "HDFCBANK"], SAMPLE_ARTICLES,
+            ["TCS", "HDFCBANK"],
+            SAMPLE_ARTICLES,
         )
         assert len(result) >= 2
 
     def test_empty_keywords(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -356,6 +361,7 @@ class TestGetStockNewsByKeywords:
 
     def test_empty_articles(self):
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
+
         mock_llm = MagicMock()
         summarizer = MarketNewsSummarizer(llm_client=mock_llm)
 
@@ -373,6 +379,7 @@ class TestArticlesToText:
 
     def test_formats_articles(self):
         from flinttrade_ai.news_summarizer import _articles_to_text
+
         text = _articles_to_text(SAMPLE_ARTICLES, max_articles=2)
         assert "1." in text
         assert "2." in text
@@ -380,12 +387,14 @@ class TestArticlesToText:
 
     def test_max_articles_limit(self):
         from flinttrade_ai.news_summarizer import _articles_to_text
+
         text = _articles_to_text(SAMPLE_ARTICLES, max_articles=1)
         # Only 1 article should appear
         assert "2." not in text
 
     def test_empty_articles(self):
         from flinttrade_ai.news_summarizer import _articles_to_text
+
         text = _articles_to_text([])
         assert text == ""
 
@@ -400,6 +409,7 @@ class TestSectorKeywords:
 
     def test_all_major_sectors_defined(self):
         from flinttrade_ai.news_summarizer import SECTOR_KEYWORDS
+
         expected = ["IT", "Banking", "Pharma", "Auto", "Energy", "Metal", "FMCG"]
         for sector in expected:
             assert sector in SECTOR_KEYWORDS

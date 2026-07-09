@@ -17,7 +17,6 @@ from .rag_pipeline import (
     RAGPipeline,
     RAGResponse,
 )
-from .news_scraper import NewsScraper, NewsArticle
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
 from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
@@ -56,6 +55,8 @@ from .memory import (
 )
 from .sentiment import (
     AggregatedSentiment,
+    NewsArticle,
+    NewsScraper,
     SentimentAnalyzer,
     SentimentScore,
 )

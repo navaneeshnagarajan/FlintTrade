@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
+import time
+import xml.etree.ElementTree as ET
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta, timezone
 from typing import Any
+
+import httpx
 
 from .llm_client import LLMClient, LLMMessage
 
@@ -18,22 +22,56 @@ logger = logging.getLogger("flinttrade.ai.sentiment")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# Default financial RSS feeds
+# Default financial RSS feeds, keyed for NewsScraper callers.
+RSS_SOURCES: dict[str, str] = {
+    "moneycontrol": "https://www.moneycontrol.com/rss/marketreports.xml",
+    "economictimes": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "livemint": "https://www.livemint.com/rss/markets",
+}
 DEFAULT_FEEDS: list[str] = [
-    "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
-    "https://www.moneycontrol.com/rss/marketreports.xml",
-    "https://www.livemint.com/rss/markets",
+    RSS_SOURCES["economictimes"],
+    RSS_SOURCES["moneycontrol"],
+    RSS_SOURCES["livemint"],
 ]
+_CACHE_TTL_SECS = 900.0
 
 # Common NSE symbols for entity extraction
 _SYMBOL_PATTERNS = [
-    "NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY",
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN",
-    "HDFC", "BHARTIARTL", "ITC", "KOTAKBANK", "LT", "HCLTECH",
-    "AXISBANK", "WIPRO", "MARUTI", "TATAMOTORS", "TATASTEEL",
-    "ADANIENT", "ADANIPORTS", "BAJFINANCE", "BAJAJFINSV",
-    "TITAN", "SUNPHARMA", "NESTLEIND", "POWERGRID", "NTPC",
-    "GOLD", "SILVER", "CRUDEOIL", "NATURALGAS",
+    "NIFTY",
+    "BANKNIFTY",
+    "SENSEX",
+    "FINNIFTY",
+    "MIDCPNIFTY",
+    "RELIANCE",
+    "TCS",
+    "INFY",
+    "HDFCBANK",
+    "ICICIBANK",
+    "SBIN",
+    "HDFC",
+    "BHARTIARTL",
+    "ITC",
+    "KOTAKBANK",
+    "LT",
+    "HCLTECH",
+    "AXISBANK",
+    "WIPRO",
+    "MARUTI",
+    "TATAMOTORS",
+    "TATASTEEL",
+    "ADANIENT",
+    "ADANIPORTS",
+    "BAJFINANCE",
+    "BAJAJFINSV",
+    "TITAN",
+    "SUNPHARMA",
+    "NESTLEIND",
+    "POWERGRID",
+    "NTPC",
+    "GOLD",
+    "SILVER",
+    "CRUDEOIL",
+    "NATURALGAS",
 ]
 
 
@@ -47,6 +85,15 @@ class NewsArticle:
     published: str = ""
     source: str = ""
     content_hash: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.content_hash:
+            digest = hashlib.sha256(f"{self.title}{self.link}".encode()).hexdigest()
+            self.content_hash = digest[:12]
+
+    def to_dict(self) -> dict[str, str]:
+        """Return all article fields in JSON-ready form."""
+        return asdict(self)
 
 
 @dataclass
@@ -87,37 +134,175 @@ class AggregatedSentiment:
 # ---------------------------------------------------------------------------
 
 
-def parse_feed(feed_url: str) -> list[NewsArticle]:
-    """Parse an RSS feed into a list of articles."""
-    try:
-        import feedparser
-    except ImportError:
-        logger.warning("feedparser not installed — pip install feedparser")
-        return []
-
-    try:
-        feed = feedparser.parse(feed_url)
-    except Exception as exc:
-        logger.error("Feed parse error for %s: %s", feed_url, exc)
-        return []
-
+def _parse_rss_xml(xml_text: str, source_name: str) -> list[NewsArticle]:
+    """Parse RSS 2.0 or Atom XML with the standard library."""
     articles: list[NewsArticle] = []
-    for entry in feed.entries:
-        title = entry.get("title", "")
-        summary = entry.get("summary", entry.get("description", ""))
-        link = entry.get("link", "")
-        published = entry.get("published", "")
 
-        articles.append(NewsArticle(
-            title=title,
-            summary=summary[:500] if summary else "",
-            link=link,
-            published=published,
-            source=feed_url,
-            content_hash=hashlib.md5(f"{title}{link}".encode()).hexdigest()[:12],
-        ))
+    try:
+        root = ET.fromstring(xml_text)  # noqa: S314
+    except ET.ParseError as exc:
+        logger.warning("XML parse error for %s: %s", source_name, exc)
+        return articles
+
+    atom_ns = ""
+    if root.tag.startswith("{"):
+        atom_ns = root.tag.split("}")[0] + "}"
+
+    items = root.findall(".//item")
+    if not items:
+        items = root.findall(f".//{atom_ns}entry") if atom_ns else root.findall(".//entry")
+
+    for item in items:
+        title = _text(item, "title", atom_ns) or ""
+        link = _link(item, atom_ns) or ""
+        summary = (
+            _text(item, "description", atom_ns)
+            or _text(item, "summary", atom_ns)
+            or _text(item, "content", atom_ns)
+            or ""
+        )
+        published = (
+            _text(item, "pubDate", atom_ns)
+            or _text(item, "published", atom_ns)
+            or _text(item, "updated", atom_ns)
+            or ""
+        )
+
+        if title:
+            articles.append(
+                NewsArticle(
+                    title=_strip_html(title).strip(),
+                    link=link.strip(),
+                    summary=_strip_html(summary).strip()[:500],
+                    published=published.strip(),
+                    source=source_name,
+                )
+            )
 
     return articles
+
+
+def _text(element: ET.Element, tag: str, ns: str = "") -> str | None:
+    """Find child text, trying namespaced and plain tags."""
+    child = element.find(f"{ns}{tag}") if ns else None
+    if child is None:
+        child = element.find(tag)
+    return child.text if child is not None and child.text else None
+
+
+def _link(element: ET.Element, ns: str = "") -> str:
+    """Extract an RSS text link or Atom href link."""
+    link_element = element.find("link")
+    if link_element is not None and link_element.text:
+        return link_element.text
+
+    if ns:
+        link_element = element.find(f"{ns}link")
+    if link_element is not None:
+        return link_element.get("href", "")
+    return ""
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags without an additional parser dependency."""
+    result: list[str] = []
+    in_tag = False
+    for character in text:
+        if character == "<":
+            in_tag = True
+        elif character == ">":
+            in_tag = False
+        elif not in_tag:
+            result.append(character)
+    return "".join(result)
+
+
+class NewsScraper:
+    """Cached RSS news client for the configured Indian-market sources."""
+
+    def __init__(self, timeout: float = 15.0, cache_ttl: float = _CACHE_TTL_SECS) -> None:
+        self._timeout = timeout
+        self._cache_ttl = cache_ttl
+        self._cache: dict[str, tuple[float, list[NewsArticle]]] = {}
+
+    def fetch_headlines(self, source: str, limit: int | None = 20) -> list[NewsArticle]:
+        """Fetch one named source or custom RSS URL, using the per-source cache."""
+        url = RSS_SOURCES.get(source.lower())
+        if url is None:
+            if source.startswith("http"):
+                url = source
+            else:
+                raise ValueError(f"Unknown source: {source!r}. Use one of {list(RSS_SOURCES)} or provide a URL.")
+
+        articles = self._fetch_cached(source.lower(), url)
+        return articles if limit is None else articles[:limit]
+
+    def search_news(self, query: str, limit: int = 20) -> list[NewsArticle]:
+        """Search titles and summaries across all default RSS sources."""
+        self._refresh_all()
+        query_lower = query.lower()
+        matches = [
+            article
+            for _timestamp, articles in self._cache.values()
+            for article in articles
+            if query_lower in f"{article.title} {article.summary}".lower()
+        ]
+        return self._deduplicate(matches)[:limit]
+
+    def get_latest(self, limit: int = 20) -> list[NewsArticle]:
+        """Return combined headlines from all default sources."""
+        self._refresh_all()
+        articles = [article for _timestamp, cached_articles in self._cache.values() for article in cached_articles]
+        return self._deduplicate(articles)[:limit]
+
+    def _refresh_all(self) -> None:
+        for key, url in RSS_SOURCES.items():
+            self._fetch_cached(key, url)
+
+    def _fetch_cached(self, source_key: str, url: str) -> list[NewsArticle]:
+        now = time.monotonic()
+        cached = self._cache.get(source_key)
+        if cached is not None and now - cached[0] < self._cache_ttl:
+            return cached[1]
+
+        articles = self._fetch_rss(url, source_key)
+        self._cache[source_key] = (now, articles)
+        return articles
+
+    def _fetch_rss(self, url: str, source_name: str) -> list[NewsArticle]:
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.get(url, follow_redirects=True)
+                response.raise_for_status()
+            articles = _parse_rss_xml(response.text, source_name)
+            logger.info("Fetched %d articles from %s (%s)", len(articles), source_name, url)
+            return articles
+        except httpx.HTTPError as exc:
+            logger.warning("HTTP error fetching %s: %s", url, exc)
+        except Exception as exc:
+            logger.warning("Unexpected error fetching %s: %s", url, exc)
+        return []
+
+    @staticmethod
+    def _deduplicate(articles: list[NewsArticle]) -> list[NewsArticle]:
+        seen: set[str] = set()
+        unique: list[NewsArticle] = []
+        for article in articles:
+            if article.title not in seen:
+                seen.add(article.title)
+                unique.append(article)
+        return unique
+
+
+_DEFAULT_NEWS_SCRAPER: NewsScraper | None = None
+
+
+def parse_feed(feed_url: str) -> list[NewsArticle]:
+    """Fetch and parse an RSS/Atom feed through the shared cached stdlib engine."""
+    global _DEFAULT_NEWS_SCRAPER
+    if _DEFAULT_NEWS_SCRAPER is None:
+        _DEFAULT_NEWS_SCRAPER = NewsScraper()
+    return _DEFAULT_NEWS_SCRAPER.fetch_headlines(feed_url, limit=None)
 
 
 def extract_symbols(text: str) -> list[str]:
@@ -152,10 +337,14 @@ def score_article_with_llm(
         summary=article.summary[:300],
     )
 
-    response = llm.chat([
-        LLMMessage(role="system", content="You are a financial sentiment analyst. Respond only with valid JSON."),
-        LLMMessage(role="user", content=prompt),
-    ], temperature=0.1, max_tokens=200)
+    response = llm.chat(
+        [
+            LLMMessage(role="system", content="You are a financial sentiment analyst. Respond only with valid JSON."),
+            LLMMessage(role="user", content=prompt),
+        ],
+        temperature=0.1,
+        max_tokens=200,
+    )
 
     if not response.success:
         return SentimentScore(
@@ -180,6 +369,7 @@ def score_article_with_llm(
                 text = text[4:].strip()
 
         import json
+
         data = json.loads(text)
         sentiment = data.get("sentiment", "NEUTRAL").upper()
         if sentiment not in ("BULLISH", "BEARISH", "NEUTRAL"):
@@ -204,10 +394,33 @@ def score_article_rule_based(article: NewsArticle) -> SentimentScore:
     """Simple rule-based sentiment (fallback when LLM unavailable)."""
     text = (article.title + " " + article.summary).lower()
 
-    bullish_words = ["rally", "surge", "gain", "bullish", "breakout", "all-time high",
-                     "upgrade", "buy", "strong", "growth", "profit", "outperform"]
-    bearish_words = ["crash", "fall", "drop", "bearish", "breakdown", "sell",
-                     "downgrade", "weak", "loss", "decline", "correction"]
+    bullish_words = [
+        "rally",
+        "surge",
+        "gain",
+        "bullish",
+        "breakout",
+        "all-time high",
+        "upgrade",
+        "buy",
+        "strong",
+        "growth",
+        "profit",
+        "outperform",
+    ]
+    bearish_words = [
+        "crash",
+        "fall",
+        "drop",
+        "bearish",
+        "breakdown",
+        "sell",
+        "downgrade",
+        "weak",
+        "loss",
+        "decline",
+        "correction",
+    ]
 
     bull = sum(1 for w in bullish_words if w in text)
     bear = sum(1 for w in bearish_words if w in text)
@@ -254,8 +467,7 @@ def aggregate_sentiment(
 
     # Net score: +1 for bullish, -1 for bearish, weighted by confidence
     net = sum(
-        (1.0 if s.sentiment == "BULLISH" else -1.0 if s.sentiment == "BEARISH" else 0.0) * s.confidence
-        for s in scores
+        (1.0 if s.sentiment == "BULLISH" else -1.0 if s.sentiment == "BEARISH" else 0.0) * s.confidence for s in scores
     ) / len(scores)
 
     return AggregatedSentiment(
@@ -354,12 +566,14 @@ class SentimentAnalyzer:
 
             shift = curr.net_score - prev.net_score
             if abs(shift) >= threshold:
-                alerts.append({
-                    "symbol": sym,
-                    "shift": shift,
-                    "direction": "BULLISH" if shift > 0 else "BEARISH",
-                    "current_score": curr.net_score,
-                    "previous_score": prev.net_score,
-                })
+                alerts.append(
+                    {
+                        "symbol": sym,
+                        "shift": shift,
+                        "direction": "BULLISH" if shift > 0 else "BEARISH",
+                        "current_score": curr.net_score,
+                        "previous_score": prev.net_score,
+                    }
+                )
 
         return sorted(alerts, key=lambda a: abs(a["shift"]), reverse=True)

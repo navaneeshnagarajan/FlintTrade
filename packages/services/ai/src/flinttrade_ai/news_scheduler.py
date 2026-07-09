@@ -189,7 +189,7 @@ class NewsScheduler:
         intraday_interval_min: int = _INTRADAY_INTERVAL_MIN,
     ) -> None:
         if scraper is None:
-            from .news_scraper import NewsScraper  # lazy import
+            from .sentiment import NewsScraper  # lazy import
 
             scraper = NewsScraper()
 
@@ -311,7 +311,7 @@ class NewsScheduler:
             NewsEvent describing the results.
         """
         if sources is None:
-            from .news_scraper import RSS_SOURCES  # lazy
+            from .sentiment import RSS_SOURCES  # lazy
 
             sources = list(RSS_SOURCES.keys())
         return await self._run_poll(poll_type, sources)
@@ -346,13 +346,11 @@ class NewsScheduler:
             if job is None or not job.enabled:
                 continue
 
-            from .news_scraper import RSS_SOURCES  # lazy
+            from .sentiment import RSS_SOURCES  # lazy
 
             await self._run_poll(poll_type, list(RSS_SOURCES.keys()))
 
-    def _next_event(
-        self, now: datetime
-    ) -> tuple[datetime, PollType, str]:
+    def _next_event(self, now: datetime) -> tuple[datetime, PollType, str]:
         """Compute the next scheduled event relative to *now* (IST).
 
         Schedule:
@@ -389,22 +387,14 @@ class NewsScheduler:
             candidates.append((post_tmrw, PollType.POST_MARKET, "post_market"))
 
         # Intraday: next N-minute slot within market hours
-        market_open_dt = datetime(
-            today.year, today.month, today.day,
-            _MARKET_OPEN[0], _MARKET_OPEN[1], tzinfo=_IST
-        )
-        market_close_dt = datetime(
-            today.year, today.month, today.day,
-            _MARKET_CLOSE[0], _MARKET_CLOSE[1], tzinfo=_IST
-        )
+        market_open_dt = datetime(today.year, today.month, today.day, _MARKET_OPEN[0], _MARKET_OPEN[1], tzinfo=_IST)
+        market_close_dt = datetime(today.year, today.month, today.day, _MARKET_CLOSE[0], _MARKET_CLOSE[1], tzinfo=_IST)
 
         if market_open_dt <= now <= market_close_dt:
             # We are inside market hours — next slot from now
             elapsed_min = (now - market_open_dt).total_seconds() / 60
             slots_passed = int(elapsed_min // self._intraday_interval_min) + 1
-            next_slot = market_open_dt + timedelta(
-                minutes=slots_passed * self._intraday_interval_min
-            )
+            next_slot = market_open_dt + timedelta(minutes=slots_passed * self._intraday_interval_min)
             if next_slot <= market_close_dt:
                 candidates.append((next_slot, PollType.INTRADAY, "intraday"))
         elif now < market_open_dt:
@@ -414,8 +404,7 @@ class NewsScheduler:
             # After close — schedule for tomorrow's open
             tomorrow = today + timedelta(days=1)
             next_open = datetime(
-                tomorrow.year, tomorrow.month, tomorrow.day,
-                _MARKET_OPEN[0], _MARKET_OPEN[1], tzinfo=_IST
+                tomorrow.year, tomorrow.month, tomorrow.day, _MARKET_OPEN[0], _MARKET_OPEN[1], tzinfo=_IST
             )
             candidates.append((next_open, PollType.INTRADAY, "intraday"))
 
@@ -427,9 +416,7 @@ class NewsScheduler:
     # Poll execution
     # ------------------------------------------------------------------
 
-    async def _run_poll(
-        self, poll_type: PollType, sources: list[str]
-    ) -> NewsEvent:
+    async def _run_poll(self, poll_type: PollType, sources: list[str]) -> NewsEvent:
         """Execute a poll, deduplicate results, emit callbacks.
 
         Args:
@@ -444,9 +431,7 @@ class NewsScheduler:
 
         for source in sources:
             try:
-                fetched = await asyncio.get_event_loop().run_in_executor(
-                    None, self._scraper.fetch_headlines, source
-                )
+                fetched = await asyncio.get_event_loop().run_in_executor(None, self._scraper.fetch_headlines, source)
                 all_articles.extend(fetched)
             except Exception as exc:
                 logger.warning("NewsScheduler: error fetching %s — %s", source, exc)

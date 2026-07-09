@@ -10,14 +10,13 @@ summarization. Designed to wire into the News widget and /ai route.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .llm_client import LLMClient, LLMMessage
-from .sentiment import DEFAULT_FEEDS
+from .sentiment import DEFAULT_FEEDS, parse_feed
 
 logger = logging.getLogger("flinttrade.ai.news_summarizer")
 
@@ -121,8 +120,7 @@ class MarketNewsSummarizer:
     ) -> list[dict[str, str]]:
         """Fetch news articles from RSS feeds.
 
-        Each article is a dict with keys: title, summary, link, published, source.
-        Falls back gracefully if feedparser is not installed.
+        Each article uses the canonical NewsArticle dictionary shape.
 
         Args:
             sources: RSS feed URLs (defaults to Indian financial feeds).
@@ -133,37 +131,16 @@ class MarketNewsSummarizer:
         """
         feeds = sources or PREMARKET_SOURCES
         articles: list[dict[str, str]] = []
-
-        try:
-            import feedparser  # type: ignore[import-untyped]
-        except ImportError:
-            logger.warning("feedparser not installed — returning empty news list")
-            return articles
+        seen_titles: set[str] = set()
 
         for feed_url in feeds:
             try:
-                parsed = feedparser.parse(feed_url)
-                source_name = parsed.feed.get("title", feed_url)[:30]
-
-                for entry in parsed.entries[:max_articles]:
-                    article: dict[str, str] = {
-                        "title": entry.get("title", ""),
-                        "summary": entry.get("summary", entry.get("description", "")),
-                        "link": entry.get("link", ""),
-                        "published": entry.get("published", ""),
-                        "source": source_name,
-                    }
-                    # Deduplicate by title hash
-                    title_hash = hashlib.md5(
-                        article["title"].encode(), usedforsecurity=False,
-                    ).hexdigest()
-                    if not any(
-                        hashlib.md5(a["title"].encode(), usedforsecurity=False).hexdigest() == title_hash
-                        for a in articles
-                    ):
-                        articles.append(article)
-
-                logger.info("Fetched %d articles from %s", len(parsed.entries), source_name)
+                parsed_articles = parse_feed(feed_url)
+                for parsed in parsed_articles[:max_articles]:
+                    if parsed.title not in seen_titles:
+                        seen_titles.add(parsed.title)
+                        articles.append(parsed.to_dict())
+                logger.info("Fetched %d articles from %s", len(parsed_articles), feed_url)
             except Exception as exc:
                 logger.warning("Failed to fetch feed %s: %s", feed_url, exc)
 

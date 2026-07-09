@@ -19,7 +19,7 @@ from flinttrade_ai.news_scheduler import (
     _NewsCache,
     _IST,
 )
-from flinttrade_ai.news_scraper import NewsArticle
+from flinttrade_ai.sentiment import NewsArticle
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +72,7 @@ class TestNewsCache:
 
     def test_sweep_removes_expired(self) -> None:
         import time as _time
+
         cache = _NewsCache(ttl_seconds=0.01)  # 10ms TTL
         cache.is_new("expiring title")
         _time.sleep(0.02)
@@ -321,6 +322,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_start_sets_is_running(self) -> None:
         scheduler = NewsScheduler(scraper=_make_scraper())
+
         # Patch the loop to immediately return so the test doesn't hang
         async def _noop_loop() -> None:
             await asyncio.sleep(100)
