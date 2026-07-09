@@ -16,6 +16,7 @@ import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
 import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
 import type { Position, Trade } from "@/types/api";
+import { realisedFromTrades } from "@/lib/pnl";
 import type { Time } from "lightweight-charts";
 
 interface Props {
@@ -69,7 +70,7 @@ interface DailyPnl {
 }
 
 function computeDailyPnl(trades: Trade[]): DailyPnl[] {
-  // Group by date, then pair BUY-SELL intraday for realized P&L
+  // Group by date; realised P&L per day is the shared per-symbol FIFO pairing.
   const byDate: Record<string, Trade[]> = {};
   trades.forEach((t) => {
     const date = t.timestamp?.slice(0, 10) ?? "unknown";
@@ -77,30 +78,9 @@ function computeDailyPnl(trades: Trade[]): DailyPnl[] {
     byDate[date].push(t);
   });
 
-  return Object.entries(byDate).map(([date, dayTrades]) => {
-    const groups: Record<string, Trade[]> = {};
-    dayTrades.forEach((t) => {
-      if (!groups[t.symbol]) groups[t.symbol] = [];
-      groups[t.symbol].push(t);
-    });
-
-    let dayPnl = 0;
-    for (const legs of Object.values(groups)) {
-      const buys = legs.filter((t) => t.action === "BUY").map((t) => ({ qty: t.quantity, price: t.price }));
-      const sells = legs.filter((t) => t.action === "SELL").map((t) => ({ qty: t.quantity, price: t.price }));
-      let bi = 0;
-      let si = 0;
-      while (bi < buys.length && si < sells.length) {
-        const matched = Math.min(buys[bi].qty, sells[si].qty);
-        dayPnl += (sells[si].price - buys[bi].price) * matched;
-        buys[bi] = { ...buys[bi], qty: buys[bi].qty - matched };
-        sells[si] = { ...sells[si], qty: sells[si].qty - matched };
-        if (buys[bi].qty === 0) bi++;
-        if (sells[si].qty === 0) si++;
-      }
-    }
-    return { date, pnl: dayPnl };
-  }).sort((a, b) => a.date.localeCompare(b.date));
+  return Object.entries(byDate)
+    .map(([date, dayTrades]) => ({ date, pnl: realisedFromTrades(dayTrades) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // Position breakdown by instrument

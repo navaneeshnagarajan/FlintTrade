@@ -269,6 +269,16 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Intraday P&L now books partial-close realised from the tradebook** — the
+  widget split realised from positionbook alone, so a position partially closed
+  earlier in the session showed zero realised (the booked amount was buried in
+  the still-open row and overwritten by the local MTM). It now attributes
+  per-symbol realised from today's tradebook (a shared `lib/pnl.ts` FIFO helper,
+  also used by the P&L dashboard) to open positions, keeps the accurate broker
+  pnl for fully-closed rows, and falls back to the old behaviour when the
+  tradebook is unavailable. Realised for a position carried over from a prior
+  day remains understated (no matching buy leg in today's tradebook) — the same
+  documented intraday-only limitation.
 - **`make full-check` no longer OOMs on the vitest stage** — it ran the entire
   terminal suite unbounded in one 4 GB process, which OOMs on the same heavy
   widgets CI has to shard around. It now uses CI's form (`--pool=forks

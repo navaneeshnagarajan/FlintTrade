@@ -26,10 +26,11 @@ import {
 } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { FlintBaselineSparkline } from "@flinttrade/design-system";
-import { getPositionbook } from "@/services/api";
+import { getPositionbook, getTradebook } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import type { Position } from "@/types/api";
+import { realisedBySymbol } from "@/lib/pnl";
+import type { Position, Trade } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -112,6 +113,11 @@ function quantityOf(pos: Position): number {
   return toFiniteNumber(pos.quantity) ?? 0;
 }
 
+/** Instrument symbol, matching the tradebook's ``symbol`` field for attribution. */
+function symbolOf(pos: Position): string {
+  return String(pos.symbol ?? (pos as Position & { tradingsymbol?: string }).tradingsymbol ?? "");
+}
+
 /**
  * Effective P&L for a position. OpenAlgo's pnl field is wrong for some
  * brokers (CLAUDE.md quirk 4), so for open positions we compute the
@@ -128,13 +134,12 @@ function quantityOf(pos: Position): number {
  *     0 as valid produced a fabricated (0 − avg)×qty loss that overrode the
  *     correct broker figure, so non-positive inputs are treated as missing.
  *
- * Known limitation: the local MTM is the *unrealised* P&L on the currently
- * open quantity only. For a position that was partially closed earlier in the
- * session the broker pnl additionally carries the booked realised amount,
- * which positionbook cannot separate — the tradebook-based recomputation that
- * would restore it (CLAUDE.md quirk 4) is not wired yet, so where a broker
- * pnl looks trustworthy it is generally the more complete figure. All inputs
- * are coerced defensively — adapters send string-typed numerics.
+ * Scope: the local MTM is the *unrealised* P&L on the currently open quantity
+ * only. A position partially closed earlier in the session has booked realised
+ * that positionbook cannot separate from unrealised; the widget restores it
+ * from the tradebook (CLAUDE.md quirk 4) via ``realisedBySymbol`` rather than
+ * from this figure. All inputs are coerced defensively — adapters send
+ * string-typed numerics.
  */
 function effectivePnL(pos: Position): number {
   const qty = quantityOf(pos);
@@ -146,16 +151,6 @@ function effectivePnL(pos: Position): number {
     return (ltp - avg) * qty;
   }
   return toFiniteNumber(pos.pnl) ?? 0;
-}
-
-/**
- * For closed positions (qty === 0) we treat the full pnl as realised;
- * for open positions the full pnl is unrealised.
- */
-function splitPnL(pos: Position): { realised: number; unrealised: number } {
-  const pnl = effectivePnL(pos);
-  if (quantityOf(pos) === 0) return { realised: pnl, unrealised: 0 };
-  return { realised: 0, unrealised: pnl };
 }
 
 /** Build per-strategy P&L map from positions */
@@ -248,12 +243,31 @@ function IntradayPnLWidget() {
     try {
       const positions: Position[] = await getPositionbook();
 
+      // Booked realised P&L per symbol from today's tradebook (partial + full
+      // closes). If the tradebook is unavailable the map is empty and realised
+      // falls back to the closed-position pnl below — the prior behaviour.
+      let trades: Trade[] = [];
+      try {
+        trades = await getTradebook();
+      } catch {
+        trades = [];
+      }
+      const realisedForSymbol = realisedBySymbol(trades);
+
       let realisedPnL   = 0;
       let unrealisedPnL = 0;
       for (const pos of positions) {
-        const { realised, unrealised } = splitPnL(pos);
-        realisedPnL   += realised;
-        unrealisedPnL += unrealised;
+        if (quantityOf(pos) === 0) {
+          // Fully closed: the broker/computed pnl is the accurate realised,
+          // including a position carried over from a prior day (which the
+          // tradebook alone would miss).
+          realisedPnL += effectivePnL(pos);
+        } else {
+          // Open: unrealised MTM on the remaining qty, plus any realised already
+          // booked by partial closes earlier in the session (from the tradebook).
+          unrealisedPnL += effectivePnL(pos);
+          realisedPnL   += realisedForSymbol.get(symbolOf(pos)) ?? 0;
+        }
       }
       const netPnL = realisedPnL + unrealisedPnL;
 

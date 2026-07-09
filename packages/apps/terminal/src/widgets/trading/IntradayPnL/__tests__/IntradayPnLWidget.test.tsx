@@ -16,6 +16,7 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/services/api", () => ({
   getPositionbook: vi.fn().mockResolvedValue([]),
+  getTradebook: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/services/ftApi.native", () => ({
@@ -30,10 +31,11 @@ vi.mock("@/lib/market", () => ({
 // Import component and mock references
 // ---------------------------------------------------------------------------
 
-import { getPositionbook } from "@/services/api";
+import { getPositionbook, getTradebook } from "@/services/api";
 import IntradayPnLWidget from "../IntradayPnLWidget";
 
 const mockGetPositionbook = getPositionbook as ReturnType<typeof vi.fn>;
+const mockGetTradebook = getTradebook as ReturnType<typeof vi.fn>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,6 +74,9 @@ describe("IntradayPnLWidget", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    // clearAllMocks resets call history but not implementations — re-default the
+    // tradebook to empty so a per-test override does not leak into later tests.
+    mockGetTradebook.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -170,6 +175,26 @@ describe("IntradayPnLWidget", () => {
     // Net should still be 500
     const netEl = screen.getByTestId("net-pnl");
     expect(netEl.textContent).toContain("500");
+  });
+
+  it("books partial-close realised from the tradebook for a still-open position", async () => {
+    // Bought 100 @ 100, sold 40 @ 110 (realised 400), 60 still open. positionbook
+    // shows only the open 60 @ avg 100, ltp 105 (unrealised 300) — its booked
+    // realised is invisible without the tradebook.
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 60, averagePrice: 100, ltp: 105, pnl: 99999, pnlPercent: 0 },
+    ]);
+    mockGetTradebook.mockResolvedValue([
+      { tradeId: "T1", orderId: "O1", symbol: "SBIN", exchange: "NSE", action: "BUY", quantity: 100, price: 100, timestamp: "2026-07-09T09:20:00Z" },
+      { tradeId: "T2", orderId: "O2", symbol: "SBIN", exchange: "NSE", action: "SELL", quantity: 40, price: 110, timestamp: "2026-07-09T10:00:00Z" },
+    ]);
+    renderWidget();
+    await act(async () => { await Promise.resolve(); });
+    // Realised = (110 − 100) × 40 = 400 (from tradebook, not double-counted in
+    // unrealised); Unrealised = (105 − 100) × 60 = 300 (open MTM); Net = 700.
+    expect(screen.getByText("Realised").parentElement).toHaveTextContent("+₹400.00");
+    expect(screen.getByText("Unrealised").parentElement).toHaveTextContent("+₹300.00");
+    expect(screen.getByTestId("net-pnl").textContent).toContain("700");
   });
 
   // ── Broker numeric coercion + local P&L (OpenAlgo quirk 4) ────────────────
