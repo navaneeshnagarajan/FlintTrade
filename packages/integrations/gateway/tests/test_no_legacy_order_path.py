@@ -52,7 +52,8 @@ _RAW_ORDER_ALLOWLIST = {
     #  now dispatches through the injected gated dispatchers — SafetySystem →
     #  gate_order → BrokerRouter — and the service holds no raw client; the pin
     #  test_bracket_order_writes_only_through_gated_router below keeps it out.)
-    "packages/services/engine/src/flinttrade_engine/router.py",
+    # (flinttrade_engine/router.py REMOVED 2026-07-09: the legacy ungated
+    #  OrderRouter is deleted; the only live dispatch is gate_order → BrokerRouter.)
     "packages/services/engine/src/flinttrade_engine/strategies/wheel_live.py",
     # Dormant automation service, not mounted by the FlintTrade core app. It
     # accepts an arbitrary ``order_router`` object and must be folded into the
@@ -69,7 +70,6 @@ _RAW_ORDER_ALLOWLIST = {
 # allowlist explicit and shrinking; a new ``.route_order(`` call must prove it is
 # canonical before being added.
 _RAW_ROUTE_ORDER_ALLOWLIST = {
-    "packages/services/engine/src/flinttrade_engine/router.py",
     "packages/services/engine/src/flinttrade_engine/smart_router.py",
     # basket_orders.py + split_orders.py graduated 2026-07-09 (G13): each leg/
     # chunk now dispatches through the gated build_gated_leg_dispatchers place_leg

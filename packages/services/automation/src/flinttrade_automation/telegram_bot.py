@@ -249,7 +249,7 @@ class TelegramBot:
     2. Wired mode (production — connects to engine)::
 
         bot = TelegramBot(
-            router=router,
+            client=client,
             safety_system=safety,
             scheduler=scheduler,
             audit_logger=auditor,
@@ -260,13 +260,13 @@ class TelegramBot:
     def __init__(
         self,
         config: BotConfig | None = None,
-        router: Any = None,
+        client: Any = None,
         safety_system: Any = None,
         scheduler: Any = None,
         audit_logger: Any = None,
     ) -> None:
         self.config = config or BotConfig.from_env()
-        self.router = router
+        self.client = client
         self.safety = safety_system
         self.scheduler = scheduler
         self.audit = audit_logger
@@ -369,9 +369,9 @@ class TelegramBot:
         # 2. Cancel all orders via OpenAlgo — run to completion so the
         #    confirmation reflects the actual outcome, not a fire-and-forget.
         orders_cancelled = False
-        if self.router and self.router.client:
+        if self.client:
             try:
-                coro = self.router.client.cancel_all_orders(strategy="Flint")
+                coro = self.client.cancel_all_orders(strategy="Flint")
                 if asyncio.iscoroutine(coro):
                     self._client_sync(coro)
                 orders_cancelled = True
@@ -381,9 +381,9 @@ class TelegramBot:
 
         # 3. Close all positions via OpenAlgo
         positions_closed = False
-        if self.router and self.router.client:
+        if self.client:
             try:
-                coro = self.router.client.close_position(strategy="Flint")
+                coro = self.client.close_position(strategy="Flint")
                 if asyncio.iscoroutine(coro):
                     self._client_sync(coro)
                 positions_closed = True
@@ -446,10 +446,10 @@ class TelegramBot:
         lines: list[str] = []
 
         # Try wired mode first
-        if self.router and self.router.client:
+        if self.client:
             try:
                 # Positions — async client, try to get result
-                positions = self._client_sync(self.router.client.positionbook())
+                positions = self._client_sync(self.client.positionbook())
                 if positions:
                     lines.append(format_positions(
                         [p.model_dump() if hasattr(p, "model_dump") else {"symbol": p.symbol, "quantity": p.quantity, "pnl": p.pnl} for p in positions]
@@ -460,7 +460,7 @@ class TelegramBot:
                 lines.append("No open positions.")
 
             try:
-                funds = self._client_sync(self.router.client.funds())
+                funds = self._client_sync(self.client.funds())
                 lines.append(f"\n*Funds:* ₹{funds.available_balance} available")
             except Exception as exc:
                 logger.exception("suppressed: %s", exc)
@@ -495,9 +495,9 @@ class TelegramBot:
         focused position book. Previously it aliased /status, so /positions and
         /status returned the same blob.
         """
-        if self.router and self.router.client:
+        if self.client:
             try:
-                positions = self._client_sync(self.router.client.positionbook())
+                positions = self._client_sync(self.client.positionbook())
                 return format_positions([_row_from(p, "symbol", "quantity", "pnl", "ltp") for p in (positions or [])])
             except Exception as exc:
                 logger.error("Telegram /positions failed: %s", exc)
@@ -513,9 +513,9 @@ class TelegramBot:
 
     def _cmd_orders(self) -> str:
         """Pending orders — from the broker order book in wired mode."""
-        if self.router and self.router.client:
+        if self.client:
             try:
-                orders = self._client_sync(self.router.client.orderbook())
+                orders = self._client_sync(self.client.orderbook())
                 return format_orders([_row_from(o, "symbol", "action", "quantity", "price") for o in (orders or [])])
             except Exception as exc:
                 logger.error("Telegram /orders failed: %s", exc)
@@ -616,7 +616,7 @@ class TelegramBot:
         negative on the kill switch. Falls back to :meth:`_run_async` for a plain
         client without ``run_sync`` (e.g. test doubles).
         """
-        client = self.router.client if self.router else None
+        client = self.client
         run_sync = getattr(client, "run_sync", None)
         if callable(run_sync):
             return run_sync(coro)

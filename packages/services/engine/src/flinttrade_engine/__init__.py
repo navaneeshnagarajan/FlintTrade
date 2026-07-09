@@ -4,7 +4,6 @@ from flinttrade_core.version import APP_VERSION
 
 __version__ = APP_VERSION
 
-from .router import OrderRouter, RoutingDecision, SandboxAccountConfig, StrategyRouteConfig
 from .safety import (
     DailyPnLLimits,
     IntradayAllowList,
@@ -36,8 +35,8 @@ from .strategy import BaseStrategy, StrategyRegistry, StrategyState
 
 # NOTE: SandboxEngine, SandboxConfig, and UserStrategyRunner are intentionally
 # NOT imported here to prevent triggering the pre-existing circular import
-# between flinttrade_core.__init__ (which imports app.py) and
-# flinttrade_engine.router.  Import these directly from their submodules:
+# between flinttrade_core.__init__ (which imports app.py) and the engine
+# submodules.  Import these directly from their submodules:
 #
 #   from flinttrade_engine.sandbox import SandboxEngine, SandboxConfig
 #   from flinttrade_engine.strategy_runner import UserStrategyRunner
@@ -61,11 +60,6 @@ __all__ = [
     "MTMCircuitBreaker",
     "MTMCircuitBreakerConfig",
     "IntradayAllowList",
-    # Router
-    "OrderRouter",
-    "RoutingDecision",
-    "StrategyRouteConfig",
-    "SandboxAccountConfig",
     # Scheduler
     "TimeScheduler",
     "ExchangeSchedule",

@@ -1,17 +1,11 @@
 """Engine test configuration.
 
 Pre-initializes the flinttrade_engine package before any test fixture runs.
-This breaks the circular import chain:
-  flinttrade_engine.__init__
-    → router.py
-      → flinttrade_core.models
-        → flinttrade_core.__init__
-          → app.py
-            → flinttrade_engine.router.OrderRouter   (fails: partial init)
-
-By importing flinttrade_engine.router directly first (before __init__ runs),
-we prime sys.modules so that when app.py tries to import OrderRouter the module
-is already fully loaded.
+This breaks the pre-existing circular import chain between
+``flinttrade_engine`` submodules, ``flinttrade_core.models`` and
+``flinttrade_core.__init__`` (which imports ``app.py``). By importing the
+package directly first (before any test module runs), we prime ``sys.modules``
+so later imports resolve against a fully-loaded package.
 
 Also rebinds the ``AuthState`` singleton at session-scope to a tmp DuckDB so
 that engine tests that mint or decode FlintTrade JWTs (e.g. test_mode_guard)
@@ -34,13 +28,13 @@ def pytest_configure(config) -> None:  # noqa: ANN001
     modules are imported or fixtures are set up.
     """
     # Only bootstrap if we haven't already successfully imported the package.
-    if "flinttrade_engine.router" not in sys.modules:
+    if "flinttrade_engine" not in sys.modules:
         try:
-            # Import router directly — this triggers the circular chain.
+            # Import the package directly — this triggers the circular chain.
             # However, because pytest_configure runs before any test module
             # is imported, sys.modules is clean and the import succeeds on
             # the first attempt through the standard Python import machinery.
-            import flinttrade_engine.router  # noqa: F401
+            import flinttrade_engine  # noqa: F401
         except ImportError:
             # If this fails (e.g. on a fresh session), we still want tests
             # to proceed so pytest can report individual import errors clearly.

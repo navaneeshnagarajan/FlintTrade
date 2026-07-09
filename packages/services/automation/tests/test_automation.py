@@ -394,10 +394,8 @@ class TestTelegramKillSwitch:
         # Make cancel_all_orders return a non-coroutine (sync mock)
         mock_client.cancel_all_orders = MagicMock(return_value=None)
         mock_client.close_position = MagicMock(return_value=None)
-        mock_router = MagicMock()
-        mock_router.client = mock_client
 
-        bot = TelegramBot(config=BotConfig(chat_id="12345"), router=mock_router)
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), client=mock_client)
         bot.handle_command("/kill", chat_id="12345")
 
         mock_client.cancel_all_orders.assert_called_once()
@@ -434,15 +432,13 @@ class TestTelegramKillSwitch:
         mock_client = MagicMock()
         mock_client.cancel_all_orders = MagicMock(return_value=None)
         mock_client.close_position = MagicMock(return_value=None)
-        mock_router = MagicMock()
-        mock_router.client = mock_client
         mock_scheduler = MagicMock()
         mock_scheduler.stop_all = MagicMock(return_value=None)
         mock_audit = MagicMock()
 
         bot = TelegramBot(
             config=BotConfig(chat_id="12345"),
-            router=mock_router,
+            client=mock_client,
             safety_system=mock_safety,
             scheduler=mock_scheduler,
             audit_logger=mock_audit,
@@ -457,13 +453,11 @@ class TestTelegramKillSwitch:
     def test_status_with_wired_router(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
-        # Mock a router with sync positionbook/funds for testing
+        # Mock a client with sync positionbook/funds for testing
         mock_client = MagicMock()
         mock_client.positionbook = MagicMock(return_value=[])
         mock_client.funds = MagicMock()
         mock_client.funds.return_value = MagicMock(available_balance="100000")
-        mock_router = MagicMock()
-        mock_router.client = mock_client
 
         mock_scheduler = MagicMock()
         mock_scheduler.status.return_value = {
@@ -472,7 +466,7 @@ class TestTelegramKillSwitch:
 
         bot = TelegramBot(
             config=BotConfig(chat_id="12345"),
-            router=mock_router,
+            client=mock_client,
             scheduler=mock_scheduler,
         )
         result = bot.handle_command("/status", chat_id="12345")

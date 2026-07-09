@@ -1,4 +1,8 @@
-"""Tests for packages/services/engine/src/order_routes.py — basket, split, options-strategy."""
+"""Tests for the advanced-order routes (basket / split / options-strategy).
+
+These routes live on core's ``orders_bp`` (folded in from the former engine
+``order_bp`` on 2026-07-09) at ``/api/v1/orders/{basket,split,options-strategy}``.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ from unittest.mock import MagicMock
 
 from flask import Flask
 
-import flinttrade_engine.order_routes as mod
+import flinttrade_core.order_routes as mod
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +60,7 @@ def _make_app(basket_executor=None, split_executor=None) -> Flask:
         flask_app.config["BASKET_EXECUTOR"] = basket_executor
     if split_executor:
         flask_app.config["SPLIT_EXECUTOR"] = split_executor
-    flask_app.register_blueprint(mod.order_bp)
+    flask_app.register_blueprint(mod.orders_bp)
     return flask_app
 
 

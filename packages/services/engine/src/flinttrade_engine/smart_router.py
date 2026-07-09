@@ -24,7 +24,7 @@ Urgency mapping:
 Usage::
 
     router = SmartOrderRouter(
-        base_router=order_router,
+        base_router=gated_executor,
         depth_provider=my_depth_fn,
         volume_provider=my_volume_fn,
     )
@@ -200,10 +200,13 @@ def _best_price(depth: dict, action: Literal["BUY", "SELL"]) -> float | None:
 class SmartOrderRouter:
     """Routes orders intelligently based on depth, volume, slippage, and urgency.
 
-    Does not modify :class:`~flinttrade_engine.router.OrderRouter` — wraps it.
+    Decides only; it does not dispatch to a broker itself. It wraps a gated base
+    router — in production the ``GatedChildExecutor`` whose ``route_order`` runs
+    the full ``gate_order`` → ``BrokerRouter`` path for every child order.
 
     Attributes:
-        base_router: The underlying :class:`~flinttrade_engine.router.OrderRouter`.
+        base_router: The underlying gated dispatcher (any object exposing an
+            async ``route_order``); production wires the ``GatedChildExecutor``.
         depth_provider: Async callable ``(symbol, exchange) → dict`` returning
             market depth in OpenAlgo format.
         volume_provider: Async callable ``(symbol, exchange) → int`` returning
@@ -223,8 +226,9 @@ class SmartOrderRouter:
         """Initialise the SmartOrderRouter.
 
         Args:
-            base_router: An :class:`~flinttrade_engine.router.OrderRouter`
-                instance used to place individual child orders.
+            base_router: A gated dispatcher exposing an async ``route_order``
+                (production: ``GatedChildExecutor``) used to place each child
+                order through ``gate_order`` → ``BrokerRouter``.
             depth_provider: Async callable that returns market depth dict for a
                 symbol and exchange.
             volume_provider: Async callable that returns recent volume (int) for

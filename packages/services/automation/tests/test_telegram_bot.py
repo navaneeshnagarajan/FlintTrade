@@ -743,9 +743,7 @@ class TestWiredCommands:
                 loop.close()
 
         client.run_sync.side_effect = _run_sync
-        router = MagicMock()
-        router.client = client
-        return TelegramBot(config=BotConfig(token="T", chat_id="9", enabled=True), router=router), client
+        return TelegramBot(config=BotConfig(token="T", chat_id="9", enabled=True), client=client), client
 
     def test_positions_wired_uses_run_sync(self):
         bot, client = self._wired_bot(positions=[{"symbol": "INFY", "quantity": 10, "pnl": 500, "ltp": 1500}])

@@ -2041,12 +2041,9 @@ def create_flask_app(
     #   admin_action_center_bp    — /admin/action-center/{pending,approve,reject,history}
     #                               (separate from `action_center_bp` which lives
     #                               under /api/v1/action-center for normal users)
-    #   engine order_bp           — /api/v1/orders/{basket,split,options-strategy}
-    #                               (advanced orders; distinct from core's safety
-    #                               proxy `orders_bp` which currently lives at
-    #                               /v1/orders/* — frontend uses the /api/v1/
-    #                               form, so these route additions reduce the
-    #                               apparent 404 surface today.)
+    #   (the advanced-order routes /api/v1/orders/{basket,split,options-strategy}
+    #    were folded into core's orders_bp on 2026-07-09 — one blueprint now owns
+    #    the whole /api/v1/orders/* surface.)
     # ------------------------------------------------------------------
     from flinttrade_webhooks.webhook_receiver import WebhookConfig, WebhookReceiver  # noqa: PLC0415
     from flinttrade_webhooks.webhook_routes import init_webhook_routes, webhook_bp  # noqa: PLC0415
@@ -2082,9 +2079,6 @@ def create_flask_app(
 
     from flinttrade_engine.action_center_routes import admin_action_center_bp  # noqa: PLC0415
     app.register_blueprint(admin_action_center_bp)
-
-    from flinttrade_engine.order_routes import order_bp as engine_order_bp  # noqa: PLC0415
-    app.register_blueprint(engine_order_bp)
 
     # Register Workspace Preset blueprint (/v1/presets/* — external: /ft-api/v1/presets/*)
     from .preset_routes import preset_bp  # noqa: PLC0415
@@ -2823,18 +2817,14 @@ class FlintTradeApp:
         self.settings = Settings.from_env()
         self.client = OpenAlgoClient(self.settings)
 
-        # Engine — safety + router + scheduler (deferred to avoid circular import
-        # between core↔engine at module level).
-        from flinttrade_engine.router import OrderRouter  # noqa: PLC0415
+        # Engine — safety + scheduler (deferred to avoid circular import
+        # between core↔engine at module level). Live order dispatch is the
+        # gateway BrokerRouter (gate_order → BrokerRouter → adapter); the legacy
+        # ungated OrderRouter was removed 2026-07-09.
         from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
         from flinttrade_engine.scheduler import StrategyScheduler, TimeScheduler  # noqa: PLC0415
 
         self.safety = SafetySystem(SafetyConfig(check_market_hours=True))
-        self.router = OrderRouter(
-            client=self.client,
-            safety=self.safety,
-            audit_logger=self.audit,
-        )
         self.time_scheduler = TimeScheduler(client=self.client)
         self.scheduler = StrategyScheduler(
             client=self.client,
@@ -2856,7 +2846,7 @@ class FlintTradeApp:
         from flinttrade_automation.telegram_bot import TelegramBot  # noqa: PLC0415
 
         self.telegram = TelegramBot(
-            router=self.router,
+            client=self.client,
             safety_system=self.safety,
             scheduler=self.scheduler,
             audit_logger=self.audit,

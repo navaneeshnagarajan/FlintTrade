@@ -1,7 +1,7 @@
 """Guard: the advanced-order executors are wired ONLY after they were gated.
 
-The basket / split / bracket order routes (engine ``order_bp`` and ``bracket_bp``)
-delegate to executors read from ``app.config["BASKET_EXECUTOR"]`` /
+The basket / split / bracket order routes (core ``orders_bp`` and engine
+``bracket_bp``) delegate to executors read from ``app.config["BASKET_EXECUTOR"]`` /
 ``["SPLIT_EXECUTOR"]`` / ``["BRACKET_SERVICE"]``.
 
 Audit finding [0] originally confirmed the basket/split executors placed per-leg

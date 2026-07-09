@@ -588,98 +588,6 @@ class TestSafetySystem:
 
 
 # ======================================================================
-# OrderRouter
-# ======================================================================
-
-
-class TestOrderRouter:
-    """Test order routing through safety + dispatch."""
-
-    def _make_order(self, **overrides):
-        from flinttrade_core.models import Order
-        defaults = {"symbol": "RELIANCE", "action": "BUY", "quantity": "10"}
-        defaults.update(overrides)
-        return Order(**defaults)
-
-    def _make_safety(self):
-        from flinttrade_engine.safety import SafetyConfig, SafetySystem
-        return SafetySystem(SafetyConfig(check_market_hours=False))
-
-    def test_route_passes_and_places_order(self):
-        from flinttrade_core.models import OrderResponse
-        from flinttrade_engine.router import OrderRouter
-
-        mock_client = MagicMock()
-        mock_client.place_order.return_value = OrderResponse(status="success", orderid="12345")
-
-        router = OrderRouter(client=mock_client, safety=self._make_safety())
-        decision = router.route(
-            self._make_order(),
-            ltp=2500.0,
-            positions=[],
-            total_balance=100000,
-            starting_capital=100000,
-        )
-        assert decision.passed
-        assert decision.order_response.orderid == "12345"
-        mock_client.place_order.assert_called_once()
-
-    def test_route_blocked_by_safety(self):
-        from flinttrade_engine.router import OrderRouter
-
-        mock_client = MagicMock()
-        router = OrderRouter(client=mock_client, safety=self._make_safety())
-
-        # Empty symbol will fail L1
-        decision = router.route(self._make_order(symbol=""), starting_capital=100000)
-        assert not decision.passed
-        mock_client.place_order.assert_not_called()
-
-    def test_disabled_strategy_blocked(self):
-        from flinttrade_engine.router import OrderRouter, StrategyRouteConfig
-
-        mock_client = MagicMock()
-        router = OrderRouter(client=mock_client, safety=self._make_safety())
-        router.add_strategy_config(StrategyRouteConfig("Flint", enabled=False))
-
-        decision = router.route(self._make_order(), starting_capital=100000)
-        assert not decision.passed
-        assert "disabled" in decision.error.lower()
-
-    def test_history_records_decisions(self):
-        from flinttrade_core.models import OrderResponse
-        from flinttrade_engine.router import OrderRouter
-
-        mock_client = MagicMock()
-        mock_client.place_order.return_value = OrderResponse(status="success", orderid="1")
-
-        router = OrderRouter(client=mock_client, safety=self._make_safety())
-        router.route(self._make_order(), ltp=2500.0, starting_capital=100000, total_balance=100000)
-        router.route(self._make_order(symbol=""), starting_capital=100000)
-
-        assert len(router.history) == 2
-        assert router.history[0].passed
-        assert not router.history[1].passed
-
-    def test_api_error_recorded(self):
-        from flinttrade_engine.router import OrderRouter
-
-        mock_client = MagicMock()
-        mock_client.place_order.side_effect = RuntimeError("Connection refused")
-
-        router = OrderRouter(client=mock_client, safety=self._make_safety())
-        decision = router.route(
-            self._make_order(),
-            ltp=2500.0,
-            positions=[],
-            total_balance=100000,
-            starting_capital=100000,
-        )
-        assert not decision.passed
-        assert "Connection refused" in decision.error
-
-
-# ======================================================================
 # TimeScheduler — Market Hours
 # ======================================================================
 
@@ -1319,7 +1227,7 @@ class TestPackageExports:
     def test_all_exports(self):
         from flinttrade_engine import __all__
         expected = [
-            "SafetySystem", "OrderRouter", "TimeScheduler",
+            "SafetySystem", "TimeScheduler",
             "BaseStrategy", "StrategyRegistry", "StrategyState",
             "SafetyResult", "SafetyConfig", "KillSwitch",
             "StrategyRunner", "StrategyScheduler",
