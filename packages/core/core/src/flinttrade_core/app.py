@@ -1601,6 +1601,23 @@ def create_flask_app(
         app.config["TRADE_STORAGE"] = None
         app.config["TRADE_STORAGE_LOCK"] = None
 
+    # Annotated Trade Journal (SQLite + FTS5, own journal.sqlite). Distinct from
+    # the TRADE_STORAGE execution records above: this holds the operator's notes,
+    # emotions, quality scores, and tags with full-text search. Best-effort — a
+    # storage failure degrades to "journal unavailable" (503s), never blocks boot.
+    try:
+        from flinttrade_journal.journal_routes import init_journal_routes, journal_bp  # noqa: PLC0415
+        from flinttrade_journal.trade_journal import TradeJournal  # noqa: PLC0415
+
+        _journal = TradeJournal()
+        _journal.initialise()
+        app.config["JOURNAL"] = _journal
+        init_journal_routes(_journal)
+        app.register_blueprint(journal_bp)
+    except Exception:  # pragma: no cover — defensive: never let the journal break boot
+        logger.warning("Trade journal unavailable; /api/v1/journal returns 503", exc_info=True)
+        app.config["JOURNAL"] = None
+
     # Register P&L tracker blueprint (/api/v1/pnl-tracker/*)
     from flinttrade_data.pnl_routes import pnl_bp  # noqa: PLC0415
     app.register_blueprint(pnl_bp)
