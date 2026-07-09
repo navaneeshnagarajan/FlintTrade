@@ -46,9 +46,9 @@ describe('docs index generation', () => {
     const architectureDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/ARCHITECTURE.md');
     const userGuideDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/USER_GUIDE.md');
 
-    expect(architectureDoc?.content).toContain('101 widgets');
-    expect(architectureDoc?.content).toContain('26 trading + 49 analysis + 26 utility');
-    expect(userGuideDoc?.content).toContain('The widgets (101)');
+    expect(architectureDoc?.content).toContain('102 widgets');
+    expect(architectureDoc?.content).toContain('26 trading + 49 analysis + 27 utility');
+    expect(userGuideDoc?.content).toContain('The widgets (102)');
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`82 ${'widgets'}`);
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`38 ${'analysis'}`);
   });
