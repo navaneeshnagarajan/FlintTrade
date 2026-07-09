@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 import time
 import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import timedelta, timezone
 from typing import Any
 
@@ -75,7 +76,7 @@ _SYMBOL_PATTERNS = [
 ]
 
 
-@dataclass
+@dataclass(frozen=True, init=False)
 class NewsArticle:
     """A parsed news article."""
 
@@ -85,15 +86,52 @@ class NewsArticle:
     published: str = ""
     source: str = ""
     content_hash: str = ""
+    _feed_title: str = field(default="", repr=False, compare=False)
 
-    def __post_init__(self) -> None:
-        if not self.content_hash:
-            digest = hashlib.sha256(f"{self.title}{self.link}".encode()).hexdigest()
-            self.content_hash = digest[:12]
+    def __init__(self, *args: str, **kwargs: str) -> None:
+        """Build a canonical article, adapting the legacy five-positional shape."""
+        canonical_fields = ("title", "summary", "link", "published", "source", "content_hash")
+        legacy_fields = ("title", "link", "summary", "published", "source")
+        allowed = {*canonical_fields, "feed_title"}
+        unknown = set(kwargs) - allowed
+        if unknown:
+            name = sorted(unknown)[0]
+            raise TypeError(f"NewsArticle got an unexpected keyword argument {name!r}")
+        if len(args) > len(canonical_fields):
+            raise TypeError(f"NewsArticle expected at most 6 positional arguments, got {len(args)}")
+
+        positional_fields = legacy_fields if len(args) == 5 else canonical_fields[: len(args)]
+        values = dict.fromkeys(canonical_fields, "")
+        assigned = set(positional_fields)
+        values.update(zip(positional_fields, args, strict=True))
+        for name in canonical_fields:
+            if name in kwargs:
+                if name in assigned:
+                    raise TypeError(f"NewsArticle got multiple values for argument {name!r}")
+                values[name] = kwargs[name]
+
+        if not values["content_hash"]:
+            digest = hashlib.sha256(f"{values['title']}{values['link']}".encode()).hexdigest()
+            values["content_hash"] = digest[:12]
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "_feed_title", kwargs.get("feed_title", ""))
+
+    @property
+    def feed_title(self) -> str:
+        """Human feed name retained without changing the article API payload."""
+        return self._feed_title
 
     def to_dict(self) -> dict[str, str]:
         """Return all article fields in JSON-ready form."""
-        return asdict(self)
+        return {
+            "title": self.title,
+            "summary": self.summary,
+            "link": self.link,
+            "published": self.published,
+            "source": self.source,
+            "content_hash": self.content_hash,
+        }
 
 
 @dataclass
@@ -136,17 +174,33 @@ class AggregatedSentiment:
 
 def _parse_rss_xml(xml_text: str, source_name: str) -> list[NewsArticle]:
     """Parse RSS 2.0 or Atom XML with the standard library."""
+    articles, _success = _parse_rss_xml_result(xml_text, source_name)
+    return articles
+
+
+def _parse_rss_xml_result(xml_text: str, source_name: str) -> tuple[list[NewsArticle], bool]:
+    """Parse RSS XML and distinguish valid empty feeds from malformed XML."""
     articles: list[NewsArticle] = []
 
     try:
         root = ET.fromstring(xml_text)  # noqa: S314
     except ET.ParseError as exc:
         logger.warning("XML parse error for %s: %s", source_name, exc)
-        return articles
+        return articles, False
+
+    root_name = root.tag.rsplit("}", 1)[-1].lower()
+    if root_name not in {"rss", "rdf", "feed"}:
+        logger.warning("Unexpected feed root for %s: %s", source_name, root_name)
+        return articles, False
 
     atom_ns = ""
     if root.tag.startswith("{"):
         atom_ns = root.tag.split("}")[0] + "}"
+
+    feed_container = root.find("channel")
+    if feed_container is None:
+        feed_container = root
+    feed_title = _strip_html(_text(feed_container, "title", atom_ns) or "").strip()
 
     items = root.findall(".//item")
     if not items:
@@ -168,18 +222,21 @@ def _parse_rss_xml(xml_text: str, source_name: str) -> list[NewsArticle]:
             or ""
         )
 
-        if title:
+        clean_title = _strip_html(title).strip()
+        clean_summary = _strip_html(summary).strip()[:500]
+        if clean_title or clean_summary:
             articles.append(
                 NewsArticle(
-                    title=_strip_html(title).strip(),
+                    title=clean_title or clean_summary[:120],
                     link=link.strip(),
-                    summary=_strip_html(summary).strip()[:500],
+                    summary=clean_summary,
                     published=published.strip(),
                     source=source_name,
+                    feed_title=feed_title,
                 )
             )
 
-    return articles
+    return articles, True
 
 
 def _text(element: ET.Element, tag: str, ns: str = "") -> str | None:
@@ -187,20 +244,32 @@ def _text(element: ET.Element, tag: str, ns: str = "") -> str | None:
     child = element.find(f"{ns}{tag}") if ns else None
     if child is None:
         child = element.find(tag)
-    return child.text if child is not None and child.text else None
+    if child is None:
+        return None
+    text = "".join(child.itertext()).strip()
+    return text or None
 
 
 def _link(element: ET.Element, ns: str = "") -> str:
     """Extract an RSS text link or Atom href link."""
-    link_element = element.find("link")
-    if link_element is not None and link_element.text:
-        return link_element.text
-
+    candidates = list(element.findall("link"))
     if ns:
-        link_element = element.find(f"{ns}link")
-    if link_element is not None:
-        return link_element.get("href", "")
-    return ""
+        candidates.extend(element.findall(f"{ns}link"))
+
+    fallback = ""
+    self_link = ""
+    for link_element in candidates:
+        value = (link_element.text or link_element.get("href", "")).strip()
+        if not value:
+            continue
+        relation = link_element.get("rel", "alternate").lower()
+        if relation == "alternate":
+            return value
+        if relation == "self" and not self_link:
+            self_link = value
+        elif not fallback:
+            fallback = value
+    return fallback or self_link
 
 
 def _strip_html(text: str) -> str:
@@ -224,6 +293,7 @@ class NewsScraper:
         self._timeout = timeout
         self._cache_ttl = cache_ttl
         self._cache: dict[str, tuple[float, list[NewsArticle]]] = {}
+        self._cache_lock = threading.RLock()
 
     def fetch_headlines(self, source: str, limit: int | None = 20) -> list[NewsArticle]:
         """Fetch one named source or custom RSS URL, using the per-source cache."""
@@ -235,24 +305,26 @@ class NewsScraper:
                 raise ValueError(f"Unknown source: {source!r}. Use one of {list(RSS_SOURCES)} or provide a URL.")
 
         articles = self._fetch_cached(source.lower(), url)
-        return articles if limit is None else articles[:limit]
+        return list(articles) if limit is None else articles[:limit]
 
     def search_news(self, query: str, limit: int = 20) -> list[NewsArticle]:
         """Search titles and summaries across all default RSS sources."""
         self._refresh_all()
         query_lower = query.lower()
-        matches = [
-            article
-            for _timestamp, articles in self._cache.values()
-            for article in articles
-            if query_lower in f"{article.title} {article.summary}".lower()
-        ]
+        with self._cache_lock:
+            matches = [
+                article
+                for _timestamp, articles in self._cache.values()
+                for article in articles
+                if query_lower in f"{article.title} {article.summary}".lower()
+            ]
         return self._deduplicate(matches)[:limit]
 
     def get_latest(self, limit: int = 20) -> list[NewsArticle]:
         """Return combined headlines from all default sources."""
         self._refresh_all()
-        articles = [article for _timestamp, cached_articles in self._cache.values() for article in cached_articles]
+        with self._cache_lock:
+            articles = [article for _timestamp, cached_articles in self._cache.values() for article in cached_articles]
         return self._deduplicate(articles)[:limit]
 
     def _refresh_all(self) -> None:
@@ -260,28 +332,33 @@ class NewsScraper:
             self._fetch_cached(key, url)
 
     def _fetch_cached(self, source_key: str, url: str) -> list[NewsArticle]:
-        now = time.monotonic()
-        cached = self._cache.get(source_key)
-        if cached is not None and now - cached[0] < self._cache_ttl:
-            return cached[1]
+        with self._cache_lock:
+            now = time.monotonic()
+            cached = self._cache.get(source_key)
+            if cached is not None and now - cached[0] < self._cache_ttl:
+                return list(cached[1])
 
-        articles = self._fetch_rss(url, source_key)
-        self._cache[source_key] = (now, articles)
-        return articles
+            articles = self._fetch_rss(url, source_key)
+            if articles is not None:
+                self._cache[source_key] = (now, list(articles))
+                return list(articles)
+            return list(cached[1]) if cached is not None else []
 
-    def _fetch_rss(self, url: str, source_name: str) -> list[NewsArticle]:
+    def _fetch_rss(self, url: str, source_name: str) -> list[NewsArticle] | None:
         try:
             with httpx.Client(timeout=self._timeout) as client:
                 response = client.get(url, follow_redirects=True)
                 response.raise_for_status()
-            articles = _parse_rss_xml(response.text, source_name)
+            articles, parsed = _parse_rss_xml_result(response.text, source_name)
+            if not parsed:
+                return None
             logger.info("Fetched %d articles from %s (%s)", len(articles), source_name, url)
             return articles
         except httpx.HTTPError as exc:
             logger.warning("HTTP error fetching %s: %s", url, exc)
         except Exception as exc:
             logger.warning("Unexpected error fetching %s: %s", url, exc)
-        return []
+        return None
 
     @staticmethod
     def _deduplicate(articles: list[NewsArticle]) -> list[NewsArticle]:
@@ -294,14 +371,11 @@ class NewsScraper:
         return unique
 
 
-_DEFAULT_NEWS_SCRAPER: NewsScraper | None = None
+_DEFAULT_NEWS_SCRAPER = NewsScraper()
 
 
 def parse_feed(feed_url: str) -> list[NewsArticle]:
     """Fetch and parse an RSS/Atom feed through the shared cached stdlib engine."""
-    global _DEFAULT_NEWS_SCRAPER
-    if _DEFAULT_NEWS_SCRAPER is None:
-        _DEFAULT_NEWS_SCRAPER = NewsScraper()
     return _DEFAULT_NEWS_SCRAPER.fetch_headlines(feed_url, limit=None)
 
 

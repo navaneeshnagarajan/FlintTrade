@@ -5,6 +5,7 @@ Uses monkeypatched httpx responses to avoid hitting real RSS feeds.
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -62,12 +63,34 @@ _ATOM_XML = """\
 </feed>
 """
 
+_ATOM_XHTML_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Economic Times Markets</title>
+  <entry>
+    <title>NIFTY holds support</title>
+    <link rel="self" href="https://example.com/api/entry/1"/>
+    <link rel="alternate" href="https://example.com/nifty-support"/>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>NIFTY held its key support.</p></div></content>
+    <updated>2026-04-08T16:00:00+05:30</updated>
+  </entry>
+</feed>
+"""
+
 _EMPTY_RSS = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel><title>Empty</title></channel></rss>
 """
 
+_DESCRIPTION_ONLY_RSS = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Brief feed</title>
+  <item><description>NIFTY advanced after the policy decision.</description><link>/brief/1</link></item>
+</channel></rss>
+"""
+
 _MALFORMED_XML = "this is not xml at all <broken"
+_WELL_FORMED_NON_FEED = "<html><body>Upstream access denied</body></html>"
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +137,14 @@ class TestParseRssXml:
         assert articles[0].title == "BANKNIFTY surges 500 points"
         assert "https://example.com/banknifty-surge" in articles[0].link
 
+    def test_atom_prefers_alternate_link_and_reads_xhtml_body(self) -> None:
+        articles = _parse_rss_xml(_ATOM_XHTML_XML, "economictimes")
+
+        assert len(articles) == 1
+        assert articles[0].link == "https://example.com/nifty-support"
+        assert articles[0].summary == "NIFTY held its key support."
+        assert articles[0].feed_title == "Economic Times Markets"
+
     def test_empty_feed_returns_empty_list(self) -> None:
         articles = _parse_rss_xml(_EMPTY_RSS, "empty")
         assert articles == []
@@ -121,6 +152,13 @@ class TestParseRssXml:
     def test_malformed_xml_returns_empty_list(self) -> None:
         articles = _parse_rss_xml(_MALFORMED_XML, "bad")
         assert articles == []
+
+    def test_description_only_rss_item_is_preserved(self) -> None:
+        articles = _parse_rss_xml(_DESCRIPTION_ONLY_RSS, "brief")
+
+        assert len(articles) == 1
+        assert articles[0].title == "NIFTY advanced after the policy decision."
+        assert articles[0].summary == "NIFTY advanced after the policy decision."
 
     def test_strips_html_from_description(self) -> None:
         articles = _parse_rss_xml(_RSS_XML, "test")
@@ -228,6 +266,77 @@ class TestNewsScraper:
         # httpx.Client should only be created once (cached second time)
         assert mock_client_cls.call_count == 1
 
+    def test_failed_fetch_is_not_cached(self) -> None:
+        recovered = NewsArticle(title="Recovered", link="https://example.com/recovered")
+        scraper = self._make_scraper()
+        scraper._fetch_rss = MagicMock(side_effect=[None, [recovered]])
+
+        first = scraper.fetch_headlines("moneycontrol")
+        second = scraper.fetch_headlines("moneycontrol")
+
+        assert first == []
+        assert second == [recovered]
+        assert scraper._fetch_rss.call_count == 2
+
+    @patch("flinttrade_ai.sentiment.httpx.Client")
+    def test_well_formed_non_feed_response_is_not_cached(self, mock_client_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = [
+            _mock_response(_WELL_FORMED_NON_FEED),
+            _mock_response(_RSS_XML),
+        ]
+        mock_client_cls.return_value = mock_client
+        scraper = self._make_scraper()
+
+        first = scraper.fetch_headlines("moneycontrol")
+        second = scraper.fetch_headlines("moneycontrol")
+
+        assert first == []
+        assert len(second) == 3
+        assert mock_client_cls.call_count == 2
+
+    def test_valid_empty_feed_is_cached(self) -> None:
+        scraper = self._make_scraper()
+        scraper._fetch_rss = MagicMock(return_value=[])
+
+        assert scraper.fetch_headlines("moneycontrol") == []
+        assert scraper.fetch_headlines("moneycontrol") == []
+        assert scraper._fetch_rss.call_count == 1
+
+    @patch("flinttrade_ai.sentiment.httpx.Client")
+    def test_full_feed_result_cannot_mutate_cache(self, mock_client_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = _mock_response(_RSS_XML)
+        mock_client_cls.return_value = mock_client
+        scraper = self._make_scraper()
+
+        first = scraper.fetch_headlines("moneycontrol", limit=None)
+        first.clear()
+        second = scraper.fetch_headlines("moneycontrol", limit=None)
+
+        assert len(second) == 3
+        assert mock_client_cls.call_count == 1
+
+    @patch("flinttrade_ai.sentiment.httpx.Client")
+    def test_cached_article_objects_are_immutable(self, mock_client_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = _mock_response(_RSS_XML)
+        mock_client_cls.return_value = mock_client
+        scraper = self._make_scraper()
+
+        first = scraper.fetch_headlines("moneycontrol")
+        with pytest.raises(FrozenInstanceError):
+            first[0].title = "Corrupted"
+
+        second = scraper.fetch_headlines("moneycontrol")
+        assert second[0].title == "NIFTY closes above 22500 for first time"
+
     @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_article_to_dict(self, mock_client_cls: MagicMock) -> None:
         mock_client = MagicMock()
@@ -247,6 +356,7 @@ class TestNewsScraper:
         assert "published" in d
         assert "source" in d
         assert d["content_hash"]
+        assert "feed_title" not in d
 
     @patch("flinttrade_ai.sentiment.httpx.Client")
     def test_parse_feed_uses_cached_stdlib_engine(self, mock_client_cls: MagicMock) -> None:
@@ -292,3 +402,25 @@ class TestNewsScraper:
 
         assert ExportedArticle is NewsArticle
         assert ExportedScraper is NewsScraper
+
+    def test_legacy_positional_article_order_is_adapted(self) -> None:
+        article = NewsArticle(
+            "Headline",
+            "/article",
+            "Article summary",
+            "2026-04-09",
+            "moneycontrol",
+        )
+
+        assert article.link == "/article"
+        assert article.summary == "Article summary"
+
+    def test_keyword_fields_never_use_legacy_positional_adaptation(self) -> None:
+        article = NewsArticle(
+            title="Headline",
+            summary="https://source.example",
+            link="/article",
+        )
+
+        assert article.summary == "https://source.example"
+        assert article.link == "/article"

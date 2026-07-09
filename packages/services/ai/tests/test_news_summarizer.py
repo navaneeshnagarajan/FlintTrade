@@ -131,13 +131,16 @@ class TestFetchNews:
             summary="Test summary",
             link="https://example.com",
             published="2026-03-31",
-            source="Test Source",
+            source="https://example.com/rss",
+            feed_title="Test Source",
         )
 
         with patch("flinttrade_ai.news_summarizer.parse_feed", return_value=[article]) as parse:
             articles = summarizer.fetch_news(sources=["https://example.com/rss"])
 
-        assert articles == [article.to_dict()]
+        assert articles[0]["source"] == "Test Source"
+        assert articles[0]["title"] == "Test Article"
+        assert "feed_title" not in articles[0]
         parse.assert_called_once_with("https://example.com/rss")
 
     def test_fetch_handles_empty_canonical_feed(self):

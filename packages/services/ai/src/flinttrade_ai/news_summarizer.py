@@ -139,7 +139,9 @@ class MarketNewsSummarizer:
                 for parsed in parsed_articles[:max_articles]:
                     if parsed.title not in seen_titles:
                         seen_titles.add(parsed.title)
-                        articles.append(parsed.to_dict())
+                        article = parsed.to_dict()
+                        article["source"] = parsed.feed_title or parsed.source
+                        articles.append(article)
                 logger.info("Fetched %d articles from %s", len(parsed_articles), feed_url)
             except Exception as exc:
                 logger.warning("Failed to fetch feed %s: %s", feed_url, exc)
