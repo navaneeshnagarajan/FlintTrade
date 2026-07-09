@@ -263,6 +263,18 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Practice fills no longer fabricate a position at price 0.0** — both paper
+  engines (`flinttrade_data.SandboxEngine` — the Practice dispatch target — and
+  `flinttrade_engine.SandboxEngine` — the strategy/router sandbox) rejected
+  nothing when a MARKET order arrived without a live price, so the fill booked
+  at 0.0 (a zero-notional order that also skipped the capital check) and created
+  a position at an average price of zero. Both engines now reject a
+  zero/negative-price market fill with a clear message; the DuckDB engine keeps
+  an `allow_zero_price_fills` opt-in for the fill-lifecycle tests only, never in
+  production. The Order Pad feeds the live LTP as the price for a Practice
+  MARKET/SL-M order so the paper fill is realistic — live-order payloads are
+  unchanged (a live market order still sends price 0; the broker fills at
+  market).
 - **OrderPad could never place an NFO order in a real browser** — the quantity
   input's `min=1 step=<lot>` made every exact lot multiple a native
   `stepMismatch`, silently blocking form submission before validation ran.

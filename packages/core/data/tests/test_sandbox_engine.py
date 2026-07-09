@@ -159,6 +159,17 @@ class TestPlaceBuyOrder:
         cap = engine.get_capital()
         assert cap["available"] == _DEFAULT_CAPITAL
 
+    def test_zero_price_order_rejected(self, engine: SandboxEngine) -> None:
+        # A zero price would fabricate a fill (and position) at 0.0 and skip the
+        # capital check — reject rather than book a fictitious fill.
+        result = engine.place_order("RELIANCE", "NSE", "BUY", 10, 0.0)
+        assert result["status"] == "REJECTED"
+        assert "live price" in result["message"].lower()
+
+    def test_zero_price_order_does_not_create_position(self, engine: SandboxEngine) -> None:
+        engine.place_order("RELIANCE", "NSE", "BUY", 10, 0.0)
+        assert engine.get_positions() == []
+
 
 # ---------------------------------------------------------------------------
 # place_order — SELL

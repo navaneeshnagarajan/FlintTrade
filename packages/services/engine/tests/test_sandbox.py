@@ -25,7 +25,9 @@ def engine():
     # circular import in flinttrade_engine.__init__.
     import flinttrade_engine.sandbox as _sandbox_mod
     cfg = _sandbox_mod.SandboxConfig(starting_capital=1_000_000.0)
-    eng = _sandbox_mod.SandboxEngine(account_id="test_account", config=cfg, db_path=":memory:")
+    eng = _sandbox_mod.SandboxEngine(
+        account_id="test_account", config=cfg, db_path=":memory:", allow_zero_price_fills=True
+    )
     yield eng
     eng.close()
 
@@ -35,7 +37,9 @@ def small_engine():
     """SandboxEngine with 10 000 capital (useful for margin failure tests)."""
     import flinttrade_engine.sandbox as _sandbox_mod
     cfg = _sandbox_mod.SandboxConfig(starting_capital=10_000.0)
-    eng = _sandbox_mod.SandboxEngine(account_id="small_account", config=cfg, db_path=":memory:")
+    eng = _sandbox_mod.SandboxEngine(
+        account_id="small_account", config=cfg, db_path=":memory:", allow_zero_price_fills=True
+    )
     yield eng
     eng.close()
 
@@ -138,6 +142,44 @@ class TestMarketOrders:
         )
         assert result["status"] == "REJECTED"
         assert "margin" in result["message"].lower()
+
+    def test_market_order_without_price_rejected_in_production(self):
+        """A production engine (no test flag) must reject a zero-price MARKET fill.
+
+        Filling a market order at 0.0 fabricates a position/P&L at price zero;
+        production requires a live LTP, so the fill fails loudly instead.
+        """
+        import flinttrade_engine.sandbox as _sandbox_mod
+        cfg = _sandbox_mod.SandboxConfig(starting_capital=1_000_000.0)
+        prod_engine = _sandbox_mod.SandboxEngine(
+            account_id="prod_account", config=cfg, db_path=":memory:"
+        )
+        try:
+            result = prod_engine.place_order(
+                {"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
+                 "quantity": 10, "price": 0.0, "pricetype": "MARKET", "product": "MIS"}
+            )
+            assert result["status"] == "REJECTED"
+            assert "live price" in result["message"].lower()
+        finally:
+            prod_engine.close()
+
+    def test_market_order_with_live_price_fills(self):
+        """A production engine fills a market order when given a real LTP."""
+        import flinttrade_engine.sandbox as _sandbox_mod
+        cfg = _sandbox_mod.SandboxConfig(starting_capital=1_000_000.0)
+        prod_engine = _sandbox_mod.SandboxEngine(
+            account_id="prod_account2", config=cfg, db_path=":memory:"
+        )
+        try:
+            result = prod_engine.place_order(
+                {"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
+                 "quantity": 10, "price": 2800.0, "pricetype": "MARKET", "product": "MIS"}
+            )
+            assert result["status"] == "COMPLETE"
+            assert result["order_id"] != ""
+        finally:
+            prod_engine.close()
 
 
 # ---------------------------------------------------------------------------

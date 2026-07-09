@@ -609,6 +609,9 @@ function OrderPadWidget(props: WidgetProps) {
     }
   }, [showToast]);
 
+  const appMode = useModeStore((s) => s.mode);
+  const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
+
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     // F&O lot-multiple validation. Quantity on a derivative exchange must be a
     // positive multiple of the instrument's lot size; when the lot size is
@@ -630,6 +633,14 @@ function OrderPadWidget(props: WidgetProps) {
       }
     }
 
+    // For a market-type order (MARKET / SL-M) the user never sets a price. In
+    // Practice mode the paper engine needs a real fill price — a zero fabricates
+    // a fill at 0.0 (now rejected by the sandbox), so feed the live LTP. Live
+    // orders keep sending price 0 for market types (the broker fills at market),
+    // so this fallback never alters the live-order payload.
+    const isMarketType = values.orderType === "MARKET" || values.orderType === "SL-M";
+    const practiceMarketFill = !priceEnabled && isMarketType && ltp > 0 && appMode === "practice";
+
     const params: PlaceOrderParams = {
       symbol: values.symbol,
       exchange: values.exchange,
@@ -637,7 +648,7 @@ function OrderPadWidget(props: WidgetProps) {
       product: values.product as "MIS" | "CNC" | "NRML",
       orderType: values.orderType as "MARKET" | "LIMIT" | "SL" | "SL-M",
       quantity: values.qty,
-      price: priceEnabled ? (values.price ?? 0) : 0,
+      price: priceEnabled ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
       triggerPrice: triggerEnabled ? (values.trigPrice ?? 0) : 0,
       strategy: "FlintOrderPad",
     };
@@ -651,9 +662,6 @@ function OrderPadWidget(props: WidgetProps) {
       void submitOrder(lastParamsRef.current);
     }
   }, [submitOrder]);
-
-  const appMode = useModeStore((s) => s.mode);
-  const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
 
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";

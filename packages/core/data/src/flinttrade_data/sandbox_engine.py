@@ -226,6 +226,17 @@ class SandboxEngine:
         if action not in ("BUY", "SELL"):
             return {"order_id": "", "status": "REJECTED", "message": f"Invalid action: {action}"}
 
+        # A paper fill must use a real price. A zero/negative price fabricates a
+        # position at 0.0 (and a 0-notional order that skips the capital check),
+        # so reject it rather than book a fictitious fill — the caller must
+        # supply the live LTP for a market order.
+        if price <= 0:
+            return {
+                "order_id": "",
+                "status": "REJECTED",
+                "message": "A market fill needs a live price; no LTP was available",
+            }
+
         product = product.upper()
         notional = quantity * price
 

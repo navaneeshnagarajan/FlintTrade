@@ -178,6 +178,12 @@ class SandboxEngine:
         db_path: Path to the DuckDB file. Defaults to the active FlintTrade
             workspace, then falls back to ``~/.flinttrade/sandbox``.
             Pass ``":memory:"`` for an in-memory database (useful in tests).
+        allow_zero_price_fills: When ``True``, a MARKET order with a zero/negative
+            price is filled at 0.0 instead of being rejected. This fabricates a
+            position at price zero, so it is reserved for tests that assert the
+            fill lifecycle without a live quote; production must leave it ``False``
+            so a market order without an LTP fails loudly instead of booking a
+            fictitious fill.
     """
 
     def __init__(
@@ -185,6 +191,8 @@ class SandboxEngine:
         account_id: str,
         config: SandboxConfig | None = None,
         db_path: str | Path | None = None,
+        *,
+        allow_zero_price_fills: bool = False,
     ) -> None:
         if not _DUCKDB_AVAILABLE:  # pragma: no cover
             raise ImportError(
@@ -194,6 +202,7 @@ class SandboxEngine:
 
         self.account_id = account_id
         self.config = config or SandboxConfig()
+        self._allow_zero_price_fills = allow_zero_price_fills
 
         if db_path is None:
             db_path = _default_db_path(account_id)
@@ -239,9 +248,11 @@ class SandboxEngine:
         """Place a virtual order.
 
         For MARKET orders the order is filled immediately at the provided LTP
-        (``order_data["price"]`` if non-zero, else a synthetic fill at 0.0 for
-        tests).  LIMIT / SL / SL-M orders are queued with status PENDING and
-        filled later via :meth:`check_pending_fills`.
+        (``order_data["price"]``). A zero/negative price is rejected because it
+        would fabricate a fill at 0.0 — unless the engine was built with
+        ``allow_zero_price_fills=True`` (tests only). LIMIT / SL / SL-M orders
+        are queued with status PENDING and filled later via
+        :meth:`check_pending_fills`.
 
         Args:
             order_data: Dict with keys: symbol, exchange, action, quantity,
@@ -284,6 +295,12 @@ class SandboxEngine:
         now = datetime.now(timezone.utc)
 
         if pricetype == "MARKET":
+            if price <= 0 and not self._allow_zero_price_fills:
+                return {
+                    "order_id": "",
+                    "status": "REJECTED",
+                    "message": "A market order needs a live price (LTP) to fill",
+                }
             fill_price = price if price > 0 else 0.0
             status = "COMPLETE"
             fill_time = now
@@ -706,10 +723,11 @@ class SandboxEngine:
         Uses a simplified model:
         - CNC / NRML: full notional value / equity_leverage
         - MIS: notional / (equity_leverage * futures_leverage)
-        - Zero margin for MARKET orders with zero price (tests)
+
+        A zero-price order yields zero notional (and therefore zero margin) from
+        the formulae below, so no special-casing is needed; production rejects
+        such orders before this is reached.
         """
-        if price <= 0 and pricetype == "MARKET":
-            return 0.0
         notional = quantity * price
         if product == "CNC":
             return notional / max(self.config.equity_leverage, 1)

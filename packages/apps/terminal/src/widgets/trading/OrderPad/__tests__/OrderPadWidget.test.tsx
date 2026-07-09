@@ -266,6 +266,21 @@ describe("OrderPadWidget", () => {
     expect(detail.title).toMatch(/order placed/i);
     window.removeEventListener("flinttrade:notify", listener);
   });
+
+  it("feeds the live LTP as the price for a Practice MARKET order", async () => {
+    // The paper engine rejects a zero-price market fill (it would fabricate a
+    // fill at 0.0), so a Practice MARKET order must carry the live LTP.
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 250.5 });
+    vi.mocked(placeOrder).mockResolvedValue({ orderId: "TEST001" });
+
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByRole("alert");
+
+    expect(placeOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ orderType: "MARKET", price: 250.5 }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
