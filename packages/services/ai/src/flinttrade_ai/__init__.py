@@ -87,7 +87,7 @@ from .regime_detector import (
 )
 from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
 from .strategy_refiner import RefinementSuggestion, StrategyRefiner
-from .trade_reflection import ReflectionConfig, ReflectionResult, TradeReflector
+from .trade_reflection import ReflectionConfig, ReflectionResult, TradeOutcome, TradeReflector
 from .news_scheduler import NewsEvent, NewsScheduler, PollType, ScheduledJob
 
 __all__ = [
@@ -211,6 +211,7 @@ __all__ = [
     "TradeReflector",
     "ReflectionConfig",
     "ReflectionResult",
+    "TradeOutcome",
     # News scheduler (FinSights pattern — IST-scheduled RSS polling)
     "NewsScheduler",
     "NewsEvent",

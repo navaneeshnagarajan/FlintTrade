@@ -14,7 +14,7 @@ import pytest
 
 from flinttrade_ai.llm_client import LLMResponse
 from flinttrade_ai.memory import MemoryLayer
-from flinttrade_ai.reflection import TradeOutcome, TradeReflector
+from flinttrade_ai.trade_reflection import TradeOutcome, TradeReflector
 
 
 # ---------------------------------------------------------------------------
@@ -69,23 +69,33 @@ class TestTradeOutcomeDataclass:
         # Arrange
         field_names = {f.name for f in fields(TradeOutcome)}
         required = {
-            "symbol", "exchange", "direction",
-            "entry_price", "exit_price", "quantity",
-            "pnl", "pnl_pct", "holding_period_days", "analysis_summary",
+            "symbol",
+            "exchange",
+            "direction",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "pnl_pct",
+            "holding_period_days",
+            "analysis_summary",
         }
 
         # Act / Assert
-        assert required.issubset(field_names), (
-            f"Missing fields: {required - field_names}"
-        )
+        assert required.issubset(field_names), f"Missing fields: {required - field_names}"
 
     def test_outcome_analysis_summary_defaults_to_empty_string(self):
         """analysis_summary should default to empty string so it is optional."""
         # Arrange / Act
         outcome = TradeOutcome(
-            symbol="RELIANCE", exchange="NSE", direction="SELL",
-            entry_price=2900.0, exit_price=2850.0,
-            quantity=10, pnl=-500.0, pnl_pct=-1.72,
+            symbol="RELIANCE",
+            exchange="NSE",
+            direction="SELL",
+            entry_price=2900.0,
+            exit_price=2850.0,
+            quantity=10,
+            pnl=-500.0,
+            pnl_pct=-1.72,
             holding_period_days=1,
         )
         # Assert
@@ -93,61 +103,61 @@ class TestTradeOutcomeDataclass:
 
 
 class TestReflectReturnsLesson:
-    """reflect() must return the lesson string from the LLM."""
+    """reflect_one() must return the lesson string from the LLM."""
 
     def test_reflect_returns_lesson_string(self):
-        """reflect() returns a non-empty string derived from LLM content."""
+        """reflect_one() returns a non-empty string derived from LLM content."""
         # Arrange
         reflector, _, _ = make_reflector("LESSON: Always use stop-losses.")
         outcome = make_outcome()
 
         # Act
-        result = reflector.reflect(outcome)
+        result = reflector.reflect_one(outcome)
 
         # Assert
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_reflect_strips_lesson_prefix(self):
-        """reflect() removes the 'LESSON:' prefix from the LLM response."""
+        """reflect_one() removes the 'LESSON:' prefix from the LLM response."""
         # Arrange
         reflector, _, _ = make_reflector("LESSON: Hold winners longer.")
         outcome = make_outcome()
 
         # Act
-        result = reflector.reflect(outcome)
+        result = reflector.reflect_one(outcome)
 
         # Assert
         assert result == "Hold winners longer."
         assert not result.startswith("LESSON:")
 
     def test_reflect_strips_lesson_prefix_with_extra_whitespace(self):
-        """reflect() strips both the prefix and any surrounding whitespace."""
+        """reflect_one() strips both the prefix and surrounding whitespace."""
         # Arrange
         reflector, _, _ = make_reflector("LESSON:   Trim positions before expiry.  ")
         outcome = make_outcome()
 
         # Act
-        result = reflector.reflect(outcome)
+        result = reflector.reflect_one(outcome)
 
         # Assert
         assert result == "Trim positions before expiry."
 
     def test_reflect_handles_response_without_lesson_prefix(self):
-        """reflect() returns the response as-is when 'LESSON:' prefix is absent."""
+        """reflect_one() returns the response as-is when 'LESSON:' is absent."""
         # Arrange
         reflector, _, _ = make_reflector("Watch the open interest more carefully.")
         outcome = make_outcome()
 
         # Act
-        result = reflector.reflect(outcome)
+        result = reflector.reflect_one(outcome)
 
         # Assert
         assert result == "Watch the open interest more carefully."
 
 
 class TestReflectStoresInMemory:
-    """reflect() must persist the lesson in the REFLECTION memory layer."""
+    """reflect_one() must persist the lesson in the REFLECTION memory layer."""
 
     def test_reflect_stores_in_reflection_layer(self):
         """add_memory() is called with MemoryLayer.REFLECTION."""
@@ -156,7 +166,7 @@ class TestReflectStoresInMemory:
         outcome = make_outcome()
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
 
         # Assert
         mock_memory.add_memory.assert_called_once()
@@ -173,7 +183,7 @@ class TestReflectStoresInMemory:
         outcome = make_outcome(symbol="BANKNIFTY")
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
 
         # Assert
         call_args, call_kwargs = mock_memory.add_memory.call_args
@@ -196,7 +206,7 @@ class TestReflectMetadata:
         outcome = make_outcome(direction="SELL")
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         metadata = self._get_metadata(mock_memory)
 
         # Assert
@@ -209,7 +219,7 @@ class TestReflectMetadata:
         outcome = make_outcome(pnl_pct=-3.5)
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         metadata = self._get_metadata(mock_memory)
 
         # Assert
@@ -222,7 +232,7 @@ class TestReflectMetadata:
         outcome = make_outcome(holding_period_days=7)
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         metadata = self._get_metadata(mock_memory)
 
         # Assert
@@ -235,7 +245,7 @@ class TestReflectMetadata:
         outcome = make_outcome(exchange="BSE")
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         metadata = self._get_metadata(mock_memory)
 
         # Assert
@@ -259,7 +269,7 @@ class TestReflectPromptContent:
         outcome = make_outcome(pnl=450.0, pnl_pct=2.05)
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         content = self._get_user_message_content(mock_llm)
 
         # Assert
@@ -273,7 +283,7 @@ class TestReflectPromptContent:
         outcome = make_outcome(symbol="RELIANCE")
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         content = self._get_user_message_content(mock_llm)
 
         # Assert
@@ -286,7 +296,7 @@ class TestReflectPromptContent:
         outcome = make_outcome(direction="SELL")
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         content = self._get_user_message_content(mock_llm)
 
         # Assert
@@ -299,7 +309,7 @@ class TestReflectPromptContent:
         outcome = make_outcome(holding_period_days=14)
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         content = self._get_user_message_content(mock_llm)
 
         # Assert
@@ -312,7 +322,7 @@ class TestReflectPromptContent:
         outcome = make_outcome(analysis_summary="")
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         content = self._get_user_message_content(mock_llm)
 
         # Assert
@@ -326,7 +336,7 @@ class TestReflectPromptContent:
         outcome = make_outcome(analysis_summary=summary)
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         content = self._get_user_message_content(mock_llm)
 
         # Assert
@@ -339,7 +349,7 @@ class TestReflectPromptContent:
         outcome = make_outcome()
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
         messages = mock_llm.chat.call_args[0][0]
 
         # Assert
@@ -349,7 +359,7 @@ class TestReflectPromptContent:
 
 
 class TestReflectContributingMemories:
-    """reflect() should optionally reinforce contributing memories."""
+    """reflect_one() should optionally reinforce contributing memories."""
 
     def test_reflect_calls_update_on_outcome_when_ids_provided(self):
         """update_on_outcome() is called when contributing_memory_ids are given."""
@@ -359,12 +369,10 @@ class TestReflectContributingMemories:
         ids = ["uuid-a", "uuid-b"]
 
         # Act
-        reflector.reflect(outcome, contributing_memory_ids=ids)
+        reflector.reflect_one(outcome, contributing_memory_ids=ids)
 
         # Assert
-        mock_memory.update_on_outcome.assert_called_once_with(
-            memory_ids=ids, direction_correct=True
-        )
+        mock_memory.update_on_outcome.assert_called_once_with(memory_ids=ids, direction_correct=True)
 
     def test_reflect_marks_direction_correct_for_profitable_trade(self):
         """A profitable trade (pnl > 0) should pass direction_correct=True."""
@@ -374,7 +382,7 @@ class TestReflectContributingMemories:
         ids = ["uuid-x"]
 
         # Act
-        reflector.reflect(outcome, contributing_memory_ids=ids)
+        reflector.reflect_one(outcome, contributing_memory_ids=ids)
 
         # Assert
         _, kwargs = mock_memory.update_on_outcome.call_args
@@ -388,7 +396,7 @@ class TestReflectContributingMemories:
         ids = ["uuid-y"]
 
         # Act
-        reflector.reflect(outcome, contributing_memory_ids=ids)
+        reflector.reflect_one(outcome, contributing_memory_ids=ids)
 
         # Assert
         _, kwargs = mock_memory.update_on_outcome.call_args
@@ -401,7 +409,7 @@ class TestReflectContributingMemories:
         outcome = make_outcome()
 
         # Act
-        reflector.reflect(outcome)
+        reflector.reflect_one(outcome)
 
         # Assert
         mock_memory.update_on_outcome.assert_not_called()

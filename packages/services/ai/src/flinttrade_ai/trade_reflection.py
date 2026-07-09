@@ -7,9 +7,8 @@ Adapted from LLM-TradeBot/src/agents/reflection_agent.py:
   win-rate, risk-reward diagnostics)
 - LLM-enhanced path when an LLMClient is supplied
 
-This module is distinct from reflection.py (single-trade post-trade loop).
-That module processes individual closed trades; this module processes *batches*
-of trades and produces strategic meta-analysis.
+The canonical reflector supports both individual closed-trade lessons and batch
+strategic meta-analysis.
 
 Usage::
 
@@ -19,7 +18,7 @@ Usage::
 
     # After each trade:
     if reflector.should_reflect(total_trade_count):
-        result = await reflector.reflect(recent_trades_list)
+        result = await reflector.reflect_batch(recent_trades_list)
         print(result.recommendations)
 
 Trade dict format (flexible — reflector tolerates missing keys)::
@@ -38,14 +37,26 @@ Trade dict format (flexible — reflector tolerates missing keys)::
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import math
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .memory import MemoryLayer, TradedMemory
+
 logger = logging.getLogger("flinttrade.ai.trade_reflection")
+
+_LESSON_PREFIX = "LESSON:"
+_SINGLE_SYSTEM_PROMPT = (
+    "You are a disciplined trading coach who specialises in post-trade analysis "
+    "for Indian F&O and equity markets. Extract clear, actionable lessons from "
+    "completed trades. Be concise and specific. Avoid generalities."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +107,22 @@ class ReflectionResult(BaseModel):
     confidence_calibration: str = ""
 
 
+@dataclass
+class TradeOutcome:
+    """A closed trade used by the single-trade reflection path."""
+
+    symbol: str
+    exchange: str
+    direction: str
+    entry_price: float
+    exit_price: float
+    quantity: int
+    pnl: float
+    pnl_pct: float
+    holding_period_days: int
+    analysis_summary: str = ""
+
+
 # ---------------------------------------------------------------------------
 # TradeReflector
 # ---------------------------------------------------------------------------
@@ -116,21 +143,30 @@ class TradeReflector:
         config: ReflectionConfig controlling trigger frequency and lookback.
         llm_client: Optional LLMClient instance. If provided, reflection
             uses the LLM for pattern extraction. If None, rule-based fallback.
+        memory: Optional persistent memory used only by ``reflect_one``.
 
     Example::
 
         reflector = TradeReflector(config=ReflectionConfig(trigger_every_n_trades=5))
         if reflector.should_reflect(trade_count):
-            result = await reflector.reflect(last_20_trades)
+            result = await reflector.reflect_batch(last_20_trades)
     """
 
     def __init__(
         self,
-        config: ReflectionConfig | None = None,
+        config: ReflectionConfig | Any | None = None,
         llm_client: Any | None = None,
+        memory: TradedMemory | None = None,
     ) -> None:
+        if config is not None and not isinstance(config, ReflectionConfig):
+            legacy_llm = config
+            if memory is None and llm_client is not None:
+                memory = llm_client
+            llm_client = legacy_llm
+            config = None
         self._config = config or ReflectionConfig()
         self._llm_client = llm_client
+        self._memory = memory
         self._last_reflected_count: int = 0
         self._reflection_history: list[ReflectionResult] = []
         logger.info(
@@ -156,6 +192,10 @@ class TradeReflector:
         return trades_since >= self._config.trigger_every_n_trades
 
     async def reflect(self, recent_trades: list[dict[str, Any]]) -> ReflectionResult | None:
+        """Preserve the canonical asynchronous batch-reflection entrypoint."""
+        return await self.reflect_batch(recent_trades)
+
+    async def reflect_batch(self, recent_trades: list[dict[str, Any]]) -> ReflectionResult | None:
         """Analyse recent trades and generate a ReflectionResult.
 
         Uses LLM if configured, falls back to rule-based analysis otherwise.
@@ -196,6 +236,48 @@ class TradeReflector:
             )
 
         return result
+
+    def reflect_one(
+        self,
+        outcome: TradeOutcome,
+        contributing_memory_ids: list[str] | None = None,
+    ) -> str:
+        """Generate one concise lesson, persist it, and reinforce its sources."""
+        if self._llm_client is None:
+            raise RuntimeError("reflect_one requires an LLM client")
+        if self._memory is None:
+            raise RuntimeError("reflect_one requires a persistent memory backend")
+
+        response = self._llm_client.chat(self._build_single_messages(outcome))
+        error = str(getattr(response, "error", "") or "").strip()
+        lesson = str(getattr(response, "content", "") or "").strip()
+        if error:
+            raise RuntimeError(f"Single-trade reflection failed: {error}")
+        if lesson.startswith(_LESSON_PREFIX):
+            lesson = lesson[len(_LESSON_PREFIX) :].strip()
+        if not lesson:
+            raise RuntimeError("Single-trade reflection failed: empty response")
+
+        memory_id = self._memory.add_memory(
+            symbol=outcome.symbol,
+            text=lesson,
+            layer=MemoryLayer.REFLECTION,
+            metadata=self._build_single_metadata(outcome),
+        )
+        if contributing_memory_ids:
+            self._memory.update_on_outcome(
+                memory_ids=contributing_memory_ids,
+                direction_correct=outcome.pnl > 0,
+            )
+
+        logger.info(
+            "Reflection stored: symbol=%s direction=%s pnl_pct=%.1f%% memory_id=%s",
+            outcome.symbol,
+            outcome.direction,
+            outcome.pnl_pct,
+            memory_id,
+        )
+        return lesson
 
     def get_reflection_prompt(self, trades: list[dict[str, Any]]) -> str:
         """Build the LLM reflection prompt for a set of trades.
@@ -255,6 +337,44 @@ class TradeReflector:
         if result.confidence_calibration:
             lines += ["", f"Confidence calibration: {result.confidence_calibration}"]
         return "\n".join(lines)
+
+    def _build_single_messages(self, outcome: TradeOutcome) -> list[Any]:
+        """Construct the exact single-trade coaching prompt."""
+        from .llm_client import LLMMessage
+
+        analysis_block = outcome.analysis_summary or "No analysis recorded"
+        user_content = (
+            "Review this completed trade and extract a lesson.\n\n"
+            "TRADE DETAILS:\n"
+            f"- Symbol: {outcome.symbol} ({outcome.exchange})\n"
+            f"- Direction: {outcome.direction}\n"
+            f"- Entry: ₹{outcome.entry_price:.2f} → Exit: ₹{outcome.exit_price:.2f}\n"
+            f"- Quantity: {outcome.quantity}\n"
+            f"- P&L: ₹{outcome.pnl:.2f} ({outcome.pnl_pct:+.1f}%)\n"
+            f"- Holding Period: {outcome.holding_period_days} day(s)\n\n"
+            f"ORIGINAL ANALYSIS:\n{analysis_block}\n\n"
+            "TASK: In 100 words or less, extract ONE specific actionable lesson. "
+            "Focus on what was correct and what should be done differently next time.\n"
+            f'Start with "{_LESSON_PREFIX}"'
+        )
+        return [
+            LLMMessage(role="system", content=_SINGLE_SYSTEM_PROMPT),
+            LLMMessage(role="user", content=user_content),
+        ]
+
+    @staticmethod
+    def _build_single_metadata(outcome: TradeOutcome) -> dict[str, Any]:
+        """Build scalar Chroma metadata for a single closed trade."""
+        return {
+            "direction": outcome.direction,
+            "pnl": outcome.pnl,
+            "pnl_pct": outcome.pnl_pct,
+            "holding_days": outcome.holding_period_days,
+            "exchange": outcome.exchange,
+            "entry_price": outcome.entry_price,
+            "exit_price": outcome.exit_price,
+            "quantity": outcome.quantity,
+        }
 
     # ------------------------------------------------------------------
     # Rule-based fallback (no LLM)
@@ -400,15 +520,13 @@ class TradeReflector:
             "market_insights, confidence_calibration.\n"
             "Be specific and data-driven. No markdown, pure JSON only."
         )
-        user_prompt = self._build_user_prompt(trades)
-
-        messages = [
-            LLMMessage(role="system", content=system_prompt),
-            LLMMessage(role="user", content=user_prompt),
-        ]
-
         try:
-            response = self._llm_client.chat(messages)
+            user_prompt = self._build_user_prompt(trades)
+            messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=user_prompt),
+            ]
+            response = await asyncio.to_thread(self._llm_client.chat, messages)
             raw = response.content.strip()
 
             # Strip markdown code fences if present
@@ -460,8 +578,8 @@ class TradeReflector:
         for i, trade in enumerate(trades, 1):
             symbol = trade.get("symbol", "UNKNOWN")
             action = trade.get("action") or trade.get("side") or "?"
-            entry = trade.get("entry_price", 0.0)
-            exit_ = trade.get("exit_price") or trade.get("close_price") or 0.0
+            entry = self._coerce_float(trade.get("entry_price"))
+            exit_ = self._coerce_float(trade.get("exit_price") or trade.get("close_price"))
             pnl_pct = self._extract_pnl(trade)
             ts = trade.get("timestamp") or trade.get("time") or ""
 
@@ -517,6 +635,15 @@ class TradeReflector:
                 except (TypeError, ValueError):
                     pass
         return 0.0
+
+    @staticmethod
+    def _coerce_float(value: Any) -> float:
+        """Convert a flexible numeric field to a finite display value."""
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return result if math.isfinite(result) else 0.0
 
     @staticmethod
     def _extract_confidence(trade: dict[str, Any]) -> float | None:
