@@ -47,9 +47,9 @@ Versioning: [Semantic Versioning](https://semver.org/).
   that previously existed only in a built-but-unregistered blueprint whose
   routes were **unauthenticated** — the PDF/summary capability (via
   `AuditExporter`) is now behind the same auth as every other audit endpoint.
-  The standalone blueprint is kept as a dormant alternative (merge-not-delete)
-  but its routes are now scope-guarded too, so it can never re-introduce an
-  unauthenticated export path. PDF needs the optional `[export]` extra
+  The `AuditExporter` engine is kept (now consumed); the old standalone
+  blueprint was removed only after verifying every capability lives on the
+  authed routes and it has no consumers. PDF needs the optional `[export]` extra
   (reportlab) and degrades to a clean 500 without it. Hardened per an
   adversarial review: a corrupt/tampered audit day fails with a controlled,
   logged error (not an uncaught 500) rather than silently emitting an
