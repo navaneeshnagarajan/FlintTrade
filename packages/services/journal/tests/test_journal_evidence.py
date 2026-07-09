@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_data.storage import StorageManager
 from flinttrade_journal.trade_journal import JournalEntry, TradeJournal
 
 pytestmark = pytest.mark.unit
@@ -12,12 +11,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def journal():
-    storage = StorageManager(":memory:")
-    storage.initialise()
-    j = TradeJournal(storage)
-    j.initialise()  # create the journal_entries table
+    j = TradeJournal(":memory:")
+    j.initialise()  # create journal_entries, journal_tags, FTS index + triggers
     yield j
-    storage.close()
+    j.close()
 
 
 def test_records_a_trade_and_computes_realised_pnl(journal):

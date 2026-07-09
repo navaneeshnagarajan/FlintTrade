@@ -1,20 +1,21 @@
-"""Trade Journal — DuckDB-backed journal for annotating and analysing trades.
-
-Adapts patterns from trading-journal (SQLAlchemy CRUD) and adapts them to
-FlintTrade's DuckDB-first persistence layer.
+"""Trade Journal — SQLite + FTS5 journal for annotating and analysing trades.
 
 Each ``JournalEntry`` extends the raw ``trades`` table with qualitative
 metadata (emotions, setup quality, execution quality, tags, notes, screenshot)
-stored in a separate ``journal_entries`` DuckDB table.
+in a dedicated ``journal.sqlite`` database, alongside a normalised
+``journal_tags`` table (exact tag-subset filtering) and a ``journal_fts`` FTS5
+index (full-text search over symbol/notes/tags/strategy). The FTS index is kept
+in sync by SQL triggers, so every add/update/delete is searchable immediately.
+
+Storage uses :func:`flinttrade_core.db.open_sqlite`, the same WAL-hardened path
+every other FlintTrade store runs on. Pass ``":memory:"`` for tests.
 
 Usage::
 
-    from flinttrade_data.storage import StorageManager
     from flinttrade_journal.trade_journal import TradeJournal, JournalEntry
 
-    storage = StorageManager()
-    storage.initialise()
-    journal = TradeJournal(storage)
+    journal = TradeJournal("~/.flinttrade/journal.sqlite")
+    journal.initialise()
 
     entry_id = journal.add_entry(JournalEntry(
         symbol="NIFTY26APR24500CE",
@@ -29,22 +30,27 @@ Usage::
         setup_quality=4,
         execution_quality=5,
     ))
+    hits = journal.search("breakout")
     stats = journal.get_stats()
 """
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
 import logging
+import os
+import sqlite3
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from flinttrade_data.storage import StorageManager
+from flinttrade_core.db import open_sqlite
 
 logger = logging.getLogger("flinttrade.journal.trade_journal")
 
@@ -54,37 +60,72 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Schema DDL
 # ---------------------------------------------------------------------------
 
-_SCHEMA_JOURNAL = """
-CREATE TABLE IF NOT EXISTS journal_entries (
-    id                  VARCHAR PRIMARY KEY,
-    symbol              VARCHAR NOT NULL,
-    exchange            VARCHAR NOT NULL,
-    side                VARCHAR NOT NULL,
-    quantity            INTEGER NOT NULL,
-    entry_price         DOUBLE NOT NULL,
-    exit_price          DOUBLE,
-    entry_time          TIMESTAMP,
-    exit_time           TIMESTAMP,
-    strategy            VARCHAR,
-    tags                VARCHAR,
-    notes               VARCHAR,
-    screenshot_path     VARCHAR,
-    emotion_before      VARCHAR,
-    emotion_after       VARCHAR,
-    setup_quality       INTEGER,
-    execution_quality   INTEGER,
-    pnl                 DOUBLE,
-    pnl_pct             DOUBLE,
-    risk_reward_ratio   DOUBLE,
-    created_at          TIMESTAMP NOT NULL,
-    updated_at          TIMESTAMP NOT NULL
-);
-"""
-
-_IDX_JOURNAL = [
+# Timestamps are stored as ISO-8601 TEXT; date() parses them for range filters.
+# journal_tags normalises the JSON `tags` column so an exact tag-subset filter is
+# a single indexed query. journal_fts (FTS5) is kept in sync by triggers, so a
+# search reflects the latest write with no manual index maintenance.
+_SCHEMA_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS journal_entries (
+        id                  TEXT PRIMARY KEY,
+        symbol              TEXT NOT NULL,
+        exchange            TEXT NOT NULL,
+        side                TEXT NOT NULL,
+        quantity            INTEGER NOT NULL,
+        entry_price         REAL NOT NULL,
+        exit_price          REAL,
+        entry_time          TEXT,
+        exit_time           TEXT,
+        strategy            TEXT,
+        tags                TEXT,
+        notes               TEXT,
+        screenshot_path     TEXT,
+        emotion_before      TEXT,
+        emotion_after       TEXT,
+        setup_quality       INTEGER,
+        execution_quality   INTEGER,
+        pnl                 REAL,
+        pnl_pct             REAL,
+        risk_reward_ratio   REAL,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries (symbol)",
     "CREATE INDEX IF NOT EXISTS idx_journal_strategy ON journal_entries (strategy)",
     "CREATE INDEX IF NOT EXISTS idx_journal_entry_time ON journal_entries (entry_time)",
+    """
+    CREATE TABLE IF NOT EXISTS journal_tags (
+        entry_id TEXT NOT NULL,
+        tag      TEXT NOT NULL,
+        PRIMARY KEY (entry_id, tag)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_journal_tags_tag ON journal_tags (tag)",
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts
+    USING fts5(id UNINDEXED, symbol, notes, tags, strategy)
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS journal_ai AFTER INSERT ON journal_entries BEGIN
+        INSERT INTO journal_fts(rowid, id, symbol, notes, tags, strategy)
+        VALUES (new.rowid, new.id, new.symbol,
+                COALESCE(new.notes, ''), COALESCE(new.tags, ''), COALESCE(new.strategy, ''));
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS journal_ad AFTER DELETE ON journal_entries BEGIN
+        DELETE FROM journal_fts WHERE rowid = old.rowid;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS journal_au_after AFTER UPDATE ON journal_entries BEGIN
+        DELETE FROM journal_fts WHERE rowid = new.rowid;
+        INSERT INTO journal_fts(rowid, id, symbol, notes, tags, strategy)
+        VALUES (new.rowid, new.id, new.symbol,
+                COALESCE(new.notes, ''), COALESCE(new.tags, ''), COALESCE(new.strategy, ''));
+    END
+    """,
 ]
 
 # ---------------------------------------------------------------------------
@@ -303,71 +344,42 @@ _TIMESTAMP_COLS = frozenset(
 
 
 def _coerce_timestamp(value: Any) -> datetime | None:
-    """Coerce a DuckDB-returned timestamp value to a Python datetime.
+    """Coerce a stored ISO-8601 TEXT timestamp to a timezone-aware datetime.
 
-    DuckDB ``fetchdf()`` can return timestamps as pandas Timestamps, Python
-    datetime objects, or integer/float epoch microseconds depending on the
-    driver version and column type.
+    SQLite returns timestamp columns as the TEXT they were written as (or
+    ``None`` for NULL); naive strings are assumed IST.
 
     Args:
-        value: Raw value from a DuckDB TIMESTAMP column.
+        value: Raw value from a SQLite TEXT timestamp column.
 
     Returns:
-        A timezone-aware datetime (IST) or ``None`` if the value is null/NaT.
+        A timezone-aware datetime (IST) or ``None`` if null/unparseable.
     """
-    import math
-
     if value is None:
         return None
-    # pandas NaT
-    try:
-        import pandas as pd
-        if isinstance(value, pd.NaT.__class__) or (
-            isinstance(value, float) and math.isnan(value)
-        ):
-            return None
-        if isinstance(value, pd.Timestamp):
-            dt = value.to_pydatetime()
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=IST)
-            return dt
-    except ImportError:
-        pass
-
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=IST)
-        return value
-
-    # Epoch microseconds (int or float)
-    if isinstance(value, (int, float)):
-        try:
-            return datetime.fromtimestamp(value / 1_000_000, tz=IST)
-        except (OSError, OverflowError, ValueError):
-            try:
-                return datetime.fromtimestamp(value, tz=IST)
-            except (OSError, OverflowError, ValueError):
-                return None
-
-    # Last resort: string parsing
+        return value if value.tzinfo is not None else value.replace(tzinfo=IST)
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=IST)
-        return dt
     except ValueError:
         return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=IST)
+
+
+def _to_iso(value: datetime | None) -> str | None:
+    """Serialise a datetime to ISO-8601 TEXT for SQLite (``None`` passes through)."""
+    return value.isoformat() if value is not None else None
 
 
 def _row_to_entry(row: dict[str, Any]) -> JournalEntry:
-    """Convert a DuckDB result row dict to a JournalEntry.
+    """Convert a SQLite result row dict to a JournalEntry.
 
-    Tags are stored as a JSON array string in DuckDB; this function deserialises
-    them back to ``list[str]``.  Timestamp columns are coerced to timezone-aware
-    Python datetimes.
+    Tags are stored as a JSON array string; this deserialises them back to
+    ``list[str]``. Timestamp columns are coerced from ISO-8601 TEXT to
+    timezone-aware datetimes.
 
     Args:
-        row: Dictionary produced by ``fetchdf().to_dict("records")``.
+        row: Dictionary produced from a :class:`sqlite3.Row`.
 
     Returns:
         Hydrated :class:`JournalEntry` instance.
@@ -386,27 +398,19 @@ def _row_to_entry(row: dict[str, Any]) -> JournalEntry:
         if col in row:
             row[col] = _coerce_timestamp(row[col])
 
-    # DuckDB / pandas returns NULL numeric columns as float NaN.
-    # Convert NaN → None so Pydantic Optional[float] validation works correctly.
-    import math
-
-    for key, val in row.items():
-        if isinstance(val, float) and math.isnan(val):
-            row[key] = None
-
     return JournalEntry.model_validate(row)
 
 
 def _entry_to_row(entry: JournalEntry) -> dict[str, Any]:
-    """Serialise a JournalEntry to a flat dict for DuckDB insertion.
+    """Serialise a JournalEntry to a flat dict for SQLite insertion.
 
-    Tags are JSON-encoded to a single VARCHAR column.
+    Tags are JSON-encoded to a single TEXT column; datetimes to ISO-8601 TEXT.
 
     Args:
         entry: The journal entry to serialise.
 
     Returns:
-        Dict with all columns as scalar values.
+        Dict with all columns as SQLite-storable scalar values.
     """
     return {
         "id": entry.id,
@@ -416,8 +420,8 @@ def _entry_to_row(entry: JournalEntry) -> dict[str, Any]:
         "quantity": entry.quantity,
         "entry_price": entry.entry_price,
         "exit_price": entry.exit_price,
-        "entry_time": entry.entry_time,
-        "exit_time": entry.exit_time,
+        "entry_time": _to_iso(entry.entry_time),
+        "exit_time": _to_iso(entry.exit_time),
         "strategy": entry.strategy,
         "tags": json.dumps(entry.tags),
         "notes": entry.notes,
@@ -429,8 +433,8 @@ def _entry_to_row(entry: JournalEntry) -> dict[str, Any]:
         "pnl": entry.pnl,
         "pnl_pct": entry.pnl_pct,
         "risk_reward_ratio": entry.risk_reward_ratio,
-        "created_at": entry.created_at,
-        "updated_at": entry.updated_at,
+        "created_at": _to_iso(entry.created_at),
+        "updated_at": _to_iso(entry.updated_at),
     }
 
 
@@ -441,20 +445,37 @@ def _entry_to_row(entry: JournalEntry) -> dict[str, Any]:
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
-class TradeJournal:
-    """DuckDB-backed trade journal with CRUD, stats, CSV export, and tradebook import.
+def _default_journal_path() -> Path:
+    """Resolve the journal SQLite path: env override > workspace > home fallback."""
+    env = os.getenv("FLINTTRADE_JOURNAL_DB")
+    if env:
+        return Path(env).expanduser()
+    try:
+        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
+        return Workspace().workspace_dir / "journal.sqlite"
+    except Exception:  # noqa: BLE001 — fall back to the conventional home path
+        return Path.home() / ".flinttrade" / "journal.sqlite"
 
-    The journal lives in a ``journal_entries`` table in the same DuckDB file
-    as the rest of FlintTrade's data.  Call :meth:`initialise` once before
-    first use (or rely on :class:`~storage.StorageManager` to call it for you
-    after ``add_journal_schema``).
+
+class TradeJournal:
+    """SQLite + FTS5 trade journal with CRUD, stats, search, CSV, and import.
+
+    The journal owns its own ``journal.sqlite`` database (opened via
+    :func:`flinttrade_core.db.open_sqlite`), with ``journal_entries`` +
+    ``journal_tags`` + an FTS5 ``journal_fts`` index. Call :meth:`initialise`
+    once before first use. Pass ``db_path=":memory:"`` for tests, or inject an
+    existing :class:`sqlite3.Connection` via ``connection`` to share one.
 
     Args:
-        storage: An initialised :class:`~storage.StorageManager` instance.
+        db_path: Path to the journal SQLite file. Defaults to
+            ``journal.sqlite`` under the FlintTrade workspace. Ignored when
+            ``connection`` is supplied.
+        connection: An open :class:`sqlite3.Connection` to use directly
+            (chiefly for tests / an injected in-memory DB).
 
     Example::
 
-        journal = TradeJournal(storage)
+        journal = TradeJournal("~/.flinttrade/journal.sqlite")
         journal.initialise()
         eid = journal.add_entry(JournalEntry(
             symbol="BANKNIFTY", exchange="NFO", side="BUY",
@@ -464,30 +485,60 @@ class TradeJournal:
         stats = journal.get_stats()
     """
 
-    def __init__(self, storage: StorageManager) -> None:
-        self._storage = storage
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
+        if connection is not None:
+            self._conn = connection
+        else:
+            path = str(db_path) if db_path is not None else str(_default_journal_path())
+            self._conn = open_sqlite(path)
+        self._conn.row_factory = sqlite3.Row
+
+    def close(self) -> None:
+        """Close the underlying SQLite connection."""
+        self._conn.close()
+
+    def __enter__(self) -> TradeJournal:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        with contextlib.suppress(sqlite3.Error):
+            self.close()
 
     # ------------------------------------------------------------------
     # Schema initialisation
     # ------------------------------------------------------------------
 
     def initialise(self) -> None:
-        """Create the ``journal_entries`` table and indexes if they do not exist.
+        """Create the journal tables, indexes, FTS index, and sync triggers.
 
-        Safe to call multiple times (CREATE IF NOT EXISTS).
+        Safe to call multiple times (every statement is ``IF NOT EXISTS``).
         """
-        conn = self._storage.connection
-        conn.execute(_SCHEMA_JOURNAL)
-        for idx_sql in _IDX_JOURNAL:
-            conn.execute(idx_sql)
+        for stmt in _SCHEMA_STATEMENTS:
+            self._conn.execute(stmt)
+        self._conn.commit()
         logger.info("TradeJournal schema initialised")
 
     # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
 
+    def _sync_tags(self, entry_id: str, tags: list[str]) -> None:
+        """Replace the normalised ``journal_tags`` rows for an entry."""
+        self._conn.execute("DELETE FROM journal_tags WHERE entry_id = ?", (entry_id,))
+        unique = {t for t in tags if t}
+        if unique:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO journal_tags (entry_id, tag) VALUES (?, ?)",
+                [(entry_id, t) for t in unique],
+            )
+
     def add_entry(self, entry: JournalEntry) -> str:
-        """Insert a new journal entry into DuckDB.
+        """Insert a new journal entry (with its tags; FTS syncs via trigger).
 
         Args:
             entry: The :class:`JournalEntry` to persist.
@@ -496,21 +547,14 @@ class TradeJournal:
             The ``id`` of the newly created entry (UUID string).
         """
         row = _entry_to_row(entry)
-        conn = self._storage.connection
-        conn.execute(
-            """
-            INSERT INTO journal_entries VALUES (
-                $id, $symbol, $exchange, $side, $quantity,
-                $entry_price, $exit_price, $entry_time, $exit_time,
-                $strategy, $tags, $notes, $screenshot_path,
-                $emotion_before, $emotion_after,
-                $setup_quality, $execution_quality,
-                $pnl, $pnl_pct, $risk_reward_ratio,
-                $created_at, $updated_at
-            )
-            """,
+        cols = list(row.keys())
+        placeholders = ", ".join(f":{c}" for c in cols)
+        self._conn.execute(
+            f"INSERT INTO journal_entries ({', '.join(cols)}) VALUES ({placeholders})",
             row,
         )
+        self._sync_tags(entry.id, entry.tags)
+        self._conn.commit()
         logger.info("Journal entry added: id=%s symbol=%s", entry.id, entry.symbol)
         return entry.id
 
@@ -523,14 +567,13 @@ class TradeJournal:
         Returns:
             The :class:`JournalEntry`, or ``None`` if not found.
         """
-        conn = self._storage.connection
-        result = conn.execute(
-            "SELECT * FROM journal_entries WHERE id = $id",
+        row = self._conn.execute(
+            "SELECT * FROM journal_entries WHERE id = :id",
             {"id": entry_id},
-        ).fetchdf()
-        if result.empty:
+        ).fetchone()
+        if row is None:
             return None
-        return _row_to_entry(result.to_dict("records")[0])
+        return _row_to_entry(dict(row))
 
     def list_entries(self, filters: JournalFilters | None = None) -> list[JournalEntry]:
         """List journal entries, optionally filtered.
@@ -546,50 +589,45 @@ class TradeJournal:
             filters = JournalFilters()
 
         clauses: list[str] = []
-        params: dict[str, Any] = {}
+        params: list[Any] = []
 
         if filters.start_date:
-            clauses.append("entry_time >= $start_date")
-            params["start_date"] = filters.start_date
-
+            clauses.append("date(entry_time) >= ?")
+            params.append(filters.start_date)
         if filters.end_date:
-            clauses.append("entry_time <= CAST($end_date AS DATE) + INTERVAL '1 day'")
-            params["end_date"] = filters.end_date
-
+            clauses.append("date(entry_time) <= ?")
+            params.append(filters.end_date)
         if filters.symbol:
-            clauses.append("symbol = $symbol")
-            params["symbol"] = filters.symbol
-
+            clauses.append("symbol = ?")
+            params.append(filters.symbol)
         if filters.strategy:
-            clauses.append("strategy = $strategy")
-            params["strategy"] = filters.strategy
-
+            clauses.append("strategy = ?")
+            params.append(filters.strategy)
         if filters.side:
-            clauses.append("side = $side")
-            params["side"] = filters.side.upper()
+            clauses.append("side = ?")
+            params.append(filters.side.upper())
+        if filters.tags:
+            # Exact subset: keep entries carrying EVERY requested tag (SQL,
+            # via the normalised journal_tags table — no Python post-filter).
+            wanted = [t for t in dict.fromkeys(filters.tags) if t]
+            if wanted:
+                marks = ", ".join("?" for _ in wanted)
+                clauses.append(
+                    f"id IN (SELECT entry_id FROM journal_tags WHERE tag IN ({marks}) "
+                    "GROUP BY entry_id HAVING COUNT(DISTINCT tag) = ?)"
+                )
+                params.extend(wanted)
+                params.append(len(wanted))
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params["limit"] = filters.limit
-        params["offset"] = filters.offset
-
-        sql = f"""
-            SELECT * FROM journal_entries
-            {where}
-            ORDER BY COALESCE(entry_time, created_at) DESC, id
-            LIMIT $limit OFFSET $offset
-        """
-        conn = self._storage.connection
-        result = conn.execute(sql, params).fetchdf()
-
-        rows = result.to_dict("records")
-
-        # Post-filter by tags (DuckDB VARCHAR LIKE is cumbersome for JSON arrays)
-        entries = [_row_to_entry(r) for r in rows]
-        if filters.tags:
-            required = set(filters.tags)
-            entries = [e for e in entries if required.issubset(set(e.tags))]
-
-        return entries
+        sql = (
+            f"SELECT * FROM journal_entries {where} "
+            "ORDER BY COALESCE(entry_time, created_at) DESC, id LIMIT ? OFFSET ?"
+        )
+        params.append(filters.limit)
+        params.append(filters.offset)
+        rows = self._conn.execute(sql, params).fetchall()
+        return [_row_to_entry(dict(r)) for r in rows]
 
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> JournalEntry | None:
         """Partially update an existing entry.
@@ -623,14 +661,15 @@ class TradeJournal:
         # Build SET clause — filter through allowlist to prevent SQL injection,
         # and exclude immutable columns (id, created_at).
         set_keys = [k for k in row if k in _ALLOWED_COLUMNS and k not in ("id", "created_at")]
-        set_clause = ", ".join(f"{k} = ${k}" for k in set_keys)
+        set_clause = ", ".join(f"{k} = :{k}" for k in set_keys)
         update_params = {k: row[k] for k in set_keys}
         update_params["id"] = row["id"]
-        conn = self._storage.connection
-        conn.execute(
-            f"UPDATE journal_entries SET {set_clause} WHERE id = $id",
+        self._conn.execute(
+            f"UPDATE journal_entries SET {set_clause} WHERE id = :id",
             update_params,
         )
+        self._sync_tags(updated.id, updated.tags)
+        self._conn.commit()
         logger.info("Journal entry updated: id=%s", entry_id)
         return updated
 
@@ -646,10 +685,51 @@ class TradeJournal:
         existing = self.get_entry(entry_id)
         if existing is None:
             return False
-        conn = self._storage.connection
-        conn.execute("DELETE FROM journal_entries WHERE id = $id", {"id": entry_id})
+        self._conn.execute("DELETE FROM journal_tags WHERE entry_id = :id", {"id": entry_id})
+        self._conn.execute("DELETE FROM journal_entries WHERE id = :id", {"id": entry_id})
+        self._conn.commit()
         logger.info("Journal entry deleted: id=%s", entry_id)
         return True
+
+    # ------------------------------------------------------------------
+    # Full-text search
+    # ------------------------------------------------------------------
+
+    def search(self, query: str, *, limit: int = 100, offset: int = 0) -> list[JournalEntry]:
+        """Full-text search entries by symbol / notes / tags / strategy.
+
+        Uses the FTS5 ``journal_fts`` index (ranked by relevance). A blank query
+        returns nothing; a malformed FTS query (unbalanced quotes, stray
+        operators) yields an empty list rather than raising, so caller input is
+        never a 500.
+
+        Args:
+            query: FTS5 MATCH expression (e.g. ``"breakout"``, ``"nifty OR banknifty"``).
+            limit: Maximum results (default 100).
+            offset: Pagination offset (default 0).
+
+        Returns:
+            Matching :class:`JournalEntry` objects, most-relevant first.
+        """
+        term = query.strip()
+        if not term:
+            return []
+        sql = (
+            "SELECT je.* FROM journal_entries je "
+            "JOIN journal_fts f ON f.rowid = je.rowid "
+            "WHERE journal_fts MATCH ? ORDER BY rank LIMIT ? OFFSET ?"
+        )
+        try:
+            rows = self._conn.execute(sql, (term, limit, offset)).fetchall()
+        except sqlite3.OperationalError:
+            # Malformed MATCH syntax — retry as a quoted phrase before giving up.
+            try:
+                phrase = '"' + term.replace('"', '""') + '"'
+                rows = self._conn.execute(sql, (phrase, limit, offset)).fetchall()
+            except sqlite3.OperationalError:
+                logger.warning("Journal FTS query rejected: %r", term)
+                return []
+        return [_row_to_entry(dict(r)) for r in rows]
 
     # ------------------------------------------------------------------
     # Statistics

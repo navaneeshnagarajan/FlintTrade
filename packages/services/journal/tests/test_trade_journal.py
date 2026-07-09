@@ -1,6 +1,6 @@
 """Tests for trade_journal — JournalEntry, TradeJournal, JournalStats.
 
-All tests use an in-memory DuckDB via StorageManager(":memory:") so no
+All tests use an in-memory SQLite journal via TradeJournal(":memory:") so no
 filesystem state is created or left behind.
 
 Run with::
@@ -22,23 +22,17 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # ---------------------------------------------------------------------------
 
 
-def _make_storage():
-    """Return an initialised in-memory StorageManager."""
-    from flinttrade_data.storage import StorageManager
-
-    s = StorageManager(":memory:")
-    s.initialise()
-    return s
-
-
 def _make_journal():
-    """Return a (storage, TradeJournal) pair backed by in-memory DuckDB."""
+    """Return a ``(None, TradeJournal)`` pair backed by an in-memory SQLite DB.
+
+    The first element is unused (kept so existing ``_, journal = ...`` unpacking
+    stays valid); the journal owns its own ``:memory:`` connection.
+    """
     from flinttrade_journal.trade_journal import TradeJournal
 
-    storage = _make_storage()
-    journal = TradeJournal(storage)
+    journal = TradeJournal(":memory:")
     journal.initialise()
-    return storage, journal
+    return None, journal
 
 
 def _entry(**kwargs):
@@ -470,3 +464,67 @@ class TestExportImport:
         second = journal.import_from_tradebook([trade])
         assert len(first) == 1
         assert len(second) == 0  # duplicate skipped
+
+
+# ---------------------------------------------------------------------------
+# Full-text search (FTS5) + lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestJournalSearch:
+    """The SQLite journal exposes an FTS5 search over symbol/notes/tags/strategy."""
+
+    def _seed(self, journal):
+        journal.add_entry(_entry(
+            symbol="BANKNIFTY", strategy="momentum", tags=["breakout", "trending"],
+            notes="Clean breakout above resistance on strong volume.",
+        ))
+        journal.add_entry(_entry(
+            symbol="RELIANCE", strategy="meanreversion", tags=["reversal"],
+            notes="Faded the gap-up open near VWAP.",
+        ))
+
+    def test_search_matches_notes(self):
+        _, journal = _make_journal()
+        self._seed(journal)
+        hits = journal.search("breakout")
+        assert len(hits) == 1
+        assert hits[0].symbol == "BANKNIFTY"
+
+    def test_search_matches_symbol_and_strategy_and_tags(self):
+        _, journal = _make_journal()
+        self._seed(journal)
+        assert len(journal.search("RELIANCE")) == 1
+        assert len(journal.search("momentum")) == 1
+        assert len(journal.search("reversal")) == 1
+
+    def test_search_blank_query_returns_empty(self):
+        _, journal = _make_journal()
+        self._seed(journal)
+        assert journal.search("") == []
+        assert journal.search("   ") == []
+
+    def test_search_malformed_query_does_not_raise(self):
+        _, journal = _make_journal()
+        self._seed(journal)
+        # Unbalanced quote / stray operator would be an FTS syntax error; the
+        # method must degrade to a quoted-phrase search or empty list, never 500.
+        assert isinstance(journal.search('"unterminated'), list)
+        assert isinstance(journal.search("AND OR"), list)
+
+    def test_search_reflects_update_and_delete(self):
+        _, journal = _make_journal()
+        eid = journal.add_entry(_entry(symbol="TCS", notes="initial thesis alpha"))
+        assert len(journal.search("alpha")) == 1
+        journal.update_entry(eid, {"notes": "revised thesis omega"})
+        assert len(journal.search("alpha")) == 0  # FTS re-synced on update
+        assert len(journal.search("omega")) == 1
+        journal.delete_entry(eid)
+        assert len(journal.search("omega")) == 0  # FTS row removed on delete
+
+    def test_context_manager_closes(self):
+        from flinttrade_journal.trade_journal import TradeJournal
+        with TradeJournal(":memory:") as journal:
+            journal.initialise()
+            journal.add_entry(_entry(symbol="INFY"))
+            assert len(journal.list_entries()) == 1
