@@ -1,8 +1,7 @@
 """Tests for packages/services/ai/src/advisor_routes.py (Flask Blueprint).
 
 Covers POST /api/v1/advisor (chat — both messages[] and legacy message),
-POST /api/v1/advisor/stream (SSE), and GET /api/v1/advisor/status and
-GET /api/v1/signals (stub).
+POST /api/v1/advisor/stream (SSE), and GET /api/v1/advisor/status.
 
 All LLM interactions are mocked so no running LM Studio is required.
 """
@@ -235,22 +234,3 @@ class TestAdvisorStatus:
         data = resp.get_json()
         assert data["data"]["configured"] is False
         assert data["data"]["provider"] == ""
-
-
-# ---------------------------------------------------------------------------
-# GET /api/v1/signals (stub)
-# ---------------------------------------------------------------------------
-
-
-class TestGetSignalsStub:
-    def test_signals_returns_empty_list(self, client) -> None:
-        """Signals stub endpoint returns an empty list with status=success.
-
-        Args:
-            client: Flask test client.
-        """
-        resp = client.get("/api/v1/signals")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["signals"] == []

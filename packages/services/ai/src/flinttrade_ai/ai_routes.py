@@ -1,7 +1,7 @@
-"""AI blueprint — /api/v1/signals/active, /sentiment/analyse, /rag/query endpoints.
+"""AI blueprint - sentiment, regime, optimiser, refinement, and RAG endpoints.
 
-Active signal pipeline polling, sentiment analysis via LLM or rule-based
-fallback, and RAG knowledge-base query.
+Trading signals are owned by ``signal_routes``. This blueprint provides
+sentiment analysis, regime detection, optimiser reports, and RAG queries.
 """
 
 from __future__ import annotations
@@ -48,46 +48,6 @@ def _is_llm_configured() -> bool:
         return bool(cfg.provider)
     except Exception:
         return False
-
-
-@ai_bp.route("/signals/active", methods=["GET"])
-def signals_active() -> tuple[Any, int]:
-    """Return currently active trading signals from the signal pipeline.
-
-    Returns:
-        JSON with ``status`` and ``data.signals`` — a list of signal
-        objects with ``symbol``, ``exchange``, ``signal_type``,
-        ``confidence``, ``timestamp``, and ``indicators`` fields.
-        Returns an empty list if the pipeline has not yet produced signals.
-    """
-    try:
-        from .pipeline import SignalPipeline  # noqa: PLC0415
-
-        # Use a module-level singleton if already running, otherwise return empty
-        pipeline: SignalPipeline | None = getattr(current_app, "_signal_pipeline", None)
-        if pipeline is None:
-            return jsonify({"status": "success", "data": {"signals": []}}), 200
-
-        raw_signals = pipeline.latest_signals
-        signals = [
-            {
-                "symbol": info.get("symbol", key.split(":")[-1]),
-                "exchange": info.get("exchange", key.split(":")[0]),
-                "signal_type": info.get("signal", "NEUTRAL"),
-                "confidence": info.get("confidence", 0.0),
-                "timestamp": info.get("timestamp", ""),
-                "indicators": {
-                    k: v
-                    for k, v in info.items()
-                    if k not in ("symbol", "exchange", "signal", "confidence", "timestamp")
-                },
-            }
-            for key, info in raw_signals.items()
-        ]
-        return jsonify({"status": "success", "data": {"signals": signals}}), 200
-    except Exception:
-        logger.exception("signals_active error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
 @ai_bp.route("/sentiment/analyse", methods=["POST"])

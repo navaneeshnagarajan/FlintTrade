@@ -1,7 +1,6 @@
 """Tests for packages/services/ai/src/ai_routes.py (Flask Blueprint).
 
 Covers:
-  GET  /api/v1/signals/active      — pipeline present / absent
   POST /api/v1/sentiment/analyse   — happy path, missing fields, LLM absent
   POST /api/v1/ai/refine-strategy  — happy path, missing fields
   POST /api/v1/rag/query           — RAG present / absent, missing query
@@ -73,51 +72,6 @@ def _typed_market_summary():
             "opportunities": ["IT"],
         }
     )
-
-
-# ---------------------------------------------------------------------------
-# GET /api/v1/signals/active
-# ---------------------------------------------------------------------------
-
-
-class TestSignalsActive:
-    def test_no_pipeline_returns_empty_list(self, client) -> None:
-        """Without a pipeline on the app object, an empty signals list is returned.
-
-        Args:
-            client: Flask test client.
-        """
-        resp = client.get("/api/v1/signals/active")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["signals"] == []
-
-    def test_pipeline_signals_serialised(self, app, client) -> None:
-        """When a pipeline is attached to the app, its signals are serialised.
-
-        Args:
-            app:    Flask application fixture.
-            client: Flask test client.
-        """
-        mock_pipeline = MagicMock()
-        mock_pipeline.latest_signals = {
-            "NSE:NIFTY": {
-                "symbol": "NIFTY",
-                "exchange": "NSE",
-                "signal": "BUY",
-                "confidence": 0.75,
-                "timestamp": "2026-04-19T10:00:00",
-            }
-        }
-        app._signal_pipeline = mock_pipeline  # type: ignore[attr-defined]
-        resp = client.get("/api/v1/signals/active")
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert len(data["data"]["signals"]) == 1
-        sig = data["data"]["signals"][0]
-        assert sig["symbol"] == "NIFTY"
-        assert sig["signal_type"] == "BUY"
 
 
 # ---------------------------------------------------------------------------

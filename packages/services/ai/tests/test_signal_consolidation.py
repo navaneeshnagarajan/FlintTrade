@@ -226,6 +226,10 @@ def test_flask_factory_installs_signal_hub_and_ml_source(monkeypatch, tmp_path) 
     assert ml_pipeline._openalgo_client is openalgo_client
     assert ml_pipeline._signal_sink.__self__ is hub
     assert ml_pipeline._signal_sink.__func__ is hub.ingest_ml_cycle.__func__
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/api/v1/signals/recent" in rules
+    assert "/api/v1/signals/active" not in rules
+    assert "/api/v1/signals" not in rules
 
 
 def test_runtime_registers_five_minute_market_hours_ml_job() -> None:

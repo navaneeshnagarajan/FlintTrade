@@ -1,7 +1,6 @@
-"""Advisor blueprint — /api/v1/advisor/* and /api/v1/signals endpoints.
+"""Advisor blueprint - conversational and streaming advisor endpoints.
 
-Provides AI advisor chat (single-turn and streaming SSE), advisor status, and
-the initial signals stub endpoint.
+Provides AI advisor chat (single-turn and streaming SSE) and advisor status.
 """
 
 from __future__ import annotations
@@ -216,13 +215,4 @@ def advisor_status() -> tuple[Any, int]:
             "provider": cfg.provider if cfg else "",
             "model": cfg.model if cfg else "",
         },
-    }), 200
-
-
-@advisor_bp.route("/signals", methods=["GET"])
-def get_signals() -> tuple[Any, int]:
-    """Return current signal state (stub — populated by signal pipeline)."""
-    return jsonify({
-        "status": "success",
-        "data": {"signals": []},
     }), 200
