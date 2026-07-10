@@ -32,8 +32,8 @@ class SignalAction(StrEnum):
 
 
 @dataclass
-class Signal:
-    """A trading signal with confidence."""
+class MLSignal:
+    """A LightGBM classification result with confidence and feature values."""
 
     action: str = "HOLD"
     confidence: float = 0.0  # 0.0 to 1.0
@@ -44,6 +44,10 @@ class Signal:
     @property
     def is_actionable(self) -> bool:
         return self.action != "HOLD" and self.confidence > 0.5
+
+
+# Historical module-level import retained while callers migrate to ``MLSignal``.
+Signal = MLSignal
 
 
 @dataclass
@@ -477,10 +481,10 @@ class SignalGenerator:
         bars: list[dict[str, Any]],
         symbol: str = "",
         **market_data: Any,
-    ) -> Signal:
+    ) -> MLSignal:
         """Generate a signal from recent bars."""
         if not self._model:
-            return Signal(action="HOLD", confidence=0.0, symbol=symbol)
+            return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
 
         features = engineer_features(
             bars,
@@ -489,7 +493,7 @@ class SignalGenerator:
             iv_percentile_values=market_data.get("iv_percentile_values"),
         )
         if not features.values:
-            return Signal(action="HOLD", confidence=0.0, symbol=symbol)
+            return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
 
         # Use the last feature row
         row = features.values[-1]
@@ -500,7 +504,7 @@ class SignalGenerator:
         action_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
         feat_dict = dict(zip(self._feature_names, row))
 
-        return Signal(
+        return MLSignal(
             action=action_map[pred_class],
             confidence=confidence,
             symbol=symbol,

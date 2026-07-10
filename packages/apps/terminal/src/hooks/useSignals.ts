@@ -20,7 +20,7 @@ import {
   getSignalConfig,
   updateSignalConfig,
 } from "@/services/ftApi";
-import type { LiveSignal, SignalConfig } from "@/services/ftApi";
+import type { SignalConfig, SignalEvent } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { isMarketHours } from "@/lib/market";
 
@@ -28,36 +28,67 @@ import { isMarketHours } from "@/lib/market";
 // Sample data for explore mode
 // ---------------------------------------------------------------------------
 
-const SAMPLE_SIGNALS: LiveSignal[] = [
+export const signalEventSchema = z.object({
+  event_id: z.number().int().nonnegative().default(0),
+  timestamp: z.string(),
+  symbol: z.string(),
+  exchange: z.string().default(""),
+  signal_type: z.enum(["BUY", "SELL", "HOLD", "ALERT"]),
+  source: z.enum(["rule", "ml"]).default("rule"),
+  method: z.string().default(""),
+  indicator: z.string(),
+  value: z.number(),
+  threshold: z.number(),
+  confidence: z.number(),
+  message: z.string(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}) satisfies z.ZodType<SignalEvent>;
+
+const SAMPLE_SIGNALS: SignalEvent[] = [
   {
+    event_id: 3,
     timestamp: new Date().toISOString(),
     symbol: "NIFTY",
+    exchange: "NSE_INDEX",
     signal_type: "BUY",
+    source: "rule",
+    method: "RSI",
     indicator: "RSI",
     value: 28.5,
     threshold: 30,
     confidence: 0.72,
     message: "NIFTY RSI(14) = 28.5 below oversold threshold 30",
+    metadata: {},
   },
   {
+    event_id: 2,
     timestamp: new Date(Date.now() - 60_000).toISOString(),
     symbol: "BANKNIFTY",
+    exchange: "NSE_INDEX",
     signal_type: "SELL",
+    source: "rule",
+    method: "EMA_Cross",
     indicator: "EMA_Cross",
     value: -45.2,
     threshold: 0,
     confidence: 0.65,
     message: "BANKNIFTY EMA(9) crossed below EMA(21)",
+    metadata: {},
   },
   {
+    event_id: 1,
     timestamp: new Date(Date.now() - 120_000).toISOString(),
     symbol: "NIFTY",
+    exchange: "NSE_INDEX",
     signal_type: "BUY",
+    source: "rule",
+    method: "MACD",
     indicator: "MACD",
     value: 12.3,
     threshold: 0,
     confidence: 0.60,
     message: "NIFTY MACD histogram turned positive (12.30)",
+    metadata: {},
   },
 ];
 
@@ -83,7 +114,7 @@ const SAMPLE_CONFIG: SignalConfig = {
 export function useRecentSignals(limit = 20) {
   const mode = useModeStore((s) => s.mode);
 
-  return useQuery<{ signals: LiveSignal[] }>({
+  return useQuery<{ signals: SignalEvent[] }>({
     queryKey: ["signals", "recent", limit],
     queryFn: () => {
       if (mode === "explore") {
@@ -138,7 +169,7 @@ export function useUpdateSignalConfig() {
 // ---------------------------------------------------------------------------
 
 export function useSignalStream(
-  onSignal: (signal: LiveSignal) => void,
+  onSignal: (signal: SignalEvent) => void,
   enabled = true,
 ) {
   const mode = useModeStore((s) => s.mode);
@@ -159,19 +190,8 @@ export function useSignalStream(
       setConnected(false);
       // EventSource auto-reconnects — no manual reconnect needed
     };
-    const liveSignalSchema = z.object({
-      timestamp: z.string(),
-      symbol: z.string(),
-      signal_type: z.enum(["BUY", "SELL", "ALERT"]),
-      indicator: z.string(),
-      value: z.number(),
-      threshold: z.number(),
-      confidence: z.number(),
-      message: z.string(),
-    }) satisfies z.ZodType<LiveSignal>;
-
     es.onmessage = (event) => {
-      const signal = safeParse(event.data as string, liveSignalSchema);
+      const signal = safeParse(event.data as string, signalEventSchema);
       if (signal) callbackRef.current(signal);
       // Malformed frames and heartbeat comments are silently discarded
     };

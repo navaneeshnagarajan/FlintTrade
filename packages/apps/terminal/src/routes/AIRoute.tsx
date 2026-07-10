@@ -43,8 +43,8 @@ import {
   getRecentSignals,
   analyzeSentiment,
   queryKnowledge,
-  type Signal,
-  type LiveSignal,
+  type SignalCardModel,
+  type SignalEvent,
   type SentimentResult,
   type RAGResult,
 } from "@/services/ftApi";
@@ -112,19 +112,19 @@ function ChatSection() {
 // Section: Signals — enhanced signal cards with animated confidence bar
 // ---------------------------------------------------------------------------
 
-function signalBadgeClass(type: Signal["signal_type"]): string {
+function signalBadgeClass(type: SignalCardModel["signal_type"]): string {
   if (type === "BUY") return "bg-bullish-bg text-profit border-profit/30";
   if (type === "SELL") return "bg-bearish-bg text-loss border-loss/30";
   return "bg-surface-base text-text-muted border-border-default";
 }
 
-function signalBarColor(type: Signal["signal_type"]): string {
+function signalBarColor(type: SignalCardModel["signal_type"]): string {
   if (type === "BUY") return "bg-profit";
   if (type === "SELL") return "bg-loss";
   return "bg-text-muted";
 }
 
-function SignalCard({ signal, index }: { signal: Signal; index: number }) {
+function SignalCard({ signal, index }: { signal: SignalCardModel; index: number }) {
   const indicatorEntries = Object.entries(signal.indicators);
   const pct = signal.confidence * 100;
 
@@ -141,7 +141,12 @@ function SignalCard({ signal, index }: { signal: Signal; index: number }) {
             <span className="font-mono font-bold text-text-primary text-sm leading-none">
               {signal.symbol}
             </span>
-            <span className="text-xs text-text-muted">{signal.exchange}</span>
+            {signal.exchange && (
+              <span className="text-xs text-text-muted">{signal.exchange}</span>
+            )}
+            <Badge className="text-xxs px-1.5 py-0 border border-border-default bg-surface-base text-text-secondary">
+              {signal.source === "ml" ? "ML" : "Rule"}
+            </Badge>
           </div>
           <Badge
             className={`text-xs font-bold px-2 py-0.5 border rounded-full ${signalBadgeClass(signal.signal_type)}`}
@@ -188,6 +193,10 @@ function SignalCard({ signal, index }: { signal: Signal; index: number }) {
           </div>
         )}
 
+        {signal.message && (
+          <p className="text-xs text-text-secondary leading-relaxed">{signal.message}</p>
+        )}
+
         <p className="text-xs text-text-muted">
           {new Date(signal.timestamp).toLocaleString("en-IN", {
             dateStyle: "short",
@@ -199,37 +208,45 @@ function SignalCard({ signal, index }: { signal: Signal; index: number }) {
   );
 }
 
-// Adapt the working /signals/recent payload (LiveSignal: single indicator+value)
-// to the SignalCard's Signal shape (indicators as a Record). LiveSignal has no
-// exchange and may carry an "ALERT" type, which maps to "HOLD" for display.
-function liveSignalToSignal(ls: LiveSignal): Signal {
+// Adapt the canonical source-tagged feed to the compact card view while keeping
+// numeric source metadata available as indicator chips.
+function signalEventToCard(event: SignalEvent): SignalCardModel {
+  const metadataIndicators = Object.fromEntries(
+    Object.entries(event.metadata).filter((entry): entry is [string, number] =>
+      typeof entry[1] === "number"),
+  );
   return {
-    symbol: ls.symbol,
-    exchange: "",
-    signal_type: ls.signal_type === "ALERT" ? "HOLD" : ls.signal_type,
-    confidence: ls.confidence,
-    timestamp: ls.timestamp,
-    indicators: { [ls.indicator]: ls.value },
+    event_id: event.event_id,
+    symbol: event.symbol,
+    exchange: event.exchange,
+    signal_type: event.signal_type === "ALERT" ? "HOLD" : event.signal_type,
+    confidence: event.confidence,
+    timestamp: event.timestamp,
+    indicators: {
+      ...(event.indicator ? { [event.indicator]: event.value } : {}),
+      ...metadataIndicators,
+    },
+    source: event.source,
+    method: event.method,
+    message: event.message,
   };
 }
 
 function SignalsSection() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["signals"],
-    // /signals/active reads a _signal_pipeline that is never wired (always []);
-    // /signals/recent is the working ML-signal source (audit M9/M10).
     queryFn: () => getRecentSignals(20),
     refetchInterval: 30_000,
   });
 
-  const signals: Signal[] = (data?.signals ?? []).map(liveSignalToSignal);
+  const signals = (data?.signals ?? []).map(signalEventToCard);
 
   return (
     <div className="space-y-4" data-tour-target="ai-signals">
       <Card className="bg-surface-card border border-border-default rounded-lg p-5">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-heading font-semibold text-base text-text-primary">
-            ML-Powered Signals
+            Trading Signals
           </h3>
           <Button
             variant="ghost"
@@ -243,7 +260,8 @@ function SignalsSection() {
           </Button>
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">
-          LightGBM models analyse price, volume, OI, and technicals. Auto-refreshes every 30s.
+          Live indicator rules and scheduled ML analysis share one source-labelled feed.
+          Auto-refreshes every 30s.
         </p>
       </Card>
 
@@ -276,7 +294,7 @@ function SignalsSection() {
           <Zap className="w-7 h-7 text-text-muted mx-auto mb-2" />
           <p className="text-sm text-text-secondary">No active signals.</p>
           <p className="text-xs text-text-muted mt-1">
-            Signal pipeline generates signals during market hours.
+            Rule and ML pipelines generate signals during market hours.
           </p>
         </Card>
       )}
@@ -285,7 +303,7 @@ function SignalsSection() {
         <div className="space-y-3">
           {signals.map((signal, idx) => (
             <SignalCard
-              key={`${signal.symbol}-${signal.timestamp}-${idx}`}
+              key={signal.event_id || `${signal.symbol}-${signal.timestamp}-${idx}`}
               signal={signal}
               index={idx}
             />
@@ -1028,8 +1046,8 @@ export default function AIRoute() {
                 {level === "beginner"
                   ? "Ask me anything about markets, stocks, or how to trade"
                   : level === "intermediate"
-                    ? "Local LLM advisor · ML signals · Market sentiment · Regime detector"
-                  : "Local LLM advisor · ML signals · Market sentiment · Regime · Knowledge base"}
+                    ? "Local LLM advisor · Rule + ML signals · Market sentiment · Regime detector"
+                  : "Local LLM advisor · Rule + ML signals · Market sentiment · Regime · Knowledge base"}
               </p>
             </div>
             {visibleSections.length > 1 && (

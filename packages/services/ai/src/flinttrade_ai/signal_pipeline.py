@@ -1,21 +1,22 @@
-"""Live market signals pipeline — processes real-time ticks through streaming
-indicators and emits rule-based trading signals when thresholds are crossed.
+"""Canonical mixed-source signal hub and live rule engine.
 
 Architecture:
-    WebSocket ticks --> process_tick() --> streaming indicators --> threshold check --> Signal
+    WebSocket ticks --> process_tick() --> streaming indicators --> SignalEvent
+    scheduled bars --> SignalPipeline --> ingest_ml_cycle() -------> SignalEvent
 
-This is the v1 rule-based pipeline.  ML scoring will be layered on top in a
-future iteration.  Each instrument maintains its own set of streaming indicator
-instances so that warm-up state is independent.
+Each instrument keeps independent streaming-indicator state. Rule and ML events
+share one bounded, source-tagged feed with monotonic IDs for reliable SSE replay.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Mapping
 from collections import deque
 from typing import Any
 
-from .signal_models import Signal, SignalConfig, now_iso
+from .signal_models import SignalConfig, SignalEvent, now_iso
 from flinttrade_indicators.streaming import StreamingEMA, StreamingRSI
 
 logger = logging.getLogger("flinttrade.ai.signal_pipeline")
@@ -96,8 +97,11 @@ class LiveSignalPipeline:
             indicators=indicators or SignalConfig().indicators,
             thresholds=thresholds or SignalConfig().thresholds,
         )
-        self.signals: deque[Signal] = deque(maxlen=_MAX_SIGNALS)
+        self.signals: deque[SignalEvent] = deque(maxlen=_MAX_SIGNALS)
         self._states: dict[str, _InstrumentState] = {}
+        self._lock = threading.RLock()
+        self._condition = threading.Condition(self._lock)
+        self._sequence = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -108,7 +112,17 @@ class LiveSignalPipeline:
         symbol: str,
         ltp: float,
         volume: int = 0,
-    ) -> Signal | None:
+    ) -> SignalEvent | None:
+        """Process one tick under the same lock used by reconfiguration."""
+        with self._lock:
+            return self._process_tick_locked(symbol, ltp, volume)
+
+    def _process_tick_locked(
+        self,
+        symbol: str,
+        ltp: float,
+        volume: int = 0,
+    ) -> SignalEvent | None:
         """Process a single tick and return a Signal if a threshold is crossed.
 
         Only the *first* indicator to trigger wins per tick.  If no indicator
@@ -133,7 +147,7 @@ class LiveSignalPipeline:
                 overbought = thresholds.get("rsi_overbought", 70.0)
 
                 if rsi_val <= oversold:
-                    sig = Signal(
+                    sig = SignalEvent(
                         timestamp=now_iso(),
                         symbol=symbol,
                         signal_type="BUY",
@@ -144,11 +158,11 @@ class LiveSignalPipeline:
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
                                 f"below oversold threshold {oversold:.0f}",
                     )
-                    self.signals.appendleft(sig)
+                    self._publish_locked(sig)
                     return sig
 
                 if rsi_val >= overbought:
-                    sig = Signal(
+                    sig = SignalEvent(
                         timestamp=now_iso(),
                         symbol=symbol,
                         signal_type="SELL",
@@ -159,7 +173,7 @@ class LiveSignalPipeline:
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
                                 f"above overbought threshold {overbought:.0f}",
                     )
-                    self.signals.appendleft(sig)
+                    self._publish_locked(sig)
                     return sig
 
         # --- EMA Crossover ---
@@ -174,7 +188,7 @@ class LiveSignalPipeline:
                 if prev_fast is not None and prev_slow is not None:
                     # Bullish crossover: fast crosses above slow
                     if prev_fast <= prev_slow and fast_val > slow_val:
-                        sig = Signal(
+                        sig = SignalEvent(
                             timestamp=now_iso(),
                             symbol=symbol,
                             signal_type="BUY",
@@ -185,14 +199,14 @@ class LiveSignalPipeline:
                             message=f"{symbol} EMA({state.ema_fast.period}) "
                                     f"crossed above EMA({state.ema_slow.period})",
                         )
-                        self.signals.appendleft(sig)
+                        self._publish_locked(sig)
                         state.prev_ema_fast = fast_val
                         state.prev_ema_slow = slow_val
                         return sig
 
                     # Bearish crossover: fast crosses below slow
                     if prev_fast >= prev_slow and fast_val < slow_val:
-                        sig = Signal(
+                        sig = SignalEvent(
                             timestamp=now_iso(),
                             symbol=symbol,
                             signal_type="SELL",
@@ -203,7 +217,7 @@ class LiveSignalPipeline:
                             message=f"{symbol} EMA({state.ema_fast.period}) "
                                     f"crossed below EMA({state.ema_slow.period})",
                         )
-                        self.signals.appendleft(sig)
+                        self._publish_locked(sig)
                         state.prev_ema_fast = fast_val
                         state.prev_ema_slow = slow_val
                         return sig
@@ -231,7 +245,7 @@ class LiveSignalPipeline:
                     if prev_hist is not None:
                         # Bullish: histogram crosses from negative to positive
                         if prev_hist <= 0 and macd_hist > 0:
-                            sig = Signal(
+                            sig = SignalEvent(
                                 timestamp=now_iso(),
                                 symbol=symbol,
                                 signal_type="BUY",
@@ -241,13 +255,13 @@ class LiveSignalPipeline:
                                 confidence=0.60,
                                 message=f"{symbol} MACD histogram turned positive ({macd_hist:.2f})",
                             )
-                            self.signals.appendleft(sig)
+                            self._publish_locked(sig)
                             state.prev_macd_hist = macd_hist
                             return sig
 
                         # Bearish: histogram crosses from positive to negative
                         if prev_hist >= 0 and macd_hist < 0:
-                            sig = Signal(
+                            sig = SignalEvent(
                                 timestamp=now_iso(),
                                 symbol=symbol,
                                 signal_type="SELL",
@@ -257,7 +271,7 @@ class LiveSignalPipeline:
                                 confidence=0.60,
                                 message=f"{symbol} MACD histogram turned negative ({macd_hist:.2f})",
                             )
-                            self.signals.appendleft(sig)
+                            self._publish_locked(sig)
                             state.prev_macd_hist = macd_hist
                             return sig
 
@@ -265,7 +279,97 @@ class LiveSignalPipeline:
 
         return None
 
-    def get_recent_signals(self, limit: int = 20) -> list[Signal]:
+    def publish_signal(self, signal: SignalEvent) -> SignalEvent:
+        """Publish one event with a hub-owned monotonic identifier."""
+        with self._lock:
+            return self._publish_locked(signal)
+
+    def _publish_locked(self, signal: SignalEvent) -> SignalEvent:
+        """Publish while the hub lock is held and wake SSE subscribers."""
+        self._sequence += 1
+        signal.event_id = self._sequence
+        signal.timestamp = signal.timestamp or now_iso()
+        signal.confidence = max(0.0, min(1.0, float(signal.confidence)))
+        if not signal.method:
+            signal.method = signal.indicator
+        self.signals.appendleft(signal)
+        self._condition.notify_all()
+        return signal
+
+    @property
+    def latest_event_id(self) -> int:
+        """Return the newest hub event ID without exposing mutable state."""
+        with self._lock:
+            return self._sequence
+
+    def get_signals_after(self, event_id: int) -> list[SignalEvent]:
+        """Return retained events newer than ``event_id`` in emission order."""
+        with self._lock:
+            return sorted(
+                (signal for signal in self.signals if signal.event_id > event_id),
+                key=lambda signal: signal.event_id,
+            )
+
+    def wait_for_signals_after(
+        self,
+        event_id: int,
+        timeout: float,
+    ) -> list[SignalEvent]:
+        """Wait for a newer event, then return every retained event after it."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._sequence > event_id, timeout=timeout)
+            return sorted(
+                (signal for signal in self.signals if signal.event_id > event_id),
+                key=lambda signal: signal.event_id,
+            )
+
+    def ingest_ml_cycle(
+        self,
+        results: Mapping[str, Mapping[str, Any]],
+    ) -> list[SignalEvent]:
+        """Convert one scheduled ML cycle into canonical source-tagged events."""
+        published: list[SignalEvent] = []
+        for key, info in results.items():
+            symbol = str(info.get("symbol") or key.rsplit(":", 1)[-1])
+            exchange = str(info.get("exchange") or key.partition(":")[0])
+            signal_type = str(info.get("signal", "HOLD")).upper()
+            if signal_type == "NEUTRAL":
+                signal_type = "HOLD"
+            if signal_type not in {"BUY", "SELL", "HOLD", "ALERT"}:
+                logger.warning("Unknown ML signal type %r for %s; emitting ALERT", signal_type, key)
+                signal_type = "ALERT"
+
+            method = str(info.get("method", "ml_model"))
+            indicator = "LightGBM" if method.startswith("ml_model") else "EMA_Cross"
+            ltp = _as_float(info.get("ltp"))
+            turbulence = _as_float(info.get("turbulence_score"))
+            confidence = _as_float(info.get("confidence"))
+            method_label = method.replace("_", " ")
+            message = f"{symbol} scheduled {method_label} signal: {signal_type}"
+
+            published.append(
+                self.publish_signal(
+                    SignalEvent(
+                        timestamp=str(info.get("timestamp") or now_iso()),
+                        symbol=symbol,
+                        exchange=exchange,
+                        signal_type=signal_type,
+                        source="ml",
+                        method=method,
+                        indicator=indicator,
+                        value=ltp,
+                        confidence=confidence,
+                        message=message,
+                        metadata={
+                            "ltp": ltp,
+                            "turbulence_score": turbulence,
+                        },
+                    )
+                )
+            )
+        return published
+
+    def get_recent_signals(self, limit: int = 20) -> list[SignalEvent]:
         """Return recent signals, newest first.
 
         Args:
@@ -274,7 +378,8 @@ class LiveSignalPipeline:
         Returns:
             List of ``Signal`` instances ordered newest first.
         """
-        return list(self.signals)[:limit]
+        with self._lock:
+            return list(self.signals)[:limit]
 
     def update_config(
         self,
@@ -289,15 +394,17 @@ class LiveSignalPipeline:
         Returns:
             The updated ``SignalConfig``.
         """
-        if instruments is not None:
-            self.config.instruments = instruments
-        if indicators is not None:
-            self.config.indicators = indicators
-        if thresholds is not None:
-            self.config.thresholds = thresholds
-        # Reset per-instrument state so indicators re-initialise with new params
-        self._states.clear()
-        self.signals.clear()
+        with self._lock:
+            if instruments is not None:
+                self.config.instruments = instruments
+            if indicators is not None:
+                self.config.indicators = indicators
+            if thresholds is not None:
+                self.config.thresholds = thresholds
+            # Reset per-instrument state so indicators re-initialise with new params.
+            # The sequence remains monotonic so SSE reconnect cursors cannot wedge.
+            self._states.clear()
+            self.signals.clear()
         logger.info("Signal pipeline config updated: %s", self.config.to_dict())
         return self.config
 
@@ -314,3 +421,12 @@ class LiveSignalPipeline:
         if symbol not in self._states:
             self._states[symbol] = _InstrumentState(self.config)
         return self._states[symbol]
+
+
+def _as_float(value: Any) -> float:
+    """Convert external numeric metadata without allowing NaN or infinities."""
+    try:
+        result = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return result if result == result and result not in {float("inf"), float("-inf")} else 0.0

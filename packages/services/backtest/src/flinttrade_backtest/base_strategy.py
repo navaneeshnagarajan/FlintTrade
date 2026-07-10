@@ -49,7 +49,7 @@ logger = logging.getLogger("flinttrade.backtest.strategy")
 # ---------------------------------------------------------------------------
 
 
-class Signal(StrEnum):
+class StrategySignal(StrEnum):
     """Strategy signals emitted by ``on_bar``.
 
     Attributes:
@@ -65,6 +65,11 @@ class Signal(StrEnum):
     HOLD = "HOLD"
     EXIT_LONG = "EXIT_LONG"
     EXIT_SHORT = "EXIT_SHORT"
+
+
+# Historical public name retained for compatibility. New code should use the
+# explicit strategy-domain name to avoid collision with live and ML signals.
+Signal = StrategySignal
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +245,7 @@ class OrderIntent:
     """
 
     symbol: str = ""
-    side: Signal = Signal.BUY
+    side: StrategySignal = StrategySignal.BUY
     quantity: int = 0
     order_type: str = "MARKET"
     limit_price: float = 0.0
@@ -251,7 +256,7 @@ class OrderIntent:
     @property
     def action(self) -> str:
         """Alias for side (BUY/SELL)."""
-        return "BUY" if self.side in (Signal.BUY, Signal.EXIT_SHORT) else "SELL"
+        return "BUY" if self.side in (StrategySignal.BUY, StrategySignal.EXIT_SHORT) else "SELL"
 
     @property
     def pricetype(self) -> str:
@@ -399,7 +404,7 @@ class BaseBacktestStrategy(ABC):
         order_type = self._infer_order_type(limit_price, stop_price)
         self._pending_orders.append(OrderIntent(
             symbol=symbol or self.symbol,
-            side=Signal.BUY,
+            side=StrategySignal.BUY,
             quantity=quantity,
             order_type=order_type,
             limit_price=limit_price,
@@ -427,7 +432,7 @@ class BaseBacktestStrategy(ABC):
         order_type = self._infer_order_type(limit_price, stop_price)
         self._pending_orders.append(OrderIntent(
             symbol=symbol or self.symbol,
-            side=Signal.SELL,
+            side=StrategySignal.SELL,
             quantity=quantity,
             order_type=order_type,
             limit_price=limit_price,
@@ -461,7 +466,11 @@ class BaseBacktestStrategy(ABC):
             logger.debug("exit_position: no open position for %s", sym)
             return
 
-        side = Signal.SELL if pos.get("side", "BUY") == "BUY" else Signal.BUY
+        side = (
+            StrategySignal.SELL
+            if pos.get("side", "BUY") == "BUY"
+            else StrategySignal.BUY
+        )
         qty = quantity or pos.get("quantity", 0)
         order_type = self._infer_order_type(limit_price, stop_price)
 

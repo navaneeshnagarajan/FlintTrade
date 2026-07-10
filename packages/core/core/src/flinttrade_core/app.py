@@ -1212,6 +1212,33 @@ def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str
 # ---------------------------------------------------------------------------
 
 
+def _wire_ml_signal_runtime(
+    app: Flask,
+    cron: Any,
+    time_scheduler: Any,
+) -> bool:
+    """Register the canonical scheduled ML producer when it was configured."""
+    pipeline = app.config.get("ML_SIGNAL_PIPELINE")
+    if pipeline is None:
+        logger.info("Scheduled ML signals inactive - no OpenAlgo-backed producer")
+        return False
+
+    from flinttrade_ai.signal_routes import make_ml_signal_job  # noqa: PLC0415
+
+    cron.register(
+        "ml_signal_cycle",
+        handler=make_ml_signal_job(
+            pipeline,
+            lambda: bool(time_scheduler.is_market_open("NSE")),
+        ),
+        description="Publish scheduled LightGBM signals into the canonical feed",
+        trigger_type="interval",
+        trigger_args={"minutes": 5},
+    )
+    app.config["ML_SIGNAL_JOB"] = "ml_signal_cycle"
+    return True
+
+
 def create_flask_app(
     safety: Any | None = None,
     scheduler: Any | None = None,
@@ -1923,8 +1950,12 @@ def create_flask_app(
     from flinttrade_ai.obsidian_routes import obsidian_bp  # noqa: PLC0415
     app.register_blueprint(obsidian_bp)
 
-    from flinttrade_ai.signal_routes import signal_bp  # noqa: PLC0415
+    from flinttrade_ai.signal_routes import (  # noqa: PLC0415
+        configure_signal_sources,
+        signal_bp,
+    )
     app.register_blueprint(signal_bp)
+    configure_signal_sources(app, client)
 
     from .backtest_routes import backtest_bp  # noqa: PLC0415
     app.register_blueprint(backtest_bp)
@@ -3050,6 +3081,15 @@ class FlintTradeApp:
                 logger.info("EOD auto-sync wired (lookback %d days)", lookback)
             except Exception as exc:
                 logger.warning("EOD auto-sync not wired (%s); scheduled sync will not run", exc)
+
+        # Scheduled LightGBM/EMA signal source. The app factory has already
+        # connected its output to the canonical rule+ML signal hub. Registering
+        # here places the cycle under the same observable CronManager as every
+        # other background job and keeps it fail-closed outside NSE hours.
+        try:
+            _wire_ml_signal_runtime(flask_app, self.cron, self.time_scheduler)
+        except Exception as exc:
+            logger.warning("Scheduled ML signals not wired (%s)", exc)
 
         # Register built-in cron jobs AND start the scheduler. Without start()
         # APScheduler never runs, so none of the built-in jobs fire — the

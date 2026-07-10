@@ -83,6 +83,25 @@ vi.mock("@/routes/ai/AISuggestionsPanel", () => ({
 vi.mock("@/services/ftApi", () => ({
   analyzeSentiment: vi.fn(),
   queryKnowledge: vi.fn(),
+  getRecentSignals: vi.fn().mockResolvedValue({
+    signals: [
+      {
+        event_id: 9,
+        timestamp: "2026-07-10T09:20:00+05:30",
+        symbol: "NIFTY",
+        exchange: "NSE_INDEX",
+        signal_type: "BUY",
+        source: "ml",
+        method: "ml_model",
+        indicator: "LightGBM",
+        value: 24500,
+        threshold: 0,
+        confidence: 0.81,
+        message: "NIFTY scheduled ml model signal: BUY",
+        metadata: { turbulence_score: 0.2 },
+      },
+    ],
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -134,6 +153,18 @@ describe("AIRoute", () => {
     const nav = screen.getByRole("navigation", { name: /ai section navigation/i });
     expect(nav).not.toHaveClass("absolute");
     expect(nav).not.toHaveClass("bottom-5");
+  });
+
+  it("shows the unified signal source and exchange truthfully", async () => {
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Signals"));
+
+    expect(await screen.findByText("Trading Signals")).toBeInTheDocument();
+    expect(screen.getByText("ML")).toBeInTheDocument();
+    expect(screen.getByText("NSE_INDEX")).toBeInTheDocument();
+    expect(screen.queryByText("ML-Powered Signals")).not.toBeInTheDocument();
   });
 
   it("renders the generated knowledge answer even when no source chunks are returned", async () => {

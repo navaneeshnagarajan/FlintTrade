@@ -7,7 +7,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,7 @@ class SignalPipeline:
         turbulence_enabled: bool = False,
         turbulence_threshold: float = 3.0,
         turbulence_window: int = 60,
+        signal_sink: Callable[[dict[str, dict[str, Any]]], Any] | None = None,
     ) -> None:
         from flinttrade_core.config import Settings
         from flinttrade_core.workspace import workspace_dir
@@ -122,6 +124,7 @@ class SignalPipeline:
         self._turbulence_enabled: bool = turbulence_enabled
         self._turbulence_threshold: float = turbulence_threshold
         self._turbulence_window: int = turbulence_window
+        self._signal_sink = signal_sink
 
     def _ensure_generator(self) -> None:
         """Lazy-load signal generator with trained model."""
@@ -245,7 +248,7 @@ class SignalPipeline:
                     "signal": raw_signal,
                     "confidence": confidence,
                     "ltp": float(closes[-1]),
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "method": method,
                     "turbulence_score": turbulence_score,
                 }
@@ -253,6 +256,11 @@ class SignalPipeline:
                 logger.exception("Signal cycle error for %s", key)
 
         self.latest_signals = results
+        if self._signal_sink is not None:
+            try:
+                self._signal_sink(results)
+            except Exception:  # noqa: BLE001 - a feed sink cannot discard ML state
+                logger.exception("Could not publish scheduled signals to the canonical hub")
         return results
 
     @classmethod

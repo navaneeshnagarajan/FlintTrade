@@ -70,7 +70,7 @@ vi.mock("@/services/ftApi", () => ({
 // Import hooks after mocks
 // ---------------------------------------------------------------------------
 
-import { useRecentSignals, useSignalConfig } from "../useSignals";
+import { signalEventSchema, useRecentSignals, useSignalConfig } from "../useSignals";
 
 // ---------------------------------------------------------------------------
 // Wrapper
@@ -157,5 +157,38 @@ describe("useSignalConfig", () => {
 
     expect(getSignalConfigMock).toHaveBeenCalled();
     expect(result.current.data?.instruments).toEqual(["NIFTY"]);
+  });
+});
+
+describe("signalEventSchema", () => {
+  it("accepts source-tagged ML HOLD events", () => {
+    const event = signalEventSchema.parse({
+      event_id: 17,
+      timestamp: "2026-07-10T09:20:00+05:30",
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "HOLD",
+      source: "ml",
+      method: "ml_model",
+      indicator: "LightGBM",
+      value: 24500,
+      threshold: 0,
+      confidence: 0.61,
+      message: "NIFTY scheduled ml model signal: HOLD",
+      metadata: { turbulence_score: 0.2 },
+    });
+
+    expect(event.source).toBe("ml");
+    expect(event.signal_type).toBe("HOLD");
+    expect(event.event_id).toBe(17);
+  });
+
+  it("defaults new identity fields for an older live-rule frame", () => {
+    const event = signalEventSchema.parse(mockApiSignals.signals[0]);
+
+    expect(event.event_id).toBe(0);
+    expect(event.source).toBe("rule");
+    expect(event.exchange).toBe("");
+    expect(event.metadata).toEqual({});
   });
 });

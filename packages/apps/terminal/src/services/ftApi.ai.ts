@@ -3,25 +3,38 @@ import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 
-export interface Signal {
+export interface SignalCardModel {
+  event_id: number;
   symbol: string;
   exchange: string;
   signal_type: "BUY" | "SELL" | "HOLD";
   confidence: number;
   timestamp: string;
   indicators: Record<string, number>;
+  source: "rule" | "ml";
+  method: string;
+  message: string;
 }
 
-export interface LiveSignal {
+export type Signal = SignalCardModel;
+
+export interface SignalEvent {
+  event_id: number;
   timestamp: string;
   symbol: string;
-  signal_type: "BUY" | "SELL" | "ALERT";
+  exchange: string;
+  signal_type: "BUY" | "SELL" | "HOLD" | "ALERT";
+  source: "rule" | "ml";
+  method: string;
   indicator: string;
   value: number;
   threshold: number;
   confidence: number;
   message: string;
+  metadata: Record<string, unknown>;
 }
+
+export type LiveSignal = SignalEvent;
 
 export interface SignalConfig {
   instruments: string[];
@@ -153,7 +166,7 @@ export type TeamStreamFrame =
 
 export const getRecentSignals = (limit?: number) => {
   const qs = limit !== undefined ? `?limit=${limit}` : "";
-  return get<{ signals: LiveSignal[] }>("signals/recent" + qs);
+  return get<{ signals: SignalEvent[] }>("signals/recent" + qs);
 };
 
 export const getSignalConfig = () => get<SignalConfig>("signals/config");

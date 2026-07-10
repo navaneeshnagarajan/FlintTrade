@@ -79,10 +79,9 @@ from .market_simulator import (
     SimulationResult,
 )
 from .pipeline import SignalPipeline
-from .signal_models import Signal as LiveSignal
-from .signal_models import SignalConfig
+from .signal_models import LiveSignal, SignalConfig, SignalEvent
 from .signal_pipeline import LiveSignalPipeline
-from .signals import Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
+from .signals import MLSignal, Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
 from .ensemble_selector import (
     EnsembleResult,
     EnsembleSelector,
@@ -119,8 +118,10 @@ __all__ = [
     "SignalGenerator",
     "SignalPipeline",
     "Signal",
+    "MLSignal",
     # Live signal pipeline (v0.5.0)
     "LiveSignal",
+    "SignalEvent",
     "LiveSignalPipeline",
     "SignalConfig",
     # Sentiment

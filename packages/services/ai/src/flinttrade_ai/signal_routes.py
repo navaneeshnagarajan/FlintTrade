@@ -1,4 +1,4 @@
-"""Signal pipeline blueprint — live market signal endpoints.
+"""Canonical rule-based and ML trading-signal HTTP surface.
 
 Endpoints:
     GET  /api/v1/signals/recent    — recent signals (JSON list)
@@ -11,16 +11,59 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import time
-from typing import Any, Generator
+from collections.abc import Callable, Generator
+from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Flask, Response, current_app, jsonify, request
 
+from .pipeline import SignalPipeline
 from .signal_pipeline import LiveSignalPipeline
 
 logger = logging.getLogger("flinttrade.ai.signal_routes")
 
 signal_bp = Blueprint("signals", __name__, url_prefix="/api/v1/signals")
+
+
+def configure_signal_sources(
+    app: Flask,
+    openalgo_client: Any | None = None,
+) -> tuple[LiveSignalPipeline, SignalPipeline | None]:
+    """Install one application signal hub and, when possible, its ML producer."""
+    pipeline: LiveSignalPipeline | None = app.config.get("SIGNAL_HUB")
+    if pipeline is None:
+        pipeline = getattr(app, "_live_signal_pipeline", None)
+    if pipeline is None:
+        pipeline = LiveSignalPipeline()
+
+    app.config["SIGNAL_HUB"] = pipeline
+    app._live_signal_pipeline = pipeline  # type: ignore[attr-defined]
+
+    ml_pipeline: SignalPipeline | None = app.config.get("ML_SIGNAL_PIPELINE")
+    if ml_pipeline is None and openalgo_client is not None:
+        try:
+            ml_pipeline = SignalPipeline(
+                openalgo_client=openalgo_client,
+                signal_sink=pipeline.ingest_ml_cycle,
+            )
+            app.config["ML_SIGNAL_PIPELINE"] = ml_pipeline
+        except Exception as exc:  # noqa: BLE001 - optional ML cannot prevent app boot
+            logger.warning("Scheduled ML signal source unavailable: %s", exc)
+    return pipeline, ml_pipeline
+
+
+def make_ml_signal_job(
+    pipeline: SignalPipeline,
+    market_is_open: Callable[[], bool],
+) -> Callable[[], dict[str, dict[str, Any]]]:
+    """Build the market-hours guard around the scheduled ML signal cycle."""
+
+    def run() -> dict[str, dict[str, Any]]:
+        if not market_is_open():
+            logger.debug("Scheduled ML signal cycle skipped outside NSE market hours")
+            return {}
+        return pipeline.run_cycle()
+
+    return run
 
 
 def _get_pipeline() -> LiveSignalPipeline:
@@ -29,13 +72,7 @@ def _get_pipeline() -> LiveSignalPipeline:
     The instance is stored on ``current_app`` to survive across requests
     without requiring a global variable.
     """
-    pipeline: LiveSignalPipeline | None = getattr(
-        current_app, "_live_signal_pipeline", None
-    )
-    if pipeline is None:
-        pipeline = LiveSignalPipeline()
-        current_app._live_signal_pipeline = pipeline  # type: ignore[attr-defined]
-        logger.info("Live signal pipeline initialised with default config")
+    pipeline, _ = configure_signal_sources(current_app)  # type: ignore[arg-type]
     return pipeline
 
 
@@ -71,38 +108,29 @@ def signals_recent() -> tuple[Any, int]:
 # GET /api/v1/signals/stream  (Server-Sent Events)
 # --------------------------------------------------------------------------
 
-def _sse_generator(pipeline: LiveSignalPipeline) -> Generator[str, None, None]:
+def _sse_generator(
+    pipeline: LiveSignalPipeline,
+    last_event_id: int | None = None,
+    heartbeat_interval: float = 15.0,
+) -> Generator[str, None, None]:
     """Yield SSE events when new signals arrive.
 
-    Polls the pipeline's signal deque every second and sends any new signals
-    that were not yet emitted.  A heartbeat comment is sent every 15 s to
-    keep the connection alive through proxies.
+    Monotonic event IDs avoid the old deque-length bug once the 100-item ring
+    buffer is full. Reconnecting clients can replay retained events with
+    ``Last-Event-ID``. A heartbeat comment keeps idle connections alive.
     """
-    last_sent_count = len(pipeline.signals)
-    heartbeat_interval = 15
-    last_heartbeat = time.monotonic()
+    newest = pipeline.latest_event_id
+    cursor = newest if last_event_id is None else max(0, min(last_event_id, newest))
 
     while True:
-        current_count = len(pipeline.signals)
-        if current_count > last_sent_count:
-            # New signals have been prepended (deque grows from the left)
-            new_count = current_count - last_sent_count
-            new_signals = list(pipeline.signals)[:new_count]
-            for sig in reversed(new_signals):  # oldest new first
-                payload = _json.dumps(sig.to_dict())
-                yield f"data: {payload}\n\n"
-            last_sent_count = current_count
-        elif current_count < last_sent_count:
-            # Pipeline was reset (config update) — re-sync
-            last_sent_count = current_count
-
-        # Heartbeat
-        now = time.monotonic()
-        if now - last_heartbeat >= heartbeat_interval:
+        events = pipeline.wait_for_signals_after(cursor, timeout=heartbeat_interval)
+        if not events:
             yield ": heartbeat\n\n"
-            last_heartbeat = now
-
-        time.sleep(1)
+            continue
+        for signal in events:
+            payload = _json.dumps(signal.to_dict())
+            yield f"id: {signal.event_id}\ndata: {payload}\n\n"
+            cursor = signal.event_id
 
 
 @signal_bp.route("/stream", methods=["GET"])
@@ -112,8 +140,18 @@ def signals_stream() -> Response:
     Connect with ``EventSource("/api/v1/signals/stream")``.
     """
     pipeline = _get_pipeline()
+    raw_last_event_id = request.headers.get("Last-Event-ID")
+    try:
+        last_event_id = int(raw_last_event_id) if raw_last_event_id is not None else None
+    except ValueError:
+        last_event_id = None
+    stream = (
+        _sse_generator(pipeline)
+        if last_event_id is None
+        else _sse_generator(pipeline, last_event_id=last_event_id)
+    )
     return Response(
-        _sse_generator(pipeline),
+        stream,
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

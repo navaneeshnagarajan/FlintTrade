@@ -43,7 +43,7 @@ globals().update(_try_import(".tax_calculator", "tax_calculator", [
 
 # --- Base strategy ---
 globals().update(_try_import(".base_strategy", "base_strategy", [
-    "BaseBacktestStrategy", "Signal", "OrderIntent", "indicators",
+    "BaseBacktestStrategy", "Signal", "StrategySignal", "OrderIntent", "indicators",
 ]))
 
 # --- Simulator ---
@@ -144,7 +144,7 @@ __all__ = [
     "IndianTaxCalculator", "TradeType", "Exchange",
     "TaxBreakdown", "TaxSummary",
     "make_equity_calculator", "make_intraday_calculator", "make_fo_calculator",
-    "BaseBacktestStrategy", "Signal", "OrderIntent", "indicators",
+    "BaseBacktestStrategy", "Signal", "StrategySignal", "OrderIntent", "indicators",
     "BacktestSimulator", "BacktestConfig", "BacktestResult",
     "SimOrder", "SimTrade", "EquityPoint",
     "PerformanceMetrics", "PerformanceReport", "TradeStats",

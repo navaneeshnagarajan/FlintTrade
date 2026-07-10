@@ -1,6 +1,6 @@
 """Data models for the live market signals pipeline.
 
-Defines the ``Signal`` dataclass emitted by the pipeline and the
+Defines the ``SignalEvent`` dataclass emitted by the canonical signal hub and the
 ``SignalConfig`` used to configure which instruments, indicators,
 and thresholds are active.
 """
@@ -9,33 +9,53 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Literal, TypeAlias
 
 
 @dataclass
-class Signal:
-    """A rule-based trading signal emitted when an indicator crosses a threshold."""
+class SignalEvent:
+    """One source-tagged event in the canonical trading-signal feed."""
 
+    event_id: int = 0
     timestamp: str = ""
     symbol: str = ""
-    signal_type: str = "ALERT"  # "BUY" | "SELL" | "ALERT"
+    exchange: str = ""
+    signal_type: str = "ALERT"  # "BUY" | "SELL" | "HOLD" | "ALERT"
+    source: str = "rule"  # "rule" | "ml"
+    method: str = ""
     indicator: str = ""  # "RSI" | "MACD" | "Supertrend" | "EMA_Cross" | etc.
     value: float = 0.0  # indicator value that triggered the signal
     threshold: float = 0.0  # threshold that was crossed
     confidence: float = 0.0  # 0.0 - 1.0
     message: str = ""  # human-readable description
+    metadata: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         """Serialise to a JSON-safe dictionary."""
         return {
+            "event_id": self.event_id,
             "timestamp": self.timestamp,
             "symbol": self.symbol,
+            "exchange": self.exchange,
             "signal_type": self.signal_type,
+            "source": self.source,
+            "method": self.method,
             "indicator": self.indicator,
             "value": round(self.value, 4),
             "threshold": round(self.threshold, 4),
             "confidence": round(self.confidence, 4),
             "message": self.message,
+            "metadata": dict(self.metadata),
         }
+
+
+SignalType: TypeAlias = Literal["BUY", "SELL", "HOLD", "ALERT"]
+SignalSource: TypeAlias = Literal["rule", "ml"]
+
+# Historical names remain import-compatible while callers migrate to the
+# explicit cross-source name.
+LiveSignal = SignalEvent
+Signal = SignalEvent
 
 
 @dataclass
