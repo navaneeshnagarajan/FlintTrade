@@ -55,10 +55,19 @@ from .memory import (
 )
 from .sentiment import (
     AggregatedSentiment,
+    FiiDiiFlow,
+    IndexSignal,
+    IndexSnapshot,
+    MARKET_SUMMARY_SCHEMA,
+    MarketSummary,
     NewsArticle,
     NewsScraper,
+    SectorOutlook,
     SentimentAnalyzer,
+    SentimentLabel,
     SentimentScore,
+    generate_market_summary,
+    sentiment_label_from_score,
 )
 from .market_simulator import (
     DEFAULT_PARTICIPANTS,
@@ -117,6 +126,15 @@ __all__ = [
     "SentimentAnalyzer",
     "SentimentScore",
     "AggregatedSentiment",
+    "SentimentLabel",
+    "IndexSignal",
+    "IndexSnapshot",
+    "SectorOutlook",
+    "FiiDiiFlow",
+    "MarketSummary",
+    "MARKET_SUMMARY_SCHEMA",
+    "generate_market_summary",
+    "sentiment_label_from_score",
     # MCP
     "MCPBridge",
     "MCPToolCall",

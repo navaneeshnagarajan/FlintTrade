@@ -181,6 +181,23 @@ describe("SentimentPanel", () => {
     });
   });
 
+  it("labels disconnected FII/DII flows as unavailable", async () => {
+    mockGetMarketSentimentSummary.mockResolvedValue({
+      ...MOCK_SUMMARY,
+      fii_dii_flow: {
+        fii_net: 0,
+        dii_net: 0,
+        interpretation: "FII/DII flow not connected; zero values are placeholders.",
+      },
+    });
+    renderPanel();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+    });
+    expect(screen.queryByText("+₹0 Cr")).not.toBeInTheDocument();
+  });
+
   it("renders sector performance grid", async () => {
     mockGetMarketSentimentSummary.mockResolvedValue(MOCK_SUMMARY);
     renderPanel();

@@ -296,7 +296,7 @@ export async function* runAgent(
 }
 
 // ---------------------------------------------------------------------------
-// Market Sentiment Dashboard (structured_sentiment.py — MarketSummary schema)
+// Market Sentiment Dashboard (sentiment.py — MarketSummary schema)
 // ---------------------------------------------------------------------------
 
 export type SentimentLabel =

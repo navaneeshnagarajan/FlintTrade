@@ -334,6 +334,44 @@ class TestSentiment:
         score = score_article_rule_based(article)
         assert score.sentiment == "NEUTRAL"
 
+    def test_unsuccessful_llm_response_uses_rule_based_fallback(self):
+        from flinttrade_ai.sentiment import NewsArticle, score_article_with_llm
+
+        article = NewsArticle(
+            title="Markets surge on strong earnings growth",
+            summary="Investors rally after record profits.",
+        )
+        response = MagicMock(success=False, error="provider unavailable")
+        llm = MagicMock()
+        llm.chat.return_value = response
+
+        score = score_article_with_llm(article, llm)
+
+        assert score.sentiment == "BULLISH"
+        assert score.confidence > 0.5
+
+    def test_malformed_llm_json_uses_rule_based_fallback(self):
+        from flinttrade_ai.sentiment import NewsArticle, score_article_rule_based, score_article_with_llm
+
+        article = NewsArticle(
+            title="Markets surge on strong earnings growth",
+            summary="Investors rally after record profits.",
+        )
+        llm = MagicMock()
+        expected = score_article_rule_based(article)
+
+        for content in (
+            "[]",
+            "42",
+            "{}",
+            '{"sentiment": [], "confidence": "bad"}',
+            '{"sentiment": "BULLISH", "confidence": true}',
+            '{"sentiment": "BULLISH", "confidence": "nan"}',
+        ):
+            llm.chat.return_value = MagicMock(success=True, content=content)
+            score = score_article_with_llm(article, llm)
+            assert score == expected
+
     def test_sentiment_score_format(self):
         from flinttrade_ai.sentiment import SentimentScore
         s = SentimentScore(

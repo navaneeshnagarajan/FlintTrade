@@ -50,6 +50,31 @@ def client(app):
     return app.test_client()
 
 
+def _market_summary_provider_data() -> dict[str, object]:
+    """Complete trusted numeric snapshot expected by the rich-summary path."""
+    return {
+        "indices": [{"name": "NIFTY 50", "value": 24500.0, "change_pct": 0.8}],
+        "fii_dii_flow": {"fii_net": 100.0, "dii_net": -20.0},
+    }
+
+
+def _typed_market_summary():
+    from flinttrade_ai.sentiment import MarketSummary
+
+    return MarketSummary.model_validate(
+        {
+            "sentiment_score": 6.5,
+            "market_sentiment": "BULLISH",
+            "indices": [{"name": "NIFTY 50", "value": 24500, "change_pct": 0.8, "signal": "BUY"}],
+            "sectors": [{"name": "IT", "performance": "Outperforming", "outlook": "Firm."}],
+            "key_points": ["Point one", "Point two", "Point three"],
+            "fii_dii_flow": {"fii_net": 100, "dii_net": -20, "interpretation": "Net inflow."},
+            "risks": ["Oil"],
+            "opportunities": ["IT"],
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/signals/active
 # ---------------------------------------------------------------------------
@@ -140,7 +165,7 @@ class TestSentimentAnalyse:
             with (
                 patch("flinttrade_ai.sentiment.score_article_with_llm", return_value=mock_scored),
                 patch("flinttrade_ai.sentiment.NewsArticle") as mock_article_cls,
-                patch("flinttrade_ai.llm_client.LLMClient"),
+                patch("flinttrade_ai.llm_client.LLMClient") as mock_llm_cls,
             ):
                 mock_article_cls.return_value = MagicMock()
                 resp = client.post(
@@ -148,8 +173,23 @@ class TestSentimentAnalyse:
                     json={"text": "NIFTY rally expected"},
                 )
 
-        # Accept either 200 (success) or 500 (if inner imports differ slightly)
-        assert resp.status_code in (200, 500)
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["label"] == "bullish"
+        mock_llm_cls.return_value.close.assert_called_once()
+
+    def test_scoring_failure_closes_llm_before_rule_fallback(self, client) -> None:
+        fallback = MagicMock(sentiment="NEUTRAL", confidence=0.5, reasoning="")
+        with (
+            patch("flinttrade_ai.ai_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.sentiment.score_article_with_llm", side_effect=RuntimeError("offline")),
+            patch("flinttrade_ai.sentiment.score_article_rule_based", return_value=fallback),
+            patch("flinttrade_ai.llm_client.LLMClient") as mock_llm_cls,
+        ):
+            resp = client.post("/api/v1/sentiment/analyse", json={"text": "NIFTY unchanged"})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["label"] == "neutral"
+        mock_llm_cls.return_value.close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -352,10 +392,206 @@ class TestSentimentSummary:
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["sentiment_score"] == 0.0
-        assert data["market_sentiment"] == "neutral"
-        assert isinstance(data["indices"], list)
-        assert "fii_net" in data["fii_dii_flow"]
-        assert data["key_points"]  # honest note when no feed
+        assert data["market_sentiment"] == "NEUTRAL"
+        assert set(data) == {
+            "sentiment_score",
+            "market_sentiment",
+            "indices",
+            "sectors",
+            "key_points",
+            "fii_dii_flow",
+            "risks",
+            "opportunities",
+        }
+        assert len(data["key_points"]) == 3
+
+    def test_rss_summary_uses_frontend_scale_and_label(self, client, monkeypatch) -> None:
+        bullish = MagicMock(sentiment="BULLISH", confidence=0.8)
+        bearish = MagicMock(sentiment="BEARISH", confidence=0.2)
+        monkeypatch.setattr(
+            "flinttrade_ai.sentiment.SentimentAnalyzer.analyze_feeds",
+            lambda self: [bullish, bearish],
+        )
+
+        resp = client.get("/api/v1/ai/sentiment/summary")
+
+        data = resp.get_json()["data"]
+        assert data["sentiment_score"] == pytest.approx(3.0)
+        assert data["market_sentiment"] == "BULLISH"
+        assert len(data["key_points"]) == 3
+
+    def test_rich_provider_returns_typed_market_summary(self, app, client) -> None:
+        summary = _typed_market_summary()
+        provider_data = _market_summary_provider_data()
+        app.config["MARKET_SENTIMENT_DATA_PROVIDER"] = lambda: provider_data
+
+        with patch(
+            "flinttrade_ai.ai_routes._cached_or_schedule_rich_summary",
+            return_value=summary,
+        ) as cached_or_schedule:
+            resp = client.get("/api/v1/ai/sentiment/summary")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"] == summary.to_display_dict()
+        cached_or_schedule.assert_called_once_with(provider_data)
+
+    @pytest.mark.parametrize("provider", [lambda: {}, lambda: [], lambda: None])
+    def test_empty_or_invalid_provider_uses_rss_fallback(self, app, client, monkeypatch, provider) -> None:
+        app.config["MARKET_SENTIMENT_DATA_PROVIDER"] = provider
+        monkeypatch.setattr(
+            "flinttrade_ai.sentiment.SentimentAnalyzer.analyze_feeds",
+            lambda self: [],
+        )
+
+        resp = client.get("/api/v1/ai/sentiment/summary")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["market_sentiment"] == "NEUTRAL"
+
+    def test_throwing_provider_uses_rss_fallback(self, app, client, monkeypatch) -> None:
+        def broken_provider():
+            raise RuntimeError("market data offline")
+
+        app.config["MARKET_SENTIMENT_DATA_PROVIDER"] = broken_provider
+        monkeypatch.setattr(
+            "flinttrade_ai.sentiment.SentimentAnalyzer.analyze_feeds",
+            lambda self: [],
+        )
+
+        resp = client.get("/api/v1/ai/sentiment/summary")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["market_sentiment"] == "NEUTRAL"
+
+    def test_uncached_rich_generation_schedules_and_uses_rss_fallback(self, app, client, monkeypatch) -> None:
+        provider_data = _market_summary_provider_data()
+        app.config["MARKET_SENTIMENT_DATA_PROVIDER"] = lambda: provider_data
+        monkeypatch.setattr(
+            "flinttrade_ai.sentiment.SentimentAnalyzer.analyze_feeds",
+            lambda self: [],
+        )
+
+        with patch(
+            "flinttrade_ai.ai_routes._cached_or_schedule_rich_summary",
+            return_value=None,
+        ) as cached_or_schedule:
+            resp = client.get("/api/v1/ai/sentiment/summary")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["market_sentiment"] == "NEUTRAL"
+        cached_or_schedule.assert_called_once_with(provider_data)
+
+    def test_background_generation_closes_client_on_failure(self) -> None:
+        from flinttrade_ai.ai_routes import _generate_rich_market_summary
+
+        with (
+            patch("flinttrade_ai.ai_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.llm_client.LLMClient") as mock_llm_cls,
+            patch("flinttrade_ai.sentiment.generate_market_summary", return_value=None),
+        ):
+            result = _generate_rich_market_summary(_market_summary_provider_data())
+
+        assert result is None
+        mock_llm_cls.return_value.close.assert_called_once()
+
+    def test_rich_generation_cache_is_single_flight(self, monkeypatch) -> None:
+        import flinttrade_ai.ai_routes as routes
+
+        thread = MagicMock()
+        monkeypatch.setattr(routes, "_rich_summary_cache", None)
+        monkeypatch.setattr(routes, "_rich_summary_inflight_key", None)
+
+        with patch("flinttrade_ai.ai_routes.threading.Thread", return_value=thread) as thread_cls:
+            first = routes._cached_or_schedule_rich_summary(_market_summary_provider_data())
+            second = routes._cached_or_schedule_rich_summary(_market_summary_provider_data())
+
+        assert first is None
+        assert second is None
+        thread_cls.assert_called_once()
+        thread.start.assert_called_once()
+
+    def test_cache_key_and_worker_share_one_immutable_snapshot(self, monkeypatch) -> None:
+        import flinttrade_ai.ai_routes as routes
+
+        provider_data = _market_summary_provider_data()
+        thread = MagicMock()
+        monkeypatch.setattr(routes, "_rich_summary_cache", None)
+        monkeypatch.setattr(routes, "_rich_summary_inflight_key", None)
+
+        with patch("flinttrade_ai.ai_routes.threading.Thread", return_value=thread) as thread_cls:
+            routes._cached_or_schedule_rich_summary(provider_data)
+
+        cache_key, worker_data = thread_cls.call_args.kwargs["args"]
+        provider_data["indices"][0]["value"] = 99999.0
+        assert worker_data["indices"][0]["value"] == pytest.approx(24500.0)
+        assert cache_key == routes._market_data_cache_key(worker_data)
+
+    def test_incomplete_provider_does_not_start_thread_or_llm(self, monkeypatch) -> None:
+        import flinttrade_ai.ai_routes as routes
+
+        monkeypatch.setattr(routes, "_rich_summary_cache", None)
+        monkeypatch.setattr(routes, "_rich_summary_inflight_key", None)
+
+        with (
+            patch("flinttrade_ai.ai_routes.threading.Thread") as thread_cls,
+            patch("flinttrade_ai.ai_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.llm_client.LLMClient") as llm_cls,
+        ):
+            assert routes._cached_or_schedule_rich_summary({"nifty": 24500}) is None
+            assert routes._generate_rich_market_summary({"nifty": 24500}) is None
+
+        thread_cls.assert_not_called()
+        llm_cls.assert_not_called()
+
+    def test_thread_start_failure_clears_single_flight_marker(self, monkeypatch) -> None:
+        import flinttrade_ai.ai_routes as routes
+
+        thread = MagicMock()
+        thread.start.side_effect = RuntimeError("thread creation unavailable")
+        monkeypatch.setattr(routes, "_rich_summary_cache", None)
+        monkeypatch.setattr(routes, "_rich_summary_inflight_key", None)
+
+        with patch("flinttrade_ai.ai_routes.threading.Thread", return_value=thread):
+            result = routes._cached_or_schedule_rich_summary(_market_summary_provider_data())
+
+        assert result is None
+        assert routes._rich_summary_inflight_key is None
+
+    def test_provider_copy_failure_never_sets_single_flight_marker(self, monkeypatch) -> None:
+        import flinttrade_ai.ai_routes as routes
+
+        class CannotCopy:
+            def __deepcopy__(self, memo):
+                raise RuntimeError("not copyable")
+
+        provider_data = _market_summary_provider_data()
+        provider_data["extra"] = CannotCopy()
+        monkeypatch.setattr(routes, "_rich_summary_cache", None)
+        monkeypatch.setattr(routes, "_rich_summary_inflight_key", None)
+
+        with patch("flinttrade_ai.ai_routes.threading.Thread") as thread_cls:
+            result = routes._cached_or_schedule_rich_summary(provider_data)
+
+        assert result is None
+        assert routes._rich_summary_inflight_key is None
+        thread_cls.assert_not_called()
+
+    def test_background_refresh_publishes_cache_and_clears_marker(self, monkeypatch) -> None:
+        import flinttrade_ai.ai_routes as routes
+
+        provider_data = _market_summary_provider_data()
+        cache_key = routes._market_data_cache_key(provider_data)
+        summary = _typed_market_summary()
+        monkeypatch.setattr(routes, "_rich_summary_cache", None)
+        monkeypatch.setattr(routes, "_rich_summary_inflight_key", cache_key)
+        monkeypatch.setattr(routes, "_generate_rich_market_summary", lambda data: summary)
+
+        routes._refresh_rich_summary_cache(cache_key, provider_data)
+
+        assert routes._rich_summary_cache is not None
+        assert routes._rich_summary_cache.key == cache_key
+        assert routes._rich_summary_cache.summary is summary
+        assert routes._rich_summary_inflight_key is None
 
 
 class TestSentimentTickers:
@@ -378,7 +614,8 @@ class TestMarketRegime:
     def test_no_source_returns_503(self, client, monkeypatch) -> None:
         # Disconnected AND the free fallback has no data → a clear 503.
         monkeypatch.setattr(
-            "flinttrade_ai.ai_routes._free_daily_ohlcv", lambda *a, **k: ([], [], []),
+            "flinttrade_ai.ai_routes._free_daily_ohlcv",
+            lambda *a, **k: ([], [], []),
         )
         resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
         assert resp.status_code == 503
@@ -391,7 +628,8 @@ class TestMarketRegime:
         lows = [98.0 + i for i in range(30)]
         closes = [100.0 + i for i in range(30)]
         monkeypatch.setattr(
-            "flinttrade_ai.ai_routes._free_daily_ohlcv", lambda *a, **k: (highs, lows, closes),
+            "flinttrade_ai.ai_routes._free_daily_ohlcv",
+            lambda *a, **k: (highs, lows, closes),
         )
         resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
         assert resp.status_code == 200
@@ -404,10 +642,7 @@ class TestMarketRegime:
         get_primary_account_id() did not exist, so a connected broker still got a
         503/500. With those methods present the route computes a real regime."""
         # 30 trending candles → a detectable regime.
-        candles = [
-            {"high": 100 + i, "low": 98 + i, "close": 99 + i, "open": 98.5 + i}
-            for i in range(30)
-        ]
+        candles = [{"high": 100 + i, "low": 98 + i, "close": 99 + i, "open": 98.5 + i} for i in range(30)]
 
         class _FakeRegistry:
             def is_connected(self):

@@ -7,15 +7,21 @@ scores sentiment via LLM, and aggregates per-symbol per-day scores.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import math
 import threading
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import timedelta, timezone
+from enum import StrEnum
 from typing import Any
 
 import httpx
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .llm_client import LLMClient, LLMMessage
 
@@ -421,13 +427,8 @@ def score_article_with_llm(
     )
 
     if not response.success:
-        return SentimentScore(
-            article_title=article.title,
-            sentiment="NEUTRAL",
-            confidence=0.0,
-            symbols=extract_symbols(article.title + " " + article.summary),
-            timestamp=article.published,
-        )
+        logger.info("LLM sentiment unavailable; using rule-based fallback: %s", response.error)
+        return score_article_rule_based(article)
 
     # Parse JSON response
     sentiment = "NEUTRAL"
@@ -442,17 +443,29 @@ def score_article_with_llm(
             if text.startswith("json"):
                 text = text[4:].strip()
 
-        import json
-
         data = json.loads(text)
-        sentiment = data.get("sentiment", "NEUTRAL").upper()
+        if not isinstance(data, dict) or "sentiment" not in data or "confidence" not in data:
+            raise ValueError("sentiment response must contain sentiment and confidence")
+        raw_sentiment = data["sentiment"]
+        if not isinstance(raw_sentiment, str):
+            raise TypeError("sentiment must be a string")
+        sentiment = raw_sentiment.upper()
         if sentiment not in ("BULLISH", "BEARISH", "NEUTRAL"):
-            sentiment = "NEUTRAL"
-        confidence = float(data.get("confidence", 0.5))
+            raise ValueError("sentiment must be BULLISH, BEARISH, or NEUTRAL")
+        raw_confidence = data["confidence"]
+        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+            raise TypeError("confidence must be a JSON number")
+        confidence = float(raw_confidence)
+        if not math.isfinite(confidence):
+            raise ValueError("confidence must be finite")
         confidence = max(0.0, min(1.0, confidence))
-        reasoning = data.get("reasoning", "")
-    except (json.JSONDecodeError, ValueError, KeyError):
+        raw_reasoning = data.get("reasoning", "")
+        if not isinstance(raw_reasoning, str):
+            raise TypeError("reasoning must be a string")
+        reasoning = raw_reasoning
+    except (AttributeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         logger.debug("Could not parse LLM sentiment response: %s", response.content[:100])
+        return score_article_rule_based(article)
 
     return SentimentScore(
         article_title=article.title,
@@ -651,3 +664,538 @@ class SentimentAnalyzer:
                 )
 
         return sorted(alerts, key=lambda a: abs(a["shift"]), reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Enumerations
+# ---------------------------------------------------------------------------
+
+
+class SentimentLabel(StrEnum):
+    """Categorical market sentiment labels (coarser than the numeric score)."""
+
+    STRONGLY_BULLISH = "STRONGLY_BULLISH"
+    BULLISH = "BULLISH"
+    NEUTRAL = "NEUTRAL"
+    BEARISH = "BEARISH"
+    STRONGLY_BEARISH = "STRONGLY_BEARISH"
+
+
+class IndexSignal(StrEnum):
+    """Directional signal for an index."""
+
+    BUY = "BUY"
+    SELL = "SELL"
+    HOLD = "HOLD"
+    WATCH = "WATCH"
+
+
+# ---------------------------------------------------------------------------
+# JSON schema (passed directly to the LLM as a response-format constraint)
+# ---------------------------------------------------------------------------
+
+#: JSON schema for AI-generated structured market sentiment.
+#: The ``type: "json_schema"`` envelope follows the OpenAI-compatible
+#: structured-output convention used by LM Studio, Groq, OpenAI, etc.
+MARKET_SUMMARY_SCHEMA: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "market_summary",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "sentiment_score": {
+                    "type": "number",
+                    "minimum": -10,
+                    "maximum": 10,
+                    "description": (
+                        "Overall market sentiment score. -10 = extremely bearish, 0 = neutral, +10 = extremely bullish."
+                    ),
+                },
+                "market_sentiment": {
+                    "type": "string",
+                    "enum": [label.value for label in SentimentLabel],
+                    "description": "Categorical market sentiment derived from sentiment_score.",
+                },
+                "indices": {
+                    "type": "array",
+                    "description": "Major Indian index snapshots (Nifty 50, Bank Nifty, Sensex, etc.).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Index name, e.g. NIFTY 50.",
+                            },
+                            "value": {
+                                "type": "number",
+                                "description": "Last traded value.",
+                            },
+                            "change_pct": {
+                                "type": "number",
+                                "description": "Percentage change from previous close.",
+                            },
+                            "signal": {
+                                "type": "string",
+                                "enum": [s.value for s in IndexSignal],
+                                "description": "Short-term directional signal for the index.",
+                            },
+                        },
+                        "required": ["name", "value", "change_pct", "signal"],
+                        "additionalProperties": False,
+                    },
+                },
+                "sectors": {
+                    "type": "array",
+                    "description": "Top and bottom performing sectors with outlook.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Sector name, e.g. IT, Banking, FMCG.",
+                            },
+                            "performance": {
+                                "type": "string",
+                                "description": (
+                                    "Qualitative performance label: Outperforming / Underperforming / Neutral."
+                                ),
+                            },
+                            "outlook": {
+                                "type": "string",
+                                "description": "One-sentence forward-looking note.",
+                            },
+                        },
+                        "required": ["name", "performance", "outlook"],
+                        "additionalProperties": False,
+                    },
+                },
+                "key_points": {
+                    "type": "array",
+                    "description": "3 to 5 concise bullet points summarising today's market.",
+                    "items": {"type": "string"},
+                    "minItems": 3,
+                    "maxItems": 5,
+                },
+                "fii_dii_flow": {
+                    "type": "object",
+                    "description": "Foreign and domestic institutional activity.",
+                    "properties": {
+                        "fii_net": {
+                            "type": "number",
+                            "description": "FII net flow in crore INR (negative = outflow).",
+                        },
+                        "dii_net": {
+                            "type": "number",
+                            "description": "DII net flow in crore INR (negative = outflow).",
+                        },
+                        "interpretation": {
+                            "type": "string",
+                            "description": "One-sentence interpretation of the combined flow.",
+                        },
+                    },
+                    "required": ["fii_net", "dii_net", "interpretation"],
+                    "additionalProperties": False,
+                },
+                "risks": {
+                    "type": "array",
+                    "description": "Key downside risks to watch today.",
+                    "items": {"type": "string"},
+                },
+                "opportunities": {
+                    "type": "array",
+                    "description": "Key upside opportunities or themes to watch today.",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": [
+                "sentiment_score",
+                "market_sentiment",
+                "indices",
+                "sectors",
+                "key_points",
+                "fii_dii_flow",
+                "risks",
+                "opportunities",
+            ],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
+
+
+class IndexSnapshot(BaseModel):
+    """Real-time or EOD snapshot for a single market index."""
+
+    name: str = Field(..., description="Index name.")
+    value: float = Field(..., description="Last traded value.")
+    change_pct: float = Field(..., description="Percentage change from previous close.")
+    signal: IndexSignal = Field(..., description="Directional signal.")
+
+
+class SectorOutlook(BaseModel):
+    """Sector-level performance and forward outlook."""
+
+    name: str = Field(..., description="Sector name.")
+    performance: str = Field(..., description="Qualitative performance label.")
+    outlook: str = Field(..., description="One-sentence forward-looking note.")
+
+
+class FiiDiiFlow(BaseModel):
+    """Foreign and domestic institutional flow data."""
+
+    fii_net: float = Field(..., description="FII net flow in crore INR.")
+    dii_net: float = Field(..., description="DII net flow in crore INR.")
+    interpretation: str = Field(..., description="Interpretation of combined flow.")
+
+
+class _ProviderIndexSnapshot(BaseModel):
+    """Trusted numeric index data supplied by the runtime provider."""
+
+    name: str = Field(..., min_length=1)
+    value: float = Field(..., allow_inf_nan=False)
+    change_pct: float = Field(..., allow_inf_nan=False)
+    signal: IndexSignal | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("index name must not be blank")
+        return name
+
+
+class _ProviderFiiDiiFlow(BaseModel):
+    """Trusted institutional-flow numbers supplied by the runtime provider."""
+
+    fii_net: float = Field(..., allow_inf_nan=False)
+    dii_net: float = Field(..., allow_inf_nan=False)
+
+
+class _ProviderMarketData(BaseModel):
+    """Minimum provider payload required before rich generation can run."""
+
+    indices: list[_ProviderIndexSnapshot] = Field(..., min_length=1)
+    fii_dii_flow: _ProviderFiiDiiFlow
+
+    @model_validator(mode="after")
+    def _unique_index_names(self) -> _ProviderMarketData:
+        names = [index.name.casefold() for index in self.indices]
+        if len(names) != len(set(names)):
+            raise ValueError("provider index names must be unique")
+        return self
+
+
+def prepare_market_summary_data(market_data: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Snapshot and validate provider data before cache or LLM use."""
+    if not isinstance(market_data, Mapping) or not market_data:
+        return None
+    try:
+        snapshot = deepcopy(dict(market_data))
+        _ProviderMarketData.model_validate(snapshot)
+    except Exception as exc:
+        logger.info("Rich market summary skipped: invalid provider snapshot (%s)", type(exc).__name__)
+        return None
+    return snapshot
+
+
+class MarketSummary(BaseModel):
+    """Structured AI-generated market sentiment summary.
+
+    Validated against :data:`MARKET_SUMMARY_SCHEMA`. Returned by
+    :func:`generate_market_summary`.
+    """
+
+    sentiment_score: float = Field(
+        ...,
+        description="Numeric sentiment score from -10 (strongly bearish) to +10 (strongly bullish).",
+    )
+    market_sentiment: SentimentLabel = Field(..., description="Categorical label derived from sentiment_score.")
+    indices: list[IndexSnapshot] = Field(default_factory=list, description="Major index snapshots.")
+    sectors: list[SectorOutlook] = Field(default_factory=list, description="Sector performance and outlook.")
+    key_points: list[str] = Field(
+        ...,
+        min_length=3,
+        max_length=5,
+        description="3-5 concise bullet points.",
+    )
+    fii_dii_flow: FiiDiiFlow = Field(..., description="Institutional flow data.")
+    risks: list[str] = Field(default_factory=list, description="Downside risks.")
+    opportunities: list[str] = Field(default_factory=list, description="Upside opportunities.")
+
+    @field_validator("sentiment_score", mode="before")
+    @classmethod
+    def _clamp_score(cls, v: Any) -> float:
+        """Clamp score to [-10, +10] in case the LLM drifts slightly.
+
+        Runs before Pydantic type coercion so out-of-range values from the LLM
+        are silently corrected rather than rejected with a ValidationError.
+        """
+        return max(-10.0, min(10.0, float(v)))
+
+    @field_validator("market_sentiment", mode="before")
+    @classmethod
+    def _normalise_label(cls, v: Any) -> str:
+        """Accept lowercase or mixed-case labels from the LLM."""
+        if isinstance(v, str):
+            return v.upper()
+        return v
+
+    # ------------------------------------------------------------------
+    # Convenience helpers
+    # ------------------------------------------------------------------
+
+    def label_from_score(self) -> SentimentLabel:
+        """Derive the categorical label purely from the numeric score.
+
+        Useful for cross-checking the LLM's own categorisation.
+        """
+        score = self.sentiment_score
+        if score >= 7:
+            return SentimentLabel.STRONGLY_BULLISH
+        if score >= 3:
+            return SentimentLabel.BULLISH
+        if score <= -7:
+            return SentimentLabel.STRONGLY_BEARISH
+        if score <= -3:
+            return SentimentLabel.BEARISH
+        return SentimentLabel.NEUTRAL
+
+    @model_validator(mode="after")
+    def _derive_label_from_score(self) -> MarketSummary:
+        """Keep the categorical label consistent with the numeric score."""
+        self.market_sentiment = self.label_from_score()
+        return self
+
+    def to_display_dict(self) -> dict[str, Any]:
+        """Flat dict suitable for passing to the terminal API response."""
+        return self.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# Prompt builder
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT = """\
+You are an expert Indian equity markets analyst. Generate a structured JSON \
+market summary for the current trading session. Base your analysis on the \
+market data provided. Be factual, concise, and use Indian market conventions \
+(crore INR for FII/DII flows, NSE index names). Never invent numeric index or \
+FII/DII values; repeat only values present in the supplied market data. \
+Return ONLY the JSON object — no prose, no markdown fences.\
+"""
+
+# Explicit field skeleton embedded in the prompt. Without response_format (which
+# reasoning models on LM Studio do not honour — they return empty content),
+# naming the exact keys is the only way to stop the model inventing its own
+# structure (e.g. "flows"/"analyst_summary"). Keep these keys in sync with
+# MARKET_SUMMARY_SCHEMA — a test walks the schema and asserts every required
+# field and enum value (top-level AND nested) appears in this hint.
+_SCHEMA_HINT = """\
+Return ONLY a JSON object with EXACTLY these keys — no extra keys, no markdown:
+{
+  "sentiment_score": <number from -10 to 10>,
+  "market_sentiment": "<STRONGLY_BULLISH|BULLISH|NEUTRAL|BEARISH|STRONGLY_BEARISH>",
+  "indices": [{"name": "<index>", "value": <number>, "change_pct": <number>, "signal": "<BUY|SELL|HOLD|WATCH>"}],
+  "sectors": [{"name": "<sector>", "performance": "<Outperforming|Underperforming|Neutral>", "outlook": "<one sentence>"}],
+  "key_points": ["<point>", "<point>", "<point>"],
+  "fii_dii_flow": {"fii_net": <crore INR>, "dii_net": <crore INR>, "interpretation": "<one sentence>"},
+  "risks": ["<risk>"],
+  "opportunities": ["<opportunity>"]
+}\
+"""
+
+_USER_PROMPT_TEMPLATE = """\
+Analyse the following Indian market data and generate a structured market \
+sentiment summary:
+
+{market_data}
+
+{schema_hint}
+
+Generate the JSON summary now, strictly following the schema above.\
+"""
+
+
+def _build_prompt(market_data: dict[str, Any]) -> str:
+    """Serialise market_data to a clean string for the LLM prompt.
+
+    Args:
+        market_data: Raw market data from OpenAlgo or FlintTrade screener.
+
+    Returns:
+        Formatted string embedding all market data fields.
+    """
+    lines: list[str] = []
+    for key, value in market_data.items():
+        if isinstance(value, (dict, list)):
+            lines.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+        else:
+            lines.append(f"{key}: {value}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def generate_market_summary(
+    llm_client: Any,
+    market_data: dict[str, Any],
+    temperature: float = 0.3,
+    max_tokens: int = 1024,
+) -> MarketSummary | None:
+    """Generate a structured market sentiment summary via the LLM.
+
+    Calls the LLM with the market data and the :data:`MARKET_SUMMARY_SCHEMA`
+    schema hint, then validates and returns a :class:`MarketSummary` Pydantic
+    model. Returns ``None`` on any failure (LLM unavailable, parse error, etc.)
+    so callers can gracefully degrade.
+
+    Args:
+        llm_client: A :class:`~flinttrade_ai.llm_client.LLMClient` instance.
+            The function accepts ``Any`` so it can be tested with mocks without
+            importing the client module.
+        market_data: Dictionary of market inputs — indices, FII/DII flow, sector
+            data, options PCR, etc. from OpenAlgo or the FlintTrade screener.
+        temperature: LLM sampling temperature. Keep low (0.1–0.4) for structured
+            output to reduce hallucinations.
+        max_tokens: Maximum tokens the LLM may generate for the response.
+
+    Returns:
+        A validated :class:`MarketSummary` instance, or ``None`` on failure.
+
+    Example::
+
+        from flinttrade_ai.llm_client import LLMClient
+        from flinttrade_ai.sentiment import generate_market_summary
+
+        client = LLMClient()
+        summary = generate_market_summary(client, {
+            "indices": [
+                {"name": "NIFTY 50", "value": 24350, "change_pct": -0.45},
+            ],
+            "fii_dii_flow": {"fii_net": -1240, "dii_net": 980},
+        })
+        if summary:
+            print(summary.sentiment_score, summary.market_sentiment)
+    """
+    snapshot = prepare_market_summary_data(market_data)
+    if snapshot is None:
+        return None
+    provider_data = _ProviderMarketData.model_validate(snapshot)
+
+    try:
+        from .llm_client import LLMMessage
+    except ImportError:
+        try:
+            from llm_client import LLMMessage  # type: ignore[no-redef]
+        except ImportError:
+            logger.error("Cannot import LLMMessage — is the ai package on sys.path?")
+            return None
+
+    prompt_text = _build_prompt(snapshot)
+    messages = [
+        LLMMessage(role="system", content=_SYSTEM_PROMPT),
+        LLMMessage(
+            role="user", content=_USER_PROMPT_TEMPLATE.format(market_data=prompt_text, schema_hint=_SCHEMA_HINT)
+        ),
+    ]
+
+    # Prompt-only structured output. We deliberately do NOT pass
+    # ``MARKET_SUMMARY_SCHEMA`` as ``response_format`` here: LM Studio applies a
+    # json_schema grammar to the visible-content channel, and reasoning models
+    # (Qwen3, DeepSeek-R1, …) then emit their think block and stop without
+    # producing the constrained JSON — yielding empty content. The system prompt
+    # already constrains the model to return JSON, and the reasoning-aware client
+    # gives it enough budget. Callers that know their model honours grammars can
+    # still opt in via ``LLMClient.chat(response_format=...)``.
+    response = None
+    try:
+        response = llm_client.chat(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:
+        logger.error("LLM call failed: %s", exc)
+        return None
+
+    if not response or not response.success:
+        logger.warning(
+            "LLM returned unsuccessful response: %s",
+            getattr(response, "error", "unknown"),
+        )
+        return None
+
+    raw = response.content.strip()
+
+    # Strip markdown code fences if the LLM included them despite the prompt.
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        raw = "\n".join(line for line in lines if not line.startswith("```")).strip()
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse LLM JSON response: %s — raw: %.200s", exc, raw)
+        return None
+
+    try:
+        summary = MarketSummary.model_validate(data)
+    except Exception as exc:
+        logger.error("MarketSummary validation failed: %s — data: %s", exc, data)
+        return None
+
+    generated_indices = {index.name.casefold(): index for index in summary.indices}
+    trusted_indices = []
+    for trusted in provider_data.indices:
+        generated = generated_indices.get(trusted.name.casefold())
+        signal = trusted.signal or (generated.signal if generated is not None else IndexSignal.HOLD)
+        trusted_indices.append(
+            IndexSnapshot(
+                name=trusted.name,
+                value=trusted.value,
+                change_pct=trusted.change_pct,
+                signal=signal,
+            )
+        )
+
+    trusted_flow = FiiDiiFlow(
+        fii_net=provider_data.fii_dii_flow.fii_net,
+        dii_net=provider_data.fii_dii_flow.dii_net,
+        interpretation=summary.fii_dii_flow.interpretation,
+    )
+    return summary.model_copy(update={"indices": trusted_indices, "fii_dii_flow": trusted_flow})
+
+
+def sentiment_label_from_score(score: float) -> SentimentLabel:
+    """Map a numeric sentiment score to its categorical label.
+
+    This mirrors :meth:`MarketSummary.label_from_score` as a standalone
+    utility for use without a full :class:`MarketSummary` instance.
+
+    Args:
+        score: Numeric score in the range [-10, +10].
+
+    Returns:
+        The corresponding :class:`SentimentLabel`.
+    """
+    score = max(-10.0, min(10.0, float(score)))
+    if score >= 7:
+        return SentimentLabel.STRONGLY_BULLISH
+    if score >= 3:
+        return SentimentLabel.BULLISH
+    if score <= -7:
+        return SentimentLabel.STRONGLY_BEARISH
+    if score <= -3:
+        return SentimentLabel.BEARISH
+    return SentimentLabel.NEUTRAL

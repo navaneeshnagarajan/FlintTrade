@@ -6,16 +6,39 @@ fallback, and RAG knowledge-base query.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import threading
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
 from .llm_client import LLMConfig
+from .sentiment import FiiDiiFlow, MarketSummary, SentimentLabel, sentiment_label_from_score
 
 logger = logging.getLogger("flinttrade")
 
 ai_bp = Blueprint("ai", __name__, url_prefix="/api/v1")
+
+_RICH_SUMMARY_CACHE_TTL_SECONDS = 300.0
+_rich_summary_lock = threading.Lock()
+_rich_summary_inflight_key: str | None = None
+
+
+@dataclass(frozen=True)
+class _RichSummaryCacheEntry:
+    """Completed rich summary keyed to its exact provider snapshot."""
+
+    key: str
+    expires_at: float
+    summary: MarketSummary
+
+
+_rich_summary_cache: _RichSummaryCacheEntry | None = None
 
 
 def _is_llm_configured() -> bool:
@@ -53,8 +76,11 @@ def signals_active() -> tuple[Any, int]:
                 "signal_type": info.get("signal", "NEUTRAL"),
                 "confidence": info.get("confidence", 0.0),
                 "timestamp": info.get("timestamp", ""),
-                "indicators": {k: v for k, v in info.items()
-                               if k not in ("symbol", "exchange", "signal", "confidence", "timestamp")},
+                "indicators": {
+                    k: v
+                    for k, v in info.items()
+                    if k not in ("symbol", "exchange", "signal", "confidence", "timestamp")
+                },
             }
             for key, info in raw_signals.items()
         ]
@@ -79,10 +105,12 @@ def sentiment_analyze() -> tuple[Any, int]:
         ``confidence`` (0 to 1).
     """
     if not _is_llm_configured():
-        return jsonify({
-            "status": "error",
-            "message": "LLM not configured. Sentiment analysis requires an LLM provider.",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "LLM not configured. Sentiment analysis requires an LLM provider.",
+            }
+        ), 503
 
     body = request.get_json(silent=True) or {}
     text: str = body.get("text", "").strip()
@@ -102,13 +130,19 @@ def sentiment_analyze() -> tuple[Any, int]:
         from .llm_client import LLMClient  # noqa: PLC0415
 
         article = NewsArticle(title=analyze_text, summary="")
+        llm_client = None
         try:
             llm_client = LLMClient()
             scored = score_article_with_llm(article, llm_client)
-            llm_client.close()
         except Exception as llm_exc:
             logger.warning("LLM sentiment failed, using rule-based: %s", llm_exc)
             scored = score_article_rule_based(article)
+        finally:
+            if llm_client is not None:
+                try:
+                    llm_client.close()
+                except Exception as close_exc:
+                    logger.warning("Failed to close sentiment LLM client: %s", close_exc)
 
         label_map = {"BULLISH": "bullish", "BEARISH": "bearish", "NEUTRAL": "neutral"}
         label = label_map.get(scored.sentiment.upper(), "neutral")
@@ -121,23 +155,20 @@ def sentiment_analyze() -> tuple[Any, int]:
         else:
             score = 0.0
 
-        return jsonify({
-            "status": "success",
-            "data": {
-                "score": round(score, 4),
-                "label": label,
-                "confidence": round(scored.confidence, 4),
-                "reasoning": scored.reasoning,
-            },
-        }), 200
+        return jsonify(
+            {
+                "status": "success",
+                "data": {
+                    "score": round(score, 4),
+                    "label": label,
+                    "confidence": round(scored.confidence, 4),
+                    "reasoning": scored.reasoning,
+                },
+            }
+        ), 200
     except Exception:
         logger.exception("sentiment_analyze error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
-
-
-def _net_to_label(net: float) -> str:
-    """Map a net sentiment score (-1..1) to a bullish/bearish/neutral label."""
-    return "bullish" if net > 0.15 else "bearish" if net < -0.15 else "neutral"
 
 
 def _score_value(score: Any) -> float:
@@ -151,6 +182,157 @@ def _score_value(score: Any) -> float:
     return 0.0
 
 
+def _market_sentiment_data() -> dict[str, Any] | None:
+    """Read optional structured market data from the runtime provider hook."""
+    provider = current_app.config.get("MARKET_SENTIMENT_DATA_PROVIDER")
+    if provider is None:
+        return None
+    if not callable(provider):
+        logger.warning("MARKET_SENTIMENT_DATA_PROVIDER is not callable")
+        return None
+    try:
+        value = provider()
+    except Exception as exc:
+        logger.info("sentiment/summary: market-data provider unavailable (%s)", exc)
+        return None
+    if not isinstance(value, Mapping) or not value:
+        return None
+    return dict(value)
+
+
+def _generate_rich_market_summary(market_data: dict[str, Any]) -> MarketSummary | None:
+    """Generate a typed LLM summary and always close its client."""
+    from .sentiment import generate_market_summary, prepare_market_summary_data  # noqa: PLC0415
+
+    snapshot = prepare_market_summary_data(market_data)
+    if snapshot is None:
+        return None
+    if not _is_llm_configured():
+        return None
+
+    from .llm_client import LLMClient  # noqa: PLC0415
+
+    llm_client = None
+    try:
+        llm_client = LLMClient()
+        return generate_market_summary(llm_client, snapshot)
+    except Exception as exc:
+        logger.info("sentiment/summary: rich generation unavailable (%s)", exc)
+        return None
+    finally:
+        if llm_client is not None:
+            try:
+                llm_client.close()
+            except Exception as close_exc:
+                logger.warning("Failed to close market-summary LLM client: %s", close_exc)
+
+
+def _market_data_cache_key(market_data: dict[str, Any]) -> str:
+    """Return a deterministic cache key without retaining provider objects."""
+    payload = json.dumps(market_data, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _refresh_rich_summary_cache(cache_key: str, market_data: dict[str, Any]) -> None:
+    """Generate one rich summary off-request and publish it atomically."""
+    global _rich_summary_cache, _rich_summary_inflight_key
+
+    summary: MarketSummary | None = None
+    try:
+        summary = _generate_rich_market_summary(market_data)
+    except Exception:
+        logger.exception("sentiment/summary: background rich generation failed")
+    finally:
+        with _rich_summary_lock:
+            if summary is not None:
+                _rich_summary_cache = _RichSummaryCacheEntry(
+                    key=cache_key,
+                    expires_at=time.monotonic() + _RICH_SUMMARY_CACHE_TTL_SECONDS,
+                    summary=summary,
+                )
+            if _rich_summary_inflight_key == cache_key:
+                _rich_summary_inflight_key = None
+
+
+def _cached_or_schedule_rich_summary(market_data: dict[str, Any]) -> MarketSummary | None:
+    """Return a fresh cached summary or start one non-blocking refresh."""
+    global _rich_summary_cache, _rich_summary_inflight_key
+
+    from .sentiment import prepare_market_summary_data  # noqa: PLC0415
+
+    snapshot = prepare_market_summary_data(market_data)
+    if snapshot is None:
+        return None
+    cache_key = _market_data_cache_key(snapshot)
+    should_start = False
+    with _rich_summary_lock:
+        now = time.monotonic()
+        cached = _rich_summary_cache
+        if cached is not None and cached.key == cache_key and cached.expires_at > now:
+            return cached.summary
+        if cached is not None and cached.expires_at <= now:
+            _rich_summary_cache = None
+        if _rich_summary_inflight_key is None:
+            _rich_summary_inflight_key = cache_key
+            should_start = True
+
+    if should_start:
+        try:
+            worker = threading.Thread(
+                target=_refresh_rich_summary_cache,
+                args=(cache_key, snapshot),
+                name="flinttrade-market-summary",
+                daemon=True,
+            )
+            worker.start()
+        except Exception as exc:
+            with _rich_summary_lock:
+                if _rich_summary_inflight_key == cache_key:
+                    _rich_summary_inflight_key = None
+            logger.warning("sentiment/summary: could not start rich refresh (%s)", exc)
+    return None
+
+
+def _rss_market_summary(scores: list[Any]) -> MarketSummary:
+    """Build the typed frontend contract from confidence-weighted RSS scores."""
+    values = [_score_value(score) for score in scores]
+    net = sum(values) / len(values) if values else 0.0
+    sentiment_score = round(net * 10.0, 4)
+    label: SentimentLabel = sentiment_label_from_score(sentiment_score)
+
+    if scores:
+        bullish = sum(str(getattr(score, "sentiment", "")).upper() == "BULLISH" for score in scores)
+        bearish = sum(str(getattr(score, "sentiment", "")).upper() == "BEARISH" for score in scores)
+        neutral = len(scores) - bullish - bearish
+        label_text = label.value.replace("_", " ").lower()
+        key_points = [
+            f"Analysed {len(scores)} recent market-news articles.",
+            f"Article mix: {bullish} bullish, {bearish} bearish, {neutral} neutral.",
+            f"Confidence-weighted news sentiment is {label_text}.",
+        ]
+    else:
+        key_points = [
+            "No live news feed is currently available.",
+            "Index and sector market data are not connected.",
+            "Connect a market-data provider for a structured market summary.",
+        ]
+
+    return MarketSummary(
+        sentiment_score=sentiment_score,
+        market_sentiment=label,
+        indices=[],
+        sectors=[],
+        key_points=key_points,
+        fii_dii_flow=FiiDiiFlow(
+            fii_net=0.0,
+            dii_net=0.0,
+            interpretation="FII/DII flow not connected; zero values are placeholders.",
+        ),
+        risks=[],
+        opportunities=[],
+    )
+
+
 @ai_bp.route("/ai/sentiment/summary", methods=["GET"])
 def sentiment_summary() -> tuple[Any, int]:
     """Market-wide sentiment summary for the terminal's Market Sentiment panel.
@@ -160,6 +342,12 @@ def sentiment_summary() -> tuple[Any, int]:
     need a connected market-data source — so the panel renders a calm state
     rather than a 404, and never shows fabricated bull/bear numbers.
     """
+    market_data = _market_sentiment_data()
+    if market_data is not None:
+        rich_summary = _cached_or_schedule_rich_summary(market_data)
+        if rich_summary is not None:
+            return jsonify({"status": "success", "data": rich_summary.to_display_dict()}), 200
+
     scores: list[Any] = []
     try:
         from .sentiment import SentimentAnalyzer  # noqa: PLC0415
@@ -168,31 +356,8 @@ def sentiment_summary() -> tuple[Any, int]:
     except Exception as exc:  # no feed / network / LLM — honest neutral fallback
         logger.info("sentiment/summary: no feed data (%s)", exc)
 
-    nums = [_score_value(s) for s in scores]
-    net = sum(nums) / len(nums) if nums else 0.0
-    key_points = (
-        []
-        if scores
-        else ["No live news feed available — connect a data source for full market sentiment."]
-    )
-
-    return jsonify({
-        "status": "success",
-        "data": {
-            "sentiment_score": round(net, 4),
-            "market_sentiment": _net_to_label(net),
-            "indices": [],
-            "sectors": [],
-            "key_points": key_points,
-            "fii_dii_flow": {
-                "fii_net": 0.0,
-                "dii_net": 0.0,
-                "interpretation": "FII/DII flow not connected.",
-            },
-            "risks": [],
-            "opportunities": [],
-        },
-    }), 200
+    summary = _rss_market_summary(scores)
+    return jsonify({"status": "success", "data": summary.to_display_dict()}), 200
 
 
 @ai_bp.route("/ai/sentiment/tickers", methods=["GET"])
@@ -214,12 +379,14 @@ def sentiment_tickers() -> tuple[Any, int]:
             agg = aggregate_sentiment(scores, sym)
             net = float(getattr(agg, "net_score", 0.0) or 0.0)
             label = "positive" if net > 0.15 else "negative" if net < -0.15 else "neutral"
-            tickers.append({
-                "ticker": sym,
-                "score": round(net * 10.0, 2),  # -10..+10 scale
-                "label": label,
-                "key_factor": str(getattr(agg, "dominant_sentiment", "")) or "news sentiment",
-            })
+            tickers.append(
+                {
+                    "ticker": sym,
+                    "score": round(net * 10.0, 2),  # -10..+10 scale
+                    "label": label,
+                    "key_factor": str(getattr(agg, "dominant_sentiment", "")) or "news sentiment",
+                }
+            )
     except Exception as exc:
         logger.info("sentiment/tickers: no feed data (%s)", exc)
 
@@ -227,7 +394,9 @@ def sentiment_tickers() -> tuple[Any, int]:
 
 
 def _free_daily_ohlcv(
-    symbol: str, exchange: str = "NSE", lookback_days: int = 220,
+    symbol: str,
+    exchange: str = "NSE",
+    lookback_days: int = 220,
 ) -> tuple[list[float], list[float], list[float]]:
     """Free daily OHLCV (OpenChart) for the disconnected / Explore regime fallback.
 
@@ -243,7 +412,11 @@ def _free_daily_ohlcv(
         end = datetime.now()
         start = end - timedelta(days=lookback_days)
         result = NSEData().historical(
-            symbol, exchange, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), "1d",
+            symbol,
+            exchange,
+            start.strftime("%Y-%m-%d"),
+            end.strftime("%Y-%m-%d"),
+            "1d",
         )
         if not result.success:
             return [], [], []
@@ -287,10 +460,12 @@ def market_regime() -> tuple[Any, int]:
 
         if len(closes) < 20:
             suffix = "" if connected else " — download daily data or connect a broker."
-            return jsonify({
-                "status": "error",
-                "message": f"Not enough history for {symbol} to compute a regime{suffix}",
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": f"Not enough history for {symbol} to compute a regime{suffix}",
+                }
+            ), 503
 
         result = detect_regime_detailed(highs, lows, closes)
         data = result.to_dict()
@@ -367,6 +542,7 @@ def refine_strategy() -> tuple[Any, int]:
         llm_client = None
         if _is_llm_configured():
             from .llm_client import LLMClient  # noqa: PLC0415
+
             try:
                 llm_client = LLMClient()
             except Exception as exc:  # noqa: BLE001
@@ -417,10 +593,12 @@ def rag_query() -> tuple[Any, int]:
                 if current_app.config.get("RAG_STATUS") == "disabled"
                 else "RAG engine not available"
             )
-            return jsonify({
-                "status": "error",
-                "message": message,
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": message,
+                }
+            ), 503
 
         response = rag.query(query, top_k=top_k)
 

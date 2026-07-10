@@ -1556,6 +1556,9 @@ def create_flask_app(
     app.config["RAG_STATUS"] = (
         "ready" if rag is not None else "disabled" if not _rag_runtime_enabled() else "unavailable"
     )
+    # Optional zero-argument callable returning a non-empty market-data mapping.
+    # The sentiment route degrades to RSS when no provider is installed.
+    app.config["MARKET_SENTIMENT_DATA_PROVIDER"] = None
 
     # Register gateway blueprint (mounts at /v1/)
     app.register_blueprint(gateway_bp)

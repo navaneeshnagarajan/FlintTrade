@@ -215,6 +215,7 @@ function SectorRow({ sector, i }: { sector: SectorOutlook; i: number }) {
 // ---------------------------------------------------------------------------
 
 function FiiDiiCard({ flow }: { flow: MarketSummary["fii_dii_flow"] }) {
+  const unavailable = /not connected|unavailable|placeholder/i.test(flow.interpretation);
   const fiiPositive = flow.fii_net >= 0;
   const diiPositive = flow.dii_net >= 0;
 
@@ -233,14 +234,18 @@ function FiiDiiCard({ flow }: { flow: MarketSummary["fii_dii_flow"] }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-surface-base border border-border-default rounded-lg p-3">
           <p className="text-xxs text-text-muted mb-1">FII Net</p>
-          <p className={`text-sm font-mono font-bold ${fiiPositive ? "text-profit" : "text-loss"}`}>
-            {formatCrore(flow.fii_net)}
+          <p
+            className={`text-sm font-mono font-bold ${unavailable ? "text-text-muted" : fiiPositive ? "text-profit" : "text-loss"}`}
+          >
+            {unavailable ? "Unavailable" : formatCrore(flow.fii_net)}
           </p>
         </div>
         <div className="bg-surface-base border border-border-default rounded-lg p-3">
           <p className="text-xxs text-text-muted mb-1">DII Net</p>
-          <p className={`text-sm font-mono font-bold ${diiPositive ? "text-profit" : "text-loss"}`}>
-            {formatCrore(flow.dii_net)}
+          <p
+            className={`text-sm font-mono font-bold ${unavailable ? "text-text-muted" : diiPositive ? "text-profit" : "text-loss"}`}
+          >
+            {unavailable ? "Unavailable" : formatCrore(flow.dii_net)}
           </p>
         </div>
       </div>
