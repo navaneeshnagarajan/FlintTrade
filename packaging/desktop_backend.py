@@ -20,15 +20,57 @@ The real serving logic lives in :mod:`flinttrade_core.desktop`.
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import threading
 import time
+from collections.abc import Callable
+from typing import TextIO
 
 #: Environment variable the Tauri shell sets to its own OS process id.
 PARENT_PID_ENV = "FLINTTRADE_PARENT_PID"
 
 #: How often (seconds) the POSIX watchdog polls for parent liveness.
 POLL_INTERVAL_SECONDS = 2.0
+
+#: Command the Tauri shell writes to stdin before its bounded hard-kill fallback.
+SHUTDOWN_COMMAND = "FLINTTRADE_SHUTDOWN"
+
+#: Last-resort orphan timeout if graceful unwinding is unable to stop Waitress.
+ORPHAN_GRACE_SECONDS = 12.0
+
+
+class _ShutdownCoordinator:
+    """Hold an early shutdown request until the backend installs its callback."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._requested = False
+        self._callback: Callable[[], None] | None = None
+
+    def request(self) -> bool:
+        """Request shutdown once and notify the installed backend callback."""
+        with self._lock:
+            first_request = not self._requested
+            self._requested = True
+            callback = self._callback if first_request else None
+        if callback is not None:
+            callback()
+        return first_request
+
+    def install(self, callback: Callable[[], None]) -> None:
+        """Install the live server callback and replay an early request."""
+        with self._lock:
+            self._callback = callback
+            requested = self._requested
+        if requested:
+            callback()
+
+    def uninstall(self, callback: Callable[[], None]) -> None:
+        """Remove ``callback`` without disturbing a replacement callback."""
+        with self._lock:
+            if self._callback is callback:
+                self._callback = None
 
 
 def _parent_pid_from_env(environ: dict[str, str] | None = None) -> int | None:
@@ -54,15 +96,24 @@ def _parent_pid_from_env(environ: dict[str, str] | None = None) -> int | None:
     return pid if pid > 0 else None
 
 
-def _exit_orphaned() -> None:
-    """Terminate the sidecar because the desktop shell is gone.
-
-    A daemon thread cannot unwind the blocking Waitress main thread, so a
-    direct ``os._exit`` is the clean option here — it is no more abrupt than
-    the shell's own kill-on-exit path on a graceful quit.
-    """
+def _exit_orphaned(request_shutdown: Callable[[], object] | None = None) -> None:
+    """Gracefully unwind the sidecar because the desktop shell is gone."""
     print("[desktop-sidecar] desktop shell exited; shutting down backend", file=sys.stderr, flush=True)
-    os._exit(0)
+    if request_shutdown is None:
+        os._exit(0)
+    request_shutdown()
+
+    # A crashed shell cannot provide Tauri's hard-kill fallback. Keep one
+    # bounded last resort so a wedged third-party server never becomes an orphan.
+    def force_exit() -> None:
+        time.sleep(ORPHAN_GRACE_SECONDS)
+        os._exit(0)
+
+    threading.Thread(
+        target=force_exit,
+        name="flinttrade-orphan-shutdown-fallback",
+        daemon=True,
+    ).start()
 
 
 def _posix_parent_alive(parent_pid: int, *, track_reparent: bool) -> bool:
@@ -91,16 +142,22 @@ def _posix_parent_alive(parent_pid: int, *, track_reparent: bool) -> bool:
     return True
 
 
-def _watch_parent_posix(parent_pid: int) -> None:
+def _watch_parent_posix(
+    parent_pid: int,
+    request_shutdown: Callable[[], object] | None = None,
+) -> None:
     """Poll the shell process on macOS/Linux; exit when it disappears."""
     track_reparent = os.getppid() == parent_pid
     while True:
         time.sleep(POLL_INTERVAL_SECONDS)
         if not _posix_parent_alive(parent_pid, track_reparent=track_reparent):
-            _exit_orphaned()
+            _exit_orphaned(request_shutdown)
 
 
-def _watch_parent_windows(parent_pid: int) -> None:
+def _watch_parent_windows(
+    parent_pid: int,
+    request_shutdown: Callable[[], object] | None = None,
+) -> None:
     """Block on the shell's process handle on Windows; exit when it dies.
 
     Holding a ``SYNCHRONIZE`` handle is event-driven (no polling) and immune
@@ -129,19 +186,22 @@ def _watch_parent_windows(parent_pid: int) -> None:
             print("[desktop-sidecar] parent watchdog disabled: access denied", file=sys.stderr)
             return
         # Any other failure means the PID no longer exists — already orphaned.
-        _exit_orphaned()
+        _exit_orphaned(request_shutdown)
         return
     try:
         result = kernel32.WaitForSingleObject(handle, infinite)
     finally:
         kernel32.CloseHandle(handle)
     if result == wait_object_0:
-        _exit_orphaned()
+        _exit_orphaned(request_shutdown)
     else:
         print(f"[desktop-sidecar] parent watchdog wait failed (result {result})", file=sys.stderr)
 
 
-def _watchdog_body(parent_pid: int) -> None:
+def _watchdog_body(
+    parent_pid: int,
+    request_shutdown: Callable[[], object] | None = None,
+) -> None:
     """Run the platform watchdog, failing open on unexpected errors.
 
     A watchdog bug must never take down a healthy backend — if anything
@@ -150,14 +210,16 @@ def _watchdog_body(parent_pid: int) -> None:
     """
     try:
         if os.name == "nt":
-            _watch_parent_windows(parent_pid)
+            _watch_parent_windows(parent_pid, request_shutdown)
         else:
-            _watch_parent_posix(parent_pid)
+            _watch_parent_posix(parent_pid, request_shutdown)
     except Exception as exc:  # noqa: BLE001 - deliberate fail-open boundary
         print(f"[desktop-sidecar] parent watchdog stopped: {exc}", file=sys.stderr)
 
 
-def start_parent_watchdog() -> threading.Thread | None:
+def start_parent_watchdog(
+    request_shutdown: Callable[[], object] | None = None,
+) -> threading.Thread | None:
     """Start the parent-liveness watchdog when launched by the desktop shell.
 
     Returns:
@@ -169,7 +231,7 @@ def start_parent_watchdog() -> threading.Thread | None:
         return None
     thread = threading.Thread(
         target=_watchdog_body,
-        args=(parent_pid,),
+        args=(parent_pid, request_shutdown),
         name="flinttrade-parent-watchdog",
         daemon=True,
     )
@@ -177,11 +239,39 @@ def start_parent_watchdog() -> threading.Thread | None:
     return thread
 
 
+def start_stdin_shutdown_listener(
+    request_shutdown: Callable[[], object],
+    *,
+    stream: TextIO | None = None,
+) -> threading.Thread:
+    """Listen for the shell's graceful command or an EOF from a dead parent."""
+    input_stream = sys.stdin if stream is None else stream
+
+    def listen() -> None:
+        for line in input_stream:
+            if line.strip() == SHUTDOWN_COMMAND:
+                request_shutdown()
+                return
+        request_shutdown()
+
+    thread = threading.Thread(
+        target=listen,
+        name="flinttrade-stdin-shutdown-listener",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 if __name__ == "__main__":
+    shutdown = _ShutdownCoordinator()
+
     # Start the watchdog before the (heavy) backend import so a shell that
     # dies during boot still gets its sidecar cleaned up promptly.
-    start_parent_watchdog()
+    start_parent_watchdog(shutdown.request)
+    start_stdin_shutdown_listener(shutdown.request)
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: shutdown.request())
 
     from flinttrade_core.desktop import main  # noqa: PLC0415 - after watchdog start, see above
 
-    main()
+    main(shutdown_signal=shutdown)

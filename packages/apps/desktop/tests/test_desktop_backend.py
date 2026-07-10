@@ -18,6 +18,7 @@ Run with::
 from __future__ import annotations
 
 import importlib.util
+import io
 import os
 import subprocess
 import sys
@@ -99,6 +100,50 @@ def test_watchdog_starts_as_daemon_thread(entry: ModuleType, monkeypatch: pytest
     assert thread.daemon is True
     assert thread.is_alive()
     assert thread.name == "flinttrade-parent-watchdog"
+
+
+@pytest.mark.unit
+def test_shutdown_coordinator_delivers_requests_before_and_after_install(entry: ModuleType) -> None:
+    coordinator = entry._ShutdownCoordinator()
+    calls: list[str] = []
+
+    assert coordinator.request() is True
+    assert coordinator.request() is False
+
+    def callback() -> None:
+        calls.append("shutdown")
+
+    coordinator.install(callback)
+
+    assert calls == ["shutdown"]
+    coordinator.uninstall(callback)
+
+    second = entry._ShutdownCoordinator()
+    second.install(callback)
+    assert second.request() is True
+    assert second.request() is False
+    assert calls == ["shutdown", "shutdown"]
+
+
+@pytest.mark.unit
+def test_stdin_shutdown_command_requests_graceful_exit(entry: ModuleType) -> None:
+    requested = threading.Event()
+    thread = entry.start_stdin_shutdown_listener(
+        requested.set,
+        stream=io.StringIO(f"ignored\n{entry.SHUTDOWN_COMMAND}\n"),
+    )
+
+    thread.join(timeout=1)
+    assert requested.is_set()
+
+
+@pytest.mark.unit
+def test_stdin_eof_requests_graceful_exit_for_a_dead_parent(entry: ModuleType) -> None:
+    requested = threading.Event()
+    thread = entry.start_stdin_shutdown_listener(requested.set, stream=io.StringIO(""))
+
+    thread.join(timeout=1)
+    assert requested.is_set()
 
 
 @pytest.mark.unit

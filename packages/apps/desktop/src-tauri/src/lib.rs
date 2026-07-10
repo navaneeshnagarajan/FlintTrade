@@ -12,11 +12,12 @@
 //! 3. Opens the main window pointed at ``http://127.0.0.1:<n>`` — the backend
 //!    serves both the React terminal and the API from that one origin, so the
 //!    app's same-origin requests resolve without any in-app configuration.
-//! 4. Kills the sidecar when the app exits.
+//! 4. Requests a graceful sidecar shutdown when the app exits, then uses a
+//!    bounded hard-kill fallback only if cleanup wedges.
 //!
 //! ## Sidecar orphan protection
 //!
-//! The kill-on-exit path (4) only runs on a graceful quit. A shell crash or
+//! The graceful exit path (4) only runs on a normal quit. A shell crash or
 //! force-quit would otherwise orphan the backend, and repeated launches would
 //! accumulate duplicates. Three layers close that hole:
 //!
@@ -29,7 +30,8 @@
 //!   ``FLINTTRADE_PARENT_PID``; the sidecar entry script
 //!   (``packaging/desktop_backend.py``) watches that process from a daemon
 //!   thread and exits cleanly when the shell dies.
-//! * **Kill on exit** — the original graceful path, kept as-is.
+//! * **Graceful stop on exit** — stdin asks Python to unwind Waitress, flush
+//!   tick capture, and close DuckDB before the bounded hard-kill fallback.
 //!
 //! A small splash window covers steps 1–2 so the user sees immediate feedback.
 //!
@@ -71,6 +73,19 @@ const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
 /// Substring that must appear in a process's command line / image name before
 /// the reaper will treat it as our backend sidecar and terminate it.
 const SIDECAR_PROCESS_MARKER: &str = "flinttrade-backend";
+
+/// Stdin command understood by ``packaging/desktop_backend.py``. The sidecar
+/// unwinds Waitress, flushes pending ticks, and closes DuckDB before exiting.
+const SIDECAR_SHUTDOWN_COMMAND: &[u8] = b"FLINTTRADE_SHUTDOWN\n";
+
+/// Maximum wait for graceful sidecar cleanup before the hard-kill fallback.
+const SIDECAR_SHUTDOWN_POLLS: usize = 100;
+
+/// Short TERM grace used when reaping a stale sidecar during application boot.
+const SIDECAR_TERM_POLLS: usize = 20;
+
+/// Brief confirmation window after a hard kill before retaining recovery data.
+const SIDECAR_KILL_CONFIRM_POLLS: usize = 10;
 
 /// File name of the platform's bootstrap install/update script. The same file
 /// can live inside a source workspace (``scripts/install/``) or inside the
@@ -997,14 +1012,42 @@ fn show_backend_error(app: &AppHandle) {
     }
 }
 
-/// Kill the backend sidecar, if still running.
+/// Gracefully stop the backend sidecar, with a bounded hard-kill fallback.
 fn kill_backend(app: &AppHandle) {
     if let Some(state) = app.try_state::<BackendState>() {
-        if let Some(child) = state.0.lock().unwrap().take() {
-            let _ = child.kill();
+        if let Some(mut child) = state.0.lock().unwrap().take() {
+            let pid = child.pid();
+            if child.write(SIDECAR_SHUTDOWN_COMMAND).is_ok()
+                && wait_for_process_exit(pid, SIDECAR_SHUTDOWN_POLLS)
+            {
+                remove_sidecar_pid_file();
+                return;
+            }
+            match process_liveness(pid) {
+                ProcessLiveness::Alive => {
+                    eprintln!(
+                        "[flinttrade] backend did not stop gracefully within 10s; forcing exit"
+                    );
+                }
+                ProcessLiveness::Unknown => {
+                    eprintln!(
+                        "[flinttrade] backend exit could not be confirmed; requesting hard kill"
+                    );
+                }
+                ProcessLiveness::Dead => {}
+            }
+            if let Err(error) = child.kill() {
+                eprintln!("[flinttrade] backend hard-kill request failed: {error}");
+            }
+            if wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS) {
+                remove_sidecar_pid_file();
+            } else {
+                eprintln!(
+                    "[flinttrade] backend pid {pid} is still alive after hard kill; retaining recovery record"
+                );
+            }
         }
     }
-    remove_sidecar_pid_file();
 }
 
 // ---------------------------------------------------------------------------
@@ -1080,47 +1123,91 @@ fn process_command_line(pid: u32) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Best-effort liveness probe for an arbitrary PID.
-#[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessLiveness {
+    Alive,
+    Dead,
+    Unknown,
 }
 
-/// Best-effort liveness probe for an arbitrary PID.
+/// Tri-state liveness probe that never treats an OS error as confirmed death.
+#[cfg(unix)]
+fn process_liveness(pid: u32) -> ProcessLiveness {
+    let Ok(raw_pid) = i32::try_from(pid) else {
+        return ProcessLiveness::Unknown;
+    };
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+
+    // Signal 0 performs permission/existence checks without delivering a signal.
+    if unsafe { kill(raw_pid, 0) } == 0 {
+        return ProcessLiveness::Alive;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(3) => ProcessLiveness::Dead,  // POSIX ESRCH
+        Some(1) => ProcessLiveness::Alive, // POSIX EPERM proves the process exists
+        _ => ProcessLiveness::Unknown,
+    }
+}
+
+/// Tri-state liveness probe that never treats a tasklist failure as death.
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
-    process_command_line(pid).is_some()
+fn process_liveness(pid: u32) -> ProcessLiveness {
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+    else {
+        return ProcessLiveness::Unknown;
+    };
+    if !output.status.success() {
+        return ProcessLiveness::Unknown;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let needle = format!("\"{pid}\"");
+    if text.lines().any(|line| line.contains(&needle)) {
+        ProcessLiveness::Alive
+    } else {
+        ProcessLiveness::Dead
+    }
+}
+
+/// Wait a bounded number of 100 ms polls for one process to disappear.
+fn wait_for_process_exit(pid: u32, polls: usize) -> bool {
+    for _ in 0..polls {
+        match process_liveness(pid) {
+            ProcessLiveness::Dead => return true,
+            ProcessLiveness::Alive | ProcessLiveness::Unknown => {}
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    process_liveness(pid) == ProcessLiveness::Dead
 }
 
 /// Terminate a process: graceful TERM first, escalating to a hard kill only
 /// if it lingers past a short grace window.
 #[cfg(unix)]
-fn terminate_process(pid: u32) {
+fn terminate_process(pid: u32) -> bool {
     let pid_s = pid.to_string();
     let _ = std::process::Command::new("kill")
         .args(["-TERM", &pid_s])
         .status();
-    for _ in 0..20 {
-        if !process_alive(pid) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    if wait_for_process_exit(pid, SIDECAR_TERM_POLLS) {
+        return true;
     }
     let _ = std::process::Command::new("kill")
         .args(["-KILL", &pid_s])
         .status();
+    wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS)
 }
 
 /// Terminate a process (Windows `taskkill`, including its child tree).
 #[cfg(windows)]
-fn terminate_process(pid: u32) {
+fn terminate_process(pid: u32) -> bool {
     let _ = std::process::Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status();
+    wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS)
 }
 
 /// Startup layer of orphan protection.
@@ -1147,28 +1234,50 @@ fn reap_stale_sidecar() {
         return;
     };
     if let Some(owner) = shell_pid {
-        if owner != std::process::id() && process_alive(owner) {
-            eprintln!(
-                "[flinttrade] sidecar pid file is owned by a live shell (pid {owner}); skipping reap"
-            );
-            return;
+        if owner != std::process::id() {
+            match process_liveness(owner) {
+                ProcessLiveness::Alive => {
+                    eprintln!(
+                        "[flinttrade] sidecar pid file is owned by a live shell (pid {owner}); skipping reap"
+                    );
+                    return;
+                }
+                ProcessLiveness::Unknown => {
+                    eprintln!(
+                        "[flinttrade] shell pid {owner} liveness is unknown; retaining sidecar recovery record"
+                    );
+                    return;
+                }
+                ProcessLiveness::Dead => {}
+            }
         }
     }
-    match process_command_line(sidecar_pid) {
-        Some(cmd) if looks_like_backend_sidecar(&cmd) => {
-            eprintln!(
-                "[flinttrade] terminating stale backend sidecar (pid {sidecar_pid}) from a previous run"
-            );
-            terminate_process(sidecar_pid);
-        }
-        Some(_) => {
-            eprintln!(
-                "[flinttrade] pid {sidecar_pid} from a previous run was reused by another process; leaving it alone"
-            );
-        }
-        None => {} // already gone — just clean up the file
+    let remove_recovery_record = match process_liveness(sidecar_pid) {
+        ProcessLiveness::Dead => true,
+        ProcessLiveness::Unknown => false,
+        ProcessLiveness::Alive => match process_command_line(sidecar_pid) {
+            Some(cmd) if looks_like_backend_sidecar(&cmd) => {
+                eprintln!(
+                    "[flinttrade] terminating stale backend sidecar (pid {sidecar_pid}) from a previous run"
+                );
+                terminate_process(sidecar_pid)
+            }
+            Some(_) => {
+                eprintln!(
+                    "[flinttrade] pid {sidecar_pid} from a previous run was reused by another process; leaving it alone"
+                );
+                true
+            }
+            None => false,
+        },
+    };
+    if remove_recovery_record {
+        let _ = std::fs::remove_file(&path);
+    } else {
+        eprintln!(
+            "[flinttrade] stale backend pid {sidecar_pid} could not be confirmed stopped; retaining recovery record"
+        );
     }
-    let _ = std::fs::remove_file(&path);
 }
 
 /// Record the freshly spawned sidecar (and this shell) in the PID file so the
@@ -1379,6 +1488,18 @@ mod tests {
         assert_eq!(parse_pid_file("not-a-pid\n77\n"), None);
         assert_eq!(parse_pid_file("0\n77\n"), None);
         assert_eq!(parse_pid_file("-5\n77\n"), None);
+    }
+
+    #[test]
+    fn exit_confirmation_never_claims_the_current_process_is_dead() {
+        assert_eq!(process_liveness(std::process::id()), ProcessLiveness::Alive);
+        assert!(!wait_for_process_exit(std::process::id(), 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_unix_pid_is_unknown_not_dead() {
+        assert_eq!(process_liveness(u32::MAX), ProcessLiveness::Unknown);
     }
 
     #[test]
