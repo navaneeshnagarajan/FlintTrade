@@ -41,7 +41,13 @@ vi.mock("@/stores/brokerStore", () => ({
   useBrokerStore: { getState: () => storeState.brokerState },
 }));
 
-import { startAgent, type AgentSnapshot, type AgentStartParams } from "../ftApi.ai";
+import {
+  runTeamAnalysisStream,
+  startAgent,
+  type AgentSnapshot,
+  type AgentStartParams,
+  type TeamStreamFrame,
+} from "../ftApi.ai";
 
 function mockBrokerAccountMatch(
   account: { account_id: string; broker: string; source?: "gateway" | "native" },
@@ -171,5 +177,110 @@ describe("startAgent", () => {
 
     expect(() => startAgent(BASE_PARAMS)).toThrow(/not available for live writes/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("runTeamAnalysisStream", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    storeState.apiKey = "openalgo-key";
+    storeState.token = "jwt-token";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the selected mode and preset and yields typed SSE frames", async () => {
+    const body = [
+      'data: {"type":"event","event":{"task_id":"technical","agent_role":"technical","event_type":"started","data":{},"timestamp":"2026-07-10T00:00:00Z"}}\n\n',
+      'data: {"type":"result","data":{"analysis":{"symbol":"NIFTY","exchange":"NSE_INDEX","agent_analyses":[],"consensus_signal":"HOLD","consensus_confidence":0,"consensus_reasoning":"","timestamp":"","errors":[],"mode":"dag","preset":"derivatives_desk","details":{}},"recommendation":{"symbol":"NIFTY","exchange":"NSE_INDEX","action":"HOLD","confidence":0,"reasoning":"","agent_count":0,"bullish_count":0,"bearish_count":0,"neutral_count":0,"timestamp":""}}}\n\n',
+      'data: {"type":"done"}\n\n',
+    ].join("");
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const frames: TeamStreamFrame[] = [];
+    for await (const frame of runTeamAnalysisStream("NIFTY", "NSE_INDEX", undefined, {
+      mode: "dag",
+      preset: "derivatives_desk",
+      max_concurrent: 2,
+    })) {
+      frames.push(frame);
+    }
+
+    expect(frames.map((frame) => frame.type)).toEqual(["event", "result", "done"]);
+    expect(frames[0]).toMatchObject({ type: "event", event: { event_type: "started" } });
+    expect(frames[1]).toMatchObject({
+      type: "result",
+      data: { analysis: { mode: "dag", preset: "derivatives_desk" } },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/v1\/ai\/team\/analyse\/stream$/);
+    expect(JSON.parse(String(init.body))).toEqual({
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      mode: "dag",
+      preset: "derivatives_desk",
+      max_concurrent: 2,
+    });
+    expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token" });
+  });
+
+  it("surfaces a JSON error instead of fabricating stream frames", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ status: "error", message: "LLM not configured" }, 503),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const consume = async () => {
+      for await (const _frame of runTeamAnalysisStream("NIFTY", "NSE_INDEX")) {
+        // The error response must throw before yielding.
+      }
+    };
+
+    await expect(consume()).rejects.toThrow("LLM not configured");
+  });
+
+  it("sends an explicit null preset to override the active preset", async () => {
+    const body = [
+      'data: {"type":"result","data":{"analysis":{"symbol":"NIFTY","exchange":"NSE_INDEX","agent_analyses":[],"consensus_signal":"HOLD","consensus_confidence":0,"consensus_reasoning":"","timestamp":"","errors":[]},"recommendation":{"symbol":"NIFTY","exchange":"NSE_INDEX","action":"HOLD","confidence":0,"reasoning":"","agent_count":0,"bullish_count":0,"bearish_count":0,"neutral_count":0,"timestamp":""}}}\n\n',
+      'data: {"type":"done"}\n\n',
+    ].join("");
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    for await (const _frame of runTeamAnalysisStream("NIFTY", "NSE_INDEX", undefined, {
+      mode: "flat",
+      preset: null,
+    })) {
+      // Consume the complete stream.
+    }
+
+    expect(requestBody(fetchMock)).toMatchObject({ mode: "flat", preset: null });
+  });
+
+  it("rejects a stream that ends before its result and done frames", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        'data: {"type":"event","event":{"task_id":"technical","agent_role":"technical","event_type":"started","data":{},"timestamp":"2026-07-10T00:00:00Z"}}\n\n',
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const consume = async () => {
+      for await (const _frame of runTeamAnalysisStream("NIFTY", "NSE_INDEX")) {
+        // A lifecycle-only stream is incomplete and must fail at EOF.
+      }
+    };
+
+    await expect(consume()).rejects.toThrow(/ended before the final result/i);
   });
 });

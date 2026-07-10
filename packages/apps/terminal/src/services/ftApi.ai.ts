@@ -57,6 +57,22 @@ export interface AgentRoleConfig {
   system_prompt: string;
   enabled: boolean;
   temperature: number | null;
+  role_id?: string;
+  model_tier?: "quick" | "deep";
+}
+
+export type TeamMode = "flat" | "dag" | "sequential" | "debate";
+
+export interface TeamPresetAgent {
+  role: string;
+  system_prompt: string;
+  model_tier: "quick" | "deep";
+}
+
+export interface TeamPreset {
+  name: string;
+  description: string;
+  agents: TeamPresetAgent[];
 }
 
 export interface AgentAnalysisResult {
@@ -67,6 +83,8 @@ export interface AgentAnalysisResult {
   confidence: number;
   timestamp: string;
   error: string;
+  task_id?: string;
+  model_tier?: "quick" | "deep";
 }
 
 export interface TeamAnalysisResult {
@@ -78,6 +96,9 @@ export interface TeamAnalysisResult {
   consensus_reasoning: string;
   timestamp: string;
   errors: string[];
+  mode?: TeamMode;
+  preset?: string;
+  details?: Record<string, unknown>;
 }
 
 export interface TeamRecommendation {
@@ -100,7 +121,35 @@ export interface TeamAnalyzeResponse {
 
 export interface TeamConfig {
   agents: AgentRoleConfig[];
+  custom_agents?: AgentRoleConfig[];
+  modes?: TeamMode[];
+  presets?: TeamPreset[];
+  active_preset?: string;
 }
+
+export type TeamConfigUpdate = { agents: AgentRoleConfig[] } | { preset: string };
+
+export interface TeamRunOptions {
+  mode?: TeamMode;
+  preset?: string | null;
+  debate_rounds?: number;
+  max_concurrent?: number;
+  task_timeout_seconds?: number;
+}
+
+export interface TeamLifecycleEvent {
+  task_id: string;
+  agent_role: string;
+  event_type: "started" | "progress" | "completed" | "error" | "timeout";
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+export type TeamStreamFrame =
+  | { type: "event"; event: TeamLifecycleEvent }
+  | { type: "result"; data: TeamAnalyzeResponse }
+  | { type: "error"; message: string }
+  | { type: "done" };
 
 export const getRecentSignals = (limit?: number) => {
   const qs = limit !== undefined ? `?limit=${limit}` : "";
@@ -125,17 +174,111 @@ export const runTeamAnalysis = (
   symbol: string,
   exchange: string,
   market_data?: Record<string, unknown>,
+  options: TeamRunOptions = {},
 ) =>
   post<TeamAnalyzeResponse>("ai/team/analyse", {
     symbol,
     exchange,
     ...(market_data ? { market_data: market_data } : {}),
+    ...options,
   });
 
 export const getTeamConfig = () => get<TeamConfig>("ai/team/config");
 
-export const updateTeamConfig = (config: TeamConfig) =>
+export const updateTeamConfig = (config: TeamConfigUpdate) =>
   post<TeamConfig>("ai/team/config", config);
+
+function parseTeamStreamFrame(line: string): TeamStreamFrame | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const raw = trimmed.slice(5).trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as TeamStreamFrame;
+    if (parsed.type === "event" && parsed.event) return parsed;
+    if (parsed.type === "result" && parsed.data) return parsed;
+    if (parsed.type === "error" && typeof parsed.message === "string") return parsed;
+    if (parsed.type === "done") return parsed;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Stream one team analysis, including task lifecycle and the canonical result. */
+export async function* runTeamAnalysisStream(
+  symbol: string,
+  exchange: string,
+  market_data?: Record<string, unknown>,
+  options: TeamRunOptions = {},
+  signal?: AbortSignal,
+): AsyncGenerator<TeamStreamFrame, void, unknown> {
+  const resp = await fetch(`${getBase()}/api/v1/ai/team/analyse/stream`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify({
+      symbol,
+      exchange,
+      ...(market_data ? { market_data } : {}),
+      ...options,
+    }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    let message = `Team analysis failed (HTTP ${resp.status})`;
+    try {
+      const payload = (await resp.json()) as { message?: unknown };
+      if (typeof payload.message === "string" && payload.message) message = payload.message;
+    } catch {
+      // Keep the status-derived message for non-JSON failures.
+    }
+    throw new Error(message);
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error("No readable stream in team analysis response.");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawResult = false;
+  let sawDone = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        const frame = parseTeamStreamFrame(line);
+        if (frame) {
+          sawResult ||= frame.type === "result";
+          sawDone ||= frame.type === "done";
+          yield frame;
+        }
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+    const tail = parseTeamStreamFrame(buffer);
+    if (tail) {
+      sawResult ||= tail.type === "result";
+      sawDone ||= tail.type === "done";
+      yield tail;
+    }
+    if (!sawResult || !sawDone) {
+      throw new Error("Team analysis stream ended before the final result and completion frames.");
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Already cancelled or closed.
+    }
+    reader.releaseLock();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // AI agent backends (agent_backends registry — /ai/agents/*)
