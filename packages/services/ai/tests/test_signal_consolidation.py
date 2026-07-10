@@ -294,11 +294,13 @@ def test_flask_factory_installs_signal_hub_and_ml_source(monkeypatch, tmp_path) 
     assert "/api/v1/signals" not in rules
 
 
-def test_runtime_registers_five_minute_market_hours_ml_job() -> None:
+def test_runtime_registers_five_minute_market_hours_ml_job(tmp_path) -> None:
     from flinttrade_core.app import _wire_ml_signal_runtime
 
     app = Flask(__name__)
     pipeline = MagicMock()
+    pipeline.model_path = str(tmp_path / "signal_model.joblib")
+    pipeline.instruments = [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}]
     app.config["ML_SIGNAL_PIPELINE"] = pipeline
     cron = MagicMock()
     time_scheduler = MagicMock()
@@ -306,8 +308,8 @@ def test_runtime_registers_five_minute_market_hours_ml_job() -> None:
 
     assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
 
-    cron.register.assert_called_once()
-    call = cron.register.call_args
+    calls = {call.args[0]: call for call in cron.register.call_args_list}
+    call = calls["ml_signal_cycle"]
     assert call.args[0] == "ml_signal_cycle"
     assert call.kwargs["trigger_type"] == "interval"
     assert call.kwargs["trigger_args"] == {"minutes": 5}

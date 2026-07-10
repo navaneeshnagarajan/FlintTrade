@@ -1236,6 +1236,44 @@ def _wire_ml_signal_runtime(
         trigger_args={"minutes": 5},
     )
     app.config["ML_SIGNAL_JOB"] = "ml_signal_cycle"
+
+    try:
+        from flinttrade_ai.signal_retraining import (  # noqa: PLC0415
+            RetrainConfig,
+            SignalRetrainer,
+        )
+
+        retrainer = SignalRetrainer(
+            RetrainConfig(model_dir=Path(pipeline.model_path).parent),
+            instruments=pipeline.instruments,
+            data_fetcher=pipeline.fetch_bars,
+            pipeline=pipeline,
+        )
+
+        def _run_signal_retrain() -> list[Any]:
+            try:
+                return retrainer.run_all()
+            except Exception as exc:  # noqa: BLE001 - scheduler and app must remain available
+                logger.warning("Scheduled signal retraining failed: %s", exc)
+                return []
+
+        cron.register(
+            "ml_signal_retrain",
+            handler=_run_signal_retrain,
+            description="Retrain canonical per-instrument signal models after market close",
+            trigger_type="cron",
+            trigger_args={
+                "hour": 16,
+                "minute": 0,
+                "day_of_week": "mon-fri",
+                "timezone": "Asia/Kolkata",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - optional ML runtime must not prevent app boot
+        logger.warning("Scheduled signal retraining not wired: %s", exc)
+    else:
+        app.config["ML_SIGNAL_RETRAINER"] = retrainer
+        app.config["ML_SIGNAL_RETRAIN_JOB"] = "ml_signal_retrain"
     return True
 
 

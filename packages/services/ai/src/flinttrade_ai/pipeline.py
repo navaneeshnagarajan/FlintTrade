@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -126,6 +127,8 @@ class SignalPipeline:
         self.interval = interval
         self.latest_signals: dict[str, dict[str, Any]] = {}
         self._generator: Any = None
+        self._symbol_generators: dict[str, Any] = {}
+        self._generator_lock = threading.RLock()
         self._turbulence_enabled: bool = turbulence_enabled
         self._turbulence_threshold: float = turbulence_threshold
         self._turbulence_window: int = turbulence_window
@@ -133,28 +136,66 @@ class SignalPipeline:
 
     def _ensure_generator(self) -> None:
         """Lazy-load signal generator with trained model."""
-        if self._generator is not None:
-            return
-        from .signals import SignalGenerator
+        with self._generator_lock:
+            if self._generator is not None:
+                return
+            from .signals import SignalGenerator
 
-        self._generator = SignalGenerator()
-        model_file = Path(self.model_path)
-        if model_file.exists():
-            try:
-                self._generator.load(self.model_path)
-            except Exception as exc:  # noqa: BLE001 - corrupt models must preserve scheduled fallback
-                logger.warning("Could not load signal model from %s; using fallback: %s", model_file, exc)
+            self._generator = SignalGenerator()
+            model_file = Path(self.model_path)
+            if model_file.exists():
+                try:
+                    self._generator.load(self.model_path)
+                except Exception as exc:  # noqa: BLE001 - corrupt models must preserve scheduled fallback
+                    logger.warning("Could not load signal model from %s; using fallback: %s", model_file, exc)
+                else:
+                    logger.info("Loaded signal model from %s", model_file)
             else:
-                logger.info("Loaded signal model from %s", model_file)
-        else:
-            logger.warning("No trained model at %s — signals will use fallback", model_file)
+                logger.warning("No trained model at %s — signals will use fallback", model_file)
 
-    def fetch_bars(self, symbol: str, exchange: str, count: int = 200) -> list[dict]:
+    def _generator_for(self, symbol: str, exchange: str) -> Any:
+        """Return the verified per-instrument model, then shared model, then fallback."""
+        key = f"{exchange}:{symbol}"
+        with self._generator_lock:
+            existing = self._symbol_generators.get(key)
+            if existing is not None:
+                return existing
+
+            from .signal_retraining import signal_model_path
+            from .signals import SignalGenerator
+
+            model_file = signal_model_path(Path(self.model_path).parent, symbol, exchange)
+            if model_file.exists():
+                candidate = SignalGenerator()
+                try:
+                    candidate.load(str(model_file))
+                except Exception as exc:  # noqa: BLE001 - invalid models fall through to shared/fallback
+                    logger.warning(
+                        "Could not load signal model for %s from %s; using shared fallback: %s",
+                        key,
+                        model_file,
+                        exc,
+                    )
+                else:
+                    self._symbol_generators[key] = candidate
+                    logger.info("Loaded signal model for %s from %s", key, model_file)
+                    return candidate
+
+            self._ensure_generator()
+            self._symbol_generators[key] = self._generator
+            return self._generator
+
+    def install_generator(self, symbol: str, exchange: str, generator: Any) -> None:
+        """Atomically publish a persisted generator to future signal cycles."""
+        with self._generator_lock:
+            self._symbol_generators[f"{exchange}:{symbol}"] = generator
+
+    def fetch_bars(self, symbol: str, exchange: str, lookback_days: int = 30) -> list[dict]:
         """Fetch OHLCV bars from OpenAlgo history API."""
         from flinttrade_core.openalgo_client import OpenAlgoClient
 
         end = datetime.now()
-        start = end - timedelta(days=30)
+        start = end - timedelta(days=lookback_days)
         client = self._openalgo_client
         close_client = False
         if client is None:
@@ -216,8 +257,9 @@ class SignalPipeline:
 
                 # Use ML model if trained, otherwise fall back to EMA crossover
                 closes = [float(b.get("close", 0)) for b in bars]
-                if self._generator is not None and self._generator.is_trained:
-                    signal = self._generator.predict(bars, symbol=inst["symbol"])
+                generator = self._generator_for(inst["symbol"], inst["exchange"])
+                if generator is not None and generator.is_trained:
+                    signal = generator.predict(bars, symbol=inst["symbol"])
                     raw_signal = signal.action
                     confidence = signal.confidence
                     method = "ml_model"

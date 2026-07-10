@@ -79,6 +79,7 @@ from .market_simulator import (
     SimulationResult,
 )
 from .pipeline import SignalPipeline
+from .signal_retraining import RetrainConfig, RetrainResult, SignalRetrainer
 from .signal_models import LiveSignal, SignalConfig, SignalEvent
 from .signal_pipeline import LiveSignalPipeline
 from .signals import MLSignal, Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
@@ -117,6 +118,9 @@ __all__ = [
     # Signals
     "SignalGenerator",
     "SignalPipeline",
+    "SignalRetrainer",
+    "RetrainConfig",
+    "RetrainResult",
     "Signal",
     "MLSignal",
     # Live signal pipeline (v0.5.0)
