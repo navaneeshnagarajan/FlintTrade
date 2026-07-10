@@ -91,13 +91,14 @@ def _finite_sse_generator(events: list[str]):
     Returns:
         A callable matching the signature of ``_sse_generator(pipeline)``.
     """
+
     def _gen(_pipeline) -> Generator[str, None, None]:  # noqa: ANN001
         yield from events
 
     return _gen
 
 
-def _signal_sse_line(symbol: str) -> str:
+def _signal_sse_line(symbol: str, exchange: str = "NSE_INDEX") -> str:
     """Build a single SSE data line for a signal.
 
     Args:
@@ -106,12 +107,15 @@ def _signal_sse_line(symbol: str) -> str:
     Returns:
         SSE-formatted string ready to be yielded by a generator.
     """
-    payload = json.dumps({
-        "symbol": symbol,
-        "signal_type": "BUY",
-        "confidence": 0.85,
-        "timestamp": "2026-04-19T09:15:00",
-    })
+    payload = json.dumps(
+        {
+            "symbol": symbol,
+            "exchange": exchange,
+            "signal_type": "BUY",
+            "confidence": 0.85,
+            "timestamp": "2026-04-19T09:15:00",
+        }
+    )
     return f"data: {payload}\n\n"
 
 
@@ -263,3 +267,23 @@ class TestSignalsStream:
             assert field in event, f"Missing field '{field}' in SSE payload: {event}"
         assert event["symbol"] == "MIDCPNIFTY"
         assert isinstance(event["confidence"], float)
+
+    def test_sse_payloads_preserve_exchange_qualified_identities(self, app: Flask) -> None:
+        sse_lines = [
+            _signal_sse_line("RELIANCE", "NSE"),
+            _signal_sse_line("RELIANCE", "BSE"),
+        ]
+        pipeline = _make_pipeline()
+
+        with app.test_client() as client:
+            with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+                with patch(
+                    "flinttrade_ai.signal_routes._sse_generator",
+                    side_effect=_finite_sse_generator(sse_lines),
+                ):
+                    response = client.get("/api/v1/signals/stream")
+
+        assert [(event["exchange"], event["symbol"]) for event in _parse_sse(response.data)] == [
+            ("NSE", "RELIANCE"),
+            ("BSE", "RELIANCE"),
+        ]

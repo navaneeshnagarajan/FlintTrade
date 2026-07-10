@@ -17,6 +17,7 @@ from typing import Any
 from flask import Blueprint, Flask, Response, current_app, jsonify, request
 
 from .pipeline import SignalPipeline
+from .signal_models import SignalConfig
 from .signal_pipeline import LiveSignalPipeline
 
 logger = logging.getLogger("flinttrade.ai.signal_routes")
@@ -80,6 +81,7 @@ def _get_pipeline() -> LiveSignalPipeline:
 # GET /api/v1/signals/recent
 # --------------------------------------------------------------------------
 
+
 @signal_bp.route("/recent", methods=["GET"])
 def signals_recent() -> tuple[Any, int]:
     """Return recent signals as a JSON list, newest first.
@@ -98,15 +100,18 @@ def signals_recent() -> tuple[Any, int]:
 
     pipeline = _get_pipeline()
     signals = pipeline.get_recent_signals(limit=limit)
-    return jsonify({
-        "status": "success",
-        "data": {"signals": [s.to_dict() for s in signals]},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"signals": [s.to_dict() for s in signals]},
+        }
+    ), 200
 
 
 # --------------------------------------------------------------------------
 # GET /api/v1/signals/stream  (Server-Sent Events)
 # --------------------------------------------------------------------------
+
 
 def _sse_generator(
     pipeline: LiveSignalPipeline,
@@ -146,9 +151,7 @@ def signals_stream() -> Response:
     except ValueError:
         last_event_id = None
     stream = (
-        _sse_generator(pipeline)
-        if last_event_id is None
-        else _sse_generator(pipeline, last_event_id=last_event_id)
+        _sse_generator(pipeline) if last_event_id is None else _sse_generator(pipeline, last_event_id=last_event_id)
     )
     return Response(
         stream,
@@ -163,6 +166,7 @@ def signals_stream() -> Response:
 # --------------------------------------------------------------------------
 # POST /api/v1/signals/configure
 # --------------------------------------------------------------------------
+
 
 @signal_bp.route("/configure", methods=["POST"])
 def signals_configure() -> tuple[Any, int]:
@@ -188,6 +192,11 @@ def signals_configure() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "indicators must be a list"}), 400
     if thresholds is not None and not isinstance(thresholds, dict):
         return jsonify({"status": "error", "message": "thresholds must be a dict"}), 400
+    if instruments is not None:
+        try:
+            SignalConfig(instruments=instruments)
+        except ValueError as exc:
+            return jsonify({"status": "error", "message": str(exc)}), 400
 
     pipeline = _get_pipeline()
     config = pipeline.update_config(
@@ -202,6 +211,7 @@ def signals_configure() -> tuple[Any, int]:
 # GET /api/v1/signals/config
 # --------------------------------------------------------------------------
 
+
 @signal_bp.route("/config", methods=["GET"])
 def signals_config() -> tuple[Any, int]:
     """Return current signal pipeline configuration.
@@ -210,7 +220,9 @@ def signals_config() -> tuple[Any, int]:
         ``{ "status": "success", "data": <config dict> }``
     """
     pipeline = _get_pipeline()
-    return jsonify({
-        "status": "success",
-        "data": pipeline.get_config().to_dict(),
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": pipeline.get_config().to_dict(),
+        }
+    ), 200

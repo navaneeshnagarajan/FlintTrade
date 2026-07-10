@@ -183,12 +183,44 @@ class TestSignalsConfigure:
         with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
             resp = client.post(
                 "/api/v1/signals/configure",
-                json={"instruments": ["NIFTY", "BANKNIFTY"]},
+                json={"instruments": ["NSE_INDEX:NIFTY", "NSE_INDEX:BANKNIFTY"]},
             )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
         pipeline.update_config.assert_called_once()
+
+    def test_unqualified_instrument_returns_400(self, client: MagicMock, pipeline: MagicMock) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            resp = client.post("/api/v1/signals/configure", json={"instruments": ["RELIANCE"]})
+
+        assert resp.status_code == 400
+        assert "EXCHANGE:SYMBOL" in resp.get_json()["message"]
+        pipeline.update_config.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "identity",
+        ["NSE:REL:IANCE", "N SE:RELIANCE", "NSE:REL IANCE", " NSE:RELIANCE", 123, None],
+    )
+    def test_invalid_instrument_identity_returns_400(
+        self,
+        client: MagicMock,
+        pipeline: MagicMock,
+        identity: object,
+    ) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            resp = client.post("/api/v1/signals/configure", json={"instruments": [identity]})
+
+        assert resp.status_code == 400
+        assert "EXCHANGE:SYMBOL" in resp.get_json()["message"]
+        pipeline.update_config.assert_not_called()
+
+    def test_empty_instrument_list_disables_all_rule_ticks(self, client: MagicMock, pipeline: MagicMock) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            resp = client.post("/api/v1/signals/configure", json={"instruments": []})
+
+        assert resp.status_code == 200
+        pipeline.update_config.assert_called_once_with(instruments=[], indicators=None, thresholds=None)
 
     def test_instruments_not_list_returns_400(self, client: MagicMock, pipeline: MagicMock) -> None:
         """Passing instruments as a string (not a list) returns HTTP 400.

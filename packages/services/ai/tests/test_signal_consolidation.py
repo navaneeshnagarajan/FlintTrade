@@ -127,6 +127,47 @@ def test_hub_ingests_ml_cycle_into_recent_feed() -> None:
     assert event.metadata["turbulence_score"] == 0.2
 
 
+def test_recent_rule_events_preserve_exchange_qualified_identities() -> None:
+    from flinttrade_ai.signal_models import SignalEvent
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+
+    hub = LiveSignalPipeline()
+    hub.publish_signal(SignalEvent(exchange="NSE", symbol="RELIANCE", source="rule"))
+    hub.publish_signal(SignalEvent(exchange="BSE", symbol="RELIANCE", source="rule"))
+
+    assert [(event.exchange, event.symbol) for event in hub.get_recent_signals()] == [
+        ("BSE", "RELIANCE"),
+        ("NSE", "RELIANCE"),
+    ]
+
+
+def test_rule_events_replay_both_exchange_qualified_identities() -> None:
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+    from flinttrade_ai.signal_routes import _sse_generator
+
+    hub = LiveSignalPipeline(
+        instruments=["NSE:RELIANCE", "BSE:RELIANCE"],
+        indicators=[{"name": "RSI", "params": {"period": 1}}],
+        thresholds={"rsi_oversold": 30.0, "rsi_overbought": 70.0},
+    )
+    for ltp in (1_400.0, 1_401.0, 1_405.0):
+        hub.process_tick("NSE", "RELIANCE", ltp)
+    for ltp in (1_500.0, 1_499.0, 1_495.0):
+        hub.process_tick("BSE", "RELIANCE", ltp)
+
+    replay = _sse_generator(hub, last_event_id=0)
+    payloads = [json.loads(next(replay).split("data: ", 1)[1]) for _ in range(hub.latest_event_id)]
+
+    assert [
+        (payload["event_id"], payload["exchange"], payload["symbol"], payload["signal_type"]) for payload in payloads
+    ] == [
+        (1, "NSE", "RELIANCE", "SELL"),
+        (2, "NSE", "RELIANCE", "SELL"),
+        (3, "BSE", "RELIANCE", "BUY"),
+        (4, "BSE", "RELIANCE", "BUY"),
+    ]
+
+
 def test_hub_labels_scheduled_ema_fallback_without_claiming_ml() -> None:
     from flinttrade_ai.signal_pipeline import LiveSignalPipeline
 

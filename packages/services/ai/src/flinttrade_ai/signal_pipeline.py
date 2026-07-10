@@ -11,9 +11,10 @@ share one bounded, source-tagged feed with monotonic IDs for reliable SSE replay
 from __future__ import annotations
 
 import logging
+import math
 import threading
-from collections.abc import Mapping
 from collections import deque
+from collections.abc import Mapping
 from typing import Any
 
 from .signal_models import SignalConfig, SignalEvent, now_iso
@@ -72,16 +73,16 @@ class LiveSignalPipeline:
     Usage::
 
         pipeline = LiveSignalPipeline(
-            instruments=["NIFTY", "BANKNIFTY"],
+            instruments=["NSE_INDEX:NIFTY", "NSE_INDEX:BANKNIFTY"],
             indicators=[{"name": "RSI", "params": {"period": 14}}],
             thresholds={"rsi_oversold": 30, "rsi_overbought": 70},
         )
-        signal = pipeline.process_tick("NIFTY", 22450.5, volume=1234567)
+        signal = pipeline.process_tick("NSE_INDEX", "NIFTY", 22450.5, volume=1234567)
         if signal:
             print(signal.message)
 
     Args:
-        instruments: List of instrument symbols to track.
+        instruments: List of ``EXCHANGE:SYMBOL`` instrument identities to track.
         indicators:  List of indicator configs, each ``{"name": ..., "params": {...}}``.
         thresholds:  Dict of threshold names to values.
     """
@@ -92,13 +93,14 @@ class LiveSignalPipeline:
         indicators: list[dict[str, object]] | None = None,
         thresholds: dict[str, float] | None = None,
     ) -> None:
+        default_config = SignalConfig()
         self.config = SignalConfig(
-            instruments=instruments or SignalConfig().instruments,
-            indicators=indicators or SignalConfig().indicators,
-            thresholds=thresholds or SignalConfig().thresholds,
+            instruments=default_config.instruments if instruments is None else instruments,
+            indicators=default_config.indicators if indicators is None else indicators,
+            thresholds=default_config.thresholds if thresholds is None else thresholds,
         )
         self.signals: deque[SignalEvent] = deque(maxlen=_MAX_SIGNALS)
-        self._states: dict[str, _InstrumentState] = {}
+        self._states: dict[tuple[str, str], _InstrumentState] = {}
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._sequence = 0
@@ -109,16 +111,30 @@ class LiveSignalPipeline:
 
     def process_tick(
         self,
+        exchange: str,
         symbol: str,
         ltp: float,
         volume: int = 0,
     ) -> SignalEvent | None:
-        """Process one tick under the same lock used by reconfiguration."""
+        """Process one exchange-qualified tick under the reconfiguration lock."""
+        if not isinstance(exchange, str) or not isinstance(symbol, str):
+            return None
+        exchange = exchange.strip().upper()
+        symbol = symbol.strip().upper()
+        try:
+            ltp = float(ltp)
+        except (TypeError, ValueError):
+            return None
+        if not exchange or not symbol or not math.isfinite(ltp) or ltp <= 0:
+            return None
         with self._lock:
-            return self._process_tick_locked(symbol, ltp, volume)
+            if f"{exchange}:{symbol}" not in self.config.instruments:
+                return None
+            return self._process_tick_locked(exchange, symbol, ltp, volume)
 
     def _process_tick_locked(
         self,
+        exchange: str,
         symbol: str,
         ltp: float,
         volume: int = 0,
@@ -129,6 +145,7 @@ class LiveSignalPipeline:
         crosses a threshold, ``None`` is returned.
 
         Args:
+            exchange: Instrument exchange (e.g. ``"NSE_INDEX"``).
             symbol: Instrument symbol (e.g. ``"NIFTY"``).
             ltp:    Last traded price.
             volume: Tick volume (informational, not used by v1 indicators).
@@ -136,7 +153,7 @@ class LiveSignalPipeline:
         Returns:
             A ``Signal`` instance if a threshold was crossed, else ``None``.
         """
-        state = self._get_or_create_state(symbol)
+        state = self._get_or_create_state(exchange, symbol)
         thresholds = self.config.thresholds
 
         # --- RSI ---
@@ -150,6 +167,7 @@ class LiveSignalPipeline:
                     sig = SignalEvent(
                         timestamp=now_iso(),
                         symbol=symbol,
+                        exchange=exchange,
                         signal_type="BUY",
                         indicator="RSI",
                         value=rsi_val,
@@ -165,6 +183,7 @@ class LiveSignalPipeline:
                     sig = SignalEvent(
                         timestamp=now_iso(),
                         symbol=symbol,
+                        exchange=exchange,
                         signal_type="SELL",
                         indicator="RSI",
                         value=rsi_val,
@@ -191,6 +210,7 @@ class LiveSignalPipeline:
                         sig = SignalEvent(
                             timestamp=now_iso(),
                             symbol=symbol,
+                            exchange=exchange,
                             signal_type="BUY",
                             indicator="EMA_Cross",
                             value=fast_val - slow_val,
@@ -208,6 +228,7 @@ class LiveSignalPipeline:
                         sig = SignalEvent(
                             timestamp=now_iso(),
                             symbol=symbol,
+                            exchange=exchange,
                             signal_type="SELL",
                             indicator="EMA_Cross",
                             value=fast_val - slow_val,
@@ -242,6 +263,7 @@ class LiveSignalPipeline:
                             sig = SignalEvent(
                                 timestamp=now_iso(),
                                 symbol=symbol,
+                                exchange=exchange,
                                 signal_type="BUY",
                                 indicator="MACD",
                                 value=macd_hist,
@@ -258,6 +280,7 @@ class LiveSignalPipeline:
                             sig = SignalEvent(
                                 timestamp=now_iso(),
                                 symbol=symbol,
+                                exchange=exchange,
                                 signal_type="SELL",
                                 indicator="MACD",
                                 value=macd_hist,
@@ -398,7 +421,7 @@ class LiveSignalPipeline:
         """
         with self._lock:
             if instruments is not None:
-                self.config.instruments = instruments
+                self.config.instruments = SignalConfig(instruments=instruments).instruments
             if indicators is not None:
                 self.config.indicators = indicators
             if thresholds is not None:
@@ -418,11 +441,12 @@ class LiveSignalPipeline:
     # Internal
     # ------------------------------------------------------------------
 
-    def _get_or_create_state(self, symbol: str) -> _InstrumentState:
+    def _get_or_create_state(self, exchange: str, symbol: str) -> _InstrumentState:
         """Lazily create per-instrument indicator state."""
-        if symbol not in self._states:
-            self._states[symbol] = _InstrumentState(self.config)
-        return self._states[symbol]
+        identity = (exchange, symbol)
+        if identity not in self._states:
+            self._states[identity] = _InstrumentState(self.config)
+        return self._states[identity]
 
 
 def _as_float(value: Any) -> float:

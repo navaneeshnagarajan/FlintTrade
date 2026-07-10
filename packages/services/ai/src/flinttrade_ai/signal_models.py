@@ -58,11 +58,24 @@ LiveSignal = SignalEvent
 Signal = SignalEvent
 
 
+def normalise_instrument_identity(identity: str) -> str:
+    """Validate and uppercase one ``EXCHANGE:SYMBOL`` instrument identity."""
+    if not isinstance(identity, str) or any(character.isspace() for character in identity):
+        raise ValueError("instruments must contain EXCHANGE:SYMBOL identities")
+    parts = identity.split(":")
+    if len(parts) != 2:
+        raise ValueError("instruments must contain EXCHANGE:SYMBOL identities")
+    exchange, symbol = (part.upper() for part in parts)
+    if not exchange or not symbol:
+        raise ValueError("instruments must contain EXCHANGE:SYMBOL identities")
+    return f"{exchange}:{symbol}"
+
+
 @dataclass
 class SignalConfig:
     """Configuration for the live signal pipeline."""
 
-    instruments: list[str] = field(default_factory=lambda: ["NIFTY", "BANKNIFTY"])
+    instruments: list[str] = field(default_factory=lambda: ["NSE_INDEX:NIFTY", "NSE_INDEX:BANKNIFTY"])
     indicators: list[dict[str, object]] = field(
         default_factory=lambda: [
             {"name": "RSI", "params": {"period": 14}},
@@ -78,6 +91,12 @@ class SignalConfig:
             "ema_cross_min_pct": 0.0,
         }
     )
+
+    def __post_init__(self) -> None:
+        """Keep the live rule allowlist in one canonical identity format."""
+        if not isinstance(self.instruments, list):
+            raise ValueError("instruments must be a list of EXCHANGE:SYMBOL identities")
+        self.instruments = [normalise_instrument_identity(identity) for identity in self.instruments]
 
     def to_dict(self) -> dict[str, object]:
         """Serialise to a JSON-safe dictionary."""
