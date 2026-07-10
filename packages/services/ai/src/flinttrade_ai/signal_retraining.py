@@ -481,7 +481,7 @@ class SignalRetrainer:
         with self._history_lock:
             return list(self._history)
 
-    def get_generator(self, exchange: str, symbol: str) -> SignalGenerator | None:
+    def get_generator(self, symbol: str, exchange: str) -> SignalGenerator | None:
         """Return the retrainer's last accepted generator for an instrument."""
         with self._promotion_lock:
             return self._live_generators.get((exchange, symbol))

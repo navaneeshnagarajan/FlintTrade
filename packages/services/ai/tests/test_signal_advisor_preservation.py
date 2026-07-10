@@ -76,6 +76,20 @@ class _ExplodingModel:
         raise RuntimeError("model exploded")
 
 
+class _BareExplodingModel:
+    def predict(self, rows: list[list[float]]) -> list[list[float]]:
+        raise RuntimeError()
+
+
+def _write_verified_payload(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("wb") as model_file:
+        pickle.dump(payload, model_file)
+    Path(f"{path}.sha256").write_text(
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+        encoding="ascii",
+    )
+
+
 def _install_fake_lightgbm(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Dataset:
         def __init__(self, data: Any, **kwargs: Any) -> None:
@@ -134,6 +148,12 @@ def test_generate_labels_validates_threshold_signs() -> None:
         generate_labels([100.0, 101.0], buy_threshold_pct=-0.1, offset=0)
     with pytest.raises(ValueError, match="sell_threshold_pct must be negative"):
         generate_labels([100.0, 101.0], sell_threshold_pct=0.1, offset=0)
+    with pytest.raises(ValueError, match="threshold_pct must be finite"):
+        generate_labels([100.0, 101.0], threshold_pct=math.nan, offset=0)
+    with pytest.raises(ValueError, match="buy_threshold_pct must be finite"):
+        generate_labels([100.0, 101.0], buy_threshold_pct=math.nan, offset=0)
+    with pytest.raises(ValueError, match="sell_threshold_pct must be finite"):
+        generate_labels([100.0, 101.0], sell_threshold_pct=math.nan, offset=0)
 
 
 def test_train_forwards_asymmetric_thresholds_and_returns_booster_importance(
@@ -232,6 +252,18 @@ def test_model_exception_returns_enriched_error_hold() -> None:
     _assert_error_hold(signal, "model exploded")
 
 
+def test_bare_model_exception_returns_nonempty_error_hold() -> None:
+    from flinttrade_ai.signals import SignalGenerator
+
+    generator = SignalGenerator()
+    generator._model = _BareExplodingModel()
+    generator._feature_names = ["return_1"]
+
+    signal = generator.predict(_bars(60), symbol="NIFTY")
+
+    _assert_error_hold(signal, "runtimeerror")
+
+
 def test_canonical_prediction_exposes_complete_probability_contract() -> None:
     from flinttrade_ai.signals import SignalGenerator, engineer_features
 
@@ -272,14 +304,9 @@ def test_verified_legacy_payload_uses_adapted_features_and_old_class_order(tmp_p
     from flinttrade_ai.signals import SignalGenerator, engineer_features
 
     model_path = tmp_path / "ml_advisor.pkl"
-    with model_path.open("wb") as model_file:
-        pickle.dump(
-            {"model": _LegacySklearnModel(), "feature_names": LEGACY_FEATURE_NAMES},
-            model_file,
-        )
-    Path(f"{model_path}.sha256").write_text(
-        hashlib.sha256(model_path.read_bytes()).hexdigest(),
-        encoding="ascii",
+    _write_verified_payload(
+        model_path,
+        {"model": _LegacySklearnModel(), "feature_names": LEGACY_FEATURE_NAMES},
     )
 
     generator = SignalGenerator()
@@ -312,6 +339,80 @@ def test_verified_legacy_payload_uses_adapted_features_and_old_class_order(tmp_p
         zip(LEGACY_FEATURE_NAMES, _LegacySklearnModel.feature_importances_, strict=True)
     )
     assert signal.success is True
+
+
+def test_metadata_less_old_canonical_payload_keeps_booster_class_order(tmp_path: Path) -> None:
+    from flinttrade_ai.signals import SignalGenerator
+
+    model_path = tmp_path / "old_canonical.joblib"
+    _write_verified_payload(
+        model_path,
+        {"model": _CanonicalBooster([0.8, 0.15, 0.05]), "feature_names": ["return_1"]},
+    )
+
+    generator = SignalGenerator()
+    generator.load(str(model_path))
+    signal = generator.predict(_bars(60))
+
+    assert signal.action == "SELL"
+    assert signal.signal_code == 0
+    assert signal.probability_labels == ["SELL", "HOLD", "BUY"]
+    assert generator._model.rows
+
+
+def test_legacy_ordinary_save_reload_retains_semantics_and_class_order(tmp_path: Path) -> None:
+    from flinttrade_ai.signals import SignalGenerator
+
+    old_path = tmp_path / "ml_advisor.pkl"
+    _write_verified_payload(
+        old_path,
+        {"model": _LegacySklearnModel(), "feature_names": LEGACY_FEATURE_NAMES},
+    )
+    generator = SignalGenerator()
+    generator.load(str(old_path))
+
+    canonical_path = tmp_path / "canonical.joblib"
+    generator.save(str(canonical_path))
+    reloaded = SignalGenerator()
+    reloaded.load(str(canonical_path))
+    signal = reloaded.predict(_bars(60))
+
+    assert signal.action == "BUY"
+    assert signal.probability_labels == ["BUY", "HOLD", "SELL"]
+    assert reloaded._model.rows
+
+
+def test_legacy_guarded_bundle_round_trip_retains_semantics_and_class_order(tmp_path: Path) -> None:
+    from flinttrade_ai.signal_retraining import (
+        _write_model_bundle,
+        load_signal_model_bundle,
+        signal_model_path,
+    )
+    from flinttrade_ai.signals import SignalGenerator, engineer_features
+
+    old_path = tmp_path / "ml_advisor.pkl"
+    _write_verified_payload(
+        old_path,
+        {"model": _LegacySklearnModel(), "feature_names": LEGACY_FEATURE_NAMES},
+    )
+    generator = SignalGenerator()
+    generator.load(str(old_path))
+    bars = _bars(60)
+    target = signal_model_path(tmp_path, "NIFTY", "NSE_INDEX")
+
+    _write_model_bundle(
+        target,
+        generator,
+        engineer_features(bars),
+        symbol="NIFTY",
+        exchange="NSE_INDEX",
+    )
+    reloaded = load_signal_model_bundle(target, symbol="NIFTY", exchange="NSE_INDEX")
+    signal = reloaded.predict(bars)
+
+    assert signal.action == "BUY"
+    assert signal.probability_labels == ["BUY", "HOLD", "SELL"]
+    assert reloaded._model.rows
 
 
 def test_unknown_persisted_feature_returns_error_without_model_execution() -> None:
@@ -371,5 +472,5 @@ def test_get_generator_uses_exchange_and_symbol_identity(tmp_path: Path) -> None
     retrainer._live_generators[("NSE", "SHARED")] = nse_generator
     retrainer._live_generators[("BSE", "SHARED")] = bse_generator
 
-    assert retrainer.get_generator("NSE", "SHARED") is nse_generator
-    assert retrainer.get_generator("BSE", "SHARED") is bse_generator
+    assert retrainer.get_generator("SHARED", "NSE") is nse_generator
+    assert retrainer.get_generator("SHARED", "BSE") is bse_generator

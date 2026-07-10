@@ -268,12 +268,18 @@ def generate_labels(
     A future return above the positive BUY threshold is BUY, below the
     negative SELL threshold is SELL, and values between them are HOLD.
     """
+    if not math.isfinite(threshold_pct):
+        raise ValueError("threshold_pct must be finite")
     if threshold_pct <= 0:
         raise ValueError("threshold_pct must be positive")
     buy_threshold = threshold_pct if buy_threshold_pct is None else buy_threshold_pct
     sell_threshold = -threshold_pct if sell_threshold_pct is None else sell_threshold_pct
+    if not math.isfinite(buy_threshold):
+        raise ValueError("buy_threshold_pct must be finite")
     if buy_threshold <= 0:
         raise ValueError("buy_threshold_pct must be positive")
+    if not math.isfinite(sell_threshold):
+        raise ValueError("sell_threshold_pct must be finite")
     if sell_threshold >= 0:
         raise ValueError("sell_threshold_pct must be negative")
 
@@ -626,7 +632,8 @@ class SignalGenerator:
             )
         except Exception as exc:  # noqa: BLE001 - prediction is a fail-closed advisory path
             logger.error("Signal model prediction failed for %s: %s", symbol or "<unknown>", exc)
-            return self._error_signal(str(exc), symbol=symbol)
+            error = str(exc).strip() or type(exc).__name__
+            return self._error_signal(error, symbol=symbol)
 
     def save(self, path: str) -> None:
         """Save trained model to disk with a SHA-256 integrity sidecar."""
