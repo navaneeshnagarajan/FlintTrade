@@ -5,6 +5,8 @@ All tests are pure in-memory and require no external connections.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 
@@ -236,18 +238,14 @@ class TestCalculateAlignedTimeBin:
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
 
         # _BASE_TS is exactly 09:15:00 IST → bin start should equal _BASE_TS
-        result = OrderFlowAggregator.calculate_aligned_time_bin(
-            _BASE_TS, bin_seconds=300, market_open="09:15"
-        )
+        result = OrderFlowAggregator.calculate_aligned_time_bin(_BASE_TS, bin_seconds=300, market_open="09:15")
         assert result == int(_BASE_TS)
 
     def test_ts_in_second_bin(self):
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
 
         ts = _BASE_TS + 301  # 5min01s after open → second bin
-        result = OrderFlowAggregator.calculate_aligned_time_bin(
-            ts, bin_seconds=300, market_open="09:15"
-        )
+        result = OrderFlowAggregator.calculate_aligned_time_bin(ts, bin_seconds=300, market_open="09:15")
         assert result == int(_BASE_TS) + 300
 
     def test_pre_market_ts_uses_floor_alignment(self):
@@ -256,9 +254,7 @@ class TestCalculateAlignedTimeBin:
         # Use a timestamp well before 09:15 (e.g. 08:00 IST)
         # _BASE_TS - 75*60 = 08:00 IST
         ts = _BASE_TS - 75 * 60  # 08:00 IST
-        result = OrderFlowAggregator.calculate_aligned_time_bin(
-            ts, bin_seconds=300, market_open="09:15"
-        )
+        result = OrderFlowAggregator.calculate_aligned_time_bin(ts, bin_seconds=300, market_open="09:15")
         assert result == (int(ts) // 300) * 300
 
     def test_different_bin_sizes(self):
@@ -277,9 +273,7 @@ class TestCalculateAlignedTimeBin:
         # Crypto: market never closes, bins start from 00:00
         # Just verify it doesn't raise for unusual market open
         ts = _BASE_TS
-        result = OrderFlowAggregator.calculate_aligned_time_bin(
-            ts, bin_seconds=300, market_open="00:00"
-        )
+        result = OrderFlowAggregator.calculate_aligned_time_bin(ts, bin_seconds=300, market_open="00:00")
         assert isinstance(result, int)
 
 
@@ -298,8 +292,11 @@ class TestCumulativeDelta:
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
 
         bucket = FootprintBucket(
-            price_level=24500.0, buy_volume=200, sell_volume=100,
-            delta=100, timestamp_bin=int(_BASE_TS),
+            price_level=24500.0,
+            buy_volume=200,
+            sell_volume=100,
+            delta=100,
+            timestamp_bin=int(_BASE_TS),
         )
         result = OrderFlowAggregator.cumulative_delta([bucket])
         assert result == [100.0]
@@ -335,8 +332,7 @@ class TestCumulativeDelta:
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
 
         bins = [
-            FootprintBucket(p, 100, 50, 50, int(_BASE_TS) + i * 300)
-            for i, p in enumerate([24500.0, 24550.0, 24600.0])
+            FootprintBucket(p, 100, 50, 50, int(_BASE_TS) + i * 300) for i, p in enumerate([24500.0, 24550.0, 24600.0])
         ]
         assert len(OrderFlowAggregator.cumulative_delta(bins)) == 3
 
@@ -463,6 +459,7 @@ class TestFeedMarketTick:
     @staticmethod
     def _agg():
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
         return OrderFlowAggregator()
 
     def test_first_tick_is_a_baseline_noop(self):
@@ -512,3 +509,104 @@ class TestFeedMarketTick:
         assert sum(bucket.buy_volume for bucket in bse_buckets) == 0
         assert sum(bucket.sell_volume for bucket in bse_buckets) == 300
         assert agg.get_footprint("RELIANCE") == []
+
+
+class TestResetMarketTickState:
+    _TS = 1_700_000_000.0
+
+    @staticmethod
+    def _agg():
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        return OrderFlowAggregator()
+
+    def test_reset_qualified_identity_clears_footprint_baseline_and_side(self):
+        agg = self._agg()
+        agg.feed_market_tick("RELIANCE", 2500.0, 1000, exchange="NSE", timestamp=self._TS)
+        agg.feed_market_tick("RELIANCE", 2499.0, 1200, exchange="NSE", timestamp=self._TS + 1)
+        agg.feed_market_tick("RELIANCE", 2500.0, 5000, exchange="BSE", timestamp=self._TS)
+
+        agg.reset("reliance", exchange="nse")
+
+        # The first tick after reset is a fresh baseline, never a stale +3,800 trade.
+        agg.feed_market_tick("RELIANCE", 2510.0, 5000, exchange="NSE", timestamp=self._TS + 2)
+        assert agg.get_footprint("RELIANCE", exchange="NSE") == []
+        assert agg.get_footprint("RELIANCE", exchange="BSE") == []
+
+        # A flat follow-up tick verifies that the prior SELL side was cleared too.
+        agg.feed_market_tick("RELIANCE", 2510.0, 5100, exchange="NSE", timestamp=self._TS + 3)
+        buckets = agg.get_footprint("RELIANCE", exchange="NSE")
+        assert sum(bucket.buy_volume for bucket in buckets) == 100
+        assert sum(bucket.sell_volume for bucket in buckets) == 0
+
+    def test_reset_empty_exchange_identity_clears_baseline_and_side(self):
+        agg = self._agg()
+        agg.feed_market_tick("RELIANCE", 2500.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("RELIANCE", 2499.0, 1200, timestamp=self._TS + 1)
+
+        agg.reset("reliance")
+
+        agg.feed_market_tick("RELIANCE", 2510.0, 5000, timestamp=self._TS + 2)
+        assert agg.get_footprint("RELIANCE") == []
+
+        agg.feed_market_tick("RELIANCE", 2510.0, 5100, timestamp=self._TS + 3)
+        buckets = agg.get_footprint("RELIANCE")
+        assert sum(bucket.buy_volume for bucket in buckets) == 100
+        assert sum(bucket.sell_volume for bucket in buckets) == 0
+
+    def test_reset_all_clears_market_tick_state_for_every_identity(self):
+        agg = self._agg()
+        agg.feed_market_tick("RELIANCE", 2500.0, 1000, exchange="NSE", timestamp=self._TS)
+        agg.feed_market_tick("INFY", 1500.0, 2000, timestamp=self._TS)
+        agg.feed_market_tick("RELIANCE", 2501.0, 1100, exchange="NSE", timestamp=self._TS + 1)
+        agg.feed_market_tick("INFY", 1499.0, 2200, timestamp=self._TS + 1)
+
+        agg.reset()
+
+        agg.feed_market_tick("RELIANCE", 2505.0, 9000, exchange="NSE", timestamp=self._TS + 2)
+        agg.feed_market_tick("INFY", 1510.0, 9000, timestamp=self._TS + 2)
+        assert agg.get_footprint("RELIANCE", exchange="NSE") == []
+        assert agg.get_footprint("INFY") == []
+
+
+class TestConcurrentAccess:
+    def test_reader_snapshot_blocks_a_concurrent_writer_until_complete(self, monkeypatch):
+        from flinttrade_data.orderflow_aggregator import _BinState
+
+        agg = _make_agg(tick_size=50.0)
+        agg.add_tick("NIFTY", 24500.0, 100, "BUY", timestamp=_BASE_TS)
+
+        reader_inside = threading.Event()
+        release_reader = threading.Event()
+        writer_done = threading.Event()
+        original_to_buckets = _BinState.to_buckets
+
+        def paused_to_buckets(state):
+            reader_inside.set()
+            assert release_reader.wait(timeout=2)
+            return original_to_buckets(state)
+
+        monkeypatch.setattr(_BinState, "to_buckets", paused_to_buckets)
+
+        reader = threading.Thread(target=agg.get_footprint, args=("NIFTY",))
+        writer = threading.Thread(
+            target=lambda: (
+                agg.add_tick("NIFTY", 24600.0, 100, "SELL", timestamp=_BASE_TS),
+                writer_done.set(),
+            )
+        )
+
+        reader.start()
+        assert reader_inside.wait(timeout=2)
+        writer.start()
+        try:
+            assert not writer_done.wait(timeout=0.2)
+        finally:
+            release_reader.set()
+            reader.join(timeout=2)
+            writer.join(timeout=2)
+
+        assert not reader.is_alive()
+        assert not writer.is_alive()
+        assert writer_done.is_set()
+        assert {bucket.price_level for bucket in agg.get_footprint("NIFTY")} == {24500.0, 24600.0}

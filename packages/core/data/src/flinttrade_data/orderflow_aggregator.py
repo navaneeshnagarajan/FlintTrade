@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time as dt_time
+from threading import RLock
 from typing import Literal
 
 logger = logging.getLogger("flinttrade.data.orderflow_aggregator")
@@ -210,6 +211,9 @@ class OrderFlowAggregator:
         # side from raw market ticks (which carry cumulative volume and no side).
         self._last_tick: dict[_InstrumentIdentity, tuple[float, int]] = {}
         self._last_side: dict[_InstrumentIdentity, Side] = {}
+        # feed_market_tick nests classification and recording under one state
+        # transaction, so this must permit re-entry.
+        self._lock = RLock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -257,14 +261,15 @@ class OrderFlowAggregator:
         volume = max(0, int(volume))
 
         identity = _instrument_identity(symbol, exchange)
-        if identity not in self._state:
-            self._state[identity] = {}
-        symbol_state = self._state[identity]
+        with self._lock:
+            if identity not in self._state:
+                self._state[identity] = {}
+            symbol_state = self._state[identity]
 
-        if bin_start not in symbol_state:
-            symbol_state[bin_start] = _BinState(bin_start=bin_start)
+            if bin_start not in symbol_state:
+                symbol_state[bin_start] = _BinState(bin_start=bin_start)
 
-        symbol_state[bin_start].add(price_level, side, volume)
+            symbol_state[bin_start].add(price_level, side, volume)
         logger.debug(
             "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d",
             identity[0], identity[1], price_level, volume, side, bin_start,
@@ -282,21 +287,22 @@ class OrderFlowAggregator:
         side. Not a guess: the standard trade-side classification.
         """
         identity = _instrument_identity(symbol, exchange)
-        if bid is not None and ask is not None and ask >= bid > 0:
-            if ltp >= ask:
-                self._last_side[identity] = "BUY"
-                return "BUY"
-            if ltp <= bid:
-                self._last_side[identity] = "SELL"
-                return "SELL"
-        if ltp > prev_ltp:
-            side: Side = "BUY"
-        elif ltp < prev_ltp:
-            side = "SELL"
-        else:
-            side = self._last_side.get(identity, "BUY")
-        self._last_side[identity] = side
-        return side
+        with self._lock:
+            if bid is not None and ask is not None and ask >= bid > 0:
+                if ltp >= ask:
+                    self._last_side[identity] = "BUY"
+                    return "BUY"
+                if ltp <= bid:
+                    self._last_side[identity] = "SELL"
+                    return "SELL"
+            if ltp > prev_ltp:
+                side: Side = "BUY"
+            elif ltp < prev_ltp:
+                side = "SELL"
+            else:
+                side = self._last_side.get(identity, "BUY")
+            self._last_side[identity] = side
+            return side
 
     def feed_market_tick(
         self,
@@ -319,16 +325,17 @@ class OrderFlowAggregator:
         real order-flow footprint instead of synthetic data.
         """
         identity = _instrument_identity(symbol, exchange)
-        prev = self._last_tick.get(identity)
-        self._last_tick[identity] = (ltp, int(cumulative_volume))
-        if prev is None:
-            return
-        prev_ltp, prev_vol = prev
-        inc_volume = max(0, int(cumulative_volume) - prev_vol)
-        if inc_volume <= 0:
-            return
-        side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
-        self.add_tick(symbol, ltp, inc_volume, side, timestamp=timestamp, exchange=exchange)
+        with self._lock:
+            prev = self._last_tick.get(identity)
+            self._last_tick[identity] = (ltp, int(cumulative_volume))
+            if prev is None:
+                return
+            prev_ltp, prev_vol = prev
+            inc_volume = max(0, int(cumulative_volume) - prev_vol)
+            if inc_volume <= 0:
+                return
+            side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
+            self.add_tick(symbol, ltp, inc_volume, side, timestamp=timestamp, exchange=exchange)
 
     def get_footprint(
         self,
@@ -356,18 +363,20 @@ class OrderFlowAggregator:
             Returns an empty list if no data has been accumulated for
             ``symbol``.
         """
-        symbol_state = self._state.get(_instrument_identity(symbol, exchange))
-        if not symbol_state:
-            return []
+        with self._lock:
+            symbol_state = self._state.get(_instrument_identity(symbol, exchange))
+            if not symbol_state:
+                return []
 
-        # Select the n_bins most recent bin keys
-        all_bins = sorted(symbol_state.keys())
-        recent_bins = all_bins[-n_bins:] if len(all_bins) > n_bins else all_bins
+            # Select the n_bins most recent bin keys and materialise a stable
+            # view before another thread can mutate the nested dictionaries.
+            all_bins = sorted(symbol_state)
+            recent_bins = all_bins[-n_bins:] if len(all_bins) > n_bins else all_bins
 
-        result: list[FootprintBucket] = []
-        for bin_start in recent_bins:
-            result.extend(symbol_state[bin_start].to_buckets())
-        return result
+            result: list[FootprintBucket] = []
+            for bin_start in recent_bins:
+                result.extend(symbol_state[bin_start].to_buckets())
+            return result
 
     def reset(self, symbol: str | None = None, *, exchange: str = "") -> None:
         """Clear accumulated state.
@@ -378,10 +387,17 @@ class OrderFlowAggregator:
             exchange: Exchange to clear when ``symbol`` is given. Defaults to
                 the empty exchange for compatibility with direct callers.
         """
-        if symbol is None:
-            self._state.clear()
-        else:
-            self._state.pop(_instrument_identity(symbol, exchange), None)
+        with self._lock:
+            if symbol is None:
+                self._state.clear()
+                self._last_tick.clear()
+                self._last_side.clear()
+                return
+
+            identity = _instrument_identity(symbol, exchange)
+            self._state.pop(identity, None)
+            self._last_tick.pop(identity, None)
+            self._last_side.pop(identity, None)
 
     # ------------------------------------------------------------------
     # Static / class-level analytics
