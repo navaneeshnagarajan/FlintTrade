@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
+import { resolveOrderFlowExchange } from "../orderFlowExchange";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -412,9 +413,52 @@ function drawFootprint(
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-function FootprintWidget(_props: IDockviewPanelProps) {
-  const [symbol, setSymbol] = useState("NIFTY");
+interface FootprintPanelParams {
+  symbol?: string;
+  exchange?: string;
+}
+
+interface FootprintInstrument {
+  symbol: string;
+  explicitExchange?: string;
+}
+
+function FootprintWidget(props: IDockviewPanelProps) {
+  const panelParams = props.params as FootprintPanelParams | undefined;
+  const panelSymbol = panelParams?.symbol;
+  const panelExchange = panelParams?.exchange;
+  const [instrument, setInstrument] = useState<FootprintInstrument>(() => ({
+    symbol: panelSymbol ?? "NIFTY",
+    explicitExchange: panelExchange,
+  }));
   const [intervalLabel, setIntervalLabel] = useState("5m");
+
+  useEffect(() => {
+    setInstrument((current) => {
+      const nextSymbol = panelSymbol ?? "NIFTY";
+      if (
+        current.symbol === nextSymbol
+        && current.explicitExchange === panelExchange
+      ) {
+        return current;
+      }
+      return { symbol: nextSymbol, explicitExchange: panelExchange };
+    });
+  }, [panelExchange, panelSymbol]);
+
+  const { symbol, explicitExchange } = instrument;
+  const exchange = useMemo(
+    () => resolveOrderFlowExchange(symbol, explicitExchange),
+    [explicitExchange, symbol],
+  );
+
+  const handleSymbolChange = useCallback((nextSymbol: string) => {
+    setInstrument((current) => (
+      current.symbol === nextSymbol
+        ? current
+        : { symbol: nextSymbol, explicitExchange: undefined }
+    ));
+  }, []);
 
   const intervalMinutes = useMemo(
     () => INTERVALS.find((iv) => iv.label === intervalLabel)?.minutes ?? 5,
@@ -423,7 +467,7 @@ function FootprintWidget(_props: IDockviewPanelProps) {
 
   const { data, isLoading, isError, error } = useOrderFlow(
     symbol,
-    "NFO",
+    exchange,
     intervalMinutes * 60,
     20,
   );
@@ -519,7 +563,7 @@ function FootprintWidget(_props: IDockviewPanelProps) {
 
         {/* Symbol */}
         <span className="sr-only" id="fp-symbol-label">Symbol</span>
-        <Select value={symbol} onValueChange={setSymbol}>
+        <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
             className="h-6 w-28 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="fp-symbol-label"

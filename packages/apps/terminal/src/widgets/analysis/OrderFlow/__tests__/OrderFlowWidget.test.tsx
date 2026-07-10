@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -32,13 +32,29 @@ vi.mock("@/hooks/useOrderFlow", () => ({
 
 // Mock shadcn/ui components to avoid Radix rendering issues in JSDOM
 vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
-    <div data-value={value}>{children}</div>
+  Select: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children: React.ReactNode;
+    value: string;
+    onValueChange: (value: string) => void;
+  }) => (
+    <select
+      aria-label="Symbol"
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+    >
+      {children}
+    </select>
   ),
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
-  SelectValue: () => <span>NIFTY</span>,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
+    <option value={value}>{children}</option>
+  ),
+  SelectTrigger: () => null,
+  SelectValue: () => null,
 }));
 
 vi.mock("@/components/ui/badge", () => ({
@@ -91,6 +107,40 @@ describe("OrderFlowWidget", () => {
   it("renders without crashing", () => {
     const { container } = render(<OrderFlowWidget {...defaultProps} />);
     expect(container.firstChild).toBeInTheDocument();
+  });
+
+  it("requests the default NIFTY capture exchange", () => {
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(mockUseOrderFlow).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", 300, 20);
+  });
+
+  it("syncs Dockview symbol and exchange parameter changes", () => {
+    const initialProps = makeDockviewPanelProps({
+      params: { symbol: "NIFTY", exchange: "NSE_INDEX" },
+    });
+    const updatedProps = makeDockviewPanelProps({
+      params: { symbol: "RELIANCE", exchange: "BSE" },
+    });
+    const { rerender } = render(<OrderFlowWidget {...initialProps} />);
+
+    mockUseOrderFlow.mockClear();
+    rerender(<OrderFlowWidget {...updatedProps} />);
+
+    expect(mockUseOrderFlow).not.toHaveBeenCalledWith("NIFTY", "BSE", 300, 20);
+    expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "BSE", 300, 20);
+  });
+
+  it("clears an explicit NSE index exchange when the user changes symbol", () => {
+    const props = makeDockviewPanelProps({
+      params: { symbol: "NIFTY", exchange: "NSE_INDEX" },
+    });
+    render(<OrderFlowWidget {...props} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Symbol" }), {
+      target: { value: "RELIANCE" },
+    });
+
+    expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
   });
 
   it("shows interval buttons (1m, 3m, 5m)", () => {

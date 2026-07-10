@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
+import { resolveOrderFlowExchange } from "../orderFlowExchange";
 // useOrderFlow hits GET /ft-api/api/v1/data/orderflow and includes is_live flag.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -454,24 +455,65 @@ function drawFootprintHeatmap(
 
 type ViewMode = "footprint" | "heatmap";
 
+interface OrderFlowPanelParams {
+  symbol?: string;
+  exchange?: string;
+}
+
+interface OrderFlowInstrument {
+  symbol: string;
+  explicitExchange?: string;
+}
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-function OrderFlowWidget(_props: IDockviewPanelProps) {
-  const [symbol, setSymbol] = useState("NIFTY");
+function OrderFlowWidget(props: IDockviewPanelProps) {
+  const panelParams = props.params as OrderFlowPanelParams | undefined;
+  const panelSymbol = panelParams?.symbol;
+  const panelExchange = panelParams?.exchange;
+  const [instrument, setInstrument] = useState<OrderFlowInstrument>(() => ({
+    symbol: panelSymbol ?? "NIFTY",
+    explicitExchange: panelExchange,
+  }));
   const [intervalLabel, setIntervalLabel] = useState("5m");
   const [viewMode, setViewMode] = useState<ViewMode>("footprint");
+
+  useEffect(() => {
+    setInstrument((current) => {
+      const nextSymbol = panelSymbol ?? "NIFTY";
+      if (
+        current.symbol === nextSymbol
+        && current.explicitExchange === panelExchange
+      ) {
+        return current;
+      }
+      return { symbol: nextSymbol, explicitExchange: panelExchange };
+    });
+  }, [panelExchange, panelSymbol]);
+
+  const { symbol, explicitExchange } = instrument;
+  const exchange = useMemo(
+    () => resolveOrderFlowExchange(symbol, explicitExchange),
+    [explicitExchange, symbol],
+  );
+
+  const handleSymbolChange = useCallback((nextSymbol: string) => {
+    setInstrument((current) => (
+      current.symbol === nextSymbol
+        ? current
+        : { symbol: nextSymbol, explicitExchange: undefined }
+    ));
+  }, []);
 
   const intervalMinutes = useMemo(
     () => INTERVALS.find((i) => i.label === intervalLabel)?.minutes ?? 5,
     [intervalLabel],
   );
 
-  // Fetch footprint data from backend.
-  // Exchange is NFO (where NIFTY/BANKNIFTY futures/options live).
   // Bins = 20 matches the backend's default bucket count.
   const { data, isLoading, isError, error } = useOrderFlow(
     symbol,
-    "NFO",
+    exchange,
     intervalMinutes * 60,
     20,
   );
@@ -562,7 +604,7 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
         <span className="sr-only" id="of-symbol-label">
           Symbol
         </span>
-        <Select value={symbol} onValueChange={setSymbol}>
+        <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
             className="h-6 w-28 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="of-symbol-label"

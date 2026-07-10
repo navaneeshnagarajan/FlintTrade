@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -28,19 +28,33 @@ vi.mock("@/hooks/useOrderFlow", () => ({
 }));
 
 vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Select: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children: React.ReactNode;
+    value: string;
+    onValueChange: (value: string) => void;
+  }) => (
+    <select
+      aria-label="Symbol"
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SelectItem: ({
     children,
     value,
   }: {
     children: React.ReactNode;
     value: string;
-  }) => <div data-value={value}>{children}</div>,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => (
-    <button>{children}</button>
-  ),
-  SelectValue: () => <span>NIFTY</span>,
+  }) => <option value={value}>{children}</option>,
+  SelectTrigger: () => null,
+  SelectValue: () => null,
 }));
 
 vi.mock("@/components/ui/badge", () => ({
@@ -194,11 +208,38 @@ describe("FootprintWidget", () => {
     expect(canvas.tagName).toBe("CANVAS");
   });
 
-  it("calls useOrderFlow with NFO exchange", () => {
+  it("requests the default NIFTY capture exchange", () => {
     render(<FootprintWidget {...defaultProps} />);
-    const [sym, exchange] = mockUseOrderFlow.mock.calls[0] as [string, string];
-    expect(sym).toBe("NIFTY");
-    expect(exchange).toBe("NFO");
+    expect(mockUseOrderFlow).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", 300, 20);
+  });
+
+  it("syncs Dockview symbol and exchange parameter changes", () => {
+    const initialProps = makeDockviewPanelProps({
+      params: { symbol: "NIFTY", exchange: "NFO" },
+    });
+    const updatedProps = makeDockviewPanelProps({
+      params: { symbol: "RELIANCE", exchange: "NSE" },
+    });
+    const { rerender } = render(<FootprintWidget {...initialProps} />);
+
+    mockUseOrderFlow.mockClear();
+    rerender(<FootprintWidget {...updatedProps} />);
+
+    expect(mockUseOrderFlow).not.toHaveBeenCalledWith("NIFTY", "NSE", 300, 20);
+    expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
+  });
+
+  it("clears an explicit NFO exchange when the user changes symbol", () => {
+    const props = makeDockviewPanelProps({
+      params: { symbol: "NIFTY", exchange: "NFO" },
+    });
+    render(<FootprintWidget {...props} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Symbol" }), {
+      target: { value: "RELIANCE" },
+    });
+
+    expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
   });
 
   it("shows bucket count in legend when data is present", () => {
