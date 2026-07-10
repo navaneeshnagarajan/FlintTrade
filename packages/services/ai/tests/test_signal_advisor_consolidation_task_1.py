@@ -199,3 +199,35 @@ def test_pipeline_uses_ema_fallback_when_verified_payload_is_corrupt(tmp_path: P
 
     assert not pipeline._generator.is_trained
     assert results["NSE_INDEX:NIFTY"]["method"] == "ema_crossover_fallback"
+
+
+def test_signed_legacy_model_migrates_with_sidecar_and_loads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Workspace migration preserves verification for a signed legacy model."""
+    import flinttrade_ai.pipeline as pipeline_mod
+    from flinttrade_ai.pipeline import SignalPipeline
+    from flinttrade_ai.signals import SignalGenerator
+
+    legacy_home = tmp_path / "legacy-home" / ".flinttrade"
+    legacy_model = legacy_home / "models" / "signal_model.joblib"
+    workspace = tmp_path / "workspace"
+    generator = SignalGenerator()
+    generator._model = RecordingModel()
+    generator._feature_names = ["return_1"]
+    generator.save(str(legacy_model))
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+    monkeypatch.delenv("FLINTTRADE_SIGNAL_MODEL_TRUST_UNVERIFIED", raising=False)
+    monkeypatch.setattr(pipeline_mod, "_legacy_state_dir", lambda: legacy_home)
+
+    pipeline = SignalPipeline()
+    pipeline._ensure_generator()
+
+    migrated_model = workspace / "models" / "signal_model.joblib"
+    migrated_sidecar = Path(f"{migrated_model}.sha256")
+    assert migrated_model.exists()
+    assert migrated_sidecar.read_text(encoding="ascii") == Path(f"{legacy_model}.sha256").read_text(encoding="ascii")
+    assert pipeline._generator.is_trained
+    assert pipeline._generator._feature_names == ["return_1"]

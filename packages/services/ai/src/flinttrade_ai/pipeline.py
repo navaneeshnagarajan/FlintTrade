@@ -28,10 +28,12 @@ def _migrate_legacy_model_file(legacy: Path, new: Path) -> None:
     ``%APPDATA%/flinttrade``) without a migration, silently orphaning an
     already-trained model on those platforms. Copy — never move; the legacy
     file stays behind as a backup — when the new path is absent and the legacy
-    one exists. No-op on Linux where the two paths coincide. Best-effort: a
-    failed copy degrades to the pre-existing "untrained model" fallback, never
-    an exception. (Sibling migration: ``flinttrade_historical.watchlist_routes``
-    does the same for ``watchlist.db``.)
+    one exists. Its SHA-256 sidecar is copied only when present; unsigned legacy
+    models remain unsigned. No-op on Linux where the two paths coincide.
+    Best-effort: a failed copy degrades to the pre-existing "untrained model"
+    fallback, never an exception. (Sibling migration:
+    ``flinttrade_historical.watchlist_routes`` does the same for
+    ``watchlist.db``.)
     """
     try:
         if new.exists() or not legacy.exists():
@@ -40,6 +42,9 @@ def _migrate_legacy_model_file(legacy: Path, new: Path) -> None:
             return
         new.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(legacy, new)
+        legacy_sidecar = legacy.with_suffix(legacy.suffix + ".sha256")
+        if legacy_sidecar.exists():
+            shutil.copy2(legacy_sidecar, new.with_suffix(new.suffix + ".sha256"))
         logger.info("Migrated legacy signal model from %s to %s", legacy, new)
     except OSError as exc:
         logger.warning("Could not migrate legacy signal model %s -> %s: %s", legacy, new, exc)
