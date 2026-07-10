@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_path):
@@ -123,6 +128,7 @@ def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
     from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
 
     app = create_flask_app()
     app.config["TESTING"] = True
@@ -130,9 +136,276 @@ def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):
     response = app.test_client().post(
         "/v1/config/openalgo",
         headers={"X-API-Key": "unit-backend-key"},
-        json={"port": "70000"},
+        json={"api_key": "must-not-persist", "host": "https://invalid.local", "port": "70000"},
         environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
     )
 
     assert response.status_code == 400
     assert "between 1 and 65535" in response.get_json()["message"]
+    assert Workspace().get("openalgo.api_key", "") != "must-not-persist"
+    assert Workspace().get("openalgo.host", "") != "https://invalid.local"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"host": "not-a-url"},
+        {"host": "http://"},
+        {"api_key": "your_openalgo_api_key_here"},
+    ],
+)
+def test_openalgo_config_endpoint_validates_candidate_before_persisting(monkeypatch, tmp_path, payload):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    before = Workspace().as_dict()
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json=payload,
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["message"] == "OpenAlgo settings are invalid"
+    assert Workspace().as_dict() == before
+
+
+def test_openalgo_config_endpoint_reconfigures_active_capture_and_desktop_redaction_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    recorder = MagicMock()
+    runtime = MagicMock()
+    app.config["TICK_RECORDER"] = recorder
+    app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={
+            "api_key": "rotated-openalgo-key",
+            "host": "https://openalgo.local",
+            "port": 5001,
+            "ws_port": 9876,
+        },
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+    recorder.reconfigure_connection.assert_called_once_with(
+        ws_url="wss://openalgo.local:9876",
+        api_key="rotated-openalgo-key",
+    )
+    runtime.update_api_key.assert_called_once_with("rotated-openalgo-key")
+    assert app.config["TICK_CAPTURE_ERROR"] == ""
+
+
+def test_openalgo_config_endpoint_reports_redacted_partial_capture_reconfiguration(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    old_api_key = "previous-openalgo-key"
+    api_key = "rotated-openalgo-key"
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    old_client = MagicMock()
+    old_client.settings.openalgo_api_key = old_api_key
+    old_client.close = AsyncMock()
+    app.config["CLIENT"] = old_client
+    recorder = MagicMock()
+    recorder.reconfigure_connection.side_effect = RuntimeError(
+        f"capture rejected old={old_api_key} new={api_key}"
+    )
+    runtime = MagicMock()
+    app.config["TICK_RECORDER"] = recorder
+    app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
+    caplog.set_level(logging.WARNING, logger="flinttrade")
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": api_key, "host": "http://127.0.0.1", "ws_port": 9876},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["status"] == "partial"
+    assert body["data"]["client_reloaded"] is True
+    assert body["data"]["tick_capture_reconfigured"] is False
+    assert "tick_capture_diagnostic" not in body["data"]
+    assert app.config["CLIENT"].settings.openalgo_api_key == api_key
+    assert app.config["TICK_CAPTURE_ERROR"] == "capture rejected old=[redacted] new=[redacted]"
+    runtime.update_api_key.assert_called_once_with(api_key)
+    assert api_key not in response.get_data(as_text=True)
+    assert old_api_key not in response.get_data(as_text=True)
+    assert api_key not in caplog.text
+    assert old_api_key not in caplog.text
+
+
+def test_openalgo_config_endpoint_leaves_disabled_capture_alone(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    runtime = MagicMock()
+    app.config["TICK_CAPTURE_ENABLED"] = False
+    app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": "new-key", "ws_port": 9876},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+    runtime.update_api_key.assert_not_called()
+
+
+def test_openalgo_config_endpoint_preserves_unexpected_capture_death(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    old_api_key = "old-capture-key"
+    new_api_key = "new-capture-key"
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    old_client = MagicMock()
+    old_client.settings.openalgo_api_key = old_api_key
+    old_client.close = AsyncMock()
+    app.config["CLIENT"] = old_client
+    recorder = MagicMock()
+    runtime = MagicMock()
+    app.config["TICK_RECORDER"] = recorder
+    app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
+
+    def die_during_reload(**_kwargs) -> None:
+        app.config.pop("TICK_RECORDER", None)
+        app.config["TICK_CAPTURE_ERROR"] = f"recorder died using {old_api_key} and {new_api_key}"
+
+    recorder.reconfigure_connection.side_effect = die_during_reload
+    caplog.set_level(logging.WARNING, logger="flinttrade")
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": new_api_key, "ws_port": 9876},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "partial"
+    assert response.get_json()["data"]["tick_capture_reconfigured"] is False
+    assert app.config["TICK_CAPTURE_ERROR"] == "recorder died using [redacted] and [redacted]"
+    runtime.update_api_key.assert_called_once_with(new_api_key)
+    assert old_api_key not in caplog.text
+    assert new_api_key not in caplog.text
+    assert new_api_key not in response.get_data(as_text=True)
+
+
+def test_openalgo_config_endpoint_reports_enabled_failed_capture_requires_restart(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config.update(TESTING=True, TICK_CAPTURE_ENABLED=True, TICK_CAPTURE_ERROR="recorder stopped")
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": "new-key", "ws_port": 9876},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "partial"
+    assert response.get_json()["data"]["tick_capture_reconfigured"] is False
+    assert app.config["TICK_CAPTURE_ERROR"] == "recorder stopped"
+
+
+def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    recorder = MagicMock()
+    app.config["TICK_RECORDER"] = recorder
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+    original_save = Workspace.save
+
+    def controlled_save(self, config=None):
+        effective_config = self.as_dict() if config is None else config
+        openalgo = effective_config.get("openalgo", {})
+        api_key = openalgo.get("api_key") if isinstance(openalgo, dict) else None
+        if api_key == "first-key":
+            first_entered.set()
+            assert release_first.wait(2)
+        elif api_key == "second-key":
+            second_entered.set()
+        return original_save(self, config)
+
+    monkeypatch.setattr(Workspace, "save", controlled_save)
+    responses: dict[str, object] = {}
+
+    def post(name: str) -> None:
+        responses[name] = app.test_client().post(
+            "/v1/config/openalgo",
+            headers={"X-API-Key": "unit-backend-key"},
+            json={"api_key": f"{name}-key"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+    first = threading.Thread(target=post, args=("first",))
+    second = threading.Thread(target=post, args=("second",))
+    first.start()
+    assert first_entered.wait(1)
+    second.start()
+    assert not second_entered.wait(0.1)
+    release_first.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert second_entered.is_set()
+    assert responses["first"].status_code == 200
+    assert responses["second"].status_code == 200
+    assert Workspace().get("openalgo.api_key") == "second-key"
+    assert app.config["CLIENT"].settings.openalgo_api_key == "second-key"
+    assert recorder.reconfigure_connection.call_args_list[-1].kwargs["api_key"] == "second-key"

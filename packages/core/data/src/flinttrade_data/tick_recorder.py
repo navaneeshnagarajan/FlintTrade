@@ -15,6 +15,8 @@ import json
 import logging
 import math
 import os
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -40,6 +42,80 @@ _MODE_LABELS = {
 _NUMERIC_MODES = {1: MODE_LTP, 2: MODE_QUOTE, 3: MODE_DEPTH}
 
 LtpSink = Callable[[str, str, float, int], None]
+
+_RETRYABLE_HANDSHAKE_STATUSES = frozenset({500, 502, 503, 504})
+_BIGINT_MIN = -(2**63)
+_BIGINT_MAX = 2**63 - 1
+
+
+def _optional_websocket_exception(name: str) -> type[BaseException] | None:
+    """Resolve an exception class without requiring it in every supported release."""
+    candidate = vars(websockets.exceptions).get(name)
+    return candidate if isinstance(candidate, type) and issubclass(candidate, BaseException) else None
+
+
+def _is_websocket_exception(error: BaseException, name: str) -> bool:
+    exception_type = _optional_websocket_exception(name)
+    return exception_type is not None and isinstance(error, exception_type)
+
+
+def _handshake_status_code(error: BaseException) -> int | None:
+    """Read new and legacy websockets handshake status shapes."""
+    if _is_websocket_exception(error, "InvalidStatus"):
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    elif _is_websocket_exception(error, "InvalidStatusCode") or type(error).__name__ == "InvalidStatusCode":
+        status = getattr(error, "status_code", None)
+    else:
+        return None
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_transient_connection_error(error: BaseException) -> bool:
+    """Match only failures for which reconnecting with the same config can work."""
+    if isinstance(error, (EOFError, OSError, TimeoutError)):
+        return True
+    if _is_websocket_exception(error, "ConnectionClosed"):
+        return True
+    if _is_websocket_exception(error, "InvalidMessage") and isinstance(
+        error.__cause__ or error.__context__, EOFError
+    ):
+        return True
+    return _handshake_status_code(error) in _RETRYABLE_HANDSHAKE_STATUSES
+
+
+def _finite_float_or_none(value: Any) -> float | None:
+    """Normalise one storage-bound floating value without poisoning its batch."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _bigint_or_none(value: Any) -> int | None:
+    """Normalise one storage-bound integer to DuckDB's signed BIGINT range."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if _BIGINT_MIN <= number <= _BIGINT_MAX else None
+
+
+class _ReconnectRequired(RuntimeError):
+    """Internal marker for a recoverable recorder connection failure."""
+
+
+class _ConnectionReconfigured(RuntimeError):
+    """Internal marker for an obsolete connection attempt."""
 
 
 class TickRecorder:
@@ -70,6 +146,9 @@ class TickRecorder:
         auth_response_timeout: float = 10.0,
     ) -> None:
         self._storage = storage
+        self._state_lock = threading.RLock()
+        self._subscription_lock = threading.RLock()
+        self._flush_lock = threading.Lock()
         # Optional live order-flow aggregator fed from each tick (None = off).
         self._orderflow = orderflow_aggregator
         self._ws_url = ws_url or _DEFAULT_WS_URL
@@ -82,6 +161,8 @@ class TickRecorder:
         # DuckDB connections are not safe for concurrent use. None = no sharing.
         self._storage_lock = storage_lock
         self._api_key = api_key
+        self._redaction_keys = {api_key} if api_key else set()
+        self._connection_revision = 0
         self._ltp_sink = ltp_sink
         self._auth_response_timeout = auth_response_timeout
         # On a persistent write failure the buffer is RETAINED for retry (a
@@ -99,28 +180,80 @@ class TickRecorder:
         self._buffer: list[tuple] = []
         self._running = False
         self._stop_event: asyncio.Event | None = None
+        self._reconfigure_event: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._active_ws: Any | None = None
         self._connected = False
-        self._last_error = ""
+        self._transport_error = ""
+        self._persistence_error = ""
+        self._persistence_error_cause = ""
         self._tick_count = 0
+        self._persisted_tick_count = 0
+        self._dropped_tick_count = 0
+        self._persistence_clock: Callable[[], float] = time.monotonic
+        self._persistence_retry_delay = 1.0
+        self._max_persistence_retry_delay = 30.0
+        self._persistence_backoff = self._persistence_retry_delay
+        self._next_persistence_retry_at = 0.0
 
     @property
     def tick_count(self) -> int:
-        return self._tick_count
+        return int(self.status_snapshot()["tick_count"])
+
+    @property
+    def persisted_tick_count(self) -> int:
+        """Number of received ticks successfully written to storage."""
+        return int(self.status_snapshot()["persisted_tick_count"])
+
+    @property
+    def pending_tick_count(self) -> int:
+        """Number of received ticks currently retained for persistence."""
+        return int(self.status_snapshot()["pending_tick_count"])
+
+    @property
+    def dropped_tick_count(self) -> int:
+        """Number of oldest buffered ticks dropped in this recorder session."""
+        return int(self.status_snapshot()["dropped_tick_count"])
 
     @property
     def is_running(self) -> bool:
         """Whether the run() loop is active (set on start, cleared by stop())."""
-        return self._running
+        return bool(self.status_snapshot()["running"])
 
     @property
     def is_connected(self) -> bool:
         """Whether the recorder has an authenticated WebSocket connection."""
-        return self._connected
+        return bool(self.status_snapshot()["connected"])
 
     @property
     def last_error(self) -> str:
-        """Most recent sanitised OpenAlgo connection or control error."""
-        return self._last_error
+        """Most recent sanitised persistence, connection, or control error."""
+        return str(self.status_snapshot()["last_error"])
+
+    def sanitise_error(self, value: Any) -> str:
+        """Sanitise a diagnostic with every API key seen by this recorder."""
+        return self._sanitise(value)
+
+    @property
+    def subscription_lock(self) -> Any:
+        """Shared re-entrant lock for cross-component watchlist transactions."""
+        return self._subscription_lock
+
+    def status_snapshot(self) -> dict[str, Any]:
+        """Return one atomic snapshot of recorder lifecycle and persistence state."""
+        with self._state_lock:
+            last_error = self._persistence_error or self._transport_error
+            return {
+                "running": self._running,
+                "connected": self._connected,
+                "tick_count": self._tick_count,
+                "persisted_tick_count": self._persisted_tick_count,
+                "pending_tick_count": len(self._buffer),
+                "dropped_tick_count": self._dropped_tick_count,
+                "last_error": last_error,
+                "transport_error": self._transport_error,
+                "persistence_error": self._persistence_error,
+            }
 
     # ------------------------------------------------------------------
     # Watchlist management
@@ -135,11 +268,12 @@ class TickRecorder:
 
         Each instrument: {"exchange": "NSE", "symbol": "RELIANCE"}
         """
-        if mode not in self._subscriptions:
-            raise ValueError(f"Invalid mode: {mode}. Use {list(_MODE_LABELS)}")
-        for inst in instruments:
-            if inst not in self._subscriptions[mode]:
-                self._subscriptions[mode].append(inst)
+        with self._subscription_lock:
+            if mode not in self._subscriptions:
+                raise ValueError(f"Invalid mode: {mode}. Use {list(_MODE_LABELS)}")
+            for inst in instruments:
+                if inst not in self._subscriptions[mode]:
+                    self._subscriptions[mode].append(dict(inst))
 
     def remove_symbols(
         self,
@@ -147,15 +281,30 @@ class TickRecorder:
         mode: str = MODE_QUOTE,
     ) -> None:
         """Remove instruments from the watchlist."""
-        for inst in instruments:
-            try:
-                self._subscriptions[mode].remove(inst)
-            except ValueError:
-                pass
+        with self._subscription_lock:
+            if mode not in self._subscriptions:
+                raise ValueError(f"Invalid mode: {mode}. Use {list(_MODE_LABELS)}")
+            for inst in instruments:
+                try:
+                    self._subscriptions[mode].remove(inst)
+                except ValueError:
+                    pass
 
     def get_watchlist(self) -> dict[str, list[dict[str, str]]]:
         """Return current subscription watchlist by mode."""
-        return {m: list(insts) for m, insts in self._subscriptions.items()}
+        with self._subscription_lock:
+            return {
+                mode: [dict(instrument) for instrument in instruments]
+                for mode, instruments in self._subscriptions.items()
+            }
+
+    def replace_watchlist(self, watchlist: dict[str, list[dict[str, str]]]) -> None:
+        """Replace all subscriptions exactly, for transactional rollback."""
+        with self._subscription_lock:
+            if set(watchlist) != set(self._subscriptions):
+                raise ValueError("Watchlist must contain ltp, quote and depth modes")
+            for mode in self._subscriptions:
+                self._subscriptions[mode] = [dict(instrument) for instrument in watchlist[mode]]
 
     # ------------------------------------------------------------------
     # WebSocket loop with auto-reconnect
@@ -163,92 +312,235 @@ class TickRecorder:
 
     async def run(self) -> None:
         """Main loop — connect, subscribe, consume ticks. Auto-reconnects."""
-        self._running = True
-        self._stop_event = asyncio.Event()
+        with self._state_lock:
+            self._running = True
+            self._stop_event = asyncio.Event()
+            self._reconfigure_event = asyncio.Event()
+            self._loop = asyncio.get_running_loop()
         delay = self._reconnect_delay
 
         try:
             while self._running:
+                ws_url, api_key, revision = self._connection_snapshot()
+                attempt_ws: Any | None = None
                 try:
                     try:
-                        async with websockets.connect(self._ws_url) as ws:
-                            logger.info("WebSocket connected: %s", self._sanitise(self._ws_url))
-                            await self._authenticate(ws)
-                            self._connected = True
-                            self._last_error = ""
+                        async with websockets.connect(ws_url) as ws:
+                            attempt_ws = ws
+                            self._activate_socket(ws, revision)
+                            logger.info("WebSocket connected: %s", self._sanitise(ws_url))
+                            await self._authenticate(ws, api_key=api_key, revision=revision)
+                            self._mark_connected(revision)
                             delay = self._reconnect_delay  # reset on successful authentication
 
                             await self._subscribe_all(ws)
                             await self._consume(ws)
                     finally:
-                        self._connected = False
+                        with self._state_lock:
+                            self._connected = False
+                            if self._active_ws is attempt_ws:
+                                self._active_ws = None
 
-                except (
-                    websockets.exceptions.ConnectionClosed,
-                    websockets.exceptions.InvalidURI,
-                    OSError,
-                    RuntimeError,
-                ) as exc:
-                    self._set_last_error(exc)
+                except _ConnectionReconfigured:
+                    delay = self._reconnect_delay
+                    continue
+                except _ReconnectRequired:
+                    if not self._is_current_revision(revision):
+                        delay = self._reconnect_delay
+                        continue
+                except Exception as exc:
+                    if not self._is_current_revision(revision):
+                        delay = self._reconnect_delay
+                        continue
+                    self._set_transport_error(exc)
+                    if not _is_transient_connection_error(exc):
+                        raise
                 else:
                     if not self._running:
                         break
-                    self._set_last_error("WebSocket stream ended")
+                    if not self._is_current_revision(revision):
+                        delay = self._reconnect_delay
+                        continue
+                    self._set_transport_error("WebSocket stream ended")
 
                 if not self._running:
                     break
                 logger.warning(
                     "WebSocket disconnected: %s; reconnecting in %.0fs",
-                    self._sanitise(self._last_error),
+                    self.last_error,
                     delay,
                 )
-                await self._wait_for_reconnect_delay(delay)
+                await self._wait_for_reconnect_delay(delay, revision=revision)
+                if not self._is_current_revision(revision):
+                    delay = self._reconnect_delay
+                    continue
                 delay = min(delay * 2, self._max_reconnect_delay)
         finally:
-            self._connected = False
-            self._running = False
-            self._stop_event = None
-            self._flush()
+            with self._state_lock:
+                self._connected = False
+                self._running = False
+                self._stop_event = None
+                self._reconfigure_event = None
+                self._active_ws = None
+                self._loop = None
+            self._flush(force=True)
             logger.info("TickRecorder stopped. Total ticks recorded: %d", self._tick_count)
 
     def stop(self) -> None:
         """Signal the recorder to stop after the current iteration."""
-        self._running = False
-        if self._stop_event is not None:
-            self._stop_event.set()
+        with self._state_lock:
+            self._running = False
+            stop_event = self._stop_event
+        if stop_event is not None:
+            stop_event.set()
+
+    def reconfigure_connection(self, *, ws_url: str, api_key: str) -> bool:
+        """Atomically replace connection credentials and retire any stale attempt."""
+        if not isinstance(ws_url, str) or not ws_url.strip():
+            raise ValueError("WebSocket URL must be a non-empty string")
+        if not isinstance(api_key, str):
+            raise TypeError("API key must be a string")
+
+        new_ws_url = ws_url.strip()
+        with self._state_lock:
+            if self._ws_url == new_ws_url and self._api_key == api_key:
+                return False
+            if self._api_key:
+                self._redaction_keys.add(self._api_key)
+            if api_key:
+                self._redaction_keys.add(api_key)
+            self._ws_url = new_ws_url
+            self._api_key = api_key
+            self._connection_revision += 1
+            self._transport_error = ""
+            loop = self._loop
+            ws = self._active_ws
+            reconfigure_event = self._reconfigure_event
+
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._notify_reconfiguration, ws, reconfigure_event)
+            except RuntimeError:
+                pass
+        return True
+
+    def _connection_snapshot(self) -> tuple[str, str, int]:
+        with self._state_lock:
+            return self._ws_url, self._api_key, self._connection_revision
+
+    def _is_current_revision(self, revision: int) -> bool:
+        with self._state_lock:
+            return revision == self._connection_revision
+
+    def _assert_current_revision(self, revision: int) -> None:
+        if not self._is_current_revision(revision):
+            raise _ConnectionReconfigured()
+
+    def _activate_socket(self, ws: Any, revision: int) -> None:
+        with self._state_lock:
+            if revision != self._connection_revision:
+                raise _ConnectionReconfigured()
+            self._active_ws = ws
+
+    def _mark_connected(self, revision: int) -> None:
+        with self._state_lock:
+            if revision != self._connection_revision:
+                raise _ConnectionReconfigured()
+            self._connected = True
+            self._transport_error = ""
+
+    def _notify_reconfiguration(self, ws: Any | None, reconfigure_event: asyncio.Event | None) -> None:
+        if reconfigure_event is not None:
+            reconfigure_event.set()
+        if ws is not None:
+            self._schedule_socket_close(ws)
+
+    def request_reconnect(self) -> bool:
+        """Schedule closure of the active socket from a non-recorder thread.
+
+        Returns ``True`` only when a close callback was queued on the recorder
+        event loop. The callback rechecks that the socket is still active before
+        closing it, so callers can safely invoke this before or after ``run()``.
+        """
+        with self._state_lock:
+            loop = self._loop
+            ws = self._active_ws
+        if loop is None or ws is None or not loop.is_running():
+            return False
+        try:
+            loop.call_soon_threadsafe(self._schedule_socket_close, ws)
+        except RuntimeError:
+            return False
+        return True
+
+    def _schedule_socket_close(self, ws: Any) -> None:
+        """Create the socket-close task on the recorder event loop."""
+        with self._state_lock:
+            if self._active_ws is not ws:
+                return
+        asyncio.create_task(self._close_socket_for_reconnect(ws))
+
+    async def _close_socket_for_reconnect(self, ws: Any) -> None:
+        """Close a requested socket without exposing recoverable close errors."""
+        try:
+            await ws.close()
+        except Exception as exc:
+            self._set_transport_error(f"WebSocket reconnect close failed: {exc}")
+            if not _is_transient_connection_error(exc):
+                raise
 
     # ------------------------------------------------------------------
     # Internal: subscribe / consume / flush
     # ------------------------------------------------------------------
 
-    async def _authenticate(self, ws: Any) -> None:
+    async def _authenticate(
+        self,
+        ws: Any,
+        *,
+        api_key: str | None = None,
+        revision: int | None = None,
+    ) -> None:
         """Authenticate and wait for the OpenAlgo control response."""
-        await ws.send(json.dumps({"action": "authenticate", "api_key": self._api_key}))
+        if api_key is None or revision is None:
+            _, snapshot_api_key, snapshot_revision = self._connection_snapshot()
+            if api_key is None:
+                api_key = snapshot_api_key
+            if revision is None:
+                revision = snapshot_revision
+
+        self._assert_current_revision(revision)
+        await ws.send(json.dumps({"action": "authenticate", "api_key": api_key}))
+        self._assert_current_revision(revision)
         try:
             raw_response = await asyncio.wait_for(ws.recv(), timeout=self._auth_response_timeout)
+            self._assert_current_revision(revision)
             response = json.loads(raw_response)
         except TimeoutError as exc:
-            self._set_last_error("Authentication response timed out")
-            raise RuntimeError(self._last_error) from exc
+            self._assert_current_revision(revision)
+            self._set_transport_error("Authentication response timed out")
+            raise _ReconnectRequired(self._transport_error) from exc
         except UnicodeDecodeError as exc:
-            self._set_last_error("Invalid authentication response: invalid UTF-8")
-            raise RuntimeError(self._last_error) from exc
+            self._assert_current_revision(revision)
+            self._set_transport_error("Invalid authentication response: invalid UTF-8")
+            raise _ReconnectRequired(self._transport_error) from exc
         except (TypeError, json.JSONDecodeError) as exc:
-            self._set_last_error("Invalid authentication response")
-            raise RuntimeError(self._last_error) from exc
+            self._assert_current_revision(revision)
+            self._set_transport_error("Invalid authentication response")
+            raise _ReconnectRequired(self._transport_error) from exc
 
         if not isinstance(response, dict):
-            self._set_last_error("Invalid authentication response: expected JSON object")
-            raise RuntimeError(self._last_error)
+            self._set_transport_error("Invalid authentication response: expected JSON object")
+            raise _ReconnectRequired(self._transport_error)
 
         status = str(response.get("status", "")).lower()
         if status not in {"authenticated", "success"}:
-            self._set_last_error(response.get("message") or response.get("error") or "Authentication failed")
-            raise RuntimeError(self._last_error)
+            self._set_transport_error(response.get("message") or response.get("error") or "Authentication failed")
+            raise _ReconnectRequired(self._transport_error)
 
     async def _subscribe_all(self, ws: Any) -> None:
         """Send subscription messages for all configured watchlists."""
-        for mode, instruments in self._subscriptions.items():
+        subscriptions = self.get_watchlist()
+        for mode, instruments in subscriptions.items():
             if not instruments:
                 continue
             msg = json.dumps({"action": "subscribe", "symbols": instruments, "mode": _MODE_LABELS[mode]})
@@ -266,7 +558,7 @@ class TickRecorder:
             try:
                 data = json.loads(raw)
             except UnicodeDecodeError:
-                self._set_last_error("Invalid WebSocket message: invalid UTF-8")
+                self._set_transport_error("Invalid WebSocket message: invalid UTF-8")
                 logger.debug("Invalid UTF-8 message: %s", self._sanitise(raw)[:100])
                 continue
             except (TypeError, json.JSONDecodeError):
@@ -274,27 +566,29 @@ class TickRecorder:
                 continue
 
             if not isinstance(data, dict):
-                self._set_last_error("Invalid WebSocket message: expected JSON object")
+                self._set_transport_error("Invalid WebSocket message: expected JSON object")
                 logger.debug("Ignored non-object JSON message: %s", self._sanitise(raw)[:100])
                 continue
 
-            self._process_tick(data)
+            if self._process_tick(data):
+                raise _ReconnectRequired()
 
             # Periodic flush
             now = asyncio.get_event_loop().time()
-            if len(self._buffer) >= self._batch_size or (now - last_flush) >= self._flush_interval:
-                self._flush()
-                last_flush = now
+            if self.pending_tick_count >= self._batch_size or (now - last_flush) >= self._flush_interval:
+                if self._flush():
+                    last_flush = now
 
-    def _process_tick(self, data: dict[str, Any]) -> None:
+    def _process_tick(self, data: dict[str, Any]) -> bool:
         """Parse a WebSocket message into a tick tuple and buffer it."""
-        if self._handle_control_message(data):
-            return
+        handled, reconnect = self._handle_control_message(data)
+        if handled:
+            return reconnect
 
         symbol = data.get("symbol", "")
         exchange = data.get("exchange", "")
         if not symbol or not exchange:
-            return
+            return False
 
         payload = data.get("data") if isinstance(data.get("data"), dict) else data
         ts = datetime.now(timezone.utc)
@@ -311,20 +605,23 @@ class TickRecorder:
             symbol,
             exchange,
             mode,
-            payload.get("ltp"),
-            payload.get("open"),
-            payload.get("high"),
-            payload.get("low"),
-            payload.get("close"),
-            payload.get("volume"),
-            payload.get("bid"),
-            payload.get("ask"),
-            payload.get("oi"),
-            payload.get("prev_close"),
+            _finite_float_or_none(payload.get("ltp")),
+            _finite_float_or_none(payload.get("open")),
+            _finite_float_or_none(payload.get("high")),
+            _finite_float_or_none(payload.get("low")),
+            _finite_float_or_none(payload.get("close")),
+            _bigint_or_none(payload.get("volume")),
+            _finite_float_or_none(payload.get("bid")),
+            _finite_float_or_none(payload.get("ask")),
+            _bigint_or_none(payload.get("oi")),
+            _finite_float_or_none(payload.get("prev_close")),
             depth_json,
         )
-        self._buffer.append(row)
-        self._tick_count += 1
+        with self._state_lock:
+            self._buffer.append(row)
+            self._tick_count += 1
+            if self._persistence_error:
+                self._drop_excess_buffer_locked()
 
         self._dispatch_ltp(exchange, symbol, payload.get("ltp"), payload.get("volume"))
 
@@ -352,6 +649,7 @@ class TickRecorder:
                         self._sanitise(symbol),
                         self._sanitise(exc),
                     )
+        return False
 
     @staticmethod
     def _detect_mode(data: dict[str, Any], reported_mode: Any = None) -> str:
@@ -372,7 +670,7 @@ class TickRecorder:
             return
         try:
             ltp_value = float(ltp)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return
         if not math.isfinite(ltp_value) or ltp_value <= 0:
             return
@@ -390,14 +688,19 @@ class TickRecorder:
                 self._sanitise(exc),
             )
 
-    def _handle_control_message(self, data: dict[str, Any]) -> bool:
+    def _handle_control_message(self, data: dict[str, Any]) -> tuple[bool, bool]:
         """Record OpenAlgo control errors without treating them as market ticks."""
         status = str(data.get("status", "")).lower()
-        if data.get("type") == "subscribe" and status == "partial":
+        if str(data.get("type", "")).lower() == "subscribe" and status == "partial":
             subscriptions = data.get("subscriptions")
             if not isinstance(subscriptions, list):
-                self._set_last_error("Partial subscription failure: invalid subscriptions response")
-                return True
+                self._set_transport_error("Partial subscription failure: invalid subscriptions response")
+                return True, True
+            successes = [
+                entry
+                for entry in subscriptions
+                if isinstance(entry, dict) and str(entry.get("status", "")).lower() in {"ok", "success", "subscribed"}
+            ]
             failures = [
                 entry
                 for entry in subscriptions
@@ -410,38 +713,84 @@ class TickRecorder:
                 )
                 message = failure.get("message") or failure.get("error") or "subscription failed"
                 details.append(f"{identity}: {message}" if identity else str(message))
-            self._set_last_error(
+            self._set_transport_error(
                 "Partial subscription failure: " + "; ".join(details)
                 if details
                 else data.get("message") or "Partial subscription failure"
             )
-            return True
-        if data.get("type") == "error" or status in {"error", "failed", "failure"}:
-            self._set_last_error(data.get("message") or data.get("error") or "OpenAlgo control error")
-            return True
-        return False
+            return True, not successes
+        if str(data.get("type", "")).lower() == "error" or status in {"error", "failed", "failure"}:
+            self._set_transport_error(data.get("message") or data.get("error") or "OpenAlgo control error")
+            return True, True
+        return False, False
 
-    def _set_last_error(self, message: Any) -> None:
-        """Store an observable error while preventing configured credentials leaking."""
-        self._last_error = self._sanitise(message)
+    def _set_transport_error(self, message: Any) -> None:
+        """Store a sanitised WebSocket or control-plane error."""
+        sanitised = self._sanitise(message)
+        with self._state_lock:
+            self._transport_error = sanitised
+
+    def _clear_transport_error(self) -> None:
+        """Clear only the reconnectable transport/control error state."""
+        with self._state_lock:
+            self._transport_error = ""
+
+    def _set_persistence_error(self, message: Any) -> None:
+        """Store a sanitised storage error without discarding transport state."""
+        sanitised = self._sanitise(message)
+        with self._state_lock:
+            self._persistence_error_cause = sanitised
+            self._refresh_persistence_error_locked()
+
+    def _clear_persistence_error(self) -> None:
+        """Clear only the error state resolved by a successful flush."""
+        with self._state_lock:
+            self._persistence_error = ""
+            self._persistence_error_cause = ""
+
+    def _refresh_persistence_error_locked(self) -> None:
+        if not self._persistence_error_cause:
+            self._persistence_error = ""
+            return
+        self._persistence_error = self._persistence_error_cause
+        if self._dropped_tick_count:
+            self._persistence_error += f"; dropped {self._dropped_tick_count} oldest buffered ticks"
+
+    def _drop_excess_buffer_locked(self) -> int:
+        dropped = max(0, len(self._buffer) - self._max_buffer)
+        if not dropped:
+            return 0
+        del self._buffer[:dropped]
+        self._dropped_tick_count += dropped
+        self._refresh_persistence_error_locked()
+        return dropped
 
     def _sanitise(self, value: Any) -> str:
         """Return display-safe text without changing recorder state."""
         text = str(value)
-        if self._api_key:
-            text = text.replace(self._api_key, "[redacted]")
+        with self._state_lock:
+            redaction_keys = tuple(self._redaction_keys)
+        for api_key in redaction_keys:
+            text = text.replace(api_key, "[redacted]")
         return text
 
-    async def _wait_for_reconnect_delay(self, delay: float) -> None:
+    async def _wait_for_reconnect_delay(self, delay: float, *, revision: int | None = None) -> None:
         """Wait for backoff completion or an explicit stop, whichever comes first."""
-        stop_event = self._stop_event
+        with self._state_lock:
+            stop_event = self._stop_event
+            reconfigure_event = self._reconfigure_event
+        if reconfigure_event is not None:
+            reconfigure_event.clear()
+        if revision is not None and not self._is_current_revision(revision):
+            return
         if stop_event is None:
             await asyncio.sleep(delay)
             return
 
         delay_task = asyncio.create_task(asyncio.sleep(delay))
         stop_task = asyncio.create_task(stop_event.wait())
-        tasks = (delay_task, stop_task)
+        reconfigure_task = asyncio.create_task(reconfigure_event.wait()) if reconfigure_event is not None else None
+        tasks = tuple(task for task in (delay_task, stop_task, reconfigure_task) if task is not None)
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
@@ -452,7 +801,7 @@ class TickRecorder:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _flush(self) -> None:
+    def _flush(self, *, force: bool = False) -> bool:
         """Write buffered ticks to DuckDB.
 
         Clears the buffer ONLY after a successful insert. On failure the batch is
@@ -460,33 +809,51 @@ class TickRecorder:
         silently discard captured ticks), bounded by ``_max_buffer`` so a
         persistent failure cannot grow memory without limit.
         """
-        if not self._buffer:
-            return
-        try:
-            if self._storage_lock is not None:
-                # This blocking lock is shared with the nightly maintenance job
-                # (scheduler thread). If that job is mid-CHECKPOINT the event loop
-                # briefly parks here — bounded and acceptable: maintenance runs
-                # off-market (00:30 IST) when tick flow is idle, and the insert is
-                # atomic so a retained batch is safe to retry.
-                with self._storage_lock:
+        with self._flush_lock, self._state_lock:
+            if not self._buffer:
+                return False
+
+            now = self._persistence_clock()
+            if not force and now < self._next_persistence_retry_at:
+                return False
+
+            batch_size = len(self._buffer)
+            try:
+                if self._storage_lock is not None:
+                    # This blocking lock is shared with the nightly maintenance job
+                    # (scheduler thread). If that job is mid-CHECKPOINT the event loop
+                    # briefly parks here — bounded and acceptable: maintenance runs
+                    # off-market (00:30 IST) when tick flow is idle, and the insert is
+                    # atomic so a retained batch is safe to retry.
+                    with self._storage_lock:
+                        self._storage.insert_ticks_batch(self._buffer)
+                else:
                     self._storage.insert_ticks_batch(self._buffer)
-            else:
-                self._storage.insert_ticks_batch(self._buffer)
-        except Exception as exc:
-            logger.error(
-                "Failed to flush %d ticks (retaining for retry): %s",
-                len(self._buffer),
-                self._sanitise(exc),
-            )
-            if len(self._buffer) > self._max_buffer:
-                dropped = len(self._buffer) - self._max_buffer
-                del self._buffer[:dropped]
-                logger.warning(
-                    "Tick buffer exceeded %d; dropped %d oldest ticks",
-                    self._max_buffer,
-                    dropped,
+            except Exception as exc:
+                logger.error(
+                    "Failed to flush %d ticks (retaining for retry): %s",
+                    batch_size,
+                    self._sanitise(exc),
                 )
-            return
-        logger.debug("Flushed %d ticks to DuckDB", len(self._buffer))
-        self._buffer.clear()
+                self._persistence_error_cause = self._sanitise(f"Tick persistence failed: {exc}")
+                dropped = self._drop_excess_buffer_locked()
+                if dropped:
+                    logger.warning(
+                        "Tick buffer exceeded %d; dropped %d oldest ticks",
+                        self._max_buffer,
+                        dropped,
+                    )
+                self._refresh_persistence_error_locked()
+                retry_delay = min(self._persistence_backoff, self._max_persistence_retry_delay)
+                self._next_persistence_retry_at = now + retry_delay
+                self._persistence_backoff = min(retry_delay * 2, self._max_persistence_retry_delay)
+                return True
+
+            logger.debug("Flushed %d ticks to DuckDB", batch_size)
+            self._persisted_tick_count += batch_size
+            self._buffer.clear()
+            self._persistence_error = ""
+            self._persistence_error_cause = ""
+            self._next_persistence_retry_at = 0.0
+            self._persistence_backoff = self._persistence_retry_delay
+            return True

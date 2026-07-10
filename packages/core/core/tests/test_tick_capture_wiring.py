@@ -114,6 +114,13 @@ def test_start_launches_gated_tick_recorder() -> None:
         "start() must launch the recorder via asyncio.create_task so it runs "
         "as a background task on the event loop"
     )
+    source_lines = APP_PY.read_text(encoding="utf-8").splitlines()
+    start_source = "\n".join(source_lines[start.lineno - 1 : start.end_lineno])
+    lifecycle = start_source.index("with _tick_capture_lifecycle_lock(flask_app):")
+    refreshed = start_source.index("capture_settings = Settings.from_env()")
+    built = start_source.index("settings=capture_settings")
+    published = start_source.index('flask_app.config["TICK_RECORDER"] = recorder')
+    assert lifecycle < refreshed < built < published
 
 
 @pytest.mark.unit
@@ -392,6 +399,53 @@ async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) 
     assert len(storage.batches) == 1
     assert len(storage.batches[0]) == 1
     assert storage.batches[0][0][1:3] == ("NIFTY", "NSE_INDEX")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_failed_tick_task_does_not_abort_shutdown_or_leak_api_key(caplog) -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    class FailedTask:
+        def cancel(self) -> None:
+            return None
+
+        def __await__(self):
+            async def wait() -> None:
+                raise RuntimeError("recorder failed with boot-secret and rotated-secret")
+
+            return wait().__await__()
+
+    class Recorder:
+        def stop(self) -> None:
+            return None
+
+        def sanitise_error(self, error: object) -> str:
+            return str(error).replace("boot-secret", "[redacted]").replace("rotated-secret", "[redacted]")
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = None
+    app._tick_recorder = Recorder()
+    app._tick_recorder_task = FailedTask()
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.settings = Settings(openalgo_api_key="boot-secret")
+    app.version = "test"
+    app._stop_event = MagicMock()
+    caplog.set_level(logging.WARNING, logger="flinttrade")
+
+    await app.stop()
+
+    app.client.close.assert_awaited_once_with()
+    app.audit.close.assert_called_once_with()
+    app._stop_event.set.assert_called_once_with()
+    assert "boot-secret" not in caplog.text
+    assert "rotated-secret" not in caplog.text
+    assert "[redacted]" in caplog.text
 
 
 @pytest.mark.unit

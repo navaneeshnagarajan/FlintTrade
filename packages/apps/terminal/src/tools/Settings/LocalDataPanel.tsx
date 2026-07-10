@@ -27,6 +27,9 @@ interface TickStatus {
   running: boolean;
   connected: boolean;
   tick_count: number;
+  persisted_tick_count?: number;
+  pending_tick_count?: number;
+  dropped_tick_count?: number;
   watchlist: Record<string, Array<{ exchange: string; symbol: string }>>;
   hint?: string;
   last_error?: string;
@@ -110,6 +113,9 @@ export function LocalDataPanel() {
 
   const tick = tickQuery.data;
   const quoteWatchlist = tick?.watchlist?.quote ?? [];
+  const persistedTickCount = tick?.persisted_tick_count ?? tick?.tick_count ?? 0;
+  const pendingTickCount = tick?.pending_tick_count ?? Math.max(0, (tick?.tick_count ?? 0) - persistedTickCount);
+  const droppedTickCount = tick?.dropped_tick_count ?? 0;
   const nonEmptyTables = Object.entries(storeQuery.data ?? {}).filter(([, t]) => t.rows > 0);
   const tickState = tickQuery.isPending
     ? { label: "checking", className: "bg-surface-hover text-text-muted" }
@@ -148,7 +154,10 @@ export function LocalDataPanel() {
           <div className="text-xs text-loss">Tick capture status unavailable.</div>
         ) : tick?.enabled ? (
           <div className="text-xs text-text-muted">
-            {tick.tick_count.toLocaleString("en-IN")} ticks this session ·{" "}
+            {persistedTickCount.toLocaleString("en-IN")} persisted ·{" "}
+            {tick.tick_count.toLocaleString("en-IN")} received ·{" "}
+            {pendingTickCount.toLocaleString("en-IN")} pending ·{" "}
+            {droppedTickCount.toLocaleString("en-IN")} dropped ·{" "}
             {quoteWatchlist.map((i) => i.symbol).join(", ") || "no symbols"}
           </div>
         ) : (

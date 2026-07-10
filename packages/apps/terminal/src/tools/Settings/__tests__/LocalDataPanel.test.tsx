@@ -33,6 +33,9 @@ describe("LocalDataPanel", () => {
           running: true,
           connected: true,
           tick_count: 12345,
+          persisted_tick_count: 12300,
+          pending_tick_count: 45,
+          dropped_tick_count: 7,
           watchlist: { quote: [{ exchange: "NSE_INDEX", symbol: "NIFTY" }], ltp: [], depth: [] },
         },
       },
@@ -58,7 +61,10 @@ describe("LocalDataPanel", () => {
     await waitFor(() => {
       expect(screen.getByText("recording")).toBeInTheDocument();
     });
-    expect(screen.getByText(/12,345 ticks this session/)).toBeInTheDocument();
+    expect(screen.getByText(/12,300 persisted/)).toBeInTheDocument();
+    expect(screen.getByText(/12,345 received/)).toBeInTheDocument();
+    expect(screen.getByText(/45 pending/)).toBeInTheDocument();
+    expect(screen.getByText(/7 dropped/)).toBeInTheDocument();
     expect(screen.getByText(/NIFTY/)).toBeInTheDocument();
   });
 

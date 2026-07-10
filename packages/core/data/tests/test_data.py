@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,6 +28,7 @@ class TestStorageManager:
 
     def _make_storage(self):
         from flinttrade_data.storage import StorageManager
+
         # Use in-memory DuckDB for tests
         storage = StorageManager(":memory:")
         storage.initialise()
@@ -54,8 +56,14 @@ class TestStorageManager:
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 0, 0)
         storage.insert_tick(
-            ts=ts, symbol="RELIANCE", exchange="NSE", mode="quote",
-            ltp=2500.0, volume=1000, bid=2499.0, ask=2501.0,
+            ts=ts,
+            symbol="RELIANCE",
+            exchange="NSE",
+            mode="quote",
+            ltp=2500.0,
+            volume=1000,
+            bid=2499.0,
+            ask=2501.0,
         )
         ticks = storage.get_ticks("RELIANCE", "NSE", "2026-03-16", "2026-03-16")
         assert len(ticks) == 1
@@ -115,10 +123,12 @@ class TestStorageManager:
         def row(ts, ltp):
             return (ts, "TCS", "NSE", "ltp", ltp, None, None, None, None, None, None, None, None, None, None)
 
-        storage.insert_ticks_batch([
-            row(now - timedelta(days=30), 1.0),   # old → pruned
-            row(now - timedelta(hours=1), 2.0),   # recent → kept
-        ])
+        storage.insert_ticks_batch(
+            [
+                row(now - timedelta(days=30), 1.0),  # old → pruned
+                row(now - timedelta(hours=1), 2.0),  # recent → kept
+            ]
+        )
 
         removed = storage.prune_ticks(7)
         assert removed == 1
@@ -141,11 +151,17 @@ class TestStorageManager:
         storage = self._make_storage()
         storage.insert_tick(
             ts=datetime(2026, 3, 15, 10, 0, 0),
-            symbol="RELIANCE", exchange="NSE", mode="ltp", ltp=2490.0,
+            symbol="RELIANCE",
+            exchange="NSE",
+            mode="ltp",
+            ltp=2490.0,
         )
         storage.insert_tick(
             ts=datetime(2026, 3, 16, 10, 0, 0),
-            symbol="RELIANCE", exchange="NSE", mode="ltp", ltp=2500.0,
+            symbol="RELIANCE",
+            exchange="NSE",
+            mode="ltp",
+            ltp=2500.0,
         )
         ticks = storage.get_ticks("RELIANCE", "NSE", "2026-03-16", "2026-03-16")
         assert len(ticks) == 1
@@ -156,9 +172,15 @@ class TestStorageManager:
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 30, 0)
         storage.insert_trade(
-            ts=ts, orderid="ORD001", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity=10, price=2500.0,
-            strategy="Flint", pnl=200.0,
+            ts=ts,
+            orderid="ORD001",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity=10,
+            price=2500.0,
+            strategy="Flint",
+            pnl=200.0,
         )
         trades = storage.get_trades_by_strategy("Flint", "2026-03-16", "2026-03-16")
         assert len(trades) == 1
@@ -170,8 +192,14 @@ class TestStorageManager:
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 30, 0)
         storage.insert_trade(
-            ts=ts, orderid="ORD001", symbol="TCS", exchange="NSE",
-            action="SELL", quantity=5, price=3500.0, strategy="Flint",
+            ts=ts,
+            orderid="ORD001",
+            symbol="TCS",
+            exchange="NSE",
+            action="SELL",
+            quantity=5,
+            price=3500.0,
+            strategy="Flint",
         )
         trades = storage.get_trades_by_date("2026-03-16")
         assert len(trades) == 1
@@ -181,13 +209,17 @@ class TestStorageManager:
         storage = self._make_storage()
         ts = datetime(2026, 3, 17, 0, 10, 0, tzinfo=IST)
         storage.insert_trade(
-            ts=ts, orderid="ORD-MIDNIGHT", symbol="TCS", exchange="NSE",
-            action="BUY", quantity=1, price=3500.0, strategy="Flint",
+            ts=ts,
+            orderid="ORD-MIDNIGHT",
+            symbol="TCS",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            price=3500.0,
+            strategy="Flint",
         )
 
-        raw_ts = storage.connection.execute(
-            "SELECT ts FROM trades WHERE orderid = 'ORD-MIDNIGHT'"
-        ).fetchone()[0]
+        raw_ts = storage.connection.execute("SELECT ts FROM trades WHERE orderid = 'ORD-MIDNIGHT'").fetchone()[0]
         assert raw_ts == datetime(2026, 3, 16, 18, 40, 0)
 
         trades = storage.get_trades_by_date("2026-03-17")
@@ -199,9 +231,14 @@ class TestStorageManager:
         storage = self._make_storage()
         d = date(2026, 3, 16)
         storage.upsert_daily_summary(
-            trade_date=d, strategy="Flint",
-            total_trades=10, winning_trades=6, losing_trades=4,
-            gross_pnl=5000.0, fees=100.0, net_pnl=4900.0,
+            trade_date=d,
+            strategy="Flint",
+            total_trades=10,
+            winning_trades=6,
+            losing_trades=4,
+            gross_pnl=5000.0,
+            fees=100.0,
+            net_pnl=4900.0,
         )
         summaries = storage.get_daily_summaries("2026-03-16", "2026-03-16", "Flint")
         assert len(summaries) == 1
@@ -210,9 +247,14 @@ class TestStorageManager:
 
         # Upsert overwrites
         storage.upsert_daily_summary(
-            trade_date=d, strategy="Flint",
-            total_trades=12, winning_trades=8, losing_trades=4,
-            gross_pnl=6000.0, fees=120.0, net_pnl=5880.0,
+            trade_date=d,
+            strategy="Flint",
+            total_trades=12,
+            winning_trades=8,
+            losing_trades=4,
+            gross_pnl=6000.0,
+            fees=120.0,
+            net_pnl=5880.0,
         )
         summaries = storage.get_daily_summaries("2026-03-16", "2026-03-16", "Flint")
         assert len(summaries) == 1
@@ -223,14 +265,24 @@ class TestStorageManager:
         storage = self._make_storage()
         d = date(2026, 3, 16)
         storage.upsert_daily_summary(
-            trade_date=d, strategy="A",
-            total_trades=5, winning_trades=3, losing_trades=2,
-            gross_pnl=1000, fees=50, net_pnl=950,
+            trade_date=d,
+            strategy="A",
+            total_trades=5,
+            winning_trades=3,
+            losing_trades=2,
+            gross_pnl=1000,
+            fees=50,
+            net_pnl=950,
         )
         storage.upsert_daily_summary(
-            trade_date=d, strategy="B",
-            total_trades=3, winning_trades=1, losing_trades=2,
-            gross_pnl=-500, fees=30, net_pnl=-530,
+            trade_date=d,
+            strategy="B",
+            total_trades=3,
+            winning_trades=1,
+            losing_trades=2,
+            gross_pnl=-500,
+            fees=30,
+            net_pnl=-530,
         )
         summaries = storage.get_daily_summaries("2026-03-16", "2026-03-16")
         assert len(summaries) == 2
@@ -240,8 +292,14 @@ class TestStorageManager:
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 30, 0)
         storage.insert_trade(
-            ts=ts, orderid="ORD001", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity=10, price=2500.0, strategy="Flint",
+            ts=ts,
+            orderid="ORD001",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity=10,
+            price=2500.0,
+            strategy="Flint",
         )
         csv_str = storage.export_trades_csv("2026-03-16", "2026-03-16", "Flint")
         assert "RELIANCE" in csv_str
@@ -262,8 +320,14 @@ class TestStorageManager:
         storage = self._make_storage()
         for day, oid, sym in ((1, "D1", "AAA"), (2, "D2", "BBB"), (3, "D3", "CCC")):
             storage.insert_trade(
-                ts=datetime(2026, 3, day, 10, 0, 0), orderid=oid, symbol=sym,
-                exchange="NSE", action="BUY", quantity=1, price=100.0, strategy="Flint",
+                ts=datetime(2026, 3, day, 10, 0, 0),
+                orderid=oid,
+                symbol=sym,
+                exchange="NSE",
+                action="BUY",
+                quantity=1,
+                price=100.0,
+                strategy="Flint",
             )
         csv_str = storage.export_trades_csv("2026-03-01", "2026-03-02")  # no strategy
         assert "AAA" in csv_str and "BBB" in csv_str  # both in-range days present
@@ -272,11 +336,15 @@ class TestStorageManager:
 
     def test_context_manager(self):
         from flinttrade_data.storage import StorageManager
+
         with StorageManager(":memory:") as storage:
             storage.initialise()
             storage.insert_tick(
                 ts=datetime(2026, 3, 16, 10, 0, 0),
-                symbol="INFY", exchange="NSE", mode="ltp", ltp=1500.0,
+                symbol="INFY",
+                exchange="NSE",
+                mode="ltp",
+                ltp=1500.0,
             )
             ticks = storage.get_ticks("INFY", "NSE", "2026-03-16", "2026-03-16")
             assert len(ticks) == 1
@@ -292,10 +360,15 @@ class TestAuditLogger:
 
     def test_log_order_placed_creates_file(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_order_placed(
-            strategy="Flint", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity="10", price="2500",
+            strategy="Flint",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity="10",
+            price="2500",
         )
         audit.close()
 
@@ -312,10 +385,15 @@ class TestAuditLogger:
 
     def test_multiple_events_same_file(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_order_placed(
-            strategy="Flint", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity="10", price="2500",
+            strategy="Flint",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity="10",
+            price="2500",
         )
         audit.log_order_cancelled(strategy="Flint", orderid="123")
         audit.log_login(user="admin", ip="192.168.1.100")
@@ -333,10 +411,16 @@ class TestAuditLogger:
 
     def test_log_order_modified(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_order_modified(
-            strategy="Flint", symbol="TCS", exchange="NSE",
-            orderid="456", action="BUY", quantity="5", price="3500",
+            strategy="Flint",
+            symbol="TCS",
+            exchange="NSE",
+            orderid="456",
+            action="BUY",
+            quantity="5",
+            price="3500",
         )
         audit.close()
 
@@ -347,10 +431,13 @@ class TestAuditLogger:
 
     def test_log_safety_check(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_safety_check(
-            layer="L1_ORDER", verdict="FAIL",
-            reason="Price deviation 12%", symbol="RELIANCE",
+            layer="L1_ORDER",
+            verdict="FAIL",
+            reason="Price deviation 12%",
+            symbol="RELIANCE",
         )
         audit.close()
 
@@ -360,6 +447,7 @@ class TestAuditLogger:
 
     def test_log_kill_switch(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_kill_switch(activated=True, reason="Daily P&L kill")
         audit.log_kill_switch(activated=False, reason="Manual reset")
@@ -371,6 +459,7 @@ class TestAuditLogger:
 
     def test_log_login_logout(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_login(user="admin", ip="192.168.1.100", method="TOTP")
         audit.log_logout(user="admin", reason="session_timeout")
@@ -383,6 +472,7 @@ class TestAuditLogger:
 
     def test_log_generic_event(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_event("STRATEGY_STARTED", name="Scalper", exchange="NFO")
         audit.close()
@@ -393,16 +483,22 @@ class TestAuditLogger:
 
     def test_read_nonexistent_day_returns_empty(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         events = audit.read_day("2020-01-01")
         assert events == []
 
     def test_all_events_have_timestamp(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_order_placed(
-            strategy="Flint", symbol="INFY", exchange="NSE",
-            action="SELL", quantity="1", price="1500",
+            strategy="Flint",
+            symbol="INFY",
+            exchange="NSE",
+            action="SELL",
+            quantity="1",
+            price="1500",
         )
         audit.close()
 
@@ -412,6 +508,7 @@ class TestAuditLogger:
 
     def test_list_audit_files(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_event("TEST")
         audit.close()
@@ -422,6 +519,7 @@ class TestAuditLogger:
 
     def test_compress_old_files(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         # Create a fake old audit file
         old_file = tmp_path / "audit_2020-01-01.jsonl"
         old_file.write_text('{"event_type": "TEST", "ts": "2020-01-01T00:00:00"}\n')
@@ -450,6 +548,7 @@ class TestAuditLogger:
 
     def test_context_manager(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         with AuditLogger(str(tmp_path)) as audit:
             audit.log_event("CONTEXT_TEST")
         # File should exist after context manager exits
@@ -467,10 +566,15 @@ class TestAuditHashChain:
 
     def _write_three(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         audit = AuditLogger(str(tmp_path))
         audit.log_order_placed(
-            strategy="Flint", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity="10", price="2500",
+            strategy="Flint",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity="10",
+            price="2500",
         )
         audit.log_safety_check(layer="L1_ORDER", verdict="PASS", symbol="RELIANCE")
         audit.log_order_cancelled(strategy="Flint", orderid="123")
@@ -479,6 +583,7 @@ class TestAuditHashChain:
 
     def test_records_carry_linked_chain_fields(self, tmp_path):
         from flinttrade_data.audit_logger import GENESIS_HASH
+
         audit = self._write_three(tmp_path)
         events = audit.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
         assert [e["seq"] for e in events] == [0, 1, 2]
@@ -499,6 +604,7 @@ class TestAuditHashChain:
     def test_verify_chain_detects_content_tampering(self, tmp_path):
         self._write_three(tmp_path)
         from flinttrade_data.audit_logger import AuditLogger
+
         path = next(tmp_path.glob("audit_*.jsonl"))
         lines = path.read_text().splitlines()
         rec = json.loads(lines[1])
@@ -514,6 +620,7 @@ class TestAuditHashChain:
     def test_verify_chain_detects_deletion(self, tmp_path):
         self._write_three(tmp_path)
         from flinttrade_data.audit_logger import AuditLogger
+
         path = next(tmp_path.glob("audit_*.jsonl"))
         lines = path.read_text().splitlines()
         del lines[1]  # remove the middle record
@@ -525,6 +632,7 @@ class TestAuditHashChain:
 
     def test_chain_is_continuous_across_reopen(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
+
         first = AuditLogger(str(tmp_path))
         first.log_event("ONE")
         first.log_event("TWO")
@@ -541,11 +649,14 @@ class TestAuditHashChain:
 
     def test_write_is_fsynced(self, tmp_path, monkeypatch):
         from flinttrade_data import audit_logger
+
         calls = {"n": 0}
         real_fsync = audit_logger.os.fsync
+
         def _counting_fsync(fd):
             calls["n"] += 1
             return real_fsync(fd)
+
         monkeypatch.setattr(audit_logger.os, "fsync", _counting_fsync)
 
         audit = audit_logger.AuditLogger(str(tmp_path))
@@ -565,6 +676,7 @@ class TestAuditHashChain:
         # start, which verify_chain reports honestly rather than hiding.
         self._write_three(tmp_path)
         from flinttrade_data.audit_logger import AuditLogger
+
         path = next(tmp_path.glob("audit_*.jsonl"))
         lines = path.read_text().splitlines()
         del lines[0]
@@ -578,6 +690,7 @@ class TestAuditHashChain:
         # A crash mid-write leaves a newline-less partial record. The next open
         # must drop it (never fsync-committed), not merge the next record into it.
         from flinttrade_data.audit_logger import AuditLogger
+
         first = AuditLogger(str(tmp_path))
         first.log_event("ONE")
         first.log_event("TWO")
@@ -598,6 +711,7 @@ class TestAuditHashChain:
 
     def test_verify_chain_skips_legacy_prefix(self, tmp_path):
         from flinttrade_data.audit_logger import GENESIS_HASH, AuditLogger
+
         # A pre-chain (legacy) record with no hash, then chained records appended.
         day = datetime.now(IST).strftime("%Y-%m-%d")
         legacy = tmp_path / f"audit_{day}.jsonl"
@@ -631,34 +745,44 @@ class TestTradeLogger:
     def _make_storage_and_logger(self):
         from flinttrade_data.storage import StorageManager
         from flinttrade_journal.trade_logger import TradeLogger
+
         storage = StorageManager(":memory:")
         storage.initialise()
         return storage, TradeLogger(storage)
 
     def test_calculate_pnl_buy(self):
         from flinttrade_journal.trade_logger import TradeLogger
+
         pnl = TradeLogger.calculate_pnl("BUY", 10, entry_price=2500.0, exit_price=2520.0)
         assert pnl == 200.0
 
     def test_calculate_pnl_sell_short(self):
         from flinttrade_journal.trade_logger import TradeLogger
+
         pnl = TradeLogger.calculate_pnl("SELL", 10, entry_price=2520.0, exit_price=2500.0)
         assert pnl == 200.0
 
     def test_calculate_pnl_loss(self):
         from flinttrade_journal.trade_logger import TradeLogger
+
         pnl = TradeLogger.calculate_pnl("BUY", 10, entry_price=2500.0, exit_price=2480.0)
         assert pnl == -200.0
 
     def test_log_trade_stores_in_duckdb(self):
         """log_trade() stores the trade; use a frozen clock so CI timezone never drifts."""
         from unittest.mock import patch
+
         storage, tl = self._make_storage_and_logger()
         with patch("flinttrade_journal.trade_logger.datetime") as mock_dt:
             mock_dt.now.return_value = self._TEST_TS
             tl.log_trade(
-                orderid="ORD001", symbol="RELIANCE", exchange="NSE",
-                action="BUY", quantity=10, price=2500.0, strategy="Flint",
+                orderid="ORD001",
+                symbol="RELIANCE",
+                exchange="NSE",
+                action="BUY",
+                quantity=10,
+                price=2500.0,
+                strategy="Flint",
             )
         trades = storage.get_trades_by_date(self._TEST_DATE)
         assert len(trades) == 1
@@ -668,13 +792,20 @@ class TestTradeLogger:
     def test_log_trade_with_pnl(self):
         """P&L is auto-calculated from entry/exit; frozen clock keeps date consistent."""
         from unittest.mock import patch
+
         storage, tl = self._make_storage_and_logger()
         with patch("flinttrade_journal.trade_logger.datetime") as mock_dt:
             mock_dt.now.return_value = self._TEST_TS
             tl.log_trade(
-                orderid="ORD002", symbol="TCS", exchange="NSE",
-                action="BUY", quantity=5, price=3520.0, strategy="Flint",
-                entry_price=3500.0, exit_price=3520.0,
+                orderid="ORD002",
+                symbol="TCS",
+                exchange="NSE",
+                action="BUY",
+                quantity=5,
+                price=3520.0,
+                strategy="Flint",
+                entry_price=3500.0,
+                exit_price=3520.0,
             )
         trades = storage.get_trades_by_strategy("Flint", self._TEST_DATE, self._TEST_DATE)
         assert len(trades) == 1
@@ -684,12 +815,18 @@ class TestTradeLogger:
     def test_log_trade_with_slippage(self):
         """Slippage = |actual - expected|; frozen clock avoids midnight date drift."""
         from unittest.mock import patch
+
         storage, tl = self._make_storage_and_logger()
         with patch("flinttrade_journal.trade_logger.datetime") as mock_dt:
             mock_dt.now.return_value = self._TEST_TS
             tl.log_trade(
-                orderid="ORD003", symbol="INFY", exchange="NSE",
-                action="BUY", quantity=10, price=1502.0, strategy="Flint",
+                orderid="ORD003",
+                symbol="INFY",
+                exchange="NSE",
+                action="BUY",
+                quantity=10,
+                price=1502.0,
+                strategy="Flint",
                 expected_price=1500.0,
             )
         trades = storage.get_trades_by_strategy("Flint", self._TEST_DATE, self._TEST_DATE)
@@ -702,19 +839,40 @@ class TestTradeLogger:
 
         # Simulate 3 trades: 2 winning, 1 losing
         storage.insert_trade(
-            ts=ts, orderid="1", symbol="A", exchange="NSE",
-            action="BUY", quantity=10, price=100.0,
-            strategy="Flint", pnl=500.0, fees=10.0,
+            ts=ts,
+            orderid="1",
+            symbol="A",
+            exchange="NSE",
+            action="BUY",
+            quantity=10,
+            price=100.0,
+            strategy="Flint",
+            pnl=500.0,
+            fees=10.0,
         )
         storage.insert_trade(
-            ts=ts, orderid="2", symbol="B", exchange="NSE",
-            action="SELL", quantity=5, price=200.0,
-            strategy="Flint", pnl=300.0, fees=8.0,
+            ts=ts,
+            orderid="2",
+            symbol="B",
+            exchange="NSE",
+            action="SELL",
+            quantity=5,
+            price=200.0,
+            strategy="Flint",
+            pnl=300.0,
+            fees=8.0,
         )
         storage.insert_trade(
-            ts=ts, orderid="3", symbol="C", exchange="NSE",
-            action="BUY", quantity=20, price=50.0,
-            strategy="Flint", pnl=-200.0, fees=5.0,
+            ts=ts,
+            orderid="3",
+            symbol="C",
+            exchange="NSE",
+            action="BUY",
+            quantity=20,
+            price=50.0,
+            strategy="Flint",
+            pnl=-200.0,
+            fees=5.0,
         )
 
         summary = tl.compute_daily_summary(self._TEST_DATE, "Flint")
@@ -732,9 +890,15 @@ class TestTradeLogger:
         ts = self._TEST_TS
 
         storage.insert_trade(
-            ts=ts, orderid="1", symbol="A", exchange="NSE",
-            action="BUY", quantity=1, price=100.0,
-            strategy="Flint", pnl=50.0,
+            ts=ts,
+            orderid="1",
+            symbol="A",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            price=100.0,
+            strategy="Flint",
+            pnl=50.0,
         )
         tl.compute_daily_summary(self._TEST_DATE, "Flint")
 
@@ -749,19 +913,37 @@ class TestTradeLogger:
 
         # Sequence: +500, -300, -400 → peak 500, trough -200 → dd=700
         storage.insert_trade(
-            ts=ts, orderid="1", symbol="A", exchange="NSE",
-            action="BUY", quantity=1, price=100.0,
-            strategy="Test", pnl=500.0,
+            ts=ts,
+            orderid="1",
+            symbol="A",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            price=100.0,
+            strategy="Test",
+            pnl=500.0,
         )
         storage.insert_trade(
-            ts=ts, orderid="2", symbol="B", exchange="NSE",
-            action="BUY", quantity=1, price=100.0,
-            strategy="Test", pnl=-300.0,
+            ts=ts,
+            orderid="2",
+            symbol="B",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            price=100.0,
+            strategy="Test",
+            pnl=-300.0,
         )
         storage.insert_trade(
-            ts=ts, orderid="3", symbol="C", exchange="NSE",
-            action="BUY", quantity=1, price=100.0,
-            strategy="Test", pnl=-400.0,
+            ts=ts,
+            orderid="3",
+            symbol="C",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            price=100.0,
+            strategy="Test",
+            pnl=-400.0,
         )
 
         summary = tl.compute_daily_summary(self._TEST_DATE, "Test")
@@ -781,8 +963,14 @@ class TestTradeLogger:
         ts = self._TEST_TS
 
         storage.insert_trade(
-            ts=ts, orderid="ORD001", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity=10, price=2500.0, strategy="Flint",
+            ts=ts,
+            orderid="ORD001",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity=10,
+            price=2500.0,
+            strategy="Flint",
         )
         csv_str = tl.export_csv(self._TEST_DATE, self._TEST_DATE, "Flint")
         assert "RELIANCE" in csv_str
@@ -791,10 +979,16 @@ class TestTradeLogger:
 
     def test_trade_summary_dataclass(self):
         from flinttrade_journal.trade_logger import TradeSummary
+
         s = TradeSummary(
-            trade_date=date(2026, 3, 16), strategy="Flint",
-            total_trades=10, winning_trades=7, losing_trades=3,
-            gross_pnl=5000.0, fees=100.0, net_pnl=4900.0,
+            trade_date=date(2026, 3, 16),
+            strategy="Flint",
+            total_trades=10,
+            winning_trades=7,
+            losing_trades=3,
+            gross_pnl=5000.0,
+            fees=100.0,
+            net_pnl=4900.0,
         )
         assert s.win_rate == 70.0
         assert s.avg_pnl_per_trade == 490.0
@@ -811,16 +1005,20 @@ class TestTickRecorder:
     def _make_recorder(self):
         from flinttrade_data.storage import StorageManager
         from flinttrade_data.tick_recorder import TickRecorder
+
         storage = StorageManager(":memory:")
         storage.initialise()
         return storage, TickRecorder(storage=storage)
 
     def test_add_symbols(self):
         _, recorder = self._make_recorder()
-        recorder.add_symbols([
-            {"exchange": "NSE", "symbol": "RELIANCE"},
-            {"exchange": "NFO", "symbol": "NIFTY26MAR2524000CE"},
-        ], mode="quote")
+        recorder.add_symbols(
+            [
+                {"exchange": "NSE", "symbol": "RELIANCE"},
+                {"exchange": "NFO", "symbol": "NIFTY26MAR2524000CE"},
+            ],
+            mode="quote",
+        )
         wl = recorder.get_watchlist()
         assert len(wl["quote"]) == 2
 
@@ -1004,7 +1202,10 @@ class TestTickRecorder:
         assert len(recorder._buffer) == 1
         sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000)
 
-    @pytest.mark.parametrize("ltp", [None, "not-a-number", float("nan"), float("inf"), 0.0, -1.0])
+    @pytest.mark.parametrize(
+        "ltp",
+        [None, "not-a-number", float("nan"), float("inf"), 10**400, 0.0, -1.0],
+    )
     def test_invalid_or_nonfinite_ltp_does_not_reach_sink(self, ltp):
         from flinttrade_data.storage import StorageManager
         from flinttrade_data.tick_recorder import TickRecorder
@@ -1017,6 +1218,36 @@ class TestTickRecorder:
         recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": ltp, "volume": 1000})
 
         sink.assert_not_called()
+
+    def test_malformed_numeric_fields_cannot_poison_the_persistence_batch(self):
+        from flinttrade_data.storage import StorageManager
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        storage = StorageManager(":memory:")
+        storage.initialise()
+        recorder = TickRecorder(storage=storage)
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 10**400,
+                "open": "not-a-price",
+                "high": float("inf"),
+                "volume": 10**400,
+                "oi": "not-an-integer",
+            }
+        )
+        recorder._process_tick({"exchange": "NSE", "symbol": "TCS", "ltp": 3500.0, "volume": 12})
+
+        malformed = recorder._buffer[0]
+        assert malformed[4] is None
+        assert malformed[5] is None
+        assert malformed[6] is None
+        assert malformed[9] is None
+        assert malformed[12] is None
+        assert recorder._flush() is True
+        assert recorder.persisted_tick_count == 2
+        assert recorder.pending_tick_count == 0
 
     @pytest.mark.parametrize("volume", [None, "not-a-volume", -100])
     def test_ltp_sink_clamps_missing_invalid_or_negative_volume_to_zero(self, volume):
@@ -1127,6 +1358,299 @@ class TestTickRecorder:
 
         assert recorder.last_error == "authentication failed"
 
+    @pytest.mark.parametrize("error", [EOFError("closed"), OSError("offline"), TimeoutError("timed out")])
+    def test_connection_error_classifier_retries_network_failures(self, error):
+        from flinttrade_data.tick_recorder import _is_transient_connection_error
+
+        assert _is_transient_connection_error(error) is True
+
+    def test_connection_error_classifier_retries_connection_closed_without_newer_exception_imports(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+
+        class ConnectionClosed(Exception):
+            pass
+
+        monkeypatch.setattr(module.websockets.exceptions, "ConnectionClosed", ConnectionClosed)
+        monkeypatch.delattr(module.websockets.exceptions, "InvalidProxy", raising=False)
+
+        assert module._is_transient_connection_error(ConnectionClosed("stream ended")) is True
+        assert module._is_transient_connection_error(ValueError("bad configuration")) is False
+
+    def test_connection_error_classifier_retries_invalid_message_wrapping_eof(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+
+        class InvalidMessage(Exception):
+            pass
+
+        monkeypatch.setattr(module.websockets.exceptions, "InvalidMessage", InvalidMessage)
+        try:
+            raise InvalidMessage("connection closed during handshake") from EOFError("unexpected EOF")
+        except InvalidMessage as error:
+            assert module._is_transient_connection_error(error) is True
+
+    @pytest.mark.parametrize(
+        ("status_code", "retryable"),
+        [(500, True), (502, True), (503, True), (504, True), (501, False), (429, False), (401, False)],
+    )
+    def test_connection_error_classifier_only_retries_official_server_statuses(
+        self, monkeypatch, status_code, retryable
+    ):
+        from flinttrade_data import tick_recorder as module
+
+        class Response:
+            def __init__(self, code: int) -> None:
+                self.status_code = code
+
+        class InvalidStatus(Exception):
+            def __init__(self, code: int) -> None:
+                self.response = Response(code)
+
+        monkeypatch.setattr(module.websockets.exceptions, "InvalidStatus", InvalidStatus)
+
+        assert module._is_transient_connection_error(InvalidStatus(status_code)) is retryable
+
+    @pytest.mark.parametrize(("status_code", "retryable"), [(503, True), (400, False)])
+    def test_connection_error_classifier_supports_legacy_status_code_shape(
+        self, monkeypatch, status_code, retryable
+    ):
+        from flinttrade_data import tick_recorder as module
+
+        class InvalidStatusCode(Exception):
+            def __init__(self, code: int) -> None:
+                self.status_code = code
+
+        monkeypatch.setitem(vars(module.websockets.exceptions), "InvalidStatusCode", InvalidStatusCode)
+
+        assert module._is_transient_connection_error(InvalidStatusCode(status_code)) is retryable
+
+    @pytest.mark.parametrize(
+        "exception_name",
+        ["InvalidURI", "InvalidProxy", "SecurityError", "InvalidHandshake", "ConcurrencyError", "InvalidState"],
+    )
+    def test_connection_error_classifier_rejects_configuration_and_programming_errors(
+        self, monkeypatch, exception_name
+    ):
+        from flinttrade_data import tick_recorder as module
+
+        class FatalConnectionError(Exception):
+            pass
+
+        monkeypatch.setattr(
+            module.websockets.exceptions,
+            exception_name,
+            FatalConnectionError,
+            raising=False,
+        )
+
+        assert module._is_transient_connection_error(FatalConnectionError("fatal")) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exception_type", [EOFError, OSError, TimeoutError])
+    async def test_transient_websocket_setup_failure_reconnects_with_sanitised_error(
+        self, monkeypatch, exception_type
+    ):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        api_key = "configured-test-key"
+        recorder = TickRecorder(storage=MagicMock(), api_key=api_key, reconnect_delay=0.25)
+        failure = exception_type(f"setup failed for {api_key}")
+
+        def failed_connect(_url):
+            raise failure
+
+        async def stop_during_backoff(_delay):
+            recorder.stop()
+
+        sleep = AsyncMock(side_effect=stop_during_backoff)
+        monkeypatch.setattr(module.websockets, "connect", failed_connect)
+        monkeypatch.setattr(module.asyncio, "sleep", sleep)
+
+        await recorder.run()
+
+        sleep.assert_awaited_once_with(0.25)
+        assert "setup failed" in recorder.last_error
+        assert api_key not in recorder.last_error
+        assert recorder.is_running is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exception_name", ["InvalidURI", "InvalidProxy", "SecurityError", "InvalidHandshake"])
+    async def test_websocket_configuration_failure_escapes_without_reconnecting(
+        self, monkeypatch, exception_name
+    ):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        api_key = "configured-test-key"
+
+        class FatalConnectionError(Exception):
+            pass
+
+        monkeypatch.setattr(
+            module.websockets.exceptions,
+            exception_name,
+            FatalConnectionError,
+            raising=False,
+        )
+        recorder = TickRecorder(storage=MagicMock(), api_key=api_key, reconnect_delay=0.25)
+        failure = FatalConnectionError(f"invalid setup for {api_key}")
+
+        def failed_connect(_url):
+            raise failure
+
+        reconnect_wait = AsyncMock()
+        monkeypatch.setattr(module.websockets, "connect", failed_connect)
+        monkeypatch.setattr(recorder, "_wait_for_reconnect_delay", reconnect_wait)
+
+        with pytest.raises(FatalConnectionError, match="invalid setup"):
+            await recorder.run()
+
+        reconnect_wait.assert_not_awaited()
+        assert api_key not in recorder.last_error
+        assert recorder.is_running is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exception_type", ["ConcurrencyError", "InvalidState"])
+    async def test_websocket_programming_errors_escape_instead_of_reconnecting(self, monkeypatch, exception_type):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        recorder = TickRecorder(storage=MagicMock(), reconnect_delay=0.25)
+        exception_class = getattr(module.websockets.exceptions, exception_type)
+        failure = exception_class("recorder WebSocket misuse")
+
+        def failed_connect(_url):
+            raise failure
+
+        reconnect_wait = AsyncMock()
+        monkeypatch.setattr(module.websockets, "connect", failed_connect)
+        monkeypatch.setattr(recorder, "_wait_for_reconnect_delay", reconnect_wait)
+
+        with pytest.raises(exception_class, match="WebSocket misuse"):
+            await recorder.run()
+
+        reconnect_wait.assert_not_awaited()
+        assert recorder.is_running is False
+        assert recorder.is_connected is False
+
+    @pytest.mark.asyncio
+    async def test_control_error_frame_triggers_reconnect(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        class ErrorWebSocket:
+            async def send(self, _message):
+                return None
+
+            async def recv(self):
+                return json.dumps({"status": "authenticated"})
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not hasattr(self, "sent_error"):
+                    self.sent_error = True
+                    return json.dumps({"type": "error", "message": "subscription control failed"})
+                raise AssertionError("control error should have ended consumption")
+
+        class WebSocketContext:
+            async def __aenter__(self):
+                return ErrorWebSocket()
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        recorder = TickRecorder(storage=MagicMock(), reconnect_delay=0.25)
+
+        async def stop_during_backoff(_delay):
+            recorder.stop()
+
+        sleep = AsyncMock(side_effect=stop_during_backoff)
+        monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
+        monkeypatch.setattr(module.asyncio, "sleep", sleep)
+
+        await recorder.run()
+
+        sleep.assert_awaited_once_with(0.25)
+        assert recorder.last_error == "subscription control failed"
+
+    @pytest.mark.asyncio
+    async def test_partial_subscribe_ack_without_successes_triggers_reconnect(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        class PartialWebSocket:
+            async def send(self, _message):
+                return None
+
+            async def recv(self):
+                return json.dumps({"status": "authenticated"})
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not hasattr(self, "sent_partial"):
+                    self.sent_partial = True
+                    return json.dumps(
+                        {
+                            "type": "subscribe",
+                            "status": "partial",
+                            "subscriptions": [{"exchange": "NSE", "symbol": "RELIANCE", "status": "error"}],
+                        }
+                    )
+                raise AssertionError("zero-success partial acknowledgement should have ended consumption")
+
+        class WebSocketContext:
+            async def __aenter__(self):
+                return PartialWebSocket()
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        recorder = TickRecorder(storage=MagicMock(), reconnect_delay=0.25)
+
+        async def stop_during_backoff(_delay):
+            recorder.stop()
+
+        sleep = AsyncMock(side_effect=stop_during_backoff)
+        monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
+        monkeypatch.setattr(module.asyncio, "sleep", sleep)
+
+        await recorder.run()
+
+        sleep.assert_awaited_once_with(0.25)
+        assert "NSE:RELIANCE" in recorder.last_error
+
+    @pytest.mark.asyncio
+    async def test_partial_subscribe_ack_with_success_keeps_consuming_with_degraded_error(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        async def frames():
+            yield json.dumps(
+                {
+                    "type": "subscribe",
+                    "status": "partial",
+                    "subscriptions": [
+                        {"exchange": "NSE", "symbol": "RELIANCE", "status": "success"},
+                        {"exchange": "NSE", "symbol": "TCS", "status": "error", "message": "rejected"},
+                    ],
+                }
+            )
+            yield json.dumps({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+
+        recorder = TickRecorder(storage=MagicMock())
+        recorder._running = True
+        recorder._connected = True
+
+        await recorder._consume(frames())
+
+        assert recorder.tick_count == 1
+        assert recorder.is_connected is True
+        assert "NSE:TCS" in recorder.last_error
+        assert "rejected" in recorder.last_error
+
     def test_partial_subscribe_ack_surfaces_sanitised_failure_and_stays_connected(self):
         from flinttrade_data.tick_recorder import TickRecorder
 
@@ -1176,6 +1700,181 @@ class TestTickRecorder:
         assert recorder.is_connected is True
 
     @pytest.mark.asyncio
+    async def test_request_reconnect_from_thread_closes_active_socket_and_clears_lifecycle_references(
+        self, monkeypatch
+    ):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        connected = asyncio.Event()
+        closed = asyncio.Event()
+
+        class BlockingWebSocket:
+            async def send(self, _message):
+                return None
+
+            async def recv(self):
+                connected.set()
+                return json.dumps({"status": "authenticated"})
+
+            async def close(self):
+                closed.set()
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                await closed.wait()
+                raise StopAsyncIteration
+
+        class WebSocketContext:
+            async def __aenter__(self):
+                return BlockingWebSocket()
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        recorder = TickRecorder(storage=MagicMock(), reconnect_delay=0.25)
+
+        async def stop_during_backoff(_delay):
+            recorder.stop()
+
+        monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
+        monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(side_effect=stop_during_backoff))
+
+        assert recorder.request_reconnect() is False
+        task = asyncio.create_task(recorder.run())
+        await asyncio.wait_for(connected.wait(), timeout=0.2)
+
+        result: list[bool] = []
+        thread = threading.Thread(target=lambda: result.append(recorder.request_reconnect()))
+        thread.start()
+        thread.join(timeout=0.2)
+
+        assert thread.is_alive() is False
+        assert result == [True]
+        await asyncio.wait_for(task, timeout=0.2)
+        assert recorder.request_reconnect() is False
+        assert recorder._active_ws is None
+        assert recorder._loop is None
+
+    @pytest.mark.asyncio
+    async def test_connection_reconfiguration_discards_a_stale_connection_before_authentication(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        first_entered = asyncio.Event()
+        release_first = asyncio.Event()
+        connect_urls: list[str] = []
+
+        class FirstWebSocket:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            async def send(self, message: str) -> None:
+                self.sent.append(message)
+
+            async def recv(self) -> str:
+                return json.dumps({"status": "authenticated"})
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise AssertionError("stale connection must not be consumed")
+
+        class SecondWebSocket:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            async def send(self, message: str) -> None:
+                self.sent.append(message)
+
+            async def recv(self) -> str:
+                return json.dumps({"status": "authenticated"})
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                recorder.stop()
+                raise StopAsyncIteration
+
+        first_ws = FirstWebSocket()
+        second_ws = SecondWebSocket()
+
+        class FirstContext:
+            async def __aenter__(self):
+                first_entered.set()
+                await release_first.wait()
+                return first_ws
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        class SecondContext:
+            async def __aenter__(self):
+                return second_ws
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        def connect(url: str):
+            connect_urls.append(url)
+            return FirstContext() if len(connect_urls) == 1 else SecondContext()
+
+        recorder = TickRecorder(
+            storage=MagicMock(),
+            ws_url="ws://old-openalgo.local:8765",
+            api_key="old-key",
+        )
+        monkeypatch.setattr(module.websockets, "connect", connect)
+        task = asyncio.create_task(recorder.run())
+        await asyncio.wait_for(first_entered.wait(), timeout=0.2)
+
+        try:
+            changed = await asyncio.to_thread(
+                recorder.reconfigure_connection,
+                ws_url="ws://new-openalgo.local:9876",
+                api_key="new-key",
+            )
+            release_first.set()
+            await asyncio.wait_for(task, timeout=0.2)
+        finally:
+            release_first.set()
+            if not task.done():
+                recorder.stop()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+        assert changed is True
+        assert connect_urls == ["ws://old-openalgo.local:8765", "ws://new-openalgo.local:9876"]
+        assert first_ws.sent == []
+        assert json.loads(second_ws.sent[0]) == {"action": "authenticate", "api_key": "new-key"}
+
+    def test_connection_reconfiguration_is_idempotent(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        recorder = TickRecorder(
+            storage=MagicMock(),
+            ws_url="ws://openalgo.local:8765",
+            api_key="configured-key",
+        )
+
+        assert recorder.reconfigure_connection(
+            ws_url="ws://openalgo.local:8765",
+            api_key="configured-key",
+        ) is False
+
+    def test_connection_reconfiguration_retains_all_keys_for_shutdown_redaction(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        recorder = TickRecorder(storage=MagicMock(), api_key="boot-key")
+        recorder.reconfigure_connection(ws_url="ws://openalgo.local:9876", api_key="rotated-key")
+
+        assert recorder.sanitise_error("boot-key then rotated-key") == "[redacted] then [redacted]"
+
+    @pytest.mark.asyncio
     async def test_cancellation_runs_final_flush(self, monkeypatch):
         from flinttrade_data import tick_recorder as module
         from flinttrade_data.tick_recorder import TickRecorder
@@ -1212,6 +1911,51 @@ class TestTickRecorder:
             await task
 
         storage.insert_ticks_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancellation_forces_one_final_flush_during_persistence_backoff(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        consume_started = asyncio.Event()
+
+        class BlockingWebSocket:
+            async def send(self, _message):
+                return None
+
+            async def recv(self):
+                return json.dumps({"status": "authenticated"})
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                consume_started.set()
+                await asyncio.Future()
+
+        class WebSocketContext:
+            async def __aenter__(self):
+                return BlockingWebSocket()
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = [RuntimeError("duckdb locked"), None]
+        recorder = TickRecorder(storage=storage, api_key="configured-test-key")
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+        recorder._flush()
+        monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
+
+        task = asyncio.create_task(recorder.run())
+        await asyncio.wait_for(consume_started.wait(), timeout=0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert storage.insert_ticks_batch.call_count == 2
+        assert recorder.persisted_tick_count == 1
+        assert recorder.pending_tick_count == 0
 
     @pytest.mark.asyncio
     async def test_normal_websocket_eof_clears_state_and_backs_off(self, monkeypatch):
@@ -1395,19 +2139,29 @@ class TestTickRecorder:
 
     def test_process_tick_quote(self):
         _, recorder = self._make_recorder()
-        recorder._process_tick({
-            "symbol": "RELIANCE", "exchange": "NSE",
-            "ltp": 2500.0, "bid": 2499.0, "ask": 2501.0, "volume": 1000,
-        })
+        recorder._process_tick(
+            {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "ltp": 2500.0,
+                "bid": 2499.0,
+                "ask": 2501.0,
+                "volume": 1000,
+            }
+        )
         assert recorder._buffer[0][3] == "quote"  # mode
 
     def test_process_tick_depth(self):
         _, recorder = self._make_recorder()
-        recorder._process_tick({
-            "symbol": "RELIANCE", "exchange": "NSE",
-            "ltp": 2500.0, "bids": [{"price": 2499, "qty": 100}],
-            "asks": [{"price": 2501, "qty": 50}],
-        })
+        recorder._process_tick(
+            {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "ltp": 2500.0,
+                "bids": [{"price": 2499, "qty": 100}],
+                "asks": [{"price": 2501, "qty": 50}],
+            }
+        )
         assert recorder._buffer[0][3] == "depth"
         assert recorder._buffer[0][14] is not None  # depth_json
 
@@ -1423,6 +2177,7 @@ class TestTickRecorder:
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
         from flinttrade_data.storage import StorageManager
         from flinttrade_data.tick_recorder import TickRecorder
+
         storage = StorageManager(":memory:")
         storage.initialise()
         agg = OrderFlowAggregator()
@@ -1437,8 +2192,14 @@ class TestTickRecorder:
         storage, recorder = self._make_recorder()
         recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
         recorder._process_tick({"symbol": "INFY", "exchange": "NSE", "ltp": 1500.0})
+        assert recorder.tick_count == 2
+        assert recorder.persisted_tick_count == 0
+        assert recorder.pending_tick_count == 2
         recorder._flush()
         assert len(recorder._buffer) == 0
+        assert recorder.tick_count == 2
+        assert recorder.persisted_tick_count == 2
+        assert recorder.pending_tick_count == 0
         # Query ticks directly — avoids timezone edge cases around midnight
         result = storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()
         assert result[0] == 2
@@ -1458,10 +2219,38 @@ class TestTickRecorder:
 
         recorder._flush()  # insert fails
         assert len(recorder._buffer) == 1  # retained, not lost
+        assert recorder.persisted_tick_count == 0
+        assert recorder.pending_tick_count == 1
+        assert "persistence" in recorder.last_error.lower()
 
         storage.insert_ticks_batch.side_effect = None  # next flush succeeds
-        recorder._flush()
+        recorder._flush(force=True)
         assert len(recorder._buffer) == 0  # persisted then cleared
+        assert recorder.persisted_tick_count == 1
+        assert recorder.pending_tick_count == 0
+
+    def test_successful_retry_clears_only_persistence_error(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        api_key = "configured-test-key"
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = RuntimeError(f"disk full for {api_key}")
+        recorder = TickRecorder(storage=storage, api_key=api_key)
+        recorder._process_tick({"type": "error", "message": "subscription rejected"})
+        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+
+        recorder._flush()
+
+        assert "persistence" in recorder.last_error.lower()
+        assert api_key not in recorder.last_error
+        assert recorder.pending_tick_count == 1
+        storage.insert_ticks_batch.side_effect = None
+
+        recorder._flush(force=True)
+
+        assert recorder.last_error == "subscription rejected"
+        assert recorder.persisted_tick_count == 1
+        assert recorder.pending_tick_count == 0
 
     def test_flush_acquires_the_storage_lock(self):
         # The recorder shares its DuckDB connection with the nightly maintenance
@@ -1497,9 +2286,76 @@ class TestTickRecorder:
 
         recorder._flush()  # fails, 10 > cap 3 → drop 7 oldest
         assert len(recorder._buffer) == 3
+        assert "dropped 7 oldest" in recorder.last_error
+        assert recorder.status_snapshot() == {
+            "running": False,
+            "connected": False,
+            "tick_count": 10,
+            "persisted_tick_count": 0,
+            "pending_tick_count": 3,
+            "dropped_tick_count": 7,
+            "last_error": recorder.last_error,
+            "transport_error": "",
+            "persistence_error": recorder.last_error,
+        }
+
+        storage.insert_ticks_batch.side_effect = None
+        recorder._flush(force=True)
+
+        snapshot = recorder.status_snapshot()
+        assert snapshot["tick_count"] == 10
+        assert snapshot["persisted_tick_count"] == 3
+        assert snapshot["pending_tick_count"] == 0
+        assert snapshot["dropped_tick_count"] == 7
+        assert snapshot["last_error"] == ""
+
+    def test_persistence_retry_uses_bounded_backoff_and_recovers(self, caplog):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        now = [0.0]
+        attempt_times: list[float] = []
+
+        def insert_ticks(_rows) -> None:
+            attempt_times.append(now[0])
+            if len(attempt_times) < 5:
+                raise RuntimeError("duckdb unavailable")
+
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = insert_ticks
+        recorder = TickRecorder(storage=storage)
+        recorder._persistence_clock = lambda: now[0]
+        recorder._persistence_retry_delay = 1.0
+        recorder._max_persistence_retry_delay = 4.0
+        recorder._max_buffer = 3
+        caplog.set_level("ERROR", logger="flinttrade.data.tick_recorder")
+
+        for i in range(4):
+            recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": float(i)})
+        recorder._flush()
+
+        for i in range(10):
+            recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": float(i + 10)})
+            recorder._flush()
+
+        assert attempt_times == [0.0]
+        assert caplog.text.count("Failed to flush") == 1
+        assert recorder.pending_tick_count == 3
+        assert recorder.status_snapshot()["dropped_tick_count"] == 11
+
+        for retry_at in (1.0, 3.0, 7.0, 11.0):
+            now[0] = retry_at - 0.01
+            recorder._flush()
+            now[0] = retry_at
+            recorder._flush()
+
+        assert attempt_times == [0.0, 1.0, 3.0, 7.0, 11.0]
+        assert recorder.persisted_tick_count == 3
+        assert recorder.pending_tick_count == 0
+        assert recorder.last_error == ""
 
     def test_detect_mode(self):
         from flinttrade_data.tick_recorder import TickRecorder
+
         assert TickRecorder._detect_mode({"ltp": 100}) == "ltp"
         assert TickRecorder._detect_mode({"ltp": 100, "bid": 99, "volume": 1000}) == "quote"
         assert TickRecorder._detect_mode({"ltp": 100, "bids": []}) == "depth"
@@ -1510,8 +2366,18 @@ class TestTickRecorder:
         # NCO, MCX_INDEX, GLOBAL_INDEX joined the supported list in the
         # OpenAlgo v2.0.0.7 sync.
         exchanges = [
-            "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
-            "NCO", "MCX_INDEX", "GLOBAL_INDEX", "DELTA",
+            "NSE",
+            "BSE",
+            "NFO",
+            "BFO",
+            "CDS",
+            "BCD",
+            "MCX",
+            "NCDEX",
+            "NCO",
+            "MCX_INDEX",
+            "GLOBAL_INDEX",
+            "DELTA",
         ]
         for exch in exchanges:
             recorder._process_tick({"symbol": "TEST", "exchange": exch, "ltp": 100.0})
@@ -1528,6 +2394,7 @@ class TestPackageExports:
 
     def test_all_exports(self):
         from flinttrade_data import __all__
+
         expected = ["StorageManager", "TickRecorder", "AuditLogger", "TradeLogger", "TradeSummary"]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"

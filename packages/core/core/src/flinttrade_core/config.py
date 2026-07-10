@@ -32,20 +32,8 @@ def _load_dev_env() -> None:
     load_dotenv(repo_root / ".env", override=False)
 
 
-def _workspace_openalgo_overrides() -> dict[str, Any]:
-    """Return explicit UI/workspace OpenAlgo settings.
-
-    A fresh workspace contains default host/port values. Those defaults should
-    not silently override server/developer environment variables unless the UI
-    has actually stored a non-default value or an API key.
-    """
-    try:
-        workspace = Workspace()
-        data = workspace.as_dict()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("workspace OpenAlgo config unavailable: %s", exc)
-        return {}
-
+def _workspace_openalgo_overrides_from_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Return explicit OpenAlgo overrides from one in-memory workspace config."""
     openalgo = data.get("openalgo") if isinstance(data, dict) else None
     if not isinstance(openalgo, dict):
         return {}
@@ -94,8 +82,13 @@ class Settings(BaseModel):
     @field_validator("openalgo_host")
     @classmethod
     def host_must_be_url(cls, v: str) -> str:
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("openalgo_host must start with http:// or https://")
+        try:
+            parsed = urlsplit(v)
+            _ = parsed.port
+        except ValueError:
+            raise ValueError("openalgo_host must be a valid HTTP(S) URL") from None
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("openalgo_host must be a valid HTTP(S) URL")
         return v.rstrip("/")
 
     @field_validator("openalgo_api_key")
@@ -115,6 +108,16 @@ class Settings(BaseModel):
     @classmethod
     def from_env(cls) -> "Settings":
         """Build Settings from UI workspace config, with env as a fallback."""
+        try:
+            workspace_data = Workspace().as_dict()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("workspace OpenAlgo config unavailable: %s", exc)
+            workspace_data = {}
+        return cls.from_workspace_data(workspace_data)
+
+    @classmethod
+    def from_workspace_data(cls, data: dict[str, Any]) -> "Settings":
+        """Validate a candidate workspace config before it is persisted."""
         _load_dev_env()
         host = os.getenv("OPENALGO_HOST", DEFAULT_OPENALGO_HOST) or DEFAULT_OPENALGO_HOST
         key = os.getenv("OPENALGO_API_KEY", "")
@@ -127,7 +130,7 @@ class Settings(BaseModel):
             "openalgo_port": int(port),
             "openalgo_ws_port": int(ws_port),
         }
-        settings.update(_workspace_openalgo_overrides())
+        settings.update(_workspace_openalgo_overrides_from_data(data))
 
         return cls(**settings)
 

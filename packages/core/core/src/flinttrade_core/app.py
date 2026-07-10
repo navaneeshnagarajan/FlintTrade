@@ -36,6 +36,7 @@ import signal
 import threading
 from collections.abc import Callable, Mapping
 from contextlib import suppress
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -179,10 +180,23 @@ def _tick_capture_enabled() -> bool:
     }
 
 
+_TICK_CAPTURE_LIFECYCLE_LOCK = "TICK_CAPTURE_LIFECYCLE_LOCK"
+
+
+def _tick_capture_lifecycle_lock(flask_app: Flask) -> threading.RLock:
+    """Return the per-app lock serialising recorder lifecycle transitions."""
+    lock = flask_app.config.get(_TICK_CAPTURE_LIFECYCLE_LOCK)
+    if lock is None:
+        lock = threading.RLock()
+        lock = flask_app.config.setdefault(_TICK_CAPTURE_LIFECYCLE_LOCK, lock)
+    return lock
+
+
 def _set_tick_capture_intent(flask_app: Flask, enabled: bool) -> None:
     """Expose capture intent before the API server accepts status requests."""
-    flask_app.config["TICK_CAPTURE_ENABLED"] = enabled
-    flask_app.config["TICK_CAPTURE_ERROR"] = ""
+    with _tick_capture_lifecycle_lock(flask_app):
+        flask_app.config["TICK_CAPTURE_ENABLED"] = enabled
+        flask_app.config["TICK_CAPTURE_ERROR"] = ""
 
 
 def _sanitise_tick_capture_error(error: Any, api_key: str) -> str:
@@ -196,7 +210,8 @@ def _sanitise_tick_capture_error(error: Any, api_key: str) -> str:
 def _record_tick_capture_failure(flask_app: Flask, error: Any, api_key: str) -> None:
     """Persist and log a redacted tick-capture startup failure."""
     diagnostic = _sanitise_tick_capture_error(error, api_key)
-    flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
+    with _tick_capture_lifecycle_lock(flask_app):
+        flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
     logger.warning("Tick capture failed to start (%s); not recording ticks", diagnostic)
 
 
@@ -1437,6 +1452,7 @@ def create_flask_app(
         )
     app.config["_FRONTEND_AVAILABLE"] = _frontend_available
     app.config["_DIST_PATH"] = _dist_path
+    _tick_capture_lifecycle_lock(app)
 
     # ------------------------------------------------------------------
     # Structured logging — ONE pipeline for both structlog calls and
@@ -2584,8 +2600,19 @@ def create_flask_app(
     # stripper normalises /ft-api/v1/X → /v1/X before URL dispatch, and the
     # Vite dev proxy does the same rewrite. So a single /v1/... registration
     # is reachable from both environments.
+    openalgo_config_lock = threading.RLock()
+
+    def _serialise_openalgo_config(handler: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(handler)
+        def serialised(*args: Any, **kwargs: Any) -> Any:
+            with openalgo_config_lock:
+                return handler(*args, **kwargs)
+
+        return serialised
+
     @app.route("/v1/config/openalgo", methods=["GET", "POST"])
     @limiter.limit("10 per minute")
+    @_serialise_openalgo_config
     def _set_openalgo_config() -> Any:
         """Persist OpenAlgo connection settings from the UI.
 
@@ -2669,25 +2696,44 @@ def create_flask_app(
                 "message": "At least one of api_key, host, port, ws_port is required",
             }), 400
 
-        # Persist to workspace.json
         try:
-            from .workspace import Workspace  # noqa: PLC0415
-            ws = Workspace()
-            if not ws.config_path.exists():
-                ws.initialise()
-            if has_api_key:
-                ws.set("openalgo.api_key", api_key)
-            if has_host:
-                ws.set("openalgo.host", host)
-            if has_port:
-                ws.set("openalgo.port", _coerce_port(port, "port"))
-            if has_ws_port:
-                ws.set("openalgo.ws_port", _coerce_port(ws_port, "ws_port"))
+            normalised_port = _coerce_port(port, "port") if has_port else None
+            normalised_ws_port = _coerce_port(ws_port, "ws_port") if has_ws_port else None
         except ValueError:
             # Fixed message — never echo exception text into a response.
             return jsonify({
                 "status": "error",
                 "message": "port and ws_port must be integers between 1 and 65535",
+            }), 400
+
+        # Persist to workspace.json
+        try:
+            from .workspace import Workspace  # noqa: PLC0415
+            from .workspace_migrations import default_workspace_config  # noqa: PLC0415
+
+            ws = Workspace()
+            workspace_exists = ws.config_path.exists()
+            config = ws.as_dict() if workspace_exists else default_workspace_config()
+            current_openalgo = config.get("openalgo")
+            openalgo = dict(current_openalgo) if isinstance(current_openalgo, dict) else {}
+            if has_api_key:
+                openalgo["api_key"] = api_key
+            if has_host:
+                openalgo["host"] = host
+            if has_port:
+                openalgo["port"] = normalised_port
+            if has_ws_port:
+                openalgo["ws_port"] = normalised_ws_port
+            config["openalgo"] = openalgo
+            candidate_settings = Settings.from_workspace_data(config)
+            if workspace_exists:
+                ws.save(config)
+            else:
+                ws.initialise(config)
+        except (TypeError, ValueError):
+            return jsonify({
+                "status": "error",
+                "message": "OpenAlgo settings are invalid",
             }), 400
         except Exception as exc:
             logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)
@@ -2705,10 +2751,13 @@ def create_flask_app(
 
         # Hot-reload OpenAlgoClient so subsequent backend→OpenAlgo calls
         # use the fresh credentials without requiring a restart.
+        old_client = app.config.get("CLIENT")
+        old_settings = getattr(old_client, "settings", None)
+        old_api_key_value = getattr(old_settings, "openalgo_api_key", "")
+        old_api_key = old_api_key_value if isinstance(old_api_key_value, str) else ""
         try:
-            new_settings = Settings.from_env()
+            new_settings = candidate_settings
             new_client = OpenAlgoClient(new_settings)
-            old_client = app.config.get("CLIENT")
             app.config["CLIENT"] = new_client
             # Best-effort close of the previous client's HTTP pool.
             if old_client is not None:
@@ -2721,13 +2770,78 @@ def create_flask_app(
                 except Exception:
                     pass
         except Exception as exc:
+            diagnostic = _sanitise_tick_capture_error(exc, api_key)
+            diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
             logger.warning(
-                "OpenAlgo config saved but client reinitialisation failed: %s", exc
+                "OpenAlgo config saved but client reinitialisation failed: %s", diagnostic
             )
             return jsonify({
                 "status": "partial",
                 "message": "Config saved but client not reloaded",
             }), 200
+
+        # The desktop and full-app boot paths both expose the active recorder on
+        # app.config. Reconfigure it only after Settings and the REST client are
+        # valid, so one save moves both transports to the same endpoint/key.
+        with _tick_capture_lifecycle_lock(app):
+            recorder = app.config.get("TICK_RECORDER")
+            if recorder is not None:
+                capture_reconfigured = False
+                try:
+                    # Register the new key with the desktop runtime before the
+                    # recorder can use it or fail, so every diagnostic is redacted.
+                    desktop_runtime = app.config.get("DESKTOP_TICK_CAPTURE_RUNTIME")
+                    update_runtime_api_key = getattr(desktop_runtime, "update_api_key", None)
+                    if callable(update_runtime_api_key):
+                        update_runtime_api_key(new_settings.openalgo_api_key)
+
+                    reconfigure_connection = getattr(recorder, "reconfigure_connection", None)
+                    if not callable(reconfigure_connection):
+                        raise RuntimeError("Tick recorder does not support connection reconfiguration")
+                    reconfigure_connection(
+                        ws_url=openalgo_ws_base_url(new_settings),
+                        api_key=new_settings.openalgo_api_key,
+                    )
+                    capture_reconfigured = True
+                    if app.config.get("TICK_RECORDER") is not recorder:
+                        diagnostic = str(app.config.get("TICK_CAPTURE_ERROR", "") or "").strip()
+                        if not diagnostic:
+                            diagnostic = "Tick recorder stopped during connection reconfiguration"
+                        diagnostic = _sanitise_tick_capture_error(diagnostic, new_settings.openalgo_api_key)
+                        diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
+                        app.config["TICK_CAPTURE_ERROR"] = diagnostic
+                        logger.warning("OpenAlgo config saved after tick recorder stopped (%s)", diagnostic)
+                        return jsonify({
+                            "status": "partial",
+                            "message": "OpenAlgo config saved and client reloaded, but tick capture reload was incomplete",
+                            "data": {
+                                "client_reloaded": True,
+                                "tick_capture_reconfigured": False,
+                            },
+                        }), 200
+                except Exception as exc:  # noqa: BLE001 - saved REST config remains usable
+                    diagnostic = _sanitise_tick_capture_error(exc, new_settings.openalgo_api_key)
+                    diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
+                    app.config["TICK_CAPTURE_ERROR"] = diagnostic
+                    logger.warning("OpenAlgo config saved but tick capture hot-reload failed (%s)", diagnostic)
+                    return jsonify({
+                        "status": "partial",
+                        "message": "OpenAlgo config saved and client reloaded, but tick capture reload was incomplete",
+                        "data": {
+                            "client_reloaded": True,
+                            "tick_capture_reconfigured": capture_reconfigured,
+                        },
+                    }), 200
+                app.config["TICK_CAPTURE_ERROR"] = ""
+            elif app.config.get("TICK_CAPTURE_ENABLED") and app.config.get("TICK_CAPTURE_ERROR"):
+                return jsonify({
+                    "status": "partial",
+                    "message": "OpenAlgo config saved and client reloaded, but tick capture requires a restart",
+                    "data": {
+                        "client_reloaded": True,
+                        "tick_capture_reconfigured": False,
+                    },
+                }), 200
 
         return jsonify({
             "status": "ok",
@@ -3246,38 +3360,64 @@ class FlintTradeApp:
                 # delta (not synthetic) while tick capture is running.
                 from flinttrade_data.orderflow_aggregator import OrderFlowAggregator  # noqa: PLC0415
                 orderflow = OrderFlowAggregator()
-                watchlist = _tick_capture_watchlist()
-                signal_hub = flask_app.config.get("SIGNAL_HUB")
-                recorder = _build_tick_recorder(
-                    recorder_factory=TickRecorder,
-                    signal_hub=signal_hub,
-                    settings=self.settings,
-                    storage=tick_storage,
-                    storage_lock=tick_lock,
-                    orderflow=orderflow,
-                    watchlist=watchlist,
-                    mode=_tick_capture_mode(),
-                )
-                recorder_task = asyncio.create_task(recorder.run())
-                self._tick_recorder = recorder
-                self._tick_recorder_task = recorder_task
-                # Hand the tick store to the cron so nightly maintenance keeps the
-                # highest-volume DuckDB file from growing unbounded. register_
-                # builtin_jobs already ran, but the job resolves this lazily.
-                self.cron.tick_storage = tick_storage
-                self.cron.tick_storage_lock = tick_lock
-                # Keep ~90 days of ticks by default so the store stays bounded;
-                # the nightly tick_retention_job prunes older rows.
-                self.cron.tick_retention_days = 90
-                # Expose the recorder + store to the tick routes (status /
-                # query / watchlist) so the terminal can see and manage capture.
-                flask_app.config["ORDERFLOW_AGGREGATOR"] = orderflow
-                flask_app.config["TICK_RECORDER"] = recorder
-                flask_app.config["TICK_STORAGE"] = tick_storage
-                flask_app.config["TICK_STORAGE_LOCK"] = tick_lock
-                flask_app.config["TICK_CAPTURE_ERROR"] = ""
+                with _tick_capture_lifecycle_lock(flask_app):
+                    # The Flask server is already accepting local setup requests.
+                    # Refresh inside the lifecycle lock so a concurrent config save
+                    # either precedes this build or reconfigures the published recorder.
+                    capture_settings = Settings.from_env()
+                    watchlist = _tick_capture_watchlist()
+                    signal_hub = flask_app.config.get("SIGNAL_HUB")
+                    recorder = _build_tick_recorder(
+                        recorder_factory=TickRecorder,
+                        signal_hub=signal_hub,
+                        settings=capture_settings,
+                        storage=tick_storage,
+                        storage_lock=tick_lock,
+                        orderflow=orderflow,
+                        watchlist=watchlist,
+                        mode=_tick_capture_mode(),
+                    )
+                    recorder_task = asyncio.create_task(recorder.run())
+                    self._tick_recorder = recorder
+                    self._tick_recorder_task = recorder_task
+                    # Hand the tick store to the cron so nightly maintenance keeps the
+                    # highest-volume DuckDB file from growing unbounded. register_
+                    # builtin_jobs already ran, but the job resolves this lazily.
+                    self.cron.tick_storage = tick_storage
+                    self.cron.tick_storage_lock = tick_lock
+                    # Keep ~90 days of ticks by default so the store stays bounded;
+                    # the nightly tick_retention_job prunes older rows.
+                    self.cron.tick_retention_days = 90
+                    # Expose the recorder + store to the tick routes (status /
+                    # query / watchlist) so the terminal can see and manage capture.
+                    flask_app.config["ORDERFLOW_AGGREGATOR"] = orderflow
+                    flask_app.config["TICK_RECORDER"] = recorder
+                    flask_app.config["TICK_STORAGE"] = tick_storage
+                    flask_app.config["TICK_STORAGE_LOCK"] = tick_lock
+                    flask_app.config["TICK_CAPTURE_ERROR"] = ""
                 logger.info("Live tick capture started → %s", tick_db)
             except Exception as exc:
+                sanitise_error = getattr(recorder, "sanitise_error", None)
+
+                def sanitise_rollback_error(error: Any) -> str:
+                    try:
+                        if callable(sanitise_error):
+                            return sanitise_error(error)
+                    except Exception:
+                        pass
+                    return _sanitise_tick_capture_error(error, self.settings.openalgo_api_key)
+
+                diagnostic = sanitise_rollback_error(exc)
+                with _tick_capture_lifecycle_lock(flask_app):
+                    self.cron.tick_storage = None
+                    self.cron.tick_storage_lock = None
+                    self._tick_recorder = None
+                    self._tick_recorder_task = None
+                    for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
+                        flask_app.config.pop(key, None)
+                    flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
+                logger.warning("Tick capture failed to start (%s); not recording ticks", diagnostic)
+
                 if recorder_task is not None:
                     recorder.stop()
                     recorder_task.cancel()
@@ -3287,7 +3427,7 @@ class FlintTradeApp:
                     except Exception as cleanup_exc:
                         logger.warning(
                             "Tick recorder rollback failed (%s)",
-                            _sanitise_tick_capture_error(cleanup_exc, self.settings.openalgo_api_key),
+                            sanitise_rollback_error(cleanup_exc),
                         )
                 if tick_storage is not None:
                     try:
@@ -3295,15 +3435,8 @@ class FlintTradeApp:
                     except Exception as cleanup_exc:
                         logger.warning(
                             "Tick storage rollback failed (%s)",
-                            _sanitise_tick_capture_error(cleanup_exc, self.settings.openalgo_api_key),
+                            sanitise_rollback_error(cleanup_exc),
                         )
-                self.cron.tick_storage = None
-                self.cron.tick_storage_lock = None
-                self._tick_recorder = None
-                self._tick_recorder_task = None
-                for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
-                    flask_app.config.pop(key, None)
-                _record_tick_capture_failure(flask_app, exc, self.settings.openalgo_api_key)
 
         # Broker reconciliation runner (contract §14.2): reconciles every ACTIVE
         # native (adapter, session) pair on start and then every
@@ -3415,8 +3548,24 @@ class FlintTradeApp:
             self._tick_recorder.stop()
         if self._tick_recorder_task is not None:
             self._tick_recorder_task.cancel()
-            with suppress(asyncio.CancelledError):
+            try:
                 await self._tick_recorder_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001 - shutdown must finish after a failed task
+                sanitise_error = getattr(self._tick_recorder, "sanitise_error", None)
+                try:
+                    diagnostic = (
+                        sanitise_error(exc)
+                        if callable(sanitise_error)
+                        else type(exc).__name__
+                    )
+                except Exception:  # pragma: no cover - a diagnostic helper must not block shutdown
+                    diagnostic = type(exc).__name__
+                logger.warning(
+                    "Tick recorder task ended with an error during shutdown (%s)",
+                    diagnostic,
+                )
 
         # Stop the reconciliation runner (signal the loop, then cancel the task)
         if self._reconciliation_runner is not None:
