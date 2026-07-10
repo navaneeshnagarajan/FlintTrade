@@ -95,7 +95,7 @@ class NewsArticle:
     _feed_title: str = field(default="", repr=False, compare=False)
 
     def __init__(self, *args: str, **kwargs: str) -> None:
-        """Build a canonical article, adapting the legacy five-positional shape."""
+        """Build one article while adapting recognisable legacy positional calls."""
         canonical_fields = ("title", "summary", "link", "published", "source", "content_hash")
         legacy_fields = ("title", "link", "summary", "published", "source")
         allowed = {*canonical_fields, "feed_title"}
@@ -106,7 +106,21 @@ class NewsArticle:
         if len(args) > len(canonical_fields):
             raise TypeError(f"NewsArticle expected at most 6 positional arguments, got {len(args)}")
 
-        positional_fields = legacy_fields if len(args) == 5 else canonical_fields[: len(args)]
+        legacy_complete = 2 <= len(args) <= 5 and all(name in kwargs for name in legacy_fields[len(args) :])
+        use_legacy_order = False
+        if legacy_complete:
+            second = args[1].strip().lower()
+            third = args[2].strip().lower() if len(args) >= 3 else ""
+            second_is_link = second.startswith(("http://", "https://", "www.", "/"))
+            third_is_link = third.startswith(("http://", "https://", "www.", "/"))
+            if second_is_link != third_is_link:
+                use_legacy_order = second_is_link
+            elif len(args) >= 3 and bool(second) != bool(third):
+                use_legacy_order = not second
+            else:
+                use_legacy_order = True
+
+        positional_fields = legacy_fields[: len(args)] if use_legacy_order else canonical_fields[: len(args)]
         values = dict.fromkeys(canonical_fields, "")
         assigned = set(positional_fields)
         values.update(zip(positional_fields, args, strict=True))

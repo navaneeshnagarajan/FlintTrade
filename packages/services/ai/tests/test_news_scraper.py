@@ -415,6 +415,60 @@ class TestNewsScraper:
         assert article.link == "/article"
         assert article.summary == "Article summary"
 
+    @pytest.mark.parametrize(
+        "args,kwargs",
+        [
+            (
+                ("Headline", "/article"),
+                {"summary": "Article summary", "published": "2026-04-09", "source": "moneycontrol"},
+            ),
+            (
+                ("Headline", "/article", "Article summary"),
+                {"published": "2026-04-09", "source": "moneycontrol"},
+            ),
+            (
+                ("Headline", "/article", "Article summary", "2026-04-09"),
+                {"source": "moneycontrol"},
+            ),
+        ],
+    )
+    def test_partial_legacy_positional_article_order_is_adapted(
+        self,
+        args: tuple[str, ...],
+        kwargs: dict[str, str],
+    ) -> None:
+        article = NewsArticle(*args, **kwargs)
+
+        assert article.title == "Headline"
+        assert article.link == "/article"
+        assert article.summary == "Article summary"
+        assert article.published == "2026-04-09"
+        assert article.source == "moneycontrol"
+
+    def test_canonical_positional_article_order_remains_available(self) -> None:
+        article = NewsArticle(
+            "Headline",
+            "Article summary",
+            "/article",
+            "2026-04-09",
+            "moneycontrol",
+            "fixed-hash",
+        )
+
+        assert article.summary == "Article summary"
+        assert article.link == "/article"
+        assert article.content_hash == "fixed-hash"
+
+        five_field_article = NewsArticle(
+            "Headline",
+            "Article summary",
+            "/article",
+            "2026-04-09",
+            "moneycontrol",
+        )
+        assert five_field_article.summary == "Article summary"
+        assert five_field_article.link == "/article"
+
     def test_keyword_fields_never_use_legacy_positional_adaptation(self) -> None:
         article = NewsArticle(
             title="Headline",
@@ -424,3 +478,20 @@ class TestNewsScraper:
 
         assert article.summary == "https://source.example"
         assert article.link == "/article"
+
+    def test_legacy_module_is_canonical_compatibility_surface(self) -> None:
+        from flinttrade_ai import news_scraper as legacy
+        from flinttrade_ai import sentiment
+
+        for name in (
+            "IST",
+            "RSS_SOURCES",
+            "NewsArticle",
+            "NewsScraper",
+            "_CACHE_TTL_SECS",
+            "_link",
+            "_parse_rss_xml",
+            "_strip_html",
+            "_text",
+        ):
+            assert getattr(legacy, name) is getattr(sentiment, name)

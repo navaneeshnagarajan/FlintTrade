@@ -510,3 +510,26 @@ def test_package_root_exports_canonical_structured_sentiment() -> None:
     assert SentimentLabel is sentiment.SentimentLabel
     assert generate_market_summary is sentiment.generate_market_summary
     assert sentiment_label_from_score is sentiment.sentiment_label_from_score
+
+
+def test_legacy_module_is_canonical_compatibility_surface() -> None:
+    from flinttrade_ai import sentiment
+    from flinttrade_ai import structured_sentiment as legacy
+
+    for name in (
+        "MARKET_SUMMARY_SCHEMA",
+        "FiiDiiFlow",
+        "IndexSignal",
+        "IndexSnapshot",
+        "MarketSummary",
+        "SectorOutlook",
+        "SentimentLabel",
+        "_SCHEMA_HINT",
+        "_SYSTEM_PROMPT",
+        "_USER_PROMPT_TEMPLATE",
+        "_build_prompt",
+        "generate_market_summary",
+        "prepare_market_summary_data",
+        "sentiment_label_from_score",
+    ):
+        assert getattr(legacy, name) is getattr(sentiment, name)
