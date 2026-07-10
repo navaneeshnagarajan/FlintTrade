@@ -49,6 +49,7 @@ class RetrainConfig(BaseModel):
 
     retrain_interval_hours: int = Field(default=24, ge=1)
     min_accuracy: float = Field(default=0.55, ge=0.0, le=1.0)
+    min_training_rows: int = Field(default=100, ge=30)
     lookback_days: int = Field(default=365, ge=30)
     validation_split: float = Field(default=0.2, gt=0.0, lt=1.0)
     drift_threshold: float = Field(default=0.1, gt=0.0, le=1.0)
@@ -356,6 +357,14 @@ class SignalRetrainer:
         except Exception as exc:  # noqa: BLE001 - one instrument must not stop the roster
             return self._record_failure(started, symbol, exchange, f"Data fetch failed: {exc}")
 
+        if len(bars) < self.config.min_training_rows:
+            return self._record_failure(
+                started,
+                symbol,
+                exchange,
+                f"Insufficient data: {len(bars)} bars; need at least {self.config.min_training_rows}",
+            )
+
         features = engineer_features(bars)
         if not features.values:
             return self._record_failure(started, symbol, exchange, f"Insufficient data: {len(bars)} bars")
@@ -389,7 +398,11 @@ class SignalRetrainer:
 
         candidate = SignalGenerator()
         try:
-            metrics = candidate.train(bars, test_ratio=self.config.validation_split)
+            metrics = candidate.train(
+                bars,
+                test_ratio=self.config.validation_split,
+                min_training_rows=self.config.min_training_rows,
+            )
         except Exception as exc:  # noqa: BLE001 - optional ML dependencies may be absent
             return self._record_failure(
                 started,
@@ -468,7 +481,7 @@ class SignalRetrainer:
         with self._history_lock:
             return list(self._history)
 
-    def get_generator(self, symbol: str, exchange: str) -> SignalGenerator | None:
+    def get_generator(self, exchange: str, symbol: str) -> SignalGenerator | None:
         """Return the retrainer's last accepted generator for an instrument."""
         with self._promotion_lock:
             return self._live_generators.get((exchange, symbol))

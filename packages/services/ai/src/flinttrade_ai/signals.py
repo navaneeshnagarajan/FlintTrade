@@ -29,6 +29,10 @@ except ImportError:  # numpy not installed — use plain lists throughout
 
 logger = logging.getLogger("flinttrade.ai.signals")
 
+_CANONICAL_PROBABILITY_LABELS = ("SELL", "HOLD", "BUY")
+_LEGACY_PROBABILITY_LABELS = ("BUY", "HOLD", "SELL")
+_LEGACY_FEATURE_NAMES = frozenset({"rsi", "bb_position", "returns_1", "returns_5", "hl_range"})
+
 
 class SignalAction(StrEnum):
     BUY = "BUY"
@@ -45,6 +49,21 @@ class MLSignal:
     symbol: str = ""
     features: dict[str, float] = field(default_factory=dict)
     timestamp: str = ""
+    signal_code: int = 1
+    probabilities: list[float] = field(default_factory=lambda: [0.0, 1.0, 0.0])
+    probability_labels: list[str] = field(default_factory=lambda: list(_CANONICAL_PROBABILITY_LABELS))
+    feature_importance: dict[str, float] = field(default_factory=dict)
+    error: str = ""
+
+    @property
+    def signal(self) -> str:
+        """Return the prediction action under the former advisor name."""
+        return self.action
+
+    @property
+    def success(self) -> bool:
+        """Return whether prediction completed without an error."""
+        return not self.error
 
     @property
     def is_actionable(self) -> bool:
@@ -240,11 +259,24 @@ def generate_labels(
     lookahead: int = 5,
     threshold_pct: float = 0.5,
     offset: int = 20,
+    *,
+    buy_threshold_pct: float | None = None,
+    sell_threshold_pct: float | None = None,
 ) -> list[int]:
     """Generate labels: 2=BUY, 0=SELL, 1=HOLD based on future returns.
 
-    A future return > threshold → BUY, < -threshold → SELL, else HOLD.
+    A future return above the positive BUY threshold is BUY, below the
+    negative SELL threshold is SELL, and values between them are HOLD.
     """
+    if threshold_pct <= 0:
+        raise ValueError("threshold_pct must be positive")
+    buy_threshold = threshold_pct if buy_threshold_pct is None else buy_threshold_pct
+    sell_threshold = -threshold_pct if sell_threshold_pct is None else sell_threshold_pct
+    if buy_threshold <= 0:
+        raise ValueError("buy_threshold_pct must be positive")
+    if sell_threshold >= 0:
+        raise ValueError("sell_threshold_pct must be negative")
+
     labels: list[int] = []
     for i in range(offset, len(closes)):
         future_idx = i + lookahead
@@ -252,9 +284,9 @@ def generate_labels(
             labels.append(1)  # HOLD for insufficient future data
             continue
         ret = (closes[future_idx] - closes[i]) / closes[i] * 100
-        if ret > threshold_pct:
+        if ret > buy_threshold:
             labels.append(2)  # BUY
-        elif ret < -threshold_pct:
+        elif ret < sell_threshold:
             labels.append(0)  # SELL
         else:
             labels.append(1)  # HOLD
@@ -446,6 +478,8 @@ class SignalGenerator:
     def __init__(self) -> None:
         self._model = None
         self._feature_names: list[str] = []
+        self._feature_semantics = "canonical"
+        self._probability_labels = _CANONICAL_PROBABILITY_LABELS
 
     @property
     def is_trained(self) -> bool:
@@ -457,12 +491,20 @@ class SignalGenerator:
         lookahead: int = 5,
         threshold_pct: float = 0.5,
         test_ratio: float = 0.2,
+        buy_threshold_pct: float | None = None,
+        sell_threshold_pct: float | None = None,
+        min_training_rows: int = 30,
         **lgb_params: Any,
-    ) -> dict[str, float]:
+    ) -> dict[str, Any]:
         """Train a LightGBM classifier on historical bar data.
 
         Returns dict with train_accuracy, test_accuracy, feature_importances.
         """
+        if min_training_rows < 30:
+            raise ValueError("min_training_rows must be at least 30")
+        if len(bars) < min_training_rows:
+            raise ValueError(f"Historical data has {len(bars)} rows; need at least {min_training_rows}")
+
         try:
             import lightgbm as lgb
         except (ImportError, OSError):
@@ -473,7 +515,13 @@ class SignalGenerator:
             raise ValueError("Not enough bars to generate features (need 30+)")
 
         closes = [float(b["close"]) for b in bars]
-        labels = generate_labels(closes, lookahead, threshold_pct)
+        labels = generate_labels(
+            closes,
+            lookahead,
+            threshold_pct,
+            buy_threshold_pct=buy_threshold_pct,
+            sell_threshold_pct=sell_threshold_pct,
+        )
 
         # Align feature rows and labels
         n = min(len(features.values), len(labels))
@@ -507,6 +555,8 @@ class SignalGenerator:
             valid_sets=[valid_data],
             callbacks=[lgb.log_evaluation(period=0)],
         )
+        self._feature_semantics = "canonical"
+        self._probability_labels = _CANONICAL_PROBABILITY_LABELS
 
         # Evaluate
         train_preds = [max(range(3), key=lambda c: row[c]) for row in self._model.predict(X_train)]
@@ -515,7 +565,11 @@ class SignalGenerator:
         test_acc = sum(1 for a, b in zip(test_preds, y_test) if a == b) / len(y_test) if y_test else 0
 
         logger.info("Signal model trained: train_acc=%.2f, test_acc=%.2f", train_acc, test_acc)
-        return {"train_accuracy": train_acc, "test_accuracy": test_acc}
+        return {
+            "train_accuracy": train_acc,
+            "test_accuracy": test_acc,
+            "feature_importances": self._feature_importance(),
+        }
 
     def predict(
         self,
@@ -524,45 +578,55 @@ class SignalGenerator:
         **market_data: Any,
     ) -> MLSignal:
         """Generate a signal from recent bars."""
-        if not self._model:
-            return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
+        if self._model is None:
+            return self._error_signal("Model not trained. Call train() or load() first.", symbol=symbol)
 
-        features = engineer_features(
-            bars,
-            pcr_values=market_data.get("pcr_values"),
-            max_pain_values=market_data.get("max_pain_values"),
-            iv_percentile_values=market_data.get("iv_percentile_values"),
-        )
-        if not features.values:
-            return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
-
-        available_features = dict(zip(features.names, features.values[-1], strict=True))
-        unknown_features = [name for name in self._feature_names if name not in available_features]
-        if unknown_features:
-            logger.error(
-                "Signal model for %s has unsupported persisted features: %s",
-                symbol or "<unknown>",
-                ", ".join(unknown_features),
+        try:
+            features = engineer_features(
+                bars,
+                pcr_values=market_data.get("pcr_values"),
+                max_pain_values=market_data.get("max_pain_values"),
+                iv_percentile_values=market_data.get("iv_percentile_values"),
             )
-            return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
+            if not features.values:
+                return self._error_signal("Insufficient data to generate prediction features.", symbol=symbol)
 
-        # Persisted model schemas are the source of truth: older models need
-        # their original column order, while new models receive the full union.
-        row = [available_features[name] for name in self._feature_names]
-        probs = self._model.predict([row])[0]
-        pred_class = max(range(3), key=lambda c: probs[c])
-        confidence = float(probs[pred_class])
+            available_features = self._model_feature_values(features)
+            unknown_features = [name for name in self._feature_names if name not in available_features]
+            if unknown_features:
+                message = f"Unsupported persisted features: {', '.join(unknown_features)}"
+                logger.error("Signal model for %s has %s", symbol or "<unknown>", message.lower())
+                return self._error_signal(message, symbol=symbol)
 
-        action_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
-        feat_dict = dict(zip(self._feature_names, row, strict=True))
+            # Persisted model schemas are the source of truth: older models need
+            # their original column order, while new models receive the full union.
+            row = [available_features[name] for name in self._feature_names]
+            if self._feature_semantics == "legacy":
+                raw_probabilities = self._model.predict_proba([row])[0]
+            else:
+                raw_probabilities = self._model.predict([row])[0]
+            probabilities = [float(value) for value in raw_probabilities]
+            if len(probabilities) != len(self._probability_labels):
+                raise ValueError(
+                    f"Model returned {len(probabilities)} probabilities; expected {len(self._probability_labels)}"
+                )
+            pred_class = max(range(len(probabilities)), key=probabilities.__getitem__)
+            feat_dict = dict(zip(self._feature_names, row, strict=True))
 
-        return MLSignal(
-            action=action_map[pred_class],
-            confidence=confidence,
-            symbol=symbol,
-            features=feat_dict,
-            timestamp=str(bars[-1].get("timestamp", "")) if bars else "",
-        )
+            return MLSignal(
+                action=self._probability_labels[pred_class],
+                confidence=probabilities[pred_class],
+                symbol=symbol,
+                features=feat_dict,
+                timestamp=str(bars[-1].get("timestamp", "")) if bars else "",
+                signal_code=pred_class,
+                probabilities=probabilities,
+                probability_labels=list(self._probability_labels),
+                feature_importance=self._feature_importance(),
+            )
+        except Exception as exc:  # noqa: BLE001 - prediction is a fail-closed advisory path
+            logger.error("Signal model prediction failed for %s: %s", symbol or "<unknown>", exc)
+            return self._error_signal(str(exc), symbol=symbol)
 
     def save(self, path: str) -> None:
         """Save trained model to disk with a SHA-256 integrity sidecar."""
@@ -572,7 +636,15 @@ class SignalGenerator:
             raise ImportError("joblib required — pip install joblib")
         model_path = Path(path)
         model_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump({"model": self._model, "feature_names": self._feature_names}, model_path)
+        joblib.dump(
+            {
+                "model": self._model,
+                "feature_names": self._feature_names,
+                "feature_semantics": self._feature_semantics,
+                "probability_labels": list(self._probability_labels),
+            },
+            model_path,
+        )
         self._checksum_path(model_path).write_text(self._compute_sha256(model_path), encoding="ascii")
         logger.info("Signal model saved to %s", path)
 
@@ -622,8 +694,75 @@ class SignalGenerator:
         if not isinstance(feature_names, list) or not all(isinstance(name, str) for name in feature_names):
             raise ValueError("Signal model payload has invalid feature names")
 
+        feature_semantics = data.get("feature_semantics")
+        if feature_semantics is None:
+            feature_semantics = "legacy" if self._is_legacy_feature_schema(feature_names) else "canonical"
+        if feature_semantics not in {"canonical", "legacy"}:
+            raise ValueError("Signal model payload has invalid feature semantics")
+
+        probability_labels = data.get("probability_labels")
+        if probability_labels is None:
+            probability_labels = (
+                _LEGACY_PROBABILITY_LABELS if feature_semantics == "legacy" else _CANONICAL_PROBABILITY_LABELS
+            )
+        if tuple(probability_labels) not in {_CANONICAL_PROBABILITY_LABELS, _LEGACY_PROBABILITY_LABELS}:
+            raise ValueError("Signal model payload has invalid probability labels")
+
         self._model = model
         self._feature_names = feature_names
+        self._feature_semantics = feature_semantics
+        self._probability_labels = tuple(probability_labels)
+
+    def _model_feature_values(self, features: FeatureSet) -> dict[str, float]:
+        """Adapt canonical values to a verified legacy schema when required."""
+        values = dict(zip(features.names, features.values[-1], strict=True))
+        if self._feature_semantics != "legacy":
+            return values
+
+        values.update(
+            {
+                "rsi": values["rsi_14"] * 100.0,
+                "macd_hist": values["macd"] - values["macd_signal"],
+                "bb_position": values["bb_pct"],
+                "returns_1": math.log1p(values["return_1"]),
+                "returns_5": math.log1p(values["return_5"]),
+                "hl_range": values["high_low_range"],
+            }
+        )
+        return values
+
+    def _feature_importance(self) -> dict[str, float]:
+        """Return model feature importance for Booster and sklearn-style models."""
+        if self._model is None:
+            return {}
+        try:
+            booster_importance = getattr(self._model, "feature_importance", None)
+            if callable(booster_importance):
+                importances = booster_importance()
+            else:
+                importances = self._model.feature_importances_
+            if hasattr(importances, "tolist"):
+                importances = importances.tolist()
+            return {name: float(value) for name, value in zip(self._feature_names, importances, strict=False)}
+        except (AttributeError, TypeError, ValueError):
+            return {}
+
+    def _error_signal(self, error: str, *, symbol: str) -> MLSignal:
+        """Return the stable HOLD result for a failed prediction."""
+        return MLSignal(
+            action="HOLD",
+            confidence=0.0,
+            symbol=symbol,
+            signal_code=1,
+            probabilities=[0.0, 1.0, 0.0],
+            probability_labels=list(self._probability_labels),
+            error=error,
+        )
+
+    @staticmethod
+    def _is_legacy_feature_schema(feature_names: list[str]) -> bool:
+        """Return whether persisted names require former advisor semantics."""
+        return bool(_LEGACY_FEATURE_NAMES.intersection(feature_names))
 
     @staticmethod
     def _checksum_path(model_path: Path) -> Path:

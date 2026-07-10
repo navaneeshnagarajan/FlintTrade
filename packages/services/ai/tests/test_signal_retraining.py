@@ -94,7 +94,7 @@ def _install_train_stub(monkeypatch: pytest.MonkeyPatch, *, test_accuracy: float
 def _config(tmp_path: Path, **overrides: Any):
     from flinttrade_ai.signal_retraining import RetrainConfig
 
-    values = {"model_dir": tmp_path, "min_accuracy": 0.55, **overrides}
+    values = {"model_dir": tmp_path, "min_accuracy": 0.55, "min_training_rows": 30, **overrides}
     return RetrainConfig(**values)
 
 
@@ -129,6 +129,7 @@ def test_retrain_config_preserves_reviewed_defaults() -> None:
 
     assert config.retrain_interval_hours == 24
     assert config.min_accuracy == 0.55
+    assert config.min_training_rows == 100
     assert config.lookback_days == 365
     assert config.validation_split == 0.2
     assert config.drift_threshold == 0.1
