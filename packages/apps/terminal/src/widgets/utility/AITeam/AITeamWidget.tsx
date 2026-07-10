@@ -11,18 +11,28 @@
  * LLM). Read-only / advisory — nothing here touches the gated order path.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, Play, Save } from "lucide-react";
+import { LoaderCircle, Play, Save, Square, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   getTeamConfig,
   updateTeamConfig,
-  runTeamAnalysis,
+  runTeamAnalysisStream,
   type AgentRoleConfig,
+  type TeamAnalyzeResponse,
+  type TeamLifecycleEvent,
+  type TeamMode,
 } from "@/services/ftApi.ai";
 
 const ROLE_LABELS: Record<AgentRoleConfig["role_type"], string> = {
@@ -32,6 +42,24 @@ const ROLE_LABELS: Record<AgentRoleConfig["role_type"], string> = {
   risk_manager: "Risk",
   aggregator: "Aggregator",
 };
+
+const MODE_LABELS: Record<TeamMode, string> = {
+  flat: "Flat",
+  dag: "DAG",
+  sequential: "Sequential",
+  debate: "Debate",
+};
+
+const DEFAULT_MODES: TeamMode[] = ["flat", "dag", "sequential", "debate"];
+const CUSTOM_PRESET = "custom";
+
+function formatName(value: string): string {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatEventType(value: TeamLifecycleEvent["event_type"]): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
 
 function signalClass(signal: string): string {
   if (signal === "BUY") return "text-profit";
@@ -44,13 +72,30 @@ export default function AITeamWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [exchange, setExchange] = useState("NSE_INDEX");
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+  const [mode, setMode] = useState<TeamMode>("flat");
+  const [selectedPreset, setSelectedPreset] = useState(CUSTOM_PRESET);
+  const [result, setResult] = useState<TeamAnalyzeResponse>();
+  const [events, setEvents] = useState<TeamLifecycleEvent[]>([]);
+  const [analysisError, setAnalysisError] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef(0);
 
   const configQuery = useQuery({
     queryKey: ["ai", "team", "config"],
     queryFn: getTeamConfig,
   });
 
-  const agents = useMemo(() => configQuery.data?.agents ?? [], [configQuery.data]);
+  const agents = useMemo(() => {
+    const configured = configQuery.data?.agents ?? [];
+    if (selectedPreset === CUSTOM_PRESET) {
+      return configQuery.data?.custom_agents ?? configured;
+    }
+    return configured;
+  }, [configQuery.data, selectedPreset]);
+  const modes = configQuery.data?.modes?.length ? configQuery.data.modes : DEFAULT_MODES;
+  const presets = configQuery.data?.presets ?? [];
+  const supportsPresets = mode === "flat" || mode === "dag";
 
   // Mirror the server roster's enabled flags into local toggle state once loaded.
   useEffect(() => {
@@ -59,21 +104,93 @@ export default function AITeamWidget() {
     }
   }, [agents]);
 
-  const dirty = agents.some((a) => (enabled[a.name] ?? a.enabled) !== a.enabled);
+  useEffect(() => {
+    setSelectedPreset(configQuery.data?.active_preset || CUSTOM_PRESET);
+  }, [configQuery.data?.active_preset]);
+
+  useEffect(
+    () => () => {
+      runIdRef.current += 1;
+      abortControllerRef.current?.abort();
+    },
+    [],
+  );
+
+  const rosterDirty = agents.some((a) => (enabled[a.name] ?? a.enabled) !== a.enabled);
+  const customRosterDirty = selectedPreset === CUSTOM_PRESET && rosterDirty;
+  const serverPreset = configQuery.data?.active_preset || CUSTOM_PRESET;
+  const dirty = rosterDirty || selectedPreset !== serverPreset;
 
   const save = useMutation({
-    mutationFn: () =>
-      updateTeamConfig({
+    mutationFn: () => {
+      if (selectedPreset !== CUSTOM_PRESET) return updateTeamConfig({ preset: selectedPreset });
+      return updateTeamConfig({
         agents: agents.map((a) => ({ ...a, enabled: enabled[a.name] ?? a.enabled })),
-      }),
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ai", "team", "config"] }),
   });
 
-  const analysis = useMutation({
-    mutationFn: () => runTeamAnalysis(symbol.trim(), exchange.trim()),
-  });
+  const runAnalysis = useCallback(async () => {
+    const trimmedSymbol = symbol.trim();
+    const trimmedExchange = exchange.trim();
+    if (!trimmedSymbol || !trimmedExchange || isRunning) return;
 
-  const result = analysis.data;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+    abortControllerRef.current = controller;
+    setIsRunning(true);
+    setAnalysisError("");
+    setEvents([]);
+    setResult(undefined);
+
+    try {
+      const options = {
+        mode,
+        preset: supportsPresets && selectedPreset !== CUSTOM_PRESET ? selectedPreset : null,
+      };
+      let receivedResult = false;
+      for await (const frame of runTeamAnalysisStream(
+        trimmedSymbol,
+        trimmedExchange,
+        undefined,
+        options,
+        controller.signal,
+      )) {
+        if (controller.signal.aborted || runIdRef.current !== runId) break;
+        if (frame.type === "event") {
+          setEvents((previous) => [...previous, frame.event]);
+        } else if (frame.type === "result") {
+          receivedResult = true;
+          setResult(frame.data);
+        } else if (frame.type === "error") {
+          throw new Error(frame.message);
+        }
+      }
+      if (!controller.signal.aborted && !receivedResult) {
+        throw new Error("Team analysis ended before a result was received.");
+      }
+    } catch (error) {
+      if (!controller.signal.aborted && runIdRef.current === runId) {
+        setResult(undefined);
+        setAnalysisError(error instanceof Error ? error.message : "Team analysis failed.");
+      }
+    } finally {
+      if (runIdRef.current === runId) {
+        abortControllerRef.current = null;
+        setIsRunning(false);
+      }
+    }
+  }, [exchange, isRunning, mode, selectedPreset, supportsPresets, symbol]);
+
+  const stopAnalysis = useCallback(() => {
+    runIdRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsRunning(false);
+  }, []);
 
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-y-auto" data-testid="aiteam-widget">
@@ -115,7 +232,11 @@ export default function AITeamWidget() {
                 </div>
                 <Switch
                   checked={enabled[a.name] ?? a.enabled}
-                  onCheckedChange={(v) => setEnabled((prev) => ({ ...prev, [a.name]: v }))}
+                  onCheckedChange={(v) => {
+                    setEnabled((prev) => ({ ...prev, [a.name]: v }));
+                    setSelectedPreset(CUSTOM_PRESET);
+                  }}
+                  disabled={selectedPreset !== CUSTOM_PRESET}
                   aria-label={`Toggle ${a.name}`}
                 />
               </li>
@@ -129,7 +250,7 @@ export default function AITeamWidget() {
         className="grid grid-cols-1 gap-2 rounded-lg border border-border-default bg-surface-base p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (symbol.trim() && exchange.trim()) analysis.mutate();
+          void runAnalysis();
         }}
       >
         <div className="grid grid-cols-2 gap-2">
@@ -148,20 +269,90 @@ export default function AITeamWidget() {
             className="h-7 text-xs"
           />
         </div>
-        <Button
-          type="submit"
-          size="sm"
-          className="h-7 text-xs"
-          disabled={!symbol.trim() || !exchange.trim() || analysis.isPending}
+        <div className="flex flex-wrap gap-1" aria-label="Team analysis mode">
+          {modes.map((availableMode) => (
+            <Button
+              key={availableMode}
+              type="button"
+              size="sm"
+              variant={mode === availableMode ? "default" : "outline"}
+              className="h-6 px-2 text-xxs"
+              aria-pressed={mode === availableMode}
+              onClick={() => setMode(availableMode)}
+            >
+              {MODE_LABELS[availableMode]}
+            </Button>
+          ))}
+        </div>
+        <Select
+          value={supportsPresets ? selectedPreset : CUSTOM_PRESET}
+          onValueChange={setSelectedPreset}
+          disabled={!supportsPresets}
         >
-          <Play size={12} className="mr-1" aria-hidden="true" />
-          {analysis.isPending ? "Analysing…" : "Run team analysis"}
-        </Button>
-        {analysis.isError && (
+          <SelectTrigger className="h-7 w-full text-xs" aria-label="Team preset">
+            <SelectValue placeholder="Custom roster" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={CUSTOM_PRESET}>Custom roster</SelectItem>
+            {presets.map((preset) => (
+              <SelectItem key={preset.name} value={preset.name}>
+                {formatName(preset.name)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {isRunning ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={stopAnalysis}
+            aria-label="Stop team analysis"
+          >
+            <Square size={11} className="mr-1" aria-hidden="true" />
+            Stop
+          </Button>
+        ) : (
+          <Button
+            type="submit"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={!symbol.trim() || !exchange.trim() || customRosterDirty}
+            title={customRosterDirty ? "Save the custom roster before analysis" : undefined}
+          >
+            <Play size={12} className="mr-1" aria-hidden="true" />
+            Run team analysis
+          </Button>
+        )}
+        {events.length > 0 && (
+          <div
+            role="status"
+            aria-label="Team analysis progress"
+            className="space-y-1 border-t border-border-subtle pt-2"
+          >
+            {events.map((event, index) => (
+              <div
+                key={`${event.task_id}:${event.event_type}:${event.timestamp}:${index}`}
+                className="flex items-center justify-between gap-2 text-xxs"
+              >
+                <span className="truncate text-text-secondary">{event.agent_role}</span>
+                <span className="flex shrink-0 items-center gap-1 text-text-muted">
+                  {event.event_type === "started" && isRunning && (
+                    <LoaderCircle size={10} className="animate-spin" aria-hidden="true" />
+                  )}
+                  {formatEventType(event.event_type)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {analysisError && (
           <p className="text-xxs text-loss">
-            Analysis failed — configure an LLM provider in Settings, then retry.
+            Analysis failed — configure an LLM provider in Settings, then retry. {analysisError}
           </p>
         )}
+        {save.isError && <p className="text-xxs text-loss">Team configuration could not be saved.</p>}
       </form>
 
       {/* Results */}
