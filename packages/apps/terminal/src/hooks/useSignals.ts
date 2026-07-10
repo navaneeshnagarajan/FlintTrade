@@ -11,7 +11,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { z } from "zod";
 import { getBase } from "@/services/ftApi.helpers";
 import { safeParse } from "@/lib/safeParse";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +19,7 @@ import {
   getSignalConfig,
   updateSignalConfig,
 } from "@/services/ftApi";
+import { signalEventSchema } from "@/services/ftApi.ai";
 import type { SignalConfig, SignalEvent } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { isMarketHours } from "@/lib/market";
@@ -28,21 +28,7 @@ import { isMarketHours } from "@/lib/market";
 // Sample data for explore mode
 // ---------------------------------------------------------------------------
 
-export const signalEventSchema = z.object({
-  event_id: z.number().int().nonnegative().default(0),
-  timestamp: z.string(),
-  symbol: z.string(),
-  exchange: z.string().default(""),
-  signal_type: z.enum(["BUY", "SELL", "HOLD", "ALERT"]),
-  source: z.enum(["rule", "ml"]).default("rule"),
-  method: z.string().default(""),
-  indicator: z.string(),
-  value: z.number(),
-  threshold: z.number(),
-  confidence: z.number(),
-  message: z.string(),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-}) satisfies z.ZodType<SignalEvent>;
+export { signalEventSchema };
 
 const SAMPLE_SIGNALS: SignalEvent[] = [
   {
@@ -66,14 +52,14 @@ const SAMPLE_SIGNALS: SignalEvent[] = [
     symbol: "BANKNIFTY",
     exchange: "NSE_INDEX",
     signal_type: "SELL",
-    source: "rule",
-    method: "EMA_Cross",
-    indicator: "EMA_Cross",
-    value: -45.2,
+    source: "ml",
+    method: "ml_model",
+    indicator: "LightGBM",
+    value: 51_420,
     threshold: 0,
-    confidence: 0.65,
-    message: "BANKNIFTY EMA(9) crossed below EMA(21)",
-    metadata: {},
+    confidence: 0.74,
+    message: "BANKNIFTY scheduled ML model signal: SELL",
+    metadata: { turbulence_score: 0.18 },
   },
   {
     event_id: 1,
@@ -81,13 +67,13 @@ const SAMPLE_SIGNALS: SignalEvent[] = [
     symbol: "NIFTY",
     exchange: "NSE_INDEX",
     signal_type: "BUY",
-    source: "rule",
-    method: "MACD",
-    indicator: "MACD",
-    value: 12.3,
+    source: "fallback",
+    method: "ema_crossover_fallback",
+    indicator: "EMA_Cross",
+    value: 24_240,
     threshold: 0,
-    confidence: 0.60,
-    message: "NIFTY MACD histogram turned positive (12.30)",
+    confidence: 0.55,
+    message: "NIFTY scheduled EMA crossover fallback signal: BUY",
     metadata: {},
   },
 ];
@@ -115,7 +101,7 @@ export function useRecentSignals(limit = 20) {
   const mode = useModeStore((s) => s.mode);
 
   return useQuery<{ signals: SignalEvent[] }>({
-    queryKey: ["signals", "recent", limit],
+    queryKey: ["signals", "recent", mode, limit],
     queryFn: () => {
       if (mode === "explore") {
         return Promise.resolve({ signals: SAMPLE_SIGNALS });
@@ -123,7 +109,7 @@ export function useRecentSignals(limit = 20) {
       return getRecentSignals(limit);
     },
     staleTime: 5_000,
-    refetchInterval: () => (isMarketHours() ? 5_000 : false),
+    refetchInterval: () => (isMarketHours() ? 5_000 : 60_000),
     retry: false,
   });
 }
@@ -136,7 +122,7 @@ export function useSignalConfig() {
   const mode = useModeStore((s) => s.mode);
 
   return useQuery<SignalConfig>({
-    queryKey: ["signals", "config"],
+    queryKey: ["signals", "config", mode],
     queryFn: () => {
       if (mode === "explore") {
         return Promise.resolve(SAMPLE_CONFIG);

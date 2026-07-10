@@ -156,7 +156,7 @@ class LiveSignalPipeline:
                         threshold=oversold,
                         confidence=min(1.0, (oversold - rsi_val) / oversold + 0.5),
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
-                                f"below oversold threshold {oversold:.0f}",
+                        f"below oversold threshold {oversold:.0f}",
                     )
                     self._publish_locked(sig)
                     return sig
@@ -171,7 +171,7 @@ class LiveSignalPipeline:
                         threshold=overbought,
                         confidence=min(1.0, (rsi_val - overbought) / (100 - overbought) + 0.5),
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
-                                f"above overbought threshold {overbought:.0f}",
+                        f"above overbought threshold {overbought:.0f}",
                     )
                     self._publish_locked(sig)
                     return sig
@@ -196,8 +196,7 @@ class LiveSignalPipeline:
                             value=fast_val - slow_val,
                             threshold=0.0,
                             confidence=0.65,
-                            message=f"{symbol} EMA({state.ema_fast.period}) "
-                                    f"crossed above EMA({state.ema_slow.period})",
+                            message=f"{symbol} EMA({state.ema_fast.period}) crossed above EMA({state.ema_slow.period})",
                         )
                         self._publish_locked(sig)
                         state.prev_ema_fast = fast_val
@@ -214,8 +213,7 @@ class LiveSignalPipeline:
                             value=fast_val - slow_val,
                             threshold=0.0,
                             confidence=0.65,
-                            message=f"{symbol} EMA({state.ema_fast.period}) "
-                                    f"crossed below EMA({state.ema_slow.period})",
+                            message=f"{symbol} EMA({state.ema_fast.period}) crossed below EMA({state.ema_slow.period})",
                         )
                         self._publish_locked(sig)
                         state.prev_ema_fast = fast_val
@@ -226,11 +224,7 @@ class LiveSignalPipeline:
                 state.prev_ema_slow = slow_val
 
         # --- MACD ---
-        if (
-            state.macd_fast_ema is not None
-            and state.macd_slow_ema is not None
-            and state.macd_signal_ema is not None
-        ):
+        if state.macd_fast_ema is not None and state.macd_slow_ema is not None and state.macd_signal_ema is not None:
             macd_fast_val = state.macd_fast_ema.update(ltp)
             macd_slow_val = state.macd_slow_ema.update(ltp)
 
@@ -340,7 +334,15 @@ class LiveSignalPipeline:
                 signal_type = "ALERT"
 
             method = str(info.get("method", "ml_model"))
-            indicator = "LightGBM" if method.startswith("ml_model") else "EMA_Cross"
+            if method.startswith("ml_model"):
+                source = "ml"
+                indicator = "LightGBM"
+            elif method.startswith("ema_crossover_fallback"):
+                source = "fallback"
+                indicator = "EMA_Cross"
+            else:
+                logger.warning("Unknown scheduled signal method %r for %s; event skipped", method, key)
+                continue
             ltp = _as_float(info.get("ltp"))
             turbulence = _as_float(info.get("turbulence_score"))
             confidence = _as_float(info.get("confidence"))
@@ -354,7 +356,7 @@ class LiveSignalPipeline:
                         symbol=symbol,
                         exchange=exchange,
                         signal_type=signal_type,
-                        source="ml",
+                        source=source,
                         method=method,
                         indicator=indicator,
                         value=ltp,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useRecentSignals } from "@/hooks/useSignals";
 import { useSkillStore } from "@/stores/skillStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -40,7 +41,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  getRecentSignals,
   analyzeSentiment,
   queryKnowledge,
   type SignalCardModel,
@@ -145,7 +145,11 @@ function SignalCard({ signal, index }: { signal: SignalCardModel; index: number 
               <span className="text-xs text-text-muted">{signal.exchange}</span>
             )}
             <Badge className="text-xxs px-1.5 py-0 border border-border-default bg-surface-base text-text-secondary">
-              {signal.source === "ml" ? "ML" : "Rule"}
+              {signal.source === "ml"
+                ? "ML"
+                : signal.source === "fallback"
+                  ? "Fallback"
+                  : "Rule"}
             </Badge>
           </div>
           <Badge
@@ -233,11 +237,7 @@ function signalEventToCard(event: SignalEvent): SignalCardModel {
 }
 
 function SignalsSection() {
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["signals"],
-    queryFn: () => getRecentSignals(20),
-    refetchInterval: 30_000,
-  });
+  const { data, isLoading, isError, refetch } = useRecentSignals(20);
 
   const signals = (data?.signals ?? []).map(signalEventToCard);
 
@@ -261,7 +261,7 @@ function SignalsSection() {
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">
           Live indicator rules and scheduled ML analysis share one source-labelled feed.
-          Auto-refreshes every 30s.
+          Polls every 5s while NSE is open and every 60s while closed.
         </p>
       </Card>
 

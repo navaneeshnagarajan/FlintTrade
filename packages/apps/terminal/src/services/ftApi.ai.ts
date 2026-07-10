@@ -1,4 +1,5 @@
 import { buildHeaders, get, getBase, post } from "./ftApi.helpers";
+import { z } from "zod";
 import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -11,7 +12,7 @@ export interface SignalCardModel {
   confidence: number;
   timestamp: string;
   indicators: Record<string, number>;
-  source: "rule" | "ml";
+  source: "rule" | "ml" | "fallback";
   method: string;
   message: string;
 }
@@ -24,7 +25,7 @@ export interface SignalEvent {
   symbol: string;
   exchange: string;
   signal_type: "BUY" | "SELL" | "HOLD" | "ALERT";
-  source: "rule" | "ml";
+  source: "rule" | "ml" | "fallback";
   method: string;
   indicator: string;
   value: number;
@@ -33,6 +34,36 @@ export interface SignalEvent {
   message: string;
   metadata: Record<string, unknown>;
 }
+
+const signalEventPayloadSchema = z.object({
+  event_id: z.number().int().nonnegative().default(0),
+  timestamp: z.string(),
+  symbol: z.string(),
+  exchange: z.string().default(""),
+  signal_type: z.enum(["BUY", "SELL", "HOLD", "ALERT"]),
+  source: z.enum(["rule", "ml", "fallback"]).default("rule"),
+  method: z.string().default(""),
+  indicator: z.string(),
+  value: z.number(),
+  threshold: z.number(),
+  confidence: z.number(),
+  message: z.string(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const signalEventSchema = signalEventPayloadSchema.transform((event): SignalEvent => {
+  if (event.method.startsWith("ema_crossover_fallback")) {
+    return { ...event, source: "fallback" };
+  }
+  if (event.method.startsWith("ml_model")) {
+    return { ...event, source: "ml" };
+  }
+  return event;
+});
+
+const recentSignalsSchema = z.object({
+  signals: z.array(signalEventSchema),
+});
 
 export type LiveSignal = SignalEvent;
 
@@ -164,9 +195,10 @@ export type TeamStreamFrame =
   | { type: "error"; message: string }
   | { type: "done" };
 
-export const getRecentSignals = (limit?: number) => {
+export const getRecentSignals = async (limit?: number) => {
   const qs = limit !== undefined ? `?limit=${limit}` : "";
-  return get<{ signals: SignalEvent[] }>("signals/recent" + qs);
+  const payload = await get<unknown>("signals/recent" + qs);
+  return recentSignalsSchema.parse(payload);
 };
 
 export const getSignalConfig = () => get<SignalConfig>("signals/config");

@@ -42,6 +42,7 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import {
+  getRecentSignals,
   runTeamAnalysisStream,
   startAgent,
   type AgentSnapshot,
@@ -85,6 +86,94 @@ function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknow
   const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
   return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
+
+describe("getRecentSignals", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("normalises older REST events with the canonical identity defaults", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      status: "success",
+      data: {
+        signals: [
+          {
+            timestamp: "2026-04-08T10:00:00Z",
+            symbol: "NIFTY",
+            signal_type: "BUY",
+            indicator: "RSI",
+            value: 25,
+            threshold: 30,
+            confidence: 0.8,
+            message: "Legacy rule signal",
+          },
+        ],
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getRecentSignals(5);
+
+    expect(result.signals[0]).toMatchObject({
+      event_id: 0,
+      exchange: "",
+      source: "rule",
+      method: "",
+      metadata: {},
+    });
+  });
+
+  it("rejects malformed REST events instead of passing unsafe values to the UI", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      status: "success",
+      data: {
+        signals: [
+          {
+            timestamp: "2026-07-10T09:20:00+05:30",
+            symbol: "NIFTY",
+            signal_type: "STRONG_BUY",
+            indicator: "LightGBM",
+            value: 24_500,
+            threshold: 0,
+            confidence: 0.8,
+            message: "Invalid signal type",
+          },
+        ],
+      },
+    })));
+
+    await expect(getRecentSignals()).rejects.toThrow(/signal_type/);
+  });
+
+  it("corrects a mixed-version fallback source from its canonical method", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      status: "success",
+      data: {
+        signals: [
+          {
+            event_id: 21,
+            timestamp: "2026-07-10T09:25:00+05:30",
+            symbol: "NIFTY",
+            exchange: "NSE_INDEX",
+            signal_type: "HOLD",
+            source: "ml",
+            method: "ema_crossover_fallback+turbulence_override",
+            indicator: "EMA_Cross",
+            value: 24_500,
+            threshold: 0,
+            confidence: 0.5,
+            message: "Legacy fallback signal",
+            metadata: {},
+          },
+        ],
+      },
+    })));
+
+    const result = await getRecentSignals();
+
+    expect(result.signals[0].source).toBe("fallback");
+  });
+});
 
 describe("startAgent", () => {
   let fetchMock: ReturnType<typeof vi.fn>;

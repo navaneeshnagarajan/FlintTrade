@@ -127,6 +127,72 @@ def test_hub_ingests_ml_cycle_into_recent_feed() -> None:
     assert event.metadata["turbulence_score"] == 0.2
 
 
+def test_hub_labels_scheduled_ema_fallback_without_claiming_ml() -> None:
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+
+    hub = LiveSignalPipeline()
+    published = hub.ingest_ml_cycle(
+        {
+            "NSE_INDEX:NIFTY": {
+                "symbol": "NIFTY",
+                "exchange": "NSE_INDEX",
+                "signal": "HOLD",
+                "confidence": 0.5,
+                "ltp": 24_500.0,
+                "method": "ema_crossover_fallback",
+            }
+        }
+    )
+
+    assert published[0].source == "fallback"
+    assert published[0].indicator == "EMA_Cross"
+
+
+def test_hub_keeps_turbulence_override_on_the_fallback_source() -> None:
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+
+    hub = LiveSignalPipeline()
+    published = hub.ingest_ml_cycle(
+        {
+            "NSE_INDEX:NIFTY": {
+                "symbol": "NIFTY",
+                "exchange": "NSE_INDEX",
+                "signal": "HOLD",
+                "confidence": 0.5,
+                "ltp": 24_500.0,
+                "method": "ema_crossover_fallback+turbulence_override",
+            }
+        }
+    )
+
+    assert published[0].source == "fallback"
+    assert published[0].method == "ema_crossover_fallback+turbulence_override"
+
+
+def test_hub_rejects_unknown_scheduled_methods_instead_of_mislabelling_them(
+    caplog,
+) -> None:
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+
+    hub = LiveSignalPipeline()
+    published = hub.ingest_ml_cycle(
+        {
+            "NSE_INDEX:NIFTY": {
+                "symbol": "NIFTY",
+                "exchange": "NSE_INDEX",
+                "signal": "BUY",
+                "confidence": 0.8,
+                "ltp": 24_500.0,
+                "method": "future_manual_method",
+            }
+        }
+    )
+
+    assert published == []
+    assert hub.get_recent_signals() == []
+    assert "Unknown scheduled signal method" in caplog.text
+
+
 def test_hub_event_ids_survive_ring_buffer_rollover() -> None:
     from flinttrade_ai.signal_models import SignalEvent
     from flinttrade_ai.signal_pipeline import LiveSignalPipeline, _MAX_SIGNALS
@@ -145,9 +211,7 @@ def test_hub_event_ids_survive_ring_buffer_rollover() -> None:
 
     assert len(hub.signals) == _MAX_SIGNALS
     assert hub.latest_event_id == _MAX_SIGNALS + 5
-    assert [event.event_id for event in retained] == list(
-        range(_MAX_SIGNALS + 1, _MAX_SIGNALS + 6)
-    )
+    assert [event.event_id for event in retained] == list(range(_MAX_SIGNALS + 1, _MAX_SIGNALS + 6))
 
 
 def test_sse_uses_monotonic_ids_after_deque_is_full() -> None:
@@ -157,9 +221,7 @@ def test_sse_uses_monotonic_ids_after_deque_is_full() -> None:
 
     hub = LiveSignalPipeline()
     for index in range(_MAX_SIGNALS + 1):
-        hub.publish_signal(
-            SignalEvent(symbol=f"TEST{index}", source="rule", signal_type="ALERT")
-        )
+        hub.publish_signal(SignalEvent(symbol=f"TEST{index}", source="rule", signal_type="ALERT"))
 
     frame = next(_sse_generator(hub, last_event_id=_MAX_SIGNALS))
     lines = frame.splitlines()

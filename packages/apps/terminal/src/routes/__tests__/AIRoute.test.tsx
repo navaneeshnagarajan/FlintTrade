@@ -109,8 +109,9 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import AIRoute from "../AIRoute";
-import { queryKnowledge } from "@/services/ftApi";
+import { getRecentSignals, queryKnowledge } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -130,6 +131,7 @@ function renderAI() {
 describe("AIRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useModeStore.setState({ mode: "explore" });
   });
 
   it("renders the AI Center heading", () => {
@@ -155,16 +157,22 @@ describe("AIRoute", () => {
     expect(nav).not.toHaveClass("bottom-5");
   });
 
-  it("shows the unified signal source and exchange truthfully", async () => {
+  it("shows rule, ML, and fallback signal sources truthfully in Explore mode", async () => {
+    vi.mocked(getRecentSignals).mockRejectedValue(new Error("backend unavailable"));
     const user = userEvent.setup();
     renderAI();
 
     await user.click(screen.getByLabelText("Signals"));
 
     expect(await screen.findByText("Trading Signals")).toBeInTheDocument();
+    expect(screen.getByText("Rule")).toBeInTheDocument();
     expect(screen.getByText("ML")).toBeInTheDocument();
-    expect(screen.getByText("NSE_INDEX")).toBeInTheDocument();
+    expect(screen.getByText("Fallback")).toBeInTheDocument();
+    expect(screen.getAllByText("NSE_INDEX")).toHaveLength(3);
+    expect(screen.getByText(/Polls every 5s while NSE is open and every 60s while closed/)).toBeInTheDocument();
     expect(screen.queryByText("ML-Powered Signals")).not.toBeInTheDocument();
+    expect(screen.queryByText("Signal service unavailable.")).not.toBeInTheDocument();
+    expect(getRecentSignals).not.toHaveBeenCalled();
   });
 
   it("renders the generated knowledge answer even when no source chunks are returned", async () => {

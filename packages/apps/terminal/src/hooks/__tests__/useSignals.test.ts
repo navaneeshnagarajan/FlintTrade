@@ -7,10 +7,12 @@
  *   3. useSignalConfig returns sample config in explore mode
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+
+const marketState = vi.hoisted(() => ({ open: true }));
 
 // ---------------------------------------------------------------------------
 // Mock modeStore
@@ -29,6 +31,10 @@ vi.mock("@/stores/modeStore", () => ({
     }, []);
     return selector({ mode: currentMode });
   },
+}));
+
+vi.mock("@/lib/market", () => ({
+  isMarketHours: () => marketState.open,
 }));
 
 // ---------------------------------------------------------------------------
@@ -91,8 +97,13 @@ function createWrapper() {
 
 beforeEach(() => {
   currentMode = "explore";
+  marketState.open = true;
   modeListeners.clear();
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ---------------------------------------------------------------------------
@@ -111,6 +122,9 @@ describe("useRecentSignals", () => {
     expect(result.current.data?.signals).toBeDefined();
     expect(result.current.data!.signals.length).toBeGreaterThan(0);
     expect(result.current.data!.signals[0].symbol).toBe("NIFTY");
+    expect(new Set(result.current.data!.signals.map((signal) => signal.source))).toEqual(
+      new Set(["rule", "ml", "fallback"]),
+    );
     // Should NOT call the real API
     expect(getRecentSignalsMock).not.toHaveBeenCalled();
   });
@@ -126,6 +140,51 @@ describe("useRecentSignals", () => {
 
     expect(getRecentSignalsMock).toHaveBeenCalledWith(10);
     expect(result.current.data?.signals[0].message).toBe("API signal");
+  });
+
+  it("refetches against a separate cache entry when mode changes", async () => {
+    const { result } = renderHook(() => useRecentSignals(10), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.data?.signals[0].source).toBe("rule"));
+    expect(getRecentSignalsMock).not.toHaveBeenCalled();
+
+    act(() => {
+      currentMode = "live";
+      modeListeners.forEach((listener) => listener());
+    });
+
+    await waitFor(() => expect(result.current.data?.signals[0].message).toBe("API signal"));
+    expect(getRecentSignalsMock).toHaveBeenCalledWith(10);
+  });
+
+  it("rechecks a closed market and adopts five-second polling after it opens", async () => {
+    vi.useFakeTimers();
+    currentMode = "live";
+    marketState.open = false;
+    renderHook(() => useRecentSignals(10), { wrapper: createWrapper() });
+
+    await vi.waitFor(() => expect(getRecentSignalsMock).toHaveBeenCalledTimes(1));
+    getRecentSignalsMock.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(getRecentSignalsMock).toHaveBeenCalledTimes(1);
+
+    marketState.open = true;
+    getRecentSignalsMock.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(getRecentSignalsMock).toHaveBeenCalled();
+
+    getRecentSignalsMock.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(getRecentSignalsMock).toHaveBeenCalled();
   });
 });
 
@@ -158,6 +217,23 @@ describe("useSignalConfig", () => {
     expect(getSignalConfigMock).toHaveBeenCalled();
     expect(result.current.data?.instruments).toEqual(["NIFTY"]);
   });
+
+  it("refetches config against a separate cache entry when mode changes", async () => {
+    const { result } = renderHook(() => useSignalConfig(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.data?.instruments).toContain("BANKNIFTY"));
+    expect(getSignalConfigMock).not.toHaveBeenCalled();
+
+    act(() => {
+      currentMode = "live";
+      modeListeners.forEach((listener) => listener());
+    });
+
+    await waitFor(() => expect(result.current.data?.instruments).toEqual(["NIFTY"]));
+    expect(getSignalConfigMock).toHaveBeenCalled();
+  });
 });
 
 describe("signalEventSchema", () => {
@@ -181,6 +257,61 @@ describe("signalEventSchema", () => {
     expect(event.source).toBe("ml");
     expect(event.signal_type).toBe("HOLD");
     expect(event.event_id).toBe(17);
+  });
+
+  it("accepts source-tagged scheduled fallback events", () => {
+    const event = signalEventSchema.parse({
+      event_id: 18,
+      timestamp: "2026-07-10T09:25:00+05:30",
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "HOLD",
+      source: "fallback",
+      method: "ema_crossover_fallback+turbulence_override",
+      indicator: "EMA_Cross",
+      value: 24_500,
+      threshold: 0,
+      confidence: 0.5,
+      message: "NIFTY scheduled EMA crossover fallback signal: HOLD",
+      metadata: {},
+    });
+
+    expect(event.source).toBe("fallback");
+  });
+
+  it("normalises known scheduled methods from mixed-version source labels", () => {
+    const fallback = signalEventSchema.parse({
+      event_id: 19,
+      timestamp: "2026-07-10T09:25:00+05:30",
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "HOLD",
+      source: "ml",
+      method: "ema_crossover_fallback+turbulence_override",
+      indicator: "EMA_Cross",
+      value: 24_500,
+      threshold: 0,
+      confidence: 0.5,
+      message: "Legacy fallback signal",
+      metadata: {},
+    });
+    const trained = signalEventSchema.parse({
+      event_id: 20,
+      timestamp: "2026-07-10T09:30:00+05:30",
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "BUY",
+      method: "ml_model",
+      indicator: "LightGBM",
+      value: 24_510,
+      threshold: 0,
+      confidence: 0.8,
+      message: "Legacy trained signal",
+      metadata: {},
+    });
+
+    expect(fallback.source).toBe("fallback");
+    expect(trained.source).toBe("ml");
   });
 
   it("defaults new identity fields for an older live-rule frame", () => {
