@@ -34,7 +34,7 @@ import os
 import secrets
 import signal
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -1243,8 +1243,20 @@ def _wire_ml_signal_runtime(
             SignalRetrainer,
         )
 
+        configured_retrain = app.config.get("ML_SIGNAL_RETRAIN_CONFIG")
+        if configured_retrain is None:
+            retrain_config = RetrainConfig(model_dir=Path(pipeline.model_path).parent)
+        elif isinstance(configured_retrain, RetrainConfig):
+            retrain_config = configured_retrain
+        elif isinstance(configured_retrain, Mapping):
+            config_values = dict(configured_retrain)
+            config_values.setdefault("model_dir", Path(pipeline.model_path).parent)
+            retrain_config = RetrainConfig(**config_values)
+        else:
+            raise TypeError("ML_SIGNAL_RETRAIN_CONFIG must be a RetrainConfig or mapping")
+
         retrainer = SignalRetrainer(
-            RetrainConfig(model_dir=Path(pipeline.model_path).parent),
+            retrain_config,
             instruments=pipeline.instruments,
             data_fetcher=pipeline.fetch_bars,
             pipeline=pipeline,
@@ -1272,6 +1284,7 @@ def _wire_ml_signal_runtime(
     except Exception as exc:  # noqa: BLE001 - optional ML runtime must not prevent app boot
         logger.warning("Scheduled signal retraining not wired: %s", exc)
     else:
+        app.config["ML_SIGNAL_RETRAIN_CONFIG"] = retrain_config
         app.config["ML_SIGNAL_RETRAINER"] = retrainer
         app.config["ML_SIGNAL_RETRAIN_JOB"] = "ml_signal_retrain"
     return True

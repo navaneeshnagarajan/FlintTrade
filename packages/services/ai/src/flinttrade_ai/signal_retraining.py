@@ -51,6 +51,9 @@ class RetrainConfig(BaseModel):
     min_accuracy: float = Field(default=0.55, ge=0.0, le=1.0)
     min_training_rows: int = Field(default=100, ge=30)
     lookback_days: int = Field(default=365, ge=30)
+    lookahead: int = Field(default=5, ge=1)
+    buy_threshold_pct: float = Field(default=0.5, gt=0.0, allow_inf_nan=False)
+    sell_threshold_pct: float = Field(default=-0.5, lt=0.0, allow_inf_nan=False)
     validation_split: float = Field(default=0.2, gt=0.0, lt=1.0)
     drift_threshold: float = Field(default=0.1, gt=0.0, le=1.0)
     model_dir: Path = Field(default_factory=_default_model_dir)
@@ -159,7 +162,7 @@ def signal_model_path(model_dir: Path, symbol: str, exchange: str) -> Path:
     """Return the canonical deterministic path for one instrument model."""
     safe_exchange = _safe_path_component(exchange)
     safe_symbol = _safe_path_component(symbol)
-    digest = _instrument_identity_digest(symbol, exchange)[:16]
+    digest = _instrument_identity_digest(symbol, exchange)
     return model_dir / f"signal_model_{safe_exchange}_{safe_symbol}_{digest}.bundle"
 
 
@@ -400,6 +403,9 @@ class SignalRetrainer:
         try:
             metrics = candidate.train(
                 bars,
+                lookahead=self.config.lookahead,
+                buy_threshold_pct=self.config.buy_threshold_pct,
+                sell_threshold_pct=self.config.sell_threshold_pct,
                 test_ratio=self.config.validation_split,
                 min_training_rows=self.config.min_training_rows,
             )

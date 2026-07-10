@@ -181,7 +181,6 @@ class SignalPipeline:
                     return candidate
 
             self._ensure_generator()
-            self._symbol_generators[key] = self._generator
             return self._generator
 
     def install_generator(self, symbol: str, exchange: str, generator: Any) -> None:
@@ -382,7 +381,13 @@ class SignalPipeline:
             gen.save(self.model_path)
             logger.info("Signal model saved to %s", self.model_path)
 
-            self._generator = gen
+            with self._generator_lock:
+                previous_shared = self._generator
+                self._generator = gen
+                if previous_shared is not None:
+                    self._symbol_generators = {
+                        key: cached for key, cached in self._symbol_generators.items() if cached is not previous_shared
+                    }
             return True
         except Exception:
             logger.exception("Model training failed")

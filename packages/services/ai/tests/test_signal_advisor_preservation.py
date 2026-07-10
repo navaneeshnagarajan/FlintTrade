@@ -474,3 +474,18 @@ def test_get_generator_uses_exchange_and_symbol_identity(tmp_path: Path) -> None
 
     assert retrainer.get_generator("SHARED", "NSE") is nse_generator
     assert retrainer.get_generator("SHARED", "BSE") is bse_generator
+
+
+def test_signal_generator_refuses_to_overwrite_with_an_untrained_model(tmp_path: Path) -> None:
+    from flinttrade_ai.signals import SignalGenerator
+
+    target = tmp_path / "signal_model.joblib"
+    checksum = Path(f"{target}.sha256")
+    target.write_bytes(b"existing-model")
+    checksum.write_text("existing-checksum", encoding="ascii")
+
+    with pytest.raises(RuntimeError, match="No trained model to save"):
+        SignalGenerator().save(str(target))
+
+    assert target.read_bytes() == b"existing-model"
+    assert checksum.read_text(encoding="ascii") == "existing-checksum"

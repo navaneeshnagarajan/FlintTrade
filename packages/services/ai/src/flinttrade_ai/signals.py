@@ -637,6 +637,8 @@ class SignalGenerator:
 
     def save(self, path: str) -> None:
         """Save trained model to disk with a SHA-256 integrity sidecar."""
+        if not self.is_trained:
+            raise RuntimeError("No trained model to save.")
         try:
             import joblib
         except ImportError:

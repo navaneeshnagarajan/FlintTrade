@@ -131,6 +131,9 @@ def test_retrain_config_preserves_reviewed_defaults() -> None:
     assert config.min_accuracy == 0.55
     assert config.min_training_rows == 100
     assert config.lookback_days == 365
+    assert config.lookahead == 5
+    assert config.buy_threshold_pct == 0.5
+    assert config.sell_threshold_pct == -0.5
     assert config.validation_split == 0.2
     assert config.drift_threshold == 0.1
     assert config.persist_log is True
@@ -431,9 +434,35 @@ def test_filesystem_safe_model_paths_include_pair_digest_and_avoid_all_reviewed_
     assert joined_left != joined_right
     assert colon_left != colon_right
     assert all(
-        re.search(r"_[0-9a-f]{16}\.bundle$", path.name)
+        re.search(r"_[0-9a-f]{64}\.bundle$", path.name)
         for path in (escaped, literal, joined_left, joined_right, colon_left, colon_right)
     )
+
+
+def test_retrainer_forwards_asymmetric_label_policy_to_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+
+    train_calls = _install_train_stub(monkeypatch)
+    retrainer = SignalRetrainer(
+        _config(
+            tmp_path,
+            lookahead=9,
+            buy_threshold_pct=0.8,
+            sell_threshold_pct=-0.3,
+        ),
+        instruments=[],
+        data_fetcher=lambda *_args: _bars(),
+    )
+
+    result = retrainer.run_once("NIFTY", "NSE_INDEX")
+
+    assert result.accepted is True
+    assert train_calls[0]["lookahead"] == 9
+    assert train_calls[0]["buy_threshold_pct"] == pytest.approx(0.8)
+    assert train_calls[0]["sell_threshold_pct"] == pytest.approx(-0.3)
 
 
 def test_concurrent_uncached_reader_sees_old_until_atomic_publication_then_new(
@@ -703,6 +732,31 @@ def test_pipeline_installs_new_generator_for_only_the_target_instrument(tmp_path
     assert pipeline._generator._model.__class__ is shared._model.__class__
 
 
+def test_shared_training_replaces_fallback_for_previously_seen_symbols(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+    from flinttrade_ai.signals import SignalGenerator, engineer_features
+
+    pipeline = SignalPipeline(model_path=str(tmp_path / "shared.joblib"))
+    stale_fallback = pipeline._generator_for("NIFTY", "NSE_INDEX")
+
+    def _train(self: SignalGenerator, bars: list[dict[str, Any]], **_kwargs: Any) -> dict[str, float]:
+        self._model = _PredictableModel()
+        self._feature_names = engineer_features(bars).names
+        return {"train_accuracy": 0.9, "test_accuracy": 0.8}
+
+    monkeypatch.setattr(SignalGenerator, "train", _train)
+
+    assert pipeline.train_model([_bars(120)], lookahead=7) is True
+    current = pipeline._generator_for("NIFTY", "NSE_INDEX")
+
+    assert current is pipeline._generator
+    assert current is not stale_fallback
+    assert current.is_trained is True
+
+
 def test_pipeline_cache_uses_tuple_keys_for_colon_colliding_instruments(tmp_path: Path) -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 
@@ -758,6 +812,33 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     assert isinstance(app.config["ML_SIGNAL_RETRAINER"], SignalRetrainer)
     assert app.config["ML_SIGNAL_RETRAIN_JOB"] == "ml_signal_retrain"
     assert app.config["ML_SIGNAL_JOB"] == "ml_signal_cycle"
+
+
+def test_runtime_threads_configurable_label_policy_into_scheduled_retrainer(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flask import Flask
+
+    from flinttrade_core.app import _wire_ml_signal_runtime
+
+    app = Flask(__name__)
+    pipeline = MagicMock()
+    pipeline.model_path = str(tmp_path / "signal_model.joblib")
+    pipeline.instruments = [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}]
+    app.config["ML_SIGNAL_PIPELINE"] = pipeline
+    app.config["ML_SIGNAL_RETRAIN_CONFIG"] = {
+        "lookahead": 9,
+        "buy_threshold_pct": 0.8,
+        "sell_threshold_pct": -0.3,
+    }
+
+    assert _wire_ml_signal_runtime(app, MagicMock(), MagicMock()) is True
+
+    config = app.config["ML_SIGNAL_RETRAINER"].config
+    assert config.lookahead == 9
+    assert config.buy_threshold_pct == pytest.approx(0.8)
+    assert config.sell_threshold_pct == pytest.approx(-0.3)
+    assert config.model_dir == tmp_path
 
 
 def test_retrain_handler_contains_unexpected_failures(
