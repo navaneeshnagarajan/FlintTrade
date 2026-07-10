@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,6 +78,44 @@ class TestAgentRole:
         assert restored.role_type == original.role_type
         assert restored.enabled == original.enabled
         assert restored.temperature == original.temperature
+
+    def test_role_id_and_model_tier_roundtrip(self) -> None:
+        from flinttrade_ai.agent_models import AgentRole, AgentRoleType
+
+        original = AgentRole(
+            name="Options Analyst",
+            role_type=AgentRoleType.TECHNICAL,
+            system_prompt="Analyse derivatives.",
+            role_id="options_analyst",
+            model_tier="deep",
+        )
+
+        restored = AgentRole.from_dict(original.to_dict())
+
+        assert restored.role_id == "options_analyst"
+        assert restored.model_tier == "deep"
+
+    def test_role_id_defaults_to_stable_name_slug(self) -> None:
+        from flinttrade_ai.agent_models import AgentRole, AgentRoleType
+
+        role = AgentRole(
+            name="Risk & Safety Lead",
+            role_type=AgentRoleType.RISK_MANAGER,
+            system_prompt="Review risk.",
+        )
+
+        assert role.role_id == "risk_safety_lead"
+
+    def test_invalid_model_tier_is_rejected(self) -> None:
+        from flinttrade_ai.agent_models import AgentRole, AgentRoleType
+
+        with pytest.raises(ValueError, match="model_tier"):
+            AgentRole(
+                name="Bad Tier",
+                role_type=AgentRoleType.TECHNICAL,
+                system_prompt="Invalid.",
+                model_tier="ultra",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +206,21 @@ class TestAgentTeamInit:
         assert "Risk Manager" not in enabled_names
         assert len(team.enabled_agents) == 3
 
+    def test_constructor_and_roster_properties_are_defensive(self) -> None:
+        from flinttrade_ai.agent_models import AgentRole, AgentRoleType
+
+        supplied = AgentRole("Custom", AgentRoleType.TECHNICAL, "custom")
+        team, _, _ = _make_team(agents=[supplied])
+
+        supplied.enabled = False
+        exposed = team.agents
+        exposed[0].enabled = False
+        exposed_enabled = team.enabled_agents
+        exposed_enabled[0].enabled = False
+
+        assert team.agents[0].enabled is True
+        assert team.enabled_agents[0].enabled is True
+
 
 # ---------------------------------------------------------------------------
 # AgentTeam — configuration
@@ -185,7 +240,9 @@ class TestAgentTeamConfig:
             system_prompt="Custom.",
         )
         team.add_agent(new_agent)
+        new_agent.enabled = False
         assert len(team.agents) == 5
+        assert next(agent for agent in team.agents if agent.name == "Custom Agent").enabled is True
 
     def test_remove_agent(self) -> None:
         team, _, _ = _make_team()
@@ -204,6 +261,9 @@ class TestAgentTeamConfig:
         assert "agents" in config
         assert len(config["agents"]) == 4
         assert all(isinstance(a, dict) for a in config["agents"])
+        assert config["modes"] == ["flat", "dag", "sequential", "debate"]
+        assert len(config["presets"]) == 10
+        assert config["active_preset"] == ""
 
     def test_update_config_replaces_roster(self) -> None:
         team, _, _ = _make_team()
@@ -214,6 +274,36 @@ class TestAgentTeamConfig:
         })
         assert len(team.agents) == 1
         assert team.agents[0].name == "Only Agent"
+
+    def test_update_config_selects_exact_preset_roster(self) -> None:
+        team, _, _ = _make_team()
+        custom_role_ids = [agent.role_id for agent in team.agents]
+
+        team.update_config({"preset": "derivatives_desk"})
+
+        assert [agent.role_id for agent in team.agents] == [
+            "options_analyst",
+            "greeks_monitor",
+            "risk_manager",
+        ]
+        config = team.get_config()
+        assert config["active_preset"] == "derivatives_desk"
+        assert [agent["role_id"] for agent in config["custom_agents"]] == custom_role_ids
+
+    @pytest.mark.parametrize("operation", ["remove", "disable"])
+    def test_failed_custom_roster_edit_preserves_active_preset(self, operation: str) -> None:
+        team, _, _ = _make_team()
+        team.update_config({"preset": "derivatives_desk"})
+        preset_role_ids = [agent.role_id for agent in team.agents]
+
+        if operation == "remove":
+            changed = team.remove_agent("Missing Agent")
+        else:
+            changed = team.set_agent_enabled("Missing Agent", False)
+
+        assert changed is False
+        assert team.get_config()["active_preset"] == "derivatives_desk"
+        assert [agent.role_id for agent in team.agents] == preset_role_ids
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +340,7 @@ class TestAgentTeamAnalyze:
     def test_analyze_with_no_enabled_agents(self) -> None:
         team, _, _ = _make_team()
         for agent in team.agents:
-            agent.enabled = False
+            team.set_agent_enabled(agent.name, False)
         result = team.analyse("NIFTY", "NSE_INDEX")
         assert result.consensus_signal == "HOLD"
         assert "No enabled agents" in result.errors[0]
@@ -287,6 +377,37 @@ class TestAgentTeamAnalyze:
         assert rec.confidence == 0.6
         assert rec.symbol == "BANKNIFTY"
 
+    def test_deep_tier_agent_uses_deep_client(self) -> None:
+        from flinttrade_ai.agent_models import AgentRole, AgentRoleType
+        from flinttrade_ai.multi_agent import AgentTeam
+
+        quick = _make_llm_client()
+        deep = _make_llm_client("Report.\nSIGNAL: BUY\nCONFIDENCE: 0.7\nSUMMARY: Up.")
+        role = AgentRole(
+            name="Lead Analyst",
+            role_type=AgentRoleType.TECHNICAL,
+            system_prompt="Lead the analysis.",
+            model_tier="deep",
+        )
+        team = AgentTeam(llm_client=quick, deep_llm_client=deep, agents=[role])
+
+        team.analyse("NIFTY", "NSE_INDEX")
+
+        quick.chat.assert_not_called()
+        assert deep.chat.call_count == 2  # lead analyst plus aggregator
+
+    def test_unsuccessful_aggregator_response_uses_majority_fallback(self) -> None:
+        from flinttrade_ai.llm_client import LLMResponse
+
+        team, quick, deep = _make_team(response_text="Report.\nSIGNAL: BUY\nCONFIDENCE: 0.8\nSUMMARY: Up.")
+        deep.chat.return_value = LLMResponse(error="provider offline")
+
+        result = team.analyse("NIFTY", "NSE_INDEX")
+
+        assert quick.chat.call_count == len(team.enabled_agents)
+        assert result.consensus_signal == "BUY"
+        assert "Majority vote" in result.consensus_reasoning
+
 
 # ---------------------------------------------------------------------------
 # Parsing helpers
@@ -313,6 +434,24 @@ class TestParsingHelpers:
         assert signal == "HOLD"
         assert confidence == 0.0
         assert report == response
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("BUY", "BUY"),
+            ("SELL", "SELL"),
+            ("HOLD", "HOLD"),
+            ("BULLISH", "BUY"),
+            ("BEARISH", "SELL"),
+            ("NEUTRAL", "HOLD"),
+        ],
+    )
+    def test_parse_agent_response_maps_exact_signal_union(self, raw: str, expected: str) -> None:
+        from flinttrade_ai.multi_agent import AgentTeam
+
+        signal, _, _ = AgentTeam._parse_agent_response(f"Report.\nSIGNAL: {raw}\nCONFIDENCE: 0.5")
+
+        assert signal == expected
 
     def test_parse_aggregator_response_structured(self) -> None:
         from flinttrade_ai.multi_agent import AgentTeam

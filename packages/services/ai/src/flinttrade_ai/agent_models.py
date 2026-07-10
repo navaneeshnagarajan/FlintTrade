@@ -13,6 +13,7 @@ No external dependencies beyond the standard library.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -36,6 +37,15 @@ class AgentRoleType(StrEnum):
     AGGREGATOR = "aggregator"
 
 
+class TeamMode(StrEnum):
+    """Execution strategies exposed by the canonical agent team."""
+
+    FLAT = "flat"
+    DAG = "dag"
+    SEQUENTIAL = "sequential"
+    DEBATE = "debate"
+
+
 @dataclass
 class AgentRole:
     """Definition of an agent's role within the team.
@@ -57,6 +67,14 @@ class AgentRole:
     system_prompt: str
     enabled: bool = True
     temperature: float | None = None
+    role_id: str = ""
+    model_tier: str = "quick"
+
+    def __post_init__(self) -> None:
+        if not self.role_id:
+            self.role_id = re.sub(r"[^a-z0-9]+", "_", self.name.lower()).strip("_") or "agent"
+        if self.model_tier not in {"quick", "deep"}:
+            raise ValueError("model_tier must be 'quick' or 'deep'")
 
     def to_dict(self) -> dict[str, object]:
         """Serialise to a JSON-safe dictionary."""
@@ -66,6 +84,8 @@ class AgentRole:
             "system_prompt": self.system_prompt,
             "enabled": self.enabled,
             "temperature": self.temperature,
+            "role_id": self.role_id,
+            "model_tier": self.model_tier,
         }
 
     @classmethod
@@ -77,6 +97,8 @@ class AgentRole:
             system_prompt=str(data.get("system_prompt", "")),
             enabled=bool(data.get("enabled", True)),
             temperature=float(data["temperature"]) if data.get("temperature") is not None else None,
+            role_id=str(data.get("role_id", "")),
+            model_tier=str(data.get("model_tier", "quick")),
         )
 
 
@@ -101,6 +123,8 @@ class AgentAnalysis:
     confidence: float = 0.0
     timestamp: str = ""
     error: str = ""
+    task_id: str = ""
+    model_tier: str = "quick"
 
     def __post_init__(self) -> None:
         if not self.timestamp:
@@ -121,6 +145,8 @@ class AgentAnalysis:
             "confidence": round(self.confidence, 4),
             "timestamp": self.timestamp,
             "error": _public_error(self.error),
+            "task_id": self.task_id,
+            "model_tier": self.model_tier,
         }
 
 
@@ -149,10 +175,15 @@ class TeamAnalysis:
     consensus_reasoning: str = ""
     timestamp: str = ""
     errors: list[str] = field(default_factory=list)
+    mode: TeamMode = TeamMode.FLAT
+    preset: str = ""
+    details: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
+        if not isinstance(self.mode, TeamMode):
+            self.mode = TeamMode(self.mode)
 
     def to_dict(self) -> dict[str, object]:
         """Serialise to a JSON-safe dictionary."""
@@ -165,6 +196,9 @@ class TeamAnalysis:
             "consensus_reasoning": self.consensus_reasoning,
             "timestamp": self.timestamp,
             "errors": [_public_error(error) for error in self.errors if error],
+            "mode": self.mode.value,
+            "preset": self.preset,
+            "details": self.details,
         }
 
 

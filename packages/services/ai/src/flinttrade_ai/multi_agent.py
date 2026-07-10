@@ -40,15 +40,20 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+from ._team_dag import EventCallback, TeamDagRunner, TeamEvent, TeamTask, _ThreadCallRunner
+from ._team_modes import AnalystChain, RiskDebate
+from ._team_presets import get_all_presets, get_preset
 from .agent_models import (
     AgentAnalysis,
     AgentRole,
     AgentRoleType,
     TeamAnalysis,
+    TeamMode,
     TradeRecommendation,
 )
 from .llm_client import LLMClient, LLMMessage
@@ -56,6 +61,24 @@ from .llm_client import LLMClient, LLMMessage
 logger = logging.getLogger("flinttrade.ai.multi_agent")
 
 _VALID_SIGNALS = frozenset({"BUY", "SELL", "HOLD"})
+_SIGNAL_ALIASES = {
+    "BUY": "BUY",
+    "SELL": "SELL",
+    "HOLD": "HOLD",
+    "BULLISH": "BUY",
+    "BEARISH": "SELL",
+    "NEUTRAL": "HOLD",
+}
+_FIXED_TEAM_MODES = frozenset({TeamMode.SEQUENTIAL, TeamMode.DEBATE})
+_FIXED_MODE_PRESET_ERROR = "preset is not supported for sequential or debate modes"
+_DEFAULT_MAX_CONCURRENT = 4
+_DEFAULT_TASK_TIMEOUT_SECONDS = 120
+_CANONICAL_PRESET_OUTPUT_CONTRACT = (
+    "\n\nPreserve every role-specific output field above. After those fields, "
+    "append exactly these canonical lines:\n"
+    "SIGNAL: [BUY/SELL/HOLD]\n"
+    "CONFIDENCE: [0.0-1.0]"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +208,26 @@ class AgentTeam:
         llm_client: LLMClient,
         deep_llm_client: LLMClient | None = None,
         agents: list[AgentRole] | None = None,
+        memory: Any | None = None,
     ) -> None:
         self._quick = llm_client
         self._deep = deep_llm_client or llm_client
-        self._agents: list[AgentRole] = agents if agents is not None else default_agents()
+        self._agents: list[AgentRole] = (
+            copy.deepcopy(agents) if agents is not None else default_agents()
+        )
+        self._custom_agents = self._agents
+        self._memory = memory
+        self._active_preset = ""
+
+    @staticmethod
+    def available_modes() -> list[str]:
+        """Return every execution strategy exposed by the canonical team."""
+        return [mode.value for mode in TeamMode]
+
+    @staticmethod
+    def available_presets() -> list[dict[str, Any]]:
+        """Return the exact preset catalogue in stable name order."""
+        return [preset.to_dict() for preset in get_all_presets()]
 
     # ------------------------------------------------------------------
     # Properties
@@ -197,12 +236,24 @@ class AgentTeam:
     @property
     def agents(self) -> list[AgentRole]:
         """Return the current agent roster."""
-        return list(self._agents)
+        return copy.deepcopy(self._agents)
 
     @property
     def enabled_agents(self) -> list[AgentRole]:
         """Return only enabled agents (excludes aggregator role type)."""
-        return [a for a in self._agents if a.enabled and a.role_type != AgentRoleType.AGGREGATOR]
+        return copy.deepcopy([
+            agent
+            for agent in self._agents
+            if agent.enabled and agent.role_type != AgentRoleType.AGGREGATOR
+        ])
+
+    def _enabled_custom_agents(self) -> list[AgentRole]:
+        """Return enabled agents from the durable custom roster."""
+        return [
+            agent
+            for agent in self._custom_agents
+            if agent.enabled and agent.role_type != AgentRoleType.AGGREGATOR
+        ]
 
     # ------------------------------------------------------------------
     # Configuration
@@ -210,26 +261,35 @@ class AgentTeam:
 
     def add_agent(self, agent: AgentRole) -> None:
         """Add an agent to the roster."""
-        self._agents.append(agent)
+        self._activate_custom_roster()
+        self._agents.append(copy.deepcopy(agent))
 
     def remove_agent(self, name: str) -> bool:
         """Remove an agent by name.  Returns True if found and removed."""
-        before = len(self._agents)
+        if not any(agent.name == name for agent in self._custom_agents):
+            return False
+        self._activate_custom_roster()
         self._agents = [a for a in self._agents if a.name != name]
-        return len(self._agents) < before
+        self._custom_agents = self._agents
+        return True
 
     def set_agent_enabled(self, name: str, enabled: bool) -> bool:
         """Enable or disable an agent by name.  Returns True if found."""
-        for agent in self._agents:
-            if agent.name == name:
-                agent.enabled = enabled
-                return True
-        return False
+        target = next((agent for agent in self._custom_agents if agent.name == name), None)
+        if target is None:
+            return False
+        self._activate_custom_roster()
+        target.enabled = enabled
+        return True
 
     def get_config(self) -> dict[str, Any]:
         """Return the team configuration as a serialisable dictionary."""
         return {
             "agents": [a.to_dict() for a in self._agents],
+            "custom_agents": [a.to_dict() for a in self._custom_agents],
+            "modes": self.available_modes(),
+            "presets": self.available_presets(),
+            "active_preset": self._active_preset,
         }
 
     def update_config(self, config: dict[str, Any]) -> None:
@@ -237,8 +297,22 @@ class AgentTeam:
 
         Replaces the agent roster with the provided list.
         """
-        if "agents" in config:
+        if "preset" in config and "agents" in config:
+            raise ValueError("provide either preset or agents, not both")
+        if "preset" in config:
+            preset_name = str(config["preset"])
+            self._agents = get_preset(preset_name).to_agent_roles()
+            self._active_preset = preset_name
+        elif "agents" in config:
             self._agents = [AgentRole.from_dict(d) for d in config["agents"]]
+            self._custom_agents = self._agents
+            self._active_preset = ""
+
+    def _activate_custom_roster(self) -> None:
+        """Restore the durable custom roster before applying a direct edit."""
+        if self._active_preset:
+            self._agents = self._custom_agents
+            self._active_preset = ""
 
     # ------------------------------------------------------------------
     # Analysis
@@ -250,6 +324,13 @@ class AgentTeam:
         exchange: str,
         market_data: dict[str, Any] | None = None,
         parallel: bool = False,
+        *,
+        mode: TeamMode | str = TeamMode.FLAT,
+        preset: str | None = None,
+        use_active_preset: bool = True,
+        debate_rounds: int = 2,
+        max_concurrent: int | None = None,
+        task_timeout_seconds: int | None = None,
     ) -> TeamAnalysis:
         """Run team analysis on a symbol.
 
@@ -275,8 +356,49 @@ class AgentTeam:
         Returns:
             A ``TeamAnalysis`` with all agent analyses and the consensus.
         """
-        result = TeamAnalysis(symbol=symbol, exchange=exchange)
-        enabled = self.enabled_agents
+        selected_mode = self._normalise_mode(mode)
+        limits_supplied = max_concurrent is not None or task_timeout_seconds is not None
+        effective_max_concurrent = (
+            _DEFAULT_MAX_CONCURRENT if max_concurrent is None else max_concurrent
+        )
+        effective_timeout = (
+            _DEFAULT_TASK_TIMEOUT_SECONDS
+            if task_timeout_seconds is None
+            else task_timeout_seconds
+        )
+        if selected_mode is TeamMode.DEBATE and debate_rounds <= 0:
+            raise ValueError("debate_rounds must be positive")
+        if effective_max_concurrent <= 0:
+            raise ValueError("max_concurrent must be positive")
+        if effective_timeout <= 0:
+            raise ValueError("task_timeout_seconds must be positive")
+        effective_preset = self._resolve_preset(selected_mode, preset, use_active_preset)
+        if (
+            selected_mode is not TeamMode.FLAT
+            or effective_preset is not None
+            or parallel
+            or limits_supplied
+        ):
+            return asyncio.run(
+                self.analyse_async(
+                    symbol,
+                    exchange,
+                    market_data=market_data,
+                    mode=selected_mode,
+                    preset=effective_preset,
+                    use_active_preset=False,
+                    debate_rounds=debate_rounds,
+                    max_concurrent=effective_max_concurrent,
+                    task_timeout_seconds=effective_timeout,
+                )
+            )
+
+        result = TeamAnalysis(symbol=symbol, exchange=exchange, mode=selected_mode)
+        enabled = (
+            self._enabled_custom_agents()
+            if preset is None and not use_active_preset
+            else self.enabled_agents
+        )
 
         if not enabled:
             result.errors.append("No enabled agents in the team")
@@ -309,6 +431,421 @@ class AgentTeam:
             # Fall back to majority vote
             self._majority_vote_fallback(result)
 
+        return result
+
+    @staticmethod
+    def _normalise_mode(mode: TeamMode | str) -> TeamMode:
+        """Parse a mode with a stable, caller-facing validation error."""
+        try:
+            return mode if isinstance(mode, TeamMode) else TeamMode(str(mode))
+        except ValueError as exc:
+            available = ", ".join(item.value for item in TeamMode)
+            raise ValueError(f"Unknown team mode {mode!r}. Available modes: {available}") from exc
+
+    def _resolve_preset(
+        self,
+        mode: TeamMode,
+        preset: str | None,
+        use_active_preset: bool,
+    ) -> str | None:
+        """Resolve explicit/active presets while keeping fixed modes independent."""
+        if mode in _FIXED_TEAM_MODES:
+            if preset is not None:
+                raise ValueError(_FIXED_MODE_PRESET_ERROR)
+            return None
+
+        effective_preset = preset
+        if effective_preset is None and use_active_preset:
+            effective_preset = self._active_preset or None
+        if effective_preset is not None:
+            get_preset(effective_preset)  # fail before any LLM call
+        return effective_preset
+
+    async def run_tasks(
+        self,
+        tasks: list[TeamTask],
+        on_event: EventCallback | None = None,
+        max_concurrent: int = 4,
+    ) -> dict[str, str]:
+        """Run a validated dependency graph through the canonical LLM clients."""
+        return await TeamDagRunner(self._quick, self._deep).execute(
+            tasks,
+            on_event=on_event,
+            max_concurrent=max_concurrent,
+        )
+
+    async def analyse_async(
+        self,
+        symbol: str,
+        exchange: str,
+        market_data: dict[str, Any] | None = None,
+        *,
+        mode: TeamMode | str = TeamMode.FLAT,
+        preset: str | None = None,
+        use_active_preset: bool = True,
+        debate_rounds: int = 2,
+        max_concurrent: int = 4,
+        task_timeout_seconds: int = 120,
+        on_event: EventCallback | None = None,
+    ) -> TeamAnalysis:
+        """Run any team strategy without blocking an existing event loop."""
+        selected_mode = self._normalise_mode(mode)
+        if debate_rounds <= 0:
+            raise ValueError("debate_rounds must be positive")
+        if task_timeout_seconds <= 0:
+            raise ValueError("task_timeout_seconds must be positive")
+        use_custom_roster = preset is None and not use_active_preset
+        effective_preset = self._resolve_preset(selected_mode, preset, use_active_preset)
+        if selected_mode is TeamMode.SEQUENTIAL:
+            return await self._analyse_sequential_async(
+                symbol,
+                exchange,
+                max_concurrent,
+                task_timeout_seconds,
+                on_event,
+            )
+        if selected_mode is TeamMode.DEBATE:
+            return await self._analyse_debate_async(
+                symbol,
+                exchange,
+                market_data,
+                debate_rounds,
+                max_concurrent,
+                task_timeout_seconds,
+                on_event,
+            )
+        return await self._analyse_roles_async(
+            symbol,
+            exchange,
+            market_data,
+            selected_mode,
+            effective_preset,
+            max_concurrent,
+            task_timeout_seconds,
+            on_event,
+            use_custom_roster,
+        )
+
+    async def _analyse_roles_async(
+        self,
+        symbol: str,
+        exchange: str,
+        market_data: dict[str, Any] | None,
+        mode: TeamMode,
+        preset_name: str | None,
+        max_concurrent: int,
+        task_timeout_seconds: int,
+        on_event: EventCallback | None,
+        use_custom_roster: bool,
+    ) -> TeamAnalysis:
+        """Run flat or DAG roles and aggregate their canonical analyses."""
+        if preset_name:
+            roles = get_preset(preset_name).to_agent_roles()
+        elif use_custom_roster:
+            roles = self._enabled_custom_agents()
+        else:
+            roles = self.enabled_agents
+        result = TeamAnalysis(symbol=symbol, exchange=exchange, mode=mode, preset=preset_name or "")
+        if not roles:
+            result.errors.append("No enabled agents in the team")
+            result.consensus_reasoning = "No agents available for analysis."
+            return result
+
+        quick_ids = [role.role_id for role in roles if role.model_tier == "quick"]
+        use_dependencies = mode is TeamMode.DAG
+        tasks: list[TeamTask] = []
+        for role in roles:
+            dependencies = quick_ids if use_dependencies and role.model_tier == "deep" else []
+            system_prompt = role.system_prompt
+            if preset_name is not None and "\nSIGNAL:" not in system_prompt.upper():
+                system_prompt += _CANONICAL_PRESET_OUTPUT_CONTRACT
+            user_prompt = self._build_agent_user_content(
+                symbol,
+                exchange,
+                market_data,
+                require_signal=preset_name is None,
+            )
+            if dependencies:
+                upstream = "\n".join(f"{dependency}: {{{dependency}}}" for dependency in dependencies)
+                user_prompt += f"\n\nUpstream analyses:\n{upstream}"
+            tasks.append(
+                TeamTask(
+                    id=role.role_id,
+                    name=role.name,
+                    agent_role=role.role_id,
+                    prompt=user_prompt,
+                    depends_on=dependencies,
+                    timeout_seconds=task_timeout_seconds,
+                    system_prompt=system_prompt,
+                    model_tier=role.model_tier,
+                    temperature=role.temperature,
+                )
+            )
+
+        call_runner = _ThreadCallRunner(max_concurrent)
+        try:
+            raw_results = await TeamDagRunner(
+                self._quick,
+                self._deep,
+                call_runner=call_runner,
+            ).execute(tasks, on_event=on_event, max_concurrent=max_concurrent)
+            for role in roles:
+                raw = raw_results[role.role_id]
+                if raw.startswith("[TIMEOUT"):
+                    analysis = AgentAnalysis(
+                        agent_name=role.name,
+                        role_type=role.role_type.value,
+                        error="Agent analysis timed out",
+                        task_id=role.role_id,
+                        model_tier=role.model_tier,
+                    )
+                elif raw.startswith("[ERROR]"):
+                    analysis = AgentAnalysis(
+                        agent_name=role.name,
+                        role_type=role.role_type.value,
+                        error="Agent analysis failed",
+                        task_id=role.role_id,
+                        model_tier=role.model_tier,
+                    )
+                else:
+                    signal, confidence, report = self._parse_agent_response(raw)
+                    analysis = AgentAnalysis(
+                        agent_name=role.name,
+                        role_type=role.role_type.value,
+                        report=report,
+                        signal=signal,
+                        confidence=confidence,
+                        task_id=role.role_id,
+                        model_tier=role.model_tier,
+                    )
+                result.agent_analyses.append(analysis)
+                if analysis.error:
+                    result.errors.append(f"{analysis.agent_name}: analysis failed")
+
+            await self._aggregate_async(result, task_timeout_seconds, on_event, call_runner)
+            return result
+        finally:
+            call_runner.close()
+
+    async def _aggregate_async(
+        self,
+        result: TeamAnalysis,
+        timeout_seconds: int,
+        on_event: EventCallback | None,
+        call_runner: _ThreadCallRunner,
+    ) -> None:
+        """Run the canonical aggregator with lifecycle events and a timeout."""
+        await TeamDagRunner._emit(
+            on_event,
+            TeamEvent(task_id="aggregator", agent_role="aggregator", event_type="started"),
+        )
+        draft = copy.deepcopy(result)
+        try:
+            await call_runner.run(lambda: self._run_aggregator(draft), timeout_seconds)
+        except TimeoutError:
+            result.errors.append("Aggregator: analysis timed out")
+            self._majority_vote_fallback(result)
+            await TeamDagRunner._emit(
+                on_event,
+                TeamEvent(
+                    task_id="aggregator",
+                    agent_role="aggregator",
+                    event_type="timeout",
+                    data={"timeout_seconds": timeout_seconds},
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            result.errors.append("Aggregator: analysis failed")
+            self._majority_vote_fallback(result)
+            await TeamDagRunner._emit(
+                on_event,
+                TeamEvent(
+                    task_id="aggregator",
+                    agent_role="aggregator",
+                    event_type="error",
+                    data={"error": "Analysis failed"},
+                ),
+            )
+        else:
+            result.consensus_signal = draft.consensus_signal
+            result.consensus_confidence = draft.consensus_confidence
+            result.consensus_reasoning = draft.consensus_reasoning
+            await TeamDagRunner._emit(
+                on_event,
+                TeamEvent(
+                    task_id="aggregator",
+                    agent_role="aggregator",
+                    event_type="completed",
+                    data={
+                        "signal": result.consensus_signal,
+                        "confidence": result.consensus_confidence,
+                    },
+                ),
+            )
+
+    async def _analyse_sequential_async(
+        self,
+        symbol: str,
+        exchange: str,
+        max_concurrent: int,
+        task_timeout_seconds: int,
+        on_event: EventCallback | None,
+    ) -> TeamAnalysis:
+        """Run the memory-enriched analyst chain and map its typed state."""
+        await TeamDagRunner._emit(
+            on_event,
+            TeamEvent(task_id="sequential", agent_role="judge", event_type="started"),
+        )
+        chain = AnalystChain(
+            self._quick,
+            deep_llm_client=self._deep,
+            memory=self._memory,
+            analysts=["market", "sentiment", "fundamentals"],
+        )
+        call_runner = _ThreadCallRunner(max_concurrent)
+        try:
+            state = await chain.analyse_async(
+                symbol,
+                exchange,
+                timeout_seconds=task_timeout_seconds,
+                call_runner=call_runner,
+                on_event=on_event,
+            )
+        finally:
+            call_runner.close()
+        result = TeamAnalysis(symbol=symbol, exchange=exchange, mode=TeamMode.SEQUENTIAL)
+        failures = {
+            name: message.strip()
+            for name, message in (error.split(":", 1) for error in state.errors)
+        }
+        fundamentals = "\n".join(
+            part
+            for part in (
+                f"Bull thesis: {state.bull_thesis}" if state.bull_thesis else "",
+                f"Bear thesis: {state.bear_thesis}" if state.bear_thesis else "",
+            )
+            if part
+        )
+        for task_id, name, role_type, report in (
+            ("market", "Market Analyst", AgentRoleType.TECHNICAL, state.market_report),
+            ("sentiment", "Sentiment Analyst", AgentRoleType.SENTIMENT, state.sentiment_report),
+            ("fundamentals", "Fundamentals Analyst", AgentRoleType.FUNDAMENTAL, fundamentals),
+        ):
+            result.agent_analyses.append(
+                AgentAnalysis(
+                    agent_name=name,
+                    role_type=role_type.value,
+                    report=report,
+                    error=(
+                        "Agent analysis timed out"
+                        if failures.get(task_id) == "analysis timed out"
+                        else "Agent analysis failed" if task_id in failures else ""
+                    ),
+                    task_id=task_id,
+                )
+            )
+        result.errors = [
+            f"{name}: {'analysis timed out' if message == 'analysis timed out' else 'analysis failed'}"
+            for name, message in sorted(failures.items())
+        ]
+        result.consensus_signal = state.final_decision
+        result.consensus_confidence = state.confidence
+        result.consensus_reasoning = state.final_reasoning
+        result.details = {
+            "trade_date": state.trade_date.isoformat(),
+            "bull_thesis": state.bull_thesis,
+            "bear_thesis": state.bear_thesis,
+            "risk_assessment": state.risk_assessment,
+        }
+        await TeamDagRunner._emit(
+            on_event,
+            TeamEvent(
+                task_id="sequential",
+                agent_role="judge",
+                event_type="completed",
+                data={"signal": result.consensus_signal, "confidence": result.consensus_confidence},
+            ),
+        )
+        return result
+
+    async def _analyse_debate_async(
+        self,
+        symbol: str,
+        exchange: str,
+        market_data: dict[str, Any] | None,
+        rounds: int,
+        max_concurrent: int,
+        task_timeout_seconds: int,
+        on_event: EventCallback | None,
+    ) -> TeamAnalysis:
+        """Run iterative adversarial debate and map the transcript."""
+        await TeamDagRunner._emit(
+            on_event,
+            TeamEvent(task_id="debate", agent_role="risk_judge", event_type="started"),
+        )
+        context = dict(market_data or {})
+        proposal = str(context.pop("trade_proposal", f"Analyse {symbol} on {exchange}"))
+        debate = RiskDebate(self._quick, judge_llm_client=self._deep, rounds=rounds)
+        call_runner = _ThreadCallRunner(max_concurrent)
+        try:
+            debate_result, failures = await debate.run_async(
+                proposal,
+                context or None,
+                timeout_seconds=task_timeout_seconds,
+                call_runner=call_runner,
+                on_event=on_event,
+            )
+        finally:
+            call_runner.close()
+        result = TeamAnalysis(symbol=symbol, exchange=exchange, mode=TeamMode.DEBATE)
+        latest = debate_result.rounds[-1]
+        for task_id, name, report in (
+            ("aggressive", "Aggressive Risk Analyst", latest.aggressive),
+            ("conservative", "Conservative Risk Analyst", latest.conservative),
+            ("neutral", "Neutral Risk Analyst", latest.neutral),
+        ):
+            result.agent_analyses.append(
+                AgentAnalysis(
+                    agent_name=name,
+                    role_type=AgentRoleType.RISK_MANAGER.value,
+                    report=report,
+                    error=(
+                        "Agent analysis timed out"
+                        if failures.get(task_id) == "timeout"
+                        else "Agent analysis failed" if task_id in failures else ""
+                    ),
+                    task_id=task_id,
+                )
+            )
+        result.errors = [
+            f"{name}: {'analysis timed out' if kind == 'timeout' else 'analysis failed'}"
+            for name, kind in sorted(failures.items())
+        ]
+        result.consensus_signal = debate_result.verdict
+        result.consensus_confidence = debate_result.confidence
+        result.consensus_reasoning = debate_result.reasoning
+        result.details = {
+            "trade_proposal": debate_result.trade_proposal,
+            "rounds": [
+                {
+                    "round_number": item.round_number,
+                    "aggressive": item.aggressive,
+                    "conservative": item.conservative,
+                    "neutral": item.neutral,
+                }
+                for item in debate_result.rounds
+            ],
+            "full_transcript": debate_result.full_transcript,
+        }
+        await TeamDagRunner._emit(
+            on_event,
+            TeamEvent(
+                task_id="debate",
+                agent_role="risk_judge",
+                event_type="completed",
+                data={"signal": result.consensus_signal, "confidence": result.consensus_confidence},
+            ),
+        )
         return result
 
     async def run_parallel(
@@ -417,6 +954,28 @@ class AgentTeam:
     # Internal: run a single agent
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _build_agent_user_content(
+        symbol: str,
+        exchange: str,
+        market_data: dict[str, Any] | None,
+        *,
+        require_signal: bool = True,
+    ) -> str:
+        """Build the shared market prompt for flat, DAG, and preset roles."""
+        user_content = f"Analyse {symbol} on {exchange} for a trading decision.\n"
+        if market_data:
+            context_lines = [f"  {key}: {value}" for key, value in market_data.items()]
+            user_content += "Market context:\n" + "\n".join(context_lines) + "\n"
+        if require_signal:
+            user_content += (
+                "\nProvide your analysis report (under 200 words), then conclude "
+                "with your SIGNAL, CONFIDENCE, and SUMMARY lines."
+            )
+        else:
+            user_content += "\nFollow the structured output contract in your assigned system role."
+        return user_content
+
     def _run_agent(
         self,
         agent: AgentRole,
@@ -430,17 +989,7 @@ class AgentTeam:
         context, sends it with the agent's system prompt to the LLM,
         and parses the structured response.
         """
-        user_content = (
-            f"Analyse {symbol} on {exchange} for a trading decision.\n"
-        )
-        if market_data:
-            context_lines = [f"  {k}: {v}" for k, v in market_data.items()]
-            user_content += "Market context:\n" + "\n".join(context_lines) + "\n"
-
-        user_content += (
-            "\nProvide your analysis report (under 200 words), then conclude "
-            "with your SIGNAL, CONFIDENCE, and SUMMARY lines."
-        )
+        user_content = self._build_agent_user_content(symbol, exchange, market_data)
 
         messages = [
             LLMMessage(role="system", content=agent.system_prompt),
@@ -448,7 +997,8 @@ class AgentTeam:
         ]
 
         try:
-            response = self._quick.chat(
+            client = self._deep if agent.model_tier == "deep" else self._quick
+            response = client.chat(
                 messages,
                 temperature=agent.temperature,
             )
@@ -457,6 +1007,8 @@ class AgentTeam:
                     agent_name=agent.name,
                     role_type=agent.role_type.value,
                     error="LLM request failed" if response.error else "LLM returned empty response",
+                    task_id=agent.role_id,
+                    model_tier=agent.model_tier,
                 )
 
             signal, confidence, report = self._parse_agent_response(response.content)
@@ -466,6 +1018,8 @@ class AgentTeam:
                 report=report,
                 signal=signal,
                 confidence=confidence,
+                task_id=agent.role_id,
+                model_tier=agent.model_tier,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Agent '%s' failed: %s", agent.name, exc)
@@ -473,6 +1027,8 @@ class AgentTeam:
                 agent_name=agent.name,
                 role_type=agent.role_type.value,
                 error="Agent analysis failed",
+                task_id=agent.role_id,
+                model_tier=agent.model_tier,
             )
 
     # ------------------------------------------------------------------
@@ -519,6 +1075,8 @@ class AgentTeam:
         ]
 
         response = self._deep.chat(messages)
+        if not response.success:
+            raise RuntimeError("Aggregator LLM request failed")
         decision, confidence, reasoning = self._parse_aggregator_response(response.content)
         result.consensus_signal = decision
         result.consensus_confidence = confidence
@@ -561,14 +1119,11 @@ class AgentTeam:
     def _parse_agent_response(response: str) -> tuple[str, float, str]:
         """Parse an agent's structured response into (signal, confidence, report).
 
-        Extracts the SIGNAL, CONFIDENCE, and SUMMARY lines.  The report
-        is everything before the SIGNAL line.  Falls back gracefully on
-        malformed output.
+        Extracts canonical signal and confidence values while retaining the
+        complete native response as the report.
         """
         signal = "HOLD"
         confidence = 0.0
-        report_lines: list[str] = []
-        found_signal = False
 
         for line in response.splitlines():
             stripped = line.strip()
@@ -576,9 +1131,8 @@ class AgentTeam:
 
             if upper.startswith("SIGNAL:"):
                 raw = stripped.split(":", 1)[1].strip().upper()
-                if raw in _VALID_SIGNALS:
-                    signal = raw
-                found_signal = True
+                if raw in _SIGNAL_ALIASES:
+                    signal = _SIGNAL_ALIASES[raw]
             elif upper.startswith("CONFIDENCE:"):
                 raw_conf = stripped.split(":", 1)[1].strip()
                 try:
@@ -586,12 +1140,7 @@ class AgentTeam:
                     confidence = max(0.0, min(1.0, parsed))
                 except ValueError:
                     pass
-            elif upper.startswith("SUMMARY:"):
-                pass  # Summary is for display; report captures the detail
-            elif not found_signal:
-                report_lines.append(line)
-
-        report = "\n".join(report_lines).strip() or response
+        report = response.strip() or response
         return signal, confidence, report
 
     @staticmethod

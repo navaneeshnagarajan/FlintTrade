@@ -5,8 +5,10 @@ from flinttrade_core.version import APP_VERSION
 __version__ = APP_VERSION
 
 from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
-from .analyst_chain import AnalysisState, AnalystChain
-from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TradeRecommendation
+from ._team_dag import TeamEvent, TeamTask
+from ._team_modes import AnalysisState, AnalystChain, DebateResult, DebateRound, RiskDebate
+from ._team_presets import TeamPreset, TeamPresetAgent
+from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TeamMode, TradeRecommendation
 from .multi_agent import AgentTeam, AutonomousResearchLoop, ResearchIteration, default_agents
 from .rag_pipeline import (
     Document,
@@ -81,7 +83,6 @@ from .signal_models import Signal as LiveSignal
 from .signal_models import SignalConfig
 from .signal_pipeline import LiveSignalPipeline
 from .signals import Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
-from .risk_debate import DebateResult, DebateRound, RiskDebate
 from .ensemble_selector import (
     EnsembleResult,
     EnsembleSelector,
@@ -167,6 +168,11 @@ __all__ = [
     "AgentRoleType",
     "AgentAnalysis",
     "TeamAnalysis",
+    "TeamMode",
+    "TeamTask",
+    "TeamEvent",
+    "TeamPreset",
+    "TeamPresetAgent",
     "TradeRecommendation",
     "default_agents",
     "AutonomousResearchLoop",
