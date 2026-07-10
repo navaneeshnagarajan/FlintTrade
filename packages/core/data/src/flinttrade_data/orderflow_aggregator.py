@@ -69,6 +69,12 @@ except Exception:
 # ---------------------------------------------------------------------------
 
 Side = Literal["BUY", "SELL"]
+_InstrumentIdentity = tuple[str, str]
+
+
+def _instrument_identity(symbol: str, exchange: str) -> _InstrumentIdentity:
+    """Return the canonical identity for an instrument stream."""
+    return exchange.strip().upper(), symbol.strip().upper()
 
 
 @dataclass
@@ -198,12 +204,12 @@ class OrderFlowAggregator:
         self.time_bin_seconds = time_bin_seconds
         self.tick_size = tick_size
 
-        # symbol → {bin_start → _BinState}
-        self._state: dict[str, dict[int, _BinState]] = {}
-        # Per-symbol baseline for deriving incremental volume + aggressor side
-        # from raw market ticks (which carry cumulative volume and no side).
-        self._last_tick: dict[str, tuple[float, int]] = {}
-        self._last_side: dict[str, Side] = {}
+        # (exchange, symbol) → {bin_start → _BinState}
+        self._state: dict[_InstrumentIdentity, dict[int, _BinState]] = {}
+        # Per-instrument baseline for deriving incremental volume + aggressor
+        # side from raw market ticks (which carry cumulative volume and no side).
+        self._last_tick: dict[_InstrumentIdentity, tuple[float, int]] = {}
+        self._last_side: dict[_InstrumentIdentity, Side] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -216,16 +222,20 @@ class OrderFlowAggregator:
         volume: int,
         side: Side,
         timestamp: float | None = None,
+        *,
+        exchange: str = "",
     ) -> int:
         """Accumulate a single tick into the appropriate time bin.
 
         Args:
-            symbol: Instrument symbol (case-sensitive key for state isolation).
+            symbol: Instrument symbol.
             price: Trade price for this tick.
             volume: Trade volume for this tick (not cumulative — this is the
                 size of the individual trade, as provided by a trade stream).
             side: Trade aggressor side: ``"BUY"`` or ``"SELL"``.
             timestamp: Unix epoch seconds. Defaults to ``time.time()``.
+            exchange: Exchange for state isolation. Defaults to the empty
+                exchange for compatibility with direct analytics callers.
 
         Returns:
             The ``bin_start`` (Unix epoch seconds) of the bin this tick was
@@ -246,22 +256,24 @@ class OrderFlowAggregator:
         price_level = self._round_to_tick(price)
         volume = max(0, int(volume))
 
-        if symbol not in self._state:
-            self._state[symbol] = {}
-        symbol_state = self._state[symbol]
+        identity = _instrument_identity(symbol, exchange)
+        if identity not in self._state:
+            self._state[identity] = {}
+        symbol_state = self._state[identity]
 
         if bin_start not in symbol_state:
             symbol_state[bin_start] = _BinState(bin_start=bin_start)
 
         symbol_state[bin_start].add(price_level, side, volume)
         logger.debug(
-            "add_tick: symbol=%s price=%.4f vol=%d side=%s bin=%d",
-            symbol, price_level, volume, side, bin_start,
+            "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d",
+            identity[0], identity[1], price_level, volume, side, bin_start,
         )
         return bin_start
 
     def _classify_side(self, symbol: str, ltp: float, prev_ltp: float,
-                       bid: float | None, ask: float | None) -> Side:
+                       bid: float | None, ask: float | None,
+                       *, exchange: str = "") -> Side:
         """Aggressor side via the quote rule (preferred) or the tick rule.
 
         Lee-Ready style: a trade at or above the ask is buyer-initiated; at or
@@ -269,20 +281,21 @@ class OrderFlowAggregator:
         rule — up-trade = buy, down-trade = sell, unchanged = carry the previous
         side. Not a guess: the standard trade-side classification.
         """
+        identity = _instrument_identity(symbol, exchange)
         if bid is not None and ask is not None and ask >= bid > 0:
             if ltp >= ask:
-                self._last_side[symbol] = "BUY"
+                self._last_side[identity] = "BUY"
                 return "BUY"
             if ltp <= bid:
-                self._last_side[symbol] = "SELL"
+                self._last_side[identity] = "SELL"
                 return "SELL"
         if ltp > prev_ltp:
             side: Side = "BUY"
         elif ltp < prev_ltp:
             side = "SELL"
         else:
-            side = self._last_side.get(symbol, "BUY")
-        self._last_side[symbol] = side
+            side = self._last_side.get(identity, "BUY")
+        self._last_side[identity] = side
         return side
 
     def feed_market_tick(
@@ -291,6 +304,7 @@ class OrderFlowAggregator:
         ltp: float,
         cumulative_volume: int,
         *,
+        exchange: str = "",
         bid: float | None = None,
         ask: float | None = None,
         timestamp: float | None = None,
@@ -298,27 +312,30 @@ class OrderFlowAggregator:
         """Feed a raw market tick (LTP + cumulative day volume, no aggressor).
 
         Derives the incremental traded volume (this tick's cumulative minus the
-        symbol's last cumulative) and the aggressor side (see
+        instrument's last cumulative) and the aggressor side (see
         :meth:`_classify_side`), then records it via :meth:`add_tick`. A no-op
         until a second tick establishes a baseline, and when no volume traded
         between ticks. This is the glue that turns the live tick stream into a
         real order-flow footprint instead of synthetic data.
         """
-        prev = self._last_tick.get(symbol)
-        self._last_tick[symbol] = (ltp, int(cumulative_volume))
+        identity = _instrument_identity(symbol, exchange)
+        prev = self._last_tick.get(identity)
+        self._last_tick[identity] = (ltp, int(cumulative_volume))
         if prev is None:
             return
         prev_ltp, prev_vol = prev
         inc_volume = max(0, int(cumulative_volume) - prev_vol)
         if inc_volume <= 0:
             return
-        side = self._classify_side(symbol, ltp, prev_ltp, bid, ask)
-        self.add_tick(symbol, ltp, inc_volume, side, timestamp=timestamp)
+        side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
+        self.add_tick(symbol, ltp, inc_volume, side, timestamp=timestamp, exchange=exchange)
 
     def get_footprint(
         self,
         symbol: str,
         n_bins: int = 50,
+        *,
+        exchange: str = "",
     ) -> list[FootprintBucket]:
         """Return aggregated footprint data for the most recent ``n_bins`` bins.
 
@@ -330,6 +347,8 @@ class OrderFlowAggregator:
         Args:
             symbol: Instrument symbol.
             n_bins: Maximum number of bins to return. Default ``50``.
+            exchange: Exchange to retrieve. Defaults to the empty exchange for
+                compatibility with direct analytics callers.
 
         Returns:
             List of :class:`FootprintBucket` instances, sorted by
@@ -337,7 +356,7 @@ class OrderFlowAggregator:
             Returns an empty list if no data has been accumulated for
             ``symbol``.
         """
-        symbol_state = self._state.get(symbol)
+        symbol_state = self._state.get(_instrument_identity(symbol, exchange))
         if not symbol_state:
             return []
 
@@ -350,17 +369,19 @@ class OrderFlowAggregator:
             result.extend(symbol_state[bin_start].to_buckets())
         return result
 
-    def reset(self, symbol: str | None = None) -> None:
+    def reset(self, symbol: str | None = None, *, exchange: str = "") -> None:
         """Clear accumulated state.
 
         Args:
-            symbol: If given, clear only that symbol. If ``None``, clear all
-                symbols.
+            symbol: If given, clear only that instrument. If ``None``, clear
+                all instruments.
+            exchange: Exchange to clear when ``symbol`` is given. Defaults to
+                the empty exchange for compatibility with direct callers.
         """
         if symbol is None:
             self._state.clear()
         else:
-            self._state.pop(symbol, None)
+            self._state.pop(_instrument_identity(symbol, exchange), None)
 
     # ------------------------------------------------------------------
     # Static / class-level analytics

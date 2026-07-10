@@ -1429,7 +1429,7 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=storage, orderflow_aggregator=agg)
         recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2500.0, "volume": 1000})
         recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2505.0, "volume": 1300})
-        buckets = agg.get_footprint("RELIANCE")
+        buckets = agg.get_footprint("RELIANCE", exchange="NSE")
         assert sum(b.buy_volume for b in buckets) == 300
         assert sum(b.sell_volume for b in buckets) == 0
 

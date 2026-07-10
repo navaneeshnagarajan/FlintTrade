@@ -493,3 +493,22 @@ class TestFeedMarketTick:
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
         agg.feed_market_tick("NIFTY", 24505.0, 1000, timestamp=self._TS + 1)  # no trade
         assert agg.get_footprint("NIFTY") == []
+
+    def test_exchange_qualified_streams_keep_baselines_sides_and_buckets_isolated(self):
+        agg = self._agg()
+
+        agg.feed_market_tick("RELIANCE", 2500.0, 1000, exchange="NSE", timestamp=self._TS)
+        agg.feed_market_tick("RELIANCE", 2500.0, 5000, exchange="BSE", timestamp=self._TS)
+        agg.feed_market_tick("reliance", 2501.0, 1100, exchange="nse", timestamp=self._TS + 1)
+        agg.feed_market_tick("RELIANCE", 2499.0, 5200, exchange="BSE", timestamp=self._TS + 1)
+        agg.feed_market_tick("RELIANCE", 2501.0, 1200, exchange="NSE", timestamp=self._TS + 2)
+        agg.feed_market_tick("reliance", 2499.0, 5300, exchange="bse", timestamp=self._TS + 2)
+
+        nse_buckets = agg.get_footprint("reliance", exchange="nse")
+        bse_buckets = agg.get_footprint("RELIANCE", exchange="BSE")
+
+        assert sum(bucket.buy_volume for bucket in nse_buckets) == 200
+        assert sum(bucket.sell_volume for bucket in nse_buckets) == 0
+        assert sum(bucket.buy_volume for bucket in bse_buckets) == 0
+        assert sum(bucket.sell_volume for bucket in bse_buckets) == 300
+        assert agg.get_footprint("RELIANCE") == []

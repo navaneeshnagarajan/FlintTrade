@@ -229,11 +229,13 @@ def orderflow_endpoint() -> tuple[Any, int]:
         JSON with ``status``, ``data.buckets``, ``data.symbol``,
         ``data.exchange``, ``data.interval``, and ``data.is_live``.
     """
-    symbol = request.args.get("symbol")
+    symbol = (request.args.get("symbol") or "").strip().upper()
     if not symbol:
         return jsonify({"status": "error", "message": "symbol query parameter is required"}), 400
 
-    exchange = request.args.get("exchange", "NFO")
+    exchange = (request.args.get("exchange", "NFO") or "").strip().upper()
+    if not exchange:
+        return jsonify({"status": "error", "message": "exchange query parameter must not be blank"}), 400
 
     try:
         interval = int(request.args.get("interval", "300"))
@@ -257,7 +259,7 @@ def orderflow_endpoint() -> tuple[Any, int]:
     if tick_size <= 0:
         return jsonify({"status": "error", "message": "tick_size must be positive"}), 400
 
-    symbol_upper = symbol.upper()
+    symbol_upper = symbol
     is_live = False
     buckets: list[dict[str, Any]] = []
     # The bin width actually represented by the returned buckets. The synthetic
@@ -270,7 +272,7 @@ def orderflow_endpoint() -> tuple[Any, int]:
     try:
         aggregator = _get_live_aggregator()
         if aggregator is not None:
-            live_data = aggregator.get_footprint(symbol_upper, n_bins=bins)
+            live_data = aggregator.get_footprint(symbol_upper, n_bins=bins, exchange=exchange)
             if live_data:
                 buckets = _live_buckets_to_response(live_data, symbol_upper)
                 effective_interval = int(getattr(aggregator, "time_bin_seconds", interval))

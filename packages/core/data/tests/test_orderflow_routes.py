@@ -55,6 +55,21 @@ def test_orderflow_missing_symbol(client):
     assert resp.status_code == 400
 
 
+def test_orderflow_blank_symbol_returns_400(client):
+    """Whitespace cannot select the legacy empty-symbol namespace."""
+    resp = client.get("/api/v1/data/orderflow", query_string={"symbol": "   "})
+    assert resp.status_code == 400
+
+
+def test_orderflow_blank_exchange_returns_400(client):
+    """Whitespace cannot collapse into the empty-exchange compatibility key."""
+    resp = client.get(
+        "/api/v1/data/orderflow",
+        query_string={"symbol": "RELIANCE", "exchange": "   "},
+    )
+    assert resp.status_code == 400
+
+
 def test_orderflow_invalid_interval(client):
     """400 when interval is not an integer."""
     resp = client.get("/api/v1/data/orderflow?symbol=NIFTY&interval=bad")
@@ -91,6 +106,25 @@ def test_orderflow_live_aggregator(app):
     with app.test_client() as c:
         resp = c.get("/api/v1/data/orderflow?symbol=NIFTY")
     assert resp.status_code == 200
+
+
+def test_orderflow_live_aggregator_receives_exchange(app):
+    """The route queries the live footprint for the requested exchange."""
+    from unittest.mock import MagicMock
+
+    aggregator = MagicMock()
+    aggregator.get_footprint.return_value = []
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as c:
+        resp = c.get(
+            "/api/v1/data/orderflow",
+            query_string={"symbol": " reliance ", "exchange": " bse ", "bins": 7},
+        )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["exchange"] == "BSE"
+    aggregator.get_footprint.assert_called_once_with("RELIANCE", n_bins=7, exchange="BSE")
 
 
 def test_orderflow_live_reports_real_bin_width_not_requested(app):

@@ -342,6 +342,7 @@ class TickRecorder:
                         symbol,
                         float(ltp),
                         int(volume),
+                        exchange=exchange,
                         bid=float(bid) if bid is not None else None,
                         ask=float(ask) if ask is not None else None,
                     )
