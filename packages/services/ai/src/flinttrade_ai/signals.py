@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import io
 import logging
 import math
 import os
@@ -577,10 +578,6 @@ class SignalGenerator:
 
     def load(self, path: str) -> None:
         """Load a trained model after validating its SHA-256 integrity sidecar."""
-        try:
-            import joblib
-        except ImportError:
-            raise ImportError("joblib required — pip install joblib")
         model_path = Path(path)
         checksum_path = self._checksum_path(model_path)
         actual = self._compute_sha256(model_path)
@@ -598,7 +595,25 @@ class SignalGenerator:
                 model_path,
             )
 
-        data = joblib.load(model_path)
+        self._load_joblib_payload(model_path, source_name=model_path.name)
+        logger.info("Signal model loaded from %s", path)
+
+    def load_guarded_bytes(self, model_bytes: bytes, expected_sha256: str, *, source_name: str) -> None:
+        """Load model bytes only after their supplied SHA-256 digest is verified."""
+        actual = hashlib.sha256(model_bytes).hexdigest()
+        if not hmac.compare_digest(expected_sha256, actual):
+            raise RuntimeError(f"Refusing to load {source_name}: SHA-256 checksum mismatch")
+        self._load_joblib_payload(io.BytesIO(model_bytes), source_name=source_name)
+        logger.info("Signal model loaded from guarded bundle %s", source_name)
+
+    def _load_joblib_payload(self, source: Any, *, source_name: str) -> None:
+        """Validate a joblib payload before changing the live generator state."""
+        try:
+            import joblib
+        except ImportError:
+            raise ImportError("joblib required — pip install joblib")
+
+        data = joblib.load(source)
         try:
             model = data["model"]
             feature_names = data["feature_names"]
@@ -609,7 +624,6 @@ class SignalGenerator:
 
         self._model = model
         self._feature_names = feature_names
-        logger.info("Signal model loaded from %s", path)
 
     @staticmethod
     def _checksum_path(model_path: Path) -> Path:

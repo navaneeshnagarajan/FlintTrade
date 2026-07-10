@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,16 @@ class _RecordingPipeline:
     def install_generator(self, symbol: str, exchange: str, generator: Any) -> None:
         self.installed.append((symbol, exchange, generator))
 
+    def publish_generator(
+        self,
+        symbol: str,
+        exchange: str,
+        generator: Any,
+        publish: Any,
+    ) -> None:
+        publish()
+        self.install_generator(symbol, exchange, generator)
+
 
 def _bars(count: int = 80, *, price_shift: float = 0.0) -> list[dict[str, float | str]]:
     return [
@@ -44,6 +56,24 @@ def _bars(count: int = 80, *, price_shift: float = 0.0) -> list[dict[str, float 
         }
         for index in range(count)
     ]
+
+
+def _distribution_shifted_bars(count: int = 120) -> list[dict[str, float | str]]:
+    rows: list[dict[str, float | str]] = []
+    for index in range(count):
+        close = 100.0 if index % 2 == 0 else 1000.0
+        open_price = close * (1.3 if index % 3 == 0 else 0.7)
+        rows.append(
+            {
+                "timestamp": f"2026-02-{index + 1:03d}",
+                "open": open_price,
+                "high": max(open_price, close) * 1.5,
+                "low": min(open_price, close) * 0.5,
+                "close": close,
+                "volume": 10_000_000.0 if index % 2 == 0 else 100.0,
+            }
+        )
+    return rows
 
 
 def _install_train_stub(monkeypatch: pytest.MonkeyPatch, *, test_accuracy: float = 0.75) -> list[dict[str, Any]]:
@@ -78,6 +108,20 @@ def _save_generator(path: Path, model: Any) -> Any:
     return generator
 
 
+def _save_bundle(path: Path, model: Any, *, symbol: str, exchange: str) -> Any:
+    from flinttrade_ai.signal_retraining import _write_model_bundle
+    from flinttrade_ai.signals import FeatureSet, SignalGenerator, engineer_features
+
+    generator = SignalGenerator()
+    generator._model = model
+    features = engineer_features(_bars(120))
+    generator._feature_names = features.names
+    split = int(len(features.values) * 0.8)
+    baseline = FeatureSet(names=features.names, values=features.values[:split])
+    _write_model_bundle(path, generator, baseline, symbol=symbol, exchange=exchange)
+    return generator
+
+
 def test_retrain_config_preserves_reviewed_defaults() -> None:
     from flinttrade_ai.signal_retraining import RetrainConfig
 
@@ -104,6 +148,30 @@ def test_feature_drift_uses_mean_score_and_has_deterministic_fallback(monkeypatc
 
     assert detected is True
     assert score == pytest.approx(0.5)
+
+
+def test_feature_drift_uses_scipy_statistic_and_threshold_equality_is_not_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import flinttrade_ai.signal_retraining as retraining
+    from flinttrade_ai.signals import FeatureSet
+
+    ks_2samp = MagicMock(return_value=SimpleNamespace(statistic=0.25))
+    monkeypatch.setattr(retraining, "_scipy_ks_2samp", ks_2samp)
+    reference = FeatureSet(names=["feature"], values=[[float(index)] for index in range(5)])
+    current = FeatureSet(names=["feature"], values=[[float(index + 10)] for index in range(5)])
+
+    detected, score = retraining.compute_feature_drift(reference, current, threshold=0.25)
+
+    assert detected is False
+    assert score == pytest.approx(0.25)
+    ks_2samp.assert_called_once_with(
+        [0.0, 1.0, 2.0, 3.0, 4.0],
+        [10.0, 11.0, 12.0, 13.0, 14.0],
+    )
 
 
 @pytest.mark.parametrize(
@@ -158,12 +226,129 @@ def test_accepted_candidate_uses_canonical_train_metrics_and_promotes_per_instru
     model_path = retrainer.model_path("NIFTY/50", "NSE INDEX")
     assert model_path.parent == tmp_path
     assert model_path.name.startswith("signal_model_")
-    assert model_path.suffix == ".joblib"
+    assert model_path.suffix == ".bundle"
     assert "/" not in model_path.name
     assert " " not in model_path.name
     assert model_path.exists()
-    assert Path(f"{model_path}.sha256").exists()
+    assert not Path(f"{model_path}.sha256").exists()
     assert not list(tmp_path.glob("*.tmp*"))
+
+    with zipfile.ZipFile(model_path) as bundle:
+        metadata = json.loads(bundle.read("metadata.json"))
+        model_bytes = bundle.read("model.joblib")
+        checksum = bundle.read("model.sha256").decode("ascii")
+    assert metadata["bundle_version"] == 1
+    assert metadata["identity"]["exchange"] == "NSE INDEX"
+    assert metadata["identity"]["symbol"] == "NIFTY/50"
+    assert metadata["baseline"]["version"] == 1
+    assert metadata["baseline"]["model_sha256"] == checksum
+    assert metadata["model_sha256"] == checksum
+    from flinttrade_ai.signals import engineer_features
+
+    expected_features = engineer_features(_bars())
+    expected_split = int(len(expected_features.values) * 0.8)
+    assert metadata["baseline"]["feature_names"] == expected_features.names
+    assert metadata["baseline"]["values"] == expected_features.values[:expected_split]
+    assert model_bytes
+
+
+def test_retraining_compares_recent_features_with_verified_incumbent_training_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_ai.signal_retraining as retraining
+
+    monkeypatch.setattr(retraining, "_scipy_ks_2samp", None)
+    _install_train_stub(monkeypatch, test_accuracy=0.8)
+    fetched = iter([_bars(120), _distribution_shifted_bars()])
+    retrainer = retraining.SignalRetrainer(
+        _config(tmp_path, drift_threshold=0.3),
+        instruments=[],
+        data_fetcher=lambda *_args: next(fetched),
+    )
+
+    first = retrainer.run_once("NIFTY", "NSE_INDEX")
+    second = retrainer.run_once("NIFTY", "NSE_INDEX")
+
+    assert first.accepted is True
+    assert first.drift_detected is False
+    assert second.accepted is True
+    assert second.drift_detected is True
+    assert second.drift_score > 0.3
+
+
+@pytest.mark.parametrize("baseline_value", [None, {"version": 1, "model_sha256": "not-a-digest"}])
+def test_missing_or_corrupt_incumbent_baseline_reports_no_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    baseline_value: Any,
+) -> None:
+    import flinttrade_ai.signal_retraining as retraining
+
+    monkeypatch.setattr(retraining, "_scipy_ks_2samp", None)
+    _install_train_stub(monkeypatch, test_accuracy=0.8)
+    retrainer = retraining.SignalRetrainer(
+        _config(tmp_path),
+        instruments=[],
+        data_fetcher=lambda *_args: _bars(120),
+    )
+    assert retrainer.run_once("NIFTY", "NSE_INDEX").accepted is True
+    target = retrainer.model_path("NIFTY", "NSE_INDEX")
+
+    with zipfile.ZipFile(target) as source:
+        model_bytes = source.read("model.joblib")
+        checksum = source.read("model.sha256")
+        metadata = json.loads(source.read("metadata.json"))
+    if baseline_value is None:
+        metadata.pop("baseline")
+    else:
+        metadata["baseline"] = baseline_value
+    with zipfile.ZipFile(target, "w") as corrupted:
+        corrupted.writestr("model.joblib", model_bytes)
+        corrupted.writestr("model.sha256", checksum)
+        corrupted.writestr("metadata.json", json.dumps(metadata))
+
+    retrainer._data_fetcher = lambda *_args: _distribution_shifted_bars()
+    result = retrainer.run_once("NIFTY", "NSE_INDEX")
+
+    assert result.accepted is True
+    assert result.drift_detected is False
+    assert result.drift_score == 0.0
+
+
+@pytest.mark.parametrize("corruption", ["baseline", "model"])
+def test_bundle_integrity_and_baseline_are_verified_before_joblib_deserialisation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corruption: str,
+) -> None:
+    from unittest.mock import MagicMock
+
+    import joblib
+
+    from flinttrade_ai.signal_retraining import load_signal_model_bundle, signal_model_path
+
+    target = signal_model_path(tmp_path, "NIFTY", "NSE_INDEX")
+    _save_bundle(target, _PredictableModel(), symbol="NIFTY", exchange="NSE_INDEX")
+    with zipfile.ZipFile(target) as source:
+        model_bytes = source.read("model.joblib")
+        checksum = source.read("model.sha256")
+        metadata = json.loads(source.read("metadata.json"))
+    if corruption == "baseline":
+        metadata["baseline"]["values"] = [[float("nan")]]
+    else:
+        model_bytes += b"tampered"
+    with zipfile.ZipFile(target, "w") as corrupted:
+        corrupted.writestr("model.joblib", model_bytes)
+        corrupted.writestr("model.sha256", checksum)
+        corrupted.writestr("metadata.json", json.dumps(metadata))
+    loader = MagicMock()
+    monkeypatch.setattr(joblib, "load", loader)
+
+    with pytest.raises((RuntimeError, ValueError)):
+        load_signal_model_bundle(target, symbol="NIFTY", exchange="NSE_INDEX")
+
+    loader.assert_not_called()
 
 
 def test_rejected_candidate_changes_neither_disk_nor_live_pipeline(
@@ -189,84 +374,146 @@ def test_rejected_candidate_changes_neither_disk_nor_live_pipeline(
     assert pipeline.installed == []
 
 
-def test_failed_candidate_persistence_restores_existing_files_and_cleans_temporaries(
+def test_interrupted_candidate_write_preserves_atomic_bundle_and_restart_loads_old_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from flinttrade_ai.signal_retraining import SignalRetrainer
-    from flinttrade_ai.signals import SignalGenerator
+    from unittest.mock import MagicMock
+
+    import flinttrade_ai.signal_retraining as retraining
+    from flinttrade_ai.pipeline import SignalPipeline
 
     _install_train_stub(monkeypatch, test_accuracy=0.8)
-    retrainer = SignalRetrainer(
+    retrainer = retraining.SignalRetrainer(
         _config(tmp_path),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         data_fetcher=lambda *_args: _bars(),
-        pipeline=_RecordingPipeline(),
     )
     target = retrainer.model_path("NIFTY", "NSE_INDEX")
-    sidecar = Path(f"{target}.sha256")
-    target.write_bytes(b"old-model")
-    sidecar.write_text("old-digest", encoding="ascii")
+    _save_bundle(target, _SellModel(), symbol="NIFTY", exchange="NSE_INDEX")
+    old_bundle = target.read_bytes()
 
-    def _broken_save(self: SignalGenerator, path: str) -> None:
-        Path(path).write_bytes(b"partial-candidate")
-        raise OSError("disk full")
+    def _interrupted_write(path: Path, *_args: Any, **_kwargs: Any) -> None:
+        path.write_bytes(b"partial-candidate-bundle")
+        raise OSError("interrupted before publication")
 
-    monkeypatch.setattr(SignalGenerator, "save", _broken_save)
+    monkeypatch.setattr(retraining, "_write_model_bundle", _interrupted_write)
 
     result = retrainer.run_once("NIFTY", "NSE_INDEX")
 
     assert result.accepted is False
     assert "Persistence failed" in result.reason
-    assert target.read_bytes() == b"old-model"
-    assert sidecar.read_text(encoding="ascii") == "old-digest"
+    assert target.read_bytes() == old_bundle
     assert not list(tmp_path.glob("*.tmp*"))
 
+    restarted = SignalPipeline(
+        model_path=str(tmp_path / "missing-shared.joblib"),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+    )
+    restarted.fetch_bars = MagicMock(return_value=_bars())
+    assert restarted.run_cycle()["NSE_INDEX:NIFTY"]["signal"] == "SELL"
 
-def test_filesystem_safe_model_paths_do_not_collide_with_literal_safe_symbols(tmp_path: Path) -> None:
+
+def test_filesystem_safe_model_paths_include_pair_digest_and_avoid_all_reviewed_collisions(tmp_path: Path) -> None:
+    import re
+
     from flinttrade_ai.signal_retraining import signal_model_path
 
     escaped = signal_model_path(tmp_path, "NIFTY/50", "NSE INDEX")
     literal = signal_model_path(tmp_path, "NIFTY_50", "NSE_INDEX")
+    joined_left = signal_model_path(tmp_path, "NIFTY", "NSE_INDEX")
+    joined_right = signal_model_path(tmp_path, "INDEX_NIFTY", "NSE")
+    colon_left = signal_model_path(tmp_path, "NIFTY", "NSE:INDEX")
+    colon_right = signal_model_path(tmp_path, "INDEX:NIFTY", "NSE")
 
     assert escaped != literal
+    assert joined_left != joined_right
+    assert colon_left != colon_right
+    assert all(
+        re.search(r"_[0-9a-f]{16}\.bundle$", path.name)
+        for path in (escaped, literal, joined_left, joined_right, colon_left, colon_right)
+    )
 
 
-def test_backup_setup_failure_cleans_all_temporary_files(
+def test_concurrent_uncached_reader_sees_old_until_atomic_publication_then_new(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from flinttrade_ai.signal_retraining import SignalRetrainer
+    import flinttrade_ai.signal_retraining as retraining
+    from flinttrade_ai.pipeline import SignalPipeline
+    from flinttrade_ai.signals import SignalGenerator, engineer_features
 
-    _install_train_stub(monkeypatch, test_accuracy=0.8)
-    retrainer = SignalRetrainer(
+    target = retraining.signal_model_path(tmp_path, "NIFTY", "NSE_INDEX")
+    old = _save_bundle(target, _PredictableModel(), symbol="NIFTY", exchange="NSE_INDEX")
+    pipeline = SignalPipeline(
+        model_path=str(tmp_path / "missing-shared.joblib"),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+    )
+
+    def _train(self: SignalGenerator, bars: list[dict[str, Any]], **_kwargs: Any) -> dict[str, float]:
+        self._model = _SellModel()
+        self._feature_names = engineer_features(bars).names
+        return {"train_accuracy": 0.9, "test_accuracy": 0.8}
+
+    monkeypatch.setattr(SignalGenerator, "train", _train)
+    retrainer = retraining.SignalRetrainer(
         _config(tmp_path),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         data_fetcher=lambda *_args: _bars(),
-        pipeline=_RecordingPipeline(),
+        pipeline=pipeline,
     )
-    target = retrainer.model_path("NIFTY", "NSE_INDEX")
-    sidecar = Path(f"{target}.sha256")
-    target.write_bytes(b"old-model")
-    sidecar.write_text("old-digest", encoding="ascii")
-    real_backup = retrainer._backup
-    calls = 0
+    candidate_ready = threading.Event()
+    allow_publication = threading.Event()
+    replace_started = threading.Event()
+    allow_replace = threading.Event()
+    reader_finished = threading.Event()
+    real_write = retraining._write_model_bundle
+    real_replace = Path.replace
 
-    def _failing_backup(path: Path) -> Path | None:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise OSError("backup unavailable")
-        return real_backup(path)
+    def _paused_write(path: Path, *args: Any, **kwargs: Any) -> None:
+        real_write(path, *args, **kwargs)
+        candidate_ready.set()
+        assert allow_publication.wait(timeout=5)
 
-    monkeypatch.setattr(retrainer, "_backup", _failing_backup)
+    def _paused_replace(source: Path, destination: Path) -> Path:
+        if Path(destination) == target:
+            replace_started.set()
+            assert allow_replace.wait(timeout=5)
+        return real_replace(source, destination)
 
-    result = retrainer.run_once("NIFTY", "NSE_INDEX")
+    monkeypatch.setattr(retraining, "_write_model_bundle", _paused_write)
+    monkeypatch.setattr(Path, "replace", _paused_replace)
+    retrain_results: list[Any] = []
+    publisher = threading.Thread(
+        target=lambda: retrain_results.append(retrainer.run_once("NIFTY", "NSE_INDEX")),
+    )
+    publisher.start()
+    assert candidate_ready.wait(timeout=5)
 
-    assert result.accepted is False
-    assert "Persistence failed" in result.reason
-    assert target.read_bytes() == b"old-model"
-    assert sidecar.read_text(encoding="ascii") == "old-digest"
+    during_build = pipeline._generator_for("NIFTY", "NSE_INDEX")
+    assert during_build._model.__class__ is old._model.__class__
+
+    allow_publication.set()
+    assert replace_started.wait(timeout=5)
+    reader_results: list[Any] = []
+
+    def _read_during_publication() -> None:
+        reader_results.append(pipeline._generator_for("NIFTY", "NSE_INDEX"))
+        reader_finished.set()
+
+    reader = threading.Thread(target=_read_during_publication)
+    reader.start()
+    assert not reader_finished.wait(timeout=0.1)
+
+    allow_replace.set()
+    publisher.join(timeout=5)
+    reader.join(timeout=5)
+
+    assert not publisher.is_alive()
+    assert not reader.is_alive()
+    assert retrain_results[0].accepted is True
+    assert reader_results[0]._model.__class__ is _SellModel
+    assert pipeline._generator_for("NIFTY", "NSE_INDEX") is reader_results[0]
     assert not list(tmp_path.glob("*.tmp*"))
 
 
@@ -385,7 +632,12 @@ def test_pipeline_prefers_verified_per_instrument_model_then_verified_shared_mod
         instruments=roster,
         data_fetcher=lambda *_args: _bars(),
     )
-    _save_generator(retrainer.model_path("NIFTY", "NSE_INDEX"), _SellModel())
+    _save_bundle(
+        retrainer.model_path("NIFTY", "NSE_INDEX"),
+        _SellModel(),
+        symbol="NIFTY",
+        exchange="NSE_INDEX",
+    )
     pipeline = SignalPipeline(model_path=str(shared_path), instruments=roster)
     pipeline.fetch_bars = MagicMock(return_value=_bars())
 
@@ -440,6 +692,22 @@ def test_pipeline_installs_new_generator_for_only_the_target_instrument(tmp_path
     assert pipeline._generator_for("BANKNIFTY", "NSE_INDEX")._model.__class__ is _PredictableModel
     assert pipeline._generator is not replacement
     assert pipeline._generator._model.__class__ is shared._model.__class__
+
+
+def test_pipeline_cache_uses_tuple_keys_for_colon_colliding_instruments(tmp_path: Path) -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    pipeline = SignalPipeline(model_path=str(tmp_path / "missing-shared.joblib"))
+    left = object()
+    right = object()
+
+    pipeline.install_generator("NIFTY", "NSE:INDEX", left)
+    pipeline.install_generator("INDEX:NIFTY", "NSE", right)
+
+    assert pipeline._symbol_generators[("NSE:INDEX", "NIFTY")] is left
+    assert pipeline._symbol_generators[("NSE", "INDEX:NIFTY")] is right
+    assert pipeline._generator_for("NIFTY", "NSE:INDEX") is left
+    assert pipeline._generator_for("INDEX:NIFTY", "NSE") is right
 
 
 def test_canonical_retraining_types_are_exported() -> None:

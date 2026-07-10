@@ -127,7 +127,7 @@ class SignalPipeline:
         self.interval = interval
         self.latest_signals: dict[str, dict[str, Any]] = {}
         self._generator: Any = None
-        self._symbol_generators: dict[str, Any] = {}
+        self._symbol_generators: dict[tuple[str, str], Any] = {}
         self._generator_lock = threading.RLock()
         self._turbulence_enabled: bool = turbulence_enabled
         self._turbulence_threshold: float = turbulence_threshold
@@ -155,30 +155,29 @@ class SignalPipeline:
 
     def _generator_for(self, symbol: str, exchange: str) -> Any:
         """Return the verified per-instrument model, then shared model, then fallback."""
-        key = f"{exchange}:{symbol}"
+        key = (exchange, symbol)
+        display_key = f"{exchange}:{symbol}"
         with self._generator_lock:
             existing = self._symbol_generators.get(key)
             if existing is not None:
                 return existing
 
-            from .signal_retraining import signal_model_path
-            from .signals import SignalGenerator
+            from .signal_retraining import load_signal_model_bundle, signal_model_path
 
             model_file = signal_model_path(Path(self.model_path).parent, symbol, exchange)
             if model_file.exists():
-                candidate = SignalGenerator()
                 try:
-                    candidate.load(str(model_file))
+                    candidate = load_signal_model_bundle(model_file, symbol=symbol, exchange=exchange)
                 except Exception as exc:  # noqa: BLE001 - invalid models fall through to shared/fallback
                     logger.warning(
                         "Could not load signal model for %s from %s; using shared fallback: %s",
-                        key,
+                        display_key,
                         model_file,
                         exc,
                     )
                 else:
                     self._symbol_generators[key] = candidate
-                    logger.info("Loaded signal model for %s from %s", key, model_file)
+                    logger.info("Loaded signal model for %s from %s", display_key, model_file)
                     return candidate
 
             self._ensure_generator()
@@ -187,8 +186,19 @@ class SignalPipeline:
 
     def install_generator(self, symbol: str, exchange: str, generator: Any) -> None:
         """Atomically publish a persisted generator to future signal cycles."""
+        self.publish_generator(symbol, exchange, generator, lambda: None)
+
+    def publish_generator(
+        self,
+        symbol: str,
+        exchange: str,
+        generator: Any,
+        publish: Callable[[], None],
+    ) -> None:
+        """Publish disk state and its cache entry under the generator lock."""
         with self._generator_lock:
-            self._symbol_generators[f"{exchange}:{symbol}"] = generator
+            publish()
+            self._symbol_generators[(exchange, symbol)] = generator
 
     def fetch_bars(self, symbol: str, exchange: str, lookback_days: int = 30) -> list[dict]:
         """Fetch OHLCV bars from OpenAlgo history API."""

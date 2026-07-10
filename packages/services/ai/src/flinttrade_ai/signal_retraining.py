@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import math
 import os
 import re
-import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -31,6 +32,10 @@ except (ImportError, OSError):
 logger = logging.getLogger("flinttrade.ai.signal_retraining")
 
 DataFetcher = Callable[[str, str, int], list[dict[str, Any]]]
+
+_BUNDLE_VERSION = 1
+_BASELINE_VERSION = 1
+_BUNDLE_MEMBERS = frozenset({"metadata.json", "model.joblib", "model.sha256"})
 
 
 def _default_model_dir() -> Path:
@@ -136,17 +141,186 @@ def _safe_path_component(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._")
     if not cleaned:
         cleaned = "UNKNOWN"
-    if cleaned != raw or len(cleaned) > 80:
-        suffix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
-        cleaned = f"{cleaned[:71]}_{suffix}"
-    return cleaned
+    return cleaned[:48]
+
+
+def _instrument_identity_digest(symbol: str, exchange: str) -> str:
+    """Hash an unambiguous length-delimited ``(exchange, symbol)`` pair."""
+    digest = hashlib.sha256()
+    for value in (exchange, symbol):
+        encoded = value.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, byteorder="big"))
+        digest.update(encoded)
+    return digest.hexdigest()
 
 
 def signal_model_path(model_dir: Path, symbol: str, exchange: str) -> Path:
     """Return the canonical deterministic path for one instrument model."""
     safe_exchange = _safe_path_component(exchange)
     safe_symbol = _safe_path_component(symbol)
-    return model_dir / f"signal_model_{safe_exchange}_{safe_symbol}.joblib"
+    digest = _instrument_identity_digest(symbol, exchange)[:16]
+    return model_dir / f"signal_model_{safe_exchange}_{safe_symbol}_{digest}.bundle"
+
+
+def _temporary_path(target: Path, label: str) -> Path:
+    descriptor, name = tempfile.mkstemp(
+        prefix=f"{target.name}.{label}.",
+        suffix=".tmp",
+        dir=target.parent,
+    )
+    os.close(descriptor)
+    return Path(name)
+
+
+def _baseline_payload(baseline: FeatureSet, *, model_sha256: str) -> dict[str, Any]:
+    return {
+        "version": _BASELINE_VERSION,
+        "model_sha256": model_sha256,
+        "feature_names": list(baseline.names),
+        "values": [list(row) for row in baseline.values],
+    }
+
+
+def _validate_baseline(payload: Any, *, model_sha256: str) -> FeatureSet:
+    if not isinstance(payload, dict) or payload.get("version") != _BASELINE_VERSION:
+        raise ValueError("Signal model bundle has missing or unsupported baseline metadata")
+    baseline_digest = payload.get("model_sha256")
+    if not isinstance(baseline_digest, str) or not hmac.compare_digest(baseline_digest, model_sha256):
+        raise ValueError("Signal model bundle baseline is not associated with its model digest")
+
+    names = payload.get("feature_names")
+    values = payload.get("values")
+    if (
+        not isinstance(names, list)
+        or not names
+        or not all(isinstance(name, str) and name for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("Signal model bundle baseline has invalid feature names")
+    if not isinstance(values, list) or not values:
+        raise ValueError("Signal model bundle baseline has no feature values")
+
+    validated_values: list[list[float]] = []
+    for row in values:
+        if not isinstance(row, list) or len(row) != len(names):
+            raise ValueError("Signal model bundle baseline row does not match its feature names")
+        validated_row: list[float] = []
+        for value in row:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError("Signal model bundle baseline contains a non-numeric value")
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                raise ValueError("Signal model bundle baseline contains a non-finite value")
+            validated_row.append(numeric)
+        validated_values.append(validated_row)
+    return FeatureSet(names=list(names), values=validated_values)
+
+
+def _read_verified_bundle(
+    path: Path,
+    *,
+    symbol: str,
+    exchange: str,
+) -> tuple[bytes, str, FeatureSet]:
+    """Validate one complete bundle without deserialising its joblib member."""
+    with zipfile.ZipFile(path) as bundle:
+        names = [member.filename for member in bundle.infolist()]
+        if len(names) != len(_BUNDLE_MEMBERS) or set(names) != _BUNDLE_MEMBERS:
+            raise ValueError("Signal model bundle has missing, duplicate, or unexpected members")
+        try:
+            metadata = json.loads(bundle.read("metadata.json").decode("utf-8"))
+            checksum = bundle.read("model.sha256").decode("ascii").strip()
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Signal model bundle metadata is not valid JSON/ASCII") from exc
+
+        if not isinstance(metadata, dict) or metadata.get("bundle_version") != _BUNDLE_VERSION:
+            raise ValueError("Signal model bundle has an unsupported version")
+        identity = metadata.get("identity")
+        expected_identity_digest = _instrument_identity_digest(symbol, exchange)
+        if not isinstance(identity, dict):
+            raise ValueError("Signal model bundle has no instrument identity")
+        if identity.get("exchange") != exchange or identity.get("symbol") != symbol:
+            raise ValueError("Signal model bundle instrument identity does not match its requested instrument")
+        identity_digest = identity.get("digest")
+        if not isinstance(identity_digest, str) or not hmac.compare_digest(identity_digest, expected_identity_digest):
+            raise ValueError("Signal model bundle instrument identity digest is invalid")
+
+        metadata_digest = metadata.get("model_sha256")
+        if not isinstance(metadata_digest, str) or re.fullmatch(r"[0-9a-f]{64}", metadata_digest) is None:
+            raise ValueError("Signal model bundle has an invalid model digest")
+        if re.fullmatch(r"[0-9a-f]{64}", checksum) is None or not hmac.compare_digest(checksum, metadata_digest):
+            raise ValueError("Signal model bundle checksum metadata does not match")
+        baseline = _validate_baseline(metadata.get("baseline"), model_sha256=metadata_digest)
+
+        model_bytes = bundle.read("model.joblib")
+    actual_digest = hashlib.sha256(model_bytes).hexdigest()
+    if not hmac.compare_digest(actual_digest, metadata_digest):
+        raise RuntimeError(f"Refusing to load {path.name}: SHA-256 checksum mismatch")
+    return model_bytes, metadata_digest, baseline
+
+
+def _write_model_bundle(
+    path: Path,
+    candidate: SignalGenerator,
+    baseline: FeatureSet,
+    *,
+    symbol: str,
+    exchange: str,
+) -> None:
+    """Write one complete guarded model bundle to ``path`` without publishing it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_model = _temporary_path(path, "joblib")
+    temp_sidecar = SignalGenerator._checksum_path(temp_model)
+    try:
+        candidate.save(str(temp_model))
+        if not temp_model.exists() or not temp_sidecar.exists():
+            raise OSError("candidate persistence did not produce model and checksum files")
+        model_bytes = temp_model.read_bytes()
+        checksum = temp_sidecar.read_text(encoding="ascii").strip()
+        actual_digest = hashlib.sha256(model_bytes).hexdigest()
+        if not hmac.compare_digest(checksum, actual_digest):
+            raise RuntimeError("candidate model checksum does not match its persisted bytes")
+
+        baseline_payload = _baseline_payload(baseline, model_sha256=actual_digest)
+        _validate_baseline(baseline_payload, model_sha256=actual_digest)
+        metadata = {
+            "bundle_version": _BUNDLE_VERSION,
+            "accepted_at": datetime.now(timezone.utc).isoformat(),
+            "identity": {
+                "exchange": exchange,
+                "symbol": symbol,
+                "digest": _instrument_identity_digest(symbol, exchange),
+            },
+            "model_sha256": actual_digest,
+            "baseline": baseline_payload,
+        }
+        metadata_bytes = json.dumps(
+            metadata,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("metadata.json", metadata_bytes)
+            bundle.writestr("model.joblib", model_bytes)
+            bundle.writestr("model.sha256", actual_digest.encode("ascii"))
+        with path.open("rb") as bundle_file:
+            os.fsync(bundle_file.fileno())
+    finally:
+        temp_model.unlink(missing_ok=True)
+        temp_sidecar.unlink(missing_ok=True)
+
+
+def load_signal_model_bundle(path: Path, *, symbol: str, exchange: str) -> SignalGenerator:
+    """Load a verified per-instrument bundle after validating all metadata."""
+    model_bytes, model_sha256, _baseline = _read_verified_bundle(
+        path,
+        symbol=symbol,
+        exchange=exchange,
+    )
+    generator = SignalGenerator()
+    generator.load_guarded_bytes(model_bytes, model_sha256, source_name=path.name)
+    return generator
 
 
 class SignalRetrainer:
@@ -167,7 +341,7 @@ class SignalRetrainer:
         self._history: deque[RetrainResult] = deque(maxlen=config.max_history)
         self._history_lock = threading.Lock()
         self._promotion_lock = threading.Lock()
-        self._live_generators: dict[str, SignalGenerator] = {}
+        self._live_generators: dict[tuple[str, str], SignalGenerator] = {}
         self.config.model_dir.mkdir(parents=True, exist_ok=True)
 
     def model_path(self, symbol: str, exchange: str) -> Path:
@@ -190,14 +364,28 @@ class SignalRetrainer:
         drift_score = 0.0
         target = self.model_path(symbol, exchange)
         if target.exists():
-            split = int(len(features.values) * (1 - self.config.validation_split))
-            reference = FeatureSet(names=features.names, values=features.values[:split])
-            current = FeatureSet(names=features.names, values=features.values[split:])
-            drift_detected, drift_score = compute_feature_drift(
-                reference,
-                current,
-                threshold=self.config.drift_threshold,
-            )
+            try:
+                _model_bytes, _model_sha256, incumbent_baseline = _read_verified_bundle(
+                    target,
+                    symbol=symbol,
+                    exchange=exchange,
+                )
+            except Exception as exc:  # noqa: BLE001 - invalid baseline means no drift, not failed retraining
+                logger.warning("Could not verify incumbent baseline for %s:%s: %s", exchange, symbol, exc)
+            else:
+                split = int(len(features.values) * (1 - self.config.validation_split))
+                recent = FeatureSet(names=features.names, values=features.values[split:])
+                drift_detected, drift_score = compute_feature_drift(
+                    incumbent_baseline,
+                    recent,
+                    threshold=self.config.drift_threshold,
+                )
+
+        training_split = int(len(features.values) * (1 - self.config.validation_split))
+        training_baseline = FeatureSet(
+            names=list(features.names),
+            values=[list(row) for row in features.values[:training_split]],
+        )
 
         candidate = SignalGenerator()
         try:
@@ -230,7 +418,7 @@ class SignalRetrainer:
             return result
 
         try:
-            self._promote(symbol, exchange, candidate)
+            self._promote(symbol, exchange, candidate, training_baseline)
         except Exception as exc:  # noqa: BLE001 - failed promotion must remain advisory
             return self._record_failure(
                 started,
@@ -283,71 +471,39 @@ class SignalRetrainer:
     def get_generator(self, symbol: str, exchange: str) -> SignalGenerator | None:
         """Return the retrainer's last accepted generator for an instrument."""
         with self._promotion_lock:
-            return self._live_generators.get(f"{exchange}:{symbol}")
+            return self._live_generators.get((exchange, symbol))
 
-    def _promote(self, symbol: str, exchange: str, candidate: SignalGenerator) -> None:
+    def _promote(
+        self,
+        symbol: str,
+        exchange: str,
+        candidate: SignalGenerator,
+        training_baseline: FeatureSet,
+    ) -> None:
         target = self.model_path(symbol, exchange)
-        target_sidecar = SignalGenerator._checksum_path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
 
         with self._promotion_lock:
-            temp_model = self._temporary_path(target, "candidate")
-            temp_sidecar = SignalGenerator._checksum_path(temp_model)
-            model_backup: Path | None = None
-            sidecar_backup: Path | None = None
+            temp_bundle = _temporary_path(target, "candidate")
             try:
-                model_backup = self._backup(target)
-                sidecar_backup = self._backup(target_sidecar)
-            except Exception:
-                for path in (temp_model, temp_sidecar, model_backup, sidecar_backup):
-                    if path is not None:
-                        path.unlink(missing_ok=True)
-                raise
-            try:
-                candidate.save(str(temp_model))
-                if not temp_model.exists() or not temp_sidecar.exists():
-                    raise OSError("candidate persistence did not produce model and checksum files")
-                temp_model.replace(target)
-                temp_sidecar.replace(target_sidecar)
+                _write_model_bundle(
+                    temp_bundle,
+                    candidate,
+                    training_baseline,
+                    symbol=symbol,
+                    exchange=exchange,
+                )
+
+                def _publish() -> None:
+                    temp_bundle.replace(target)
+
                 if self._pipeline is not None:
-                    self._pipeline.install_generator(symbol, exchange, candidate)
-                self._live_generators[f"{exchange}:{symbol}"] = candidate
-            except Exception:
-                self._restore(target, model_backup)
-                self._restore(target_sidecar, sidecar_backup)
-                raise
+                    self._pipeline.publish_generator(symbol, exchange, candidate, _publish)
+                else:
+                    _publish()
+                self._live_generators[(exchange, symbol)] = candidate
             finally:
-                for path in (temp_model, temp_sidecar, model_backup, sidecar_backup):
-                    if path is not None:
-                        path.unlink(missing_ok=True)
-
-    @staticmethod
-    def _temporary_path(target: Path, label: str) -> Path:
-        descriptor, name = tempfile.mkstemp(
-            prefix=f"{target.name}.{label}.",
-            suffix=".tmp",
-            dir=target.parent,
-        )
-        os.close(descriptor)
-        return Path(name)
-
-    def _backup(self, path: Path) -> Path | None:
-        if not path.exists():
-            return None
-        backup = self._temporary_path(path, "backup")
-        try:
-            shutil.copy2(path, backup)
-        except Exception:
-            backup.unlink(missing_ok=True)
-            raise
-        return backup
-
-    @staticmethod
-    def _restore(path: Path, backup: Path | None) -> None:
-        if backup is None:
-            path.unlink(missing_ok=True)
-            return
-        backup.replace(path)
+                temp_bundle.unlink(missing_ok=True)
 
     def _result(
         self,
