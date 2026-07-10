@@ -466,6 +466,7 @@ def test_concurrent_uncached_reader_sees_old_until_atomic_publication_then_new(
     allow_publication = threading.Event()
     replace_started = threading.Event()
     allow_replace = threading.Event()
+    reader_started = threading.Event()
     reader_finished = threading.Event()
     real_write = retraining._write_model_bundle
     real_replace = Path.replace
@@ -490,19 +491,26 @@ def test_concurrent_uncached_reader_sees_old_until_atomic_publication_then_new(
     publisher.start()
     assert candidate_ready.wait(timeout=5)
 
-    during_build = pipeline._generator_for("NIFTY", "NSE_INDEX")
+    during_build = retraining.load_signal_model_bundle(
+        target,
+        symbol="NIFTY",
+        exchange="NSE_INDEX",
+    )
     assert during_build._model.__class__ is old._model.__class__
+    assert pipeline._symbol_generators == {}
 
     allow_publication.set()
     assert replace_started.wait(timeout=5)
     reader_results: list[Any] = []
 
     def _read_during_publication() -> None:
+        reader_started.set()
         reader_results.append(pipeline._generator_for("NIFTY", "NSE_INDEX"))
         reader_finished.set()
 
     reader = threading.Thread(target=_read_during_publication)
     reader.start()
+    assert reader_started.wait(timeout=5)
     assert not reader_finished.wait(timeout=0.1)
 
     allow_replace.set()
