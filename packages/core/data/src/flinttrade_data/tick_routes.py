@@ -58,25 +58,40 @@ def tick_status() -> Any:
     """
     recorder = _recorder()
     if recorder is None:
+        enabled = bool(current_app.config.get("TICK_CAPTURE_ENABLED", False))
+        data: dict[str, Any] = {
+            "enabled": enabled,
+            "running": False,
+            "connected": False,
+            "tick_count": 0,
+            "watchlist": {},
+        }
+        last_error = str(current_app.config.get("TICK_CAPTURE_ERROR", "") or "").strip()
+        if last_error:
+            data["last_error"] = last_error
+        elif not enabled:
+            data["hint"] = (
+                "Set FLINTTRADE_TICK_CAPTURE=1 (or workspace.json data.tick_capture.enabled) "
+                "and restart to record ticks."
+            )
         return jsonify({
             "status": "success",
-            "data": {
-                "enabled": False,
-                "running": False,
-                "tick_count": 0,
-                "watchlist": {},
-                "hint": "Set FLINTTRADE_TICK_CAPTURE=1 (or workspace.json data.tick_capture.enabled) and restart to record ticks.",
-            },
+            "data": data,
         })
 
+    last_error = str(getattr(recorder, "last_error", "") or "").strip()
+    data: dict[str, Any] = {
+        "enabled": True,
+        "running": bool(getattr(recorder, "is_running", False)),
+        "connected": bool(getattr(recorder, "is_connected", False)),
+        "tick_count": int(getattr(recorder, "tick_count", 0)),
+        "watchlist": recorder.get_watchlist(),
+    }
+    if last_error:
+        data["last_error"] = last_error
     return jsonify({
         "status": "success",
-        "data": {
-            "enabled": True,
-            "running": bool(getattr(recorder, "is_running", False)),
-            "tick_count": int(getattr(recorder, "tick_count", 0)),
-            "watchlist": recorder.get_watchlist(),
-        },
+        "data": data,
     })
 
 

@@ -25,9 +25,11 @@ const FT_BASE = "/ft-api";
 interface TickStatus {
   enabled: boolean;
   running: boolean;
+  connected: boolean;
   tick_count: number;
   watchlist: Record<string, Array<{ exchange: string; symbol: string }>>;
   hint?: string;
+  last_error?: string;
 }
 
 async function fetchTickStatus(): Promise<TickStatus> {
@@ -109,6 +111,24 @@ export function LocalDataPanel() {
   const tick = tickQuery.data;
   const quoteWatchlist = tick?.watchlist?.quote ?? [];
   const nonEmptyTables = Object.entries(storeQuery.data ?? {}).filter(([, t]) => t.rows > 0);
+  const tickState = tickQuery.isPending
+    ? { label: "checking", className: "bg-surface-hover text-text-muted" }
+    : tickQuery.isError
+      ? { label: "unavailable", className: "bg-red-500/15 text-loss" }
+      : !tick?.enabled
+        ? { label: "off", className: "bg-surface-hover text-text-muted" }
+        : tick.last_error && tick.running && tick.connected
+          ? { label: "degraded", className: "bg-red-500/15 text-loss" }
+          : tick.running && tick.connected
+            ? { label: "recording", className: "bg-green-500/15 text-green-500" }
+            : tick.running
+              ? {
+                  label: tick.last_error ? "reconnecting" : "connecting",
+                  className: "bg-amber-500/15 text-amber-500",
+                }
+              : tick.last_error
+                ? { label: "error", className: "bg-red-500/15 text-loss" }
+                : { label: "stopped", className: "bg-amber-500/15 text-amber-500" };
 
   return (
     <div className="space-y-4">
@@ -118,15 +138,15 @@ export function LocalDataPanel() {
       <div className="p-3 rounded bg-surface-card border border-border-default space-y-2">
         <div className="flex items-center gap-2 text-xs font-semibold text-text-primary">
           <Activity size={13} /> Tick capture
-          {tick?.running ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-500">recording</span>
-          ) : tick?.enabled ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">enabled, not running</span>
-          ) : (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted">off</span>
-          )}
+          <span className={`text-[10px] px-1.5 py-0.5 rounded ${tickState.className}`}>{tickState.label}</span>
         </div>
-        {tick?.enabled ? (
+        {tickQuery.isPending ? (
+          <div className="text-xs text-text-muted flex items-center gap-1">
+            <Loader2 size={11} className="animate-spin" /> Checking tick capture status…
+          </div>
+        ) : tickQuery.isError ? (
+          <div className="text-xs text-loss">Tick capture status unavailable.</div>
+        ) : tick?.enabled ? (
           <div className="text-xs text-text-muted">
             {tick.tick_count.toLocaleString("en-IN")} ticks this session ·{" "}
             {quoteWatchlist.map((i) => i.symbol).join(", ") || "no symbols"}
@@ -136,6 +156,9 @@ export function LocalDataPanel() {
             {tick?.hint ??
               "Set FLINTTRADE_TICK_CAPTURE=1 and restart the backend to record live ticks to DuckDB."}
           </div>
+        )}
+        {!tickQuery.isPending && !tickQuery.isError && tick?.last_error && (
+          <div className="text-xs text-loss break-words">{tick.last_error}</div>
         )}
       </div>
 

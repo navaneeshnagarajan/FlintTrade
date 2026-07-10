@@ -151,6 +151,18 @@ def openalgo_rest_base_url(settings: Settings) -> str:
     return urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), parsed.query, parsed.fragment)).rstrip("/")
 
 
+def openalgo_ws_base_url(settings: Settings) -> str:
+    """Return the OpenAlgo WebSocket origin derived from workspace settings."""
+    parsed = urlsplit(settings.openalgo_host)
+    scheme = {"http": "ws", "https": "wss"}.get(parsed.scheme)
+    hostname = parsed.hostname
+    if scheme is None or not hostname:
+        raise ValueError("openalgo_host must contain a valid HTTP(S) hostname")
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    return urlunsplit((scheme, f"{hostname}:{settings.openalgo_ws_port}", "", "", ""))
+
+
 class FlintTradeConfig:
     """Combined configuration: workspace for UI config, env for fallback.
 

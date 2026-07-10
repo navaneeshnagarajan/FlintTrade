@@ -16,12 +16,18 @@ require booting the app (which opens sockets and spawns threads).
 from __future__ import annotations
 
 import ast
+import asyncio
+import json
+import logging
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from flask import Flask
 
 from flinttrade_core.app import _tick_capture_enabled
+from flinttrade_core.config import Settings
 
 APP_PY = Path(__file__).resolve().parents[1] / "src" / "flinttrade_core" / "app.py"
 
@@ -68,6 +74,31 @@ def test_tick_capture_disabled_by_default() -> None:
 
 
 @pytest.mark.unit
+def test_tick_capture_explicit_env_false_overrides_workspace_true(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_TICK_CAPTURE", "false")
+    (tmp_path / "workspace.json").write_text(
+        json.dumps({"data": {"tick_capture": {"enabled": True}}}),
+        encoding="utf-8",
+    )
+
+    assert _tick_capture_enabled() is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("enabled", [True, "true"])
+def test_tick_capture_workspace_true_enables_when_env_is_absent(tmp_path, monkeypatch, enabled) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("FLINTTRADE_TICK_CAPTURE", raising=False)
+    (tmp_path / "workspace.json").write_text(
+        json.dumps({"data": {"tick_capture": {"enabled": enabled}}}),
+        encoding="utf-8",
+    )
+
+    assert _tick_capture_enabled() is True
+
+
+@pytest.mark.unit
 def test_start_launches_gated_tick_recorder() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
     start = _find_method(tree, "FlintTradeApp", "start")
@@ -76,13 +107,162 @@ def test_start_launches_gated_tick_recorder() -> None:
     assert _calls_named(start, "_tick_capture_enabled"), (
         "Tick capture must be gated by _tick_capture_enabled() in start()"
     )
-    assert _calls_named(start, "TickRecorder"), (
-        "start() must construct a TickRecorder when tick capture is enabled"
+    assert _calls_named(start, "_build_tick_recorder"), (
+        "start() must construct the recorder through the runtime-tested seam"
     )
     assert _calls_named(start, "create_task"), (
         "start() must launch the recorder via asyncio.create_task so it runs "
         "as a background task on the event loop"
     )
+
+
+@pytest.mark.unit
+def test_build_tick_recorder_uses_exact_settings_watchlist_and_existing_hub() -> None:
+    from flinttrade_core.app import _build_tick_recorder
+
+    class FakeHub:
+        constructions = 0
+
+        def __init__(self) -> None:
+            type(self).constructions += 1
+            self.instruments: list[str] = []
+            self.ticks: list[tuple[str, str, float, int]] = []
+
+        def update_config(self, *, instruments: list[str]) -> None:
+            self.instruments = instruments
+
+        def process_tick(self, exchange: str, symbol: str, ltp: float, volume: int) -> None:
+            self.ticks.append((exchange, symbol, ltp, volume))
+
+    class FakeRecorder:
+        def __init__(self) -> None:
+            self.watchlist = None
+            self.mode = None
+
+        def add_symbols(self, watchlist, *, mode: str) -> None:
+            self.watchlist = watchlist
+            self.mode = mode
+
+    hub = FakeHub()
+    storage = object()
+    storage_lock = object()
+    orderflow = object()
+    watchlist = [
+        {"exchange": "nse", "symbol": "reliance"},
+        {"exchange": "NSE_INDEX", "symbol": "nifty"},
+    ]
+    settings = Settings(
+        openalgo_host="https://openalgo.local:5000",
+        openalgo_ws_port=8770,
+        openalgo_api_key="workspace-key",
+    )
+    factory_calls: list[dict] = []
+
+    def recorder_factory(**kwargs):
+        factory_calls.append(kwargs)
+        return FakeRecorder()
+
+    recorder = _build_tick_recorder(
+        recorder_factory=recorder_factory,
+        signal_hub=hub,
+        settings=settings,
+        storage=storage,
+        storage_lock=storage_lock,
+        orderflow=orderflow,
+        watchlist=watchlist,
+        mode="depth",
+    )
+
+    assert FakeHub.constructions == 1
+    assert hub.instruments == ["NSE:RELIANCE", "NSE_INDEX:NIFTY"]
+    assert len(factory_calls) == 1
+    call = factory_calls[0]
+    assert call["storage"] is storage
+    assert call["storage_lock"] is storage_lock
+    assert call["orderflow_aggregator"] is orderflow
+    assert call["ws_url"] == "wss://openalgo.local:8770"
+    assert call["api_key"] == "workspace-key"
+    assert call["ltp_sink"].__self__ is hub
+    assert call["ltp_sink"].__func__ is FakeHub.process_tick
+    assert recorder.watchlist is watchlist
+    assert recorder.mode == "depth"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure_stage", ["factory", "watchlist"])
+def test_build_tick_recorder_failure_does_not_reconfigure_signal_hub(failure_stage: str) -> None:
+    from flinttrade_core.app import _build_tick_recorder
+
+    class FakeHub:
+        def __init__(self) -> None:
+            self.instruments = ["NSE_INDEX:NIFTY"]
+
+        def update_config(self, *, instruments: list[str]) -> None:
+            self.instruments = instruments
+
+        def process_tick(self, exchange: str, symbol: str, ltp: float, volume: int) -> None:
+            return None
+
+    class FakeRecorder:
+        def add_symbols(self, watchlist, *, mode: str) -> None:
+            if failure_stage == "watchlist":
+                raise ValueError("watchlist rejected")
+
+    def recorder_factory(**kwargs):
+        if failure_stage == "factory":
+            raise RuntimeError("recorder construction failed")
+        return FakeRecorder()
+
+    hub = FakeHub()
+    with pytest.raises((RuntimeError, ValueError)):
+        _build_tick_recorder(
+            recorder_factory=recorder_factory,
+            signal_hub=hub,
+            settings=Settings(openalgo_api_key="workspace-key"),
+            storage=object(),
+            storage_lock=object(),
+            orderflow=object(),
+            watchlist=[{"exchange": "NSE", "symbol": "RELIANCE"}],
+            mode="quote",
+        )
+
+    assert hub.instruments == ["NSE_INDEX:NIFTY"]
+
+
+@pytest.mark.unit
+def test_start_sets_capture_intent_before_starting_flask_server() -> None:
+    tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
+    start = _find_method(tree, "FlintTradeApp", "start")
+    assert start is not None
+    calls = {
+        node.func.id: node.lineno
+        for node in ast.walk(start)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"_set_tick_capture_intent", "_run_flask_server"}
+    }
+
+    assert calls["_set_tick_capture_intent"] < calls["_run_flask_server"]
+
+
+@pytest.mark.unit
+def test_capture_failure_redacts_api_key_from_status_and_log(caplog) -> None:
+    from flinttrade_core.app import _record_tick_capture_failure
+
+    flask_app = Flask("capture_failure")
+    api_key = "top-secret-workspace-key"
+    caplog.set_level(logging.WARNING, logger="flinttrade")
+
+    _record_tick_capture_failure(
+        flask_app,
+        RuntimeError(f"OpenAlgo rejected {api_key}"),
+        api_key,
+    )
+
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "OpenAlgo rejected [redacted]"
+    assert api_key not in flask_app.config["TICK_CAPTURE_ERROR"]
+    assert api_key not in caplog.text
+    assert "OpenAlgo rejected [redacted]" in caplog.text
 
 
 @pytest.mark.unit
@@ -97,6 +277,121 @@ def test_stop_stops_tick_recorder() -> None:
         if isinstance(n, ast.Attribute) and n.attr == "_tick_recorder"
     ]
     assert refs, "stop() must stop/cancel the tick recorder (_tick_recorder)"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_awaits_cancelled_tick_recorder_cleanup() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    class CancelledTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+            self.awaited = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+        def __await__(self):
+            async def wait() -> None:
+                self.awaited = True
+                raise asyncio.CancelledError
+
+            return wait().__await__()
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = None
+    app._tick_recorder = MagicMock()
+    task = CancelledTask()
+    app._tick_recorder_task = task
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    await app.stop()
+
+    app._tick_recorder.stop.assert_called_once_with()
+    assert task.cancelled is True
+    assert task.awaited is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) -> None:
+    import flinttrade_data.tick_recorder as recorder_module
+    from flinttrade_core.app import FlintTradeApp
+    from flinttrade_data.tick_recorder import TickRecorder
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.batches: list[list[tuple]] = []
+
+        def insert_ticks_batch(self, rows) -> None:
+            self.batches.append(list(rows))
+
+    class BlockingWebSocket:
+        def __init__(self) -> None:
+            self.consume_started = asyncio.Event()
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            self.consume_started.set()
+            await asyncio.Future()
+
+    class WebSocketContext:
+        def __init__(self, websocket) -> None:
+            self.websocket = websocket
+
+        async def __aenter__(self):
+            return self.websocket
+
+        async def __aexit__(self, exc_type, exc, traceback) -> bool:
+            return False
+
+    storage = FakeStorage()
+    websocket = BlockingWebSocket()
+    recorder = TickRecorder(storage=storage, ws_url="ws://openalgo.local:8770")
+    recorder._process_tick({
+        "exchange": "NSE_INDEX",
+        "symbol": "NIFTY",
+        "data": {"ltp": 24500.0, "volume": 10},
+    })
+    monkeypatch.setattr(
+        recorder_module.websockets,
+        "connect",
+        lambda *_args, **_kwargs: WebSocketContext(websocket),
+    )
+    monkeypatch.setattr(recorder, "_authenticate", AsyncMock())
+    recorder_task = asyncio.create_task(recorder.run())
+    await asyncio.wait_for(websocket.consume_started.wait(), timeout=1.0)
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = None
+    app._tick_recorder = recorder
+    app._tick_recorder_task = recorder_task
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    await app.stop()
+
+    assert recorder_task.done()
+    assert recorder.is_running is False
+    assert len(storage.batches) == 1
+    assert len(storage.batches[0]) == 1
+    assert storage.batches[0][0][1:3] == ("NIFTY", "NSE_INDEX")
 
 
 @pytest.mark.unit

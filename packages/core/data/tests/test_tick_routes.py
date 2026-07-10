@@ -21,6 +21,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 class _FakeRecorder:
     def __init__(self) -> None:
         self.is_running = True
+        self.is_connected = True
+        self.last_error = ""
         self.tick_count = 42
         self._watchlist: dict[str, list[dict[str, str]]] = {
             "quote": [{"exchange": "NSE_INDEX", "symbol": "NIFTY"}],
@@ -82,15 +84,50 @@ class TestStatus:
         data = resp.get_json()["data"]
         assert data["enabled"] is False
         assert data["running"] is False
+        assert data["connected"] is False
         assert "hint" in data
+
+    def test_configured_startup_failure_is_not_reported_as_off(self, client, app):
+        app.config["TICK_CAPTURE_ENABLED"] = True
+        app.config["TICK_CAPTURE_ERROR"] = "OpenAlgo rejected [redacted]"
+
+        data = client.get("/api/v1/data/ticks/status").get_json()["data"]
+
+        assert data["enabled"] is True
+        assert data["running"] is False
+        assert data["connected"] is False
+        assert data["last_error"] == "OpenAlgo rejected [redacted]"
+        assert "hint" not in data
 
     def test_enabled_reports_recorder_state(self, client, wired):
         resp = client.get("/api/v1/data/ticks/status")
         data = resp.get_json()["data"]
         assert data["enabled"] is True
         assert data["running"] is True
+        assert data["connected"] is True
         assert data["tick_count"] == 42
         assert data["watchlist"]["quote"] == [{"exchange": "NSE_INDEX", "symbol": "NIFTY"}]
+        assert "last_error" not in data
+
+    def test_connected_and_sanitised_error_are_reported_when_reconnecting(self, client, wired):
+        wired.is_connected = False
+        wired.last_error = "OpenAlgo connection refused"
+
+        data = client.get("/api/v1/data/ticks/status").get_json()["data"]
+
+        assert data["running"] is True
+        assert data["connected"] is False
+        assert data["last_error"] == "OpenAlgo connection refused"
+
+    def test_connected_control_error_is_reported(self, client, wired):
+        wired.is_connected = True
+        wired.last_error = "Partial subscription failure: NSE:BAD"
+
+        data = client.get("/api/v1/data/ticks/status").get_json()["data"]
+
+        assert data["running"] is True
+        assert data["connected"] is True
+        assert data["last_error"] == "Partial subscription failure: NSE:BAD"
 
 
 class TestQuery:

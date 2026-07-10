@@ -31,6 +31,7 @@ describe("LocalDataPanel", () => {
         data: {
           enabled: true,
           running: true,
+          connected: true,
           tick_count: 12345,
           watchlist: { quote: [{ exchange: "NSE_INDEX", symbol: "NIFTY" }], ltp: [], depth: [] },
         },
@@ -86,6 +87,173 @@ describe("LocalDataPanel", () => {
       expect(screen.getByText("off")).toBeInTheDocument();
     });
     expect(screen.getByText(/FLINTTRADE_TICK_CAPTURE=1/)).toBeInTheDocument();
+  });
+
+  it("shows reconnecting rather than recording when the enabled recorder is disconnected", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: true,
+          running: true,
+          connected: false,
+          last_error: "OpenAlgo connection refused",
+          tick_count: 0,
+          watchlist: {},
+        },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("reconnecting")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+    expect(screen.getByText("OpenAlgo connection refused")).toBeInTheDocument();
+  });
+
+  it("shows degraded rather than recording for a connected control error", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: true,
+          running: true,
+          connected: true,
+          last_error: "Partial subscription failure: NSE:BAD",
+          tick_count: 10,
+          watchlist: {},
+        },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("degraded")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+    expect(screen.getByText("Partial subscription failure: NSE:BAD")).toBeInTheDocument();
+  });
+
+  it("shows connecting when the enabled recorder has no connection error", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: { enabled: true, running: true, connected: false, tick_count: 0, watchlist: {} },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("connecting")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+  });
+
+  it("shows stopped error state without claiming recording", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: true,
+          running: false,
+          connected: false,
+          last_error: "Authentication failed",
+          tick_count: 0,
+          watchlist: {},
+        },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("error")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+    expect(screen.getByText("Authentication failed")).toBeInTheDocument();
+  });
+
+  it("shows stopped when capture is enabled but no recorder task is running", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: { enabled: true, running: false, connected: false, tick_count: 0, watchlist: {} },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("stopped")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("recording")).not.toBeInTheDocument();
+  });
+
+  it("shows checking while tick status is pending", () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("/api/v1/data/ticks/status")) {
+        return new Promise<Response>(() => {});
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ status: "success", data: { tables: {} } }),
+      } as Response);
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    expect(screen.getByText("checking")).toBeInTheDocument();
+    expect(screen.queryByText("off")).not.toBeInTheDocument();
+    expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1/)).not.toBeInTheDocument();
+  });
+
+  it("shows unavailable when tick status fetch is rejected", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("/api/v1/data/ticks/status")) {
+        return Promise.reject(new Error("backend unavailable"));
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ status: "success", data: { tables: {} } }),
+      } as Response);
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("unavailable")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("off")).not.toBeInTheDocument();
+    expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1/)).not.toBeInTheDocument();
+  });
+
+  it("shows unavailable when tick status response is non-ok", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/v1/data/ticks/status")) {
+        return { ok: false, json: async () => ({}) } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({ status: "success", data: { tables: {} } }),
+      } as Response;
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText("unavailable")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("off")).not.toBeInTheDocument();
+    expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1/)).not.toBeInTheDocument();
   });
 
   it("renders the bhavcopy fetch controls", () => {

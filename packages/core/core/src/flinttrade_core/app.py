@@ -35,6 +35,7 @@ import secrets
 import signal
 import threading
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +87,7 @@ from flask_limiter.util import get_remote_address  # noqa: E402
 import sentry_sdk  # noqa: E402
 from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 
-from .config import DEFAULT_OPENALGO_PORT, DEFAULT_OPENALGO_WS_PORT, Settings  # noqa: E402
+from .config import DEFAULT_OPENALGO_PORT, DEFAULT_OPENALGO_WS_PORT, Settings, openalgo_ws_base_url  # noqa: E402
 from .csp import (  # noqa: E402
     build_csp_header as _build_csp_header,
     csp_report_bp as _csp_report_bp,
@@ -161,16 +162,77 @@ def _rag_runtime_enabled() -> bool:
 def _tick_capture_enabled() -> bool:
     """Return whether the startup path should launch live tick capture.
 
-    Off by default — the recorder opens an OpenAlgo WebSocket on boot, so it is
-    opt-in via ``FLINTTRADE_TICK_CAPTURE`` to avoid an unwanted connection on
-    deployments that do not want disk-backed tick storage.
+    The environment setting is authoritative when present, including explicit
+    false. Otherwise, read the UI-owned workspace setting. Capture stays off
+    by default because the recorder opens an OpenAlgo WebSocket on boot.
     """
-    return os.environ.get("FLINTTRADE_TICK_CAPTURE", "").strip().lower() in {
+    raw = os.environ.get("FLINTTRADE_TICK_CAPTURE")
+    if raw is None:
+        raw = _read_workspace_section("data", "tick_capture", "enabled")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in {
         "1",
         "true",
         "yes",
         "on",
     }
+
+
+def _set_tick_capture_intent(flask_app: Flask, enabled: bool) -> None:
+    """Expose capture intent before the API server accepts status requests."""
+    flask_app.config["TICK_CAPTURE_ENABLED"] = enabled
+    flask_app.config["TICK_CAPTURE_ERROR"] = ""
+
+
+def _sanitise_tick_capture_error(error: Any, api_key: str) -> str:
+    """Return a single-line startup diagnostic without the OpenAlgo API key."""
+    diagnostic = str(error).strip() or type(error).__name__
+    if api_key:
+        diagnostic = diagnostic.replace(api_key, "[redacted]")
+    return " ".join(diagnostic.splitlines())
+
+
+def _record_tick_capture_failure(flask_app: Flask, error: Any, api_key: str) -> None:
+    """Persist and log a redacted tick-capture startup failure."""
+    diagnostic = _sanitise_tick_capture_error(error, api_key)
+    flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
+    logger.warning("Tick capture failed to start (%s); not recording ticks", diagnostic)
+
+
+def _build_tick_recorder(
+    *,
+    recorder_factory: Callable[..., Any],
+    signal_hub: Any,
+    settings: Settings,
+    storage: Any,
+    storage_lock: Any,
+    orderflow: Any,
+    watchlist: list[dict[str, str]],
+    mode: str,
+) -> Any:
+    """Build a recorder wired to the existing application signal hub."""
+    ltp_sink = getattr(signal_hub, "process_tick", None)
+    update_config = getattr(signal_hub, "update_config", None)
+    if not callable(ltp_sink) or not callable(update_config):
+        raise RuntimeError("Signal hub is unavailable; tick capture remains disabled")
+
+    recorder = recorder_factory(
+        storage=storage,
+        ws_url=openalgo_ws_base_url(settings),
+        storage_lock=storage_lock,
+        orderflow_aggregator=orderflow,
+        api_key=settings.openalgo_api_key,
+        ltp_sink=ltp_sink,
+    )
+    recorder.add_symbols(watchlist, mode=mode)
+    update_config(
+        instruments=[
+            f"{instrument['exchange'].upper()}:{instrument['symbol'].upper()}"
+            for instrument in watchlist
+        ]
+    )
+    return recorder
 
 
 _DEFAULT_TICK_WATCHLIST: list[dict[str, str]] = [
@@ -3046,6 +3108,8 @@ class FlintTradeApp:
             contract_manager=self.contract_manager,
             rag=self.rag,
         )
+        tick_capture_enabled = _tick_capture_enabled()
+        _set_tick_capture_intent(flask_app, tick_capture_enabled)
         _run_flask_server(flask_app, port=_resolve_backend_port())
 
         # Load market holidays (graceful — warns if OpenAlgo unreachable)
@@ -3162,7 +3226,10 @@ class FlintTradeApp:
         # connection with the Flask-thread trade journal (DuckDB connections are
         # not safe for concurrent use). Launched as a background task on this
         # loop; auto-reconnects to the OpenAlgo WebSocket.
-        if _tick_capture_enabled():
+        if tick_capture_enabled:
+            tick_storage: Any | None = None
+            recorder: Any | None = None
+            recorder_task: asyncio.Task[Any] | None = None
             try:
                 from flinttrade_data.storage import StorageManager as _TickStore  # noqa: PLC0415
                 from flinttrade_data.tick_recorder import TickRecorder  # noqa: PLC0415
@@ -3179,10 +3246,21 @@ class FlintTradeApp:
                 # delta (not synthetic) while tick capture is running.
                 from flinttrade_data.orderflow_aggregator import OrderFlowAggregator  # noqa: PLC0415
                 orderflow = OrderFlowAggregator()
-                flask_app.config["ORDERFLOW_AGGREGATOR"] = orderflow
-                recorder = TickRecorder(
-                    storage=tick_storage, storage_lock=tick_lock, orderflow_aggregator=orderflow
+                watchlist = _tick_capture_watchlist()
+                signal_hub = flask_app.config.get("SIGNAL_HUB")
+                recorder = _build_tick_recorder(
+                    recorder_factory=TickRecorder,
+                    signal_hub=signal_hub,
+                    settings=self.settings,
+                    storage=tick_storage,
+                    storage_lock=tick_lock,
+                    orderflow=orderflow,
+                    watchlist=watchlist,
+                    mode=_tick_capture_mode(),
                 )
+                recorder_task = asyncio.create_task(recorder.run())
+                self._tick_recorder = recorder
+                self._tick_recorder_task = recorder_task
                 # Hand the tick store to the cron so nightly maintenance keeps the
                 # highest-volume DuckDB file from growing unbounded. register_
                 # builtin_jobs already ran, but the job resolves this lazily.
@@ -3191,24 +3269,41 @@ class FlintTradeApp:
                 # Keep ~90 days of ticks by default so the store stays bounded;
                 # the nightly tick_retention_job prunes older rows.
                 self.cron.tick_retention_days = 90
-                # Capture watchlist — workspace.json data.tick_capture.symbols
-                # when configured, else the major indices; capture mode from
-                # data.tick_capture.mode (ltp/quote/depth, default quote). An
-                # empty watchlist would capture nothing.
-                recorder.add_symbols(
-                    _tick_capture_watchlist(),
-                    mode=_tick_capture_mode(),
-                )
-                self._tick_recorder = recorder
-                self._tick_recorder_task = asyncio.create_task(recorder.run())
                 # Expose the recorder + store to the tick routes (status /
                 # query / watchlist) so the terminal can see and manage capture.
+                flask_app.config["ORDERFLOW_AGGREGATOR"] = orderflow
                 flask_app.config["TICK_RECORDER"] = recorder
                 flask_app.config["TICK_STORAGE"] = tick_storage
                 flask_app.config["TICK_STORAGE_LOCK"] = tick_lock
+                flask_app.config["TICK_CAPTURE_ERROR"] = ""
                 logger.info("Live tick capture started → %s", tick_db)
             except Exception as exc:
-                logger.warning("Tick capture failed to start (%s); not recording ticks", exc)
+                if recorder_task is not None:
+                    recorder.stop()
+                    recorder_task.cancel()
+                    try:
+                        with suppress(asyncio.CancelledError):
+                            await recorder_task
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Tick recorder rollback failed (%s)",
+                            _sanitise_tick_capture_error(cleanup_exc, self.settings.openalgo_api_key),
+                        )
+                if tick_storage is not None:
+                    try:
+                        tick_storage.close()
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Tick storage rollback failed (%s)",
+                            _sanitise_tick_capture_error(cleanup_exc, self.settings.openalgo_api_key),
+                        )
+                self.cron.tick_storage = None
+                self.cron.tick_storage_lock = None
+                self._tick_recorder = None
+                self._tick_recorder_task = None
+                for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
+                    flask_app.config.pop(key, None)
+                _record_tick_capture_failure(flask_app, exc, self.settings.openalgo_api_key)
 
         # Broker reconciliation runner (contract §14.2): reconciles every ACTIVE
         # native (adapter, session) pair on start and then every
@@ -3320,6 +3415,8 @@ class FlintTradeApp:
             self._tick_recorder.stop()
         if self._tick_recorder_task is not None:
             self._tick_recorder_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._tick_recorder_task
 
         # Stop the reconciliation runner (signal the loop, then cancel the task)
         if self._reconciliation_runner is not None:
