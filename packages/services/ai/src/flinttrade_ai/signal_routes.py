@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import json as _json
 import logging
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
+from contextlib import nullcontext
 from typing import Any
 
 from flask import Blueprint, Flask, Response, current_app, jsonify, request
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from .pipeline import SignalPipeline
 from .signal_models import SignalConfig
@@ -180,30 +182,89 @@ def signals_configure() -> tuple[Any, int]:
     Returns:
         ``{ "status": "success", "data": <updated config> }``
     """
-    body = request.get_json(silent=True) or {}
+    if not request.get_data(cache=True):
+        body = {}
+    else:
+        try:
+            body = request.get_json(silent=False)
+        except (BadRequest, UnsupportedMediaType):
+            return jsonify({"status": "error", "message": "request body must contain valid JSON"}), 400
+
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "configuration payload must be an object"}), 400
+
+    supported_keys = {"instruments", "indicators", "thresholds"}
+    unknown_keys = set(body) - supported_keys
+    if unknown_keys:
+        names = ", ".join(sorted(unknown_keys))
+        return jsonify({"status": "error", "message": f"unknown configuration keys: {names}"}), 400
+
+    pipeline = _get_pipeline()
+    if not body:
+        return jsonify({"status": "success", "data": pipeline.get_config().to_dict()}), 200
 
     instruments = body.get("instruments")
     indicators = body.get("indicators")
     thresholds = body.get("thresholds")
 
-    if instruments is not None and not isinstance(instruments, list):
+    if "instruments" in body and not isinstance(instruments, list):
         return jsonify({"status": "error", "message": "instruments must be a list"}), 400
-    if indicators is not None and not isinstance(indicators, list):
+    if "indicators" in body and not isinstance(indicators, list):
         return jsonify({"status": "error", "message": "indicators must be a list"}), 400
-    if thresholds is not None and not isinstance(thresholds, dict):
+    if "thresholds" in body and not isinstance(thresholds, dict):
         return jsonify({"status": "error", "message": "thresholds must be a dict"}), 400
     if instruments is not None:
         try:
-            SignalConfig(instruments=instruments)
+            instruments = SignalConfig(instruments=instruments).instruments
         except ValueError as exc:
             return jsonify({"status": "error", "message": str(exc)}), 400
 
-    pipeline = _get_pipeline()
-    config = pipeline.update_config(
-        instruments=instruments,
-        indicators=indicators,
-        thresholds=thresholds,
-    )
+    lifecycle_lock = current_app.config.get("TICK_CAPTURE_LIFECYCLE_LOCK")
+    lifecycle_context: Any = lifecycle_lock if hasattr(lifecycle_lock, "__enter__") else nullcontext()
+    with lifecycle_context:
+        recorder = current_app.config.get("TICK_RECORDER")
+        update_lock: Any = nullcontext()
+        if recorder is not None:
+            subscription_lock = getattr(recorder, "subscription_lock", None)
+            get_watchlist = getattr(recorder, "get_watchlist", None)
+            if subscription_lock is None or not callable(get_watchlist):
+                return jsonify({"status": "error", "message": "Recorder watchlist control is unavailable."}), 503
+            update_lock = subscription_lock
+
+        with update_lock:
+            if recorder is not None and instruments is not None:
+                try:
+                    watchlist = get_watchlist()
+                    if not isinstance(watchlist, Mapping):
+                        raise ValueError("watchlist must be a mapping")
+                    recorder_instruments = [
+                        f"{instrument['exchange']}:{instrument['symbol']}"
+                        for mode_instruments in watchlist.values()
+                        for instrument in mode_instruments
+                    ]
+                    recorder_identities = set(SignalConfig(instruments=recorder_instruments).instruments)
+                except (KeyError, TypeError, ValueError):
+                    return jsonify({"status": "error", "message": "Recorder watchlist snapshot is invalid."}), 503
+
+                if set(instruments) != recorder_identities:
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "message": (
+                                "Signal instruments must match the active tick recorder watchlist; "
+                                "update /api/v1/data/ticks/watchlist instead."
+                            ),
+                        }
+                    ), 409
+
+            try:
+                config = pipeline.update_config(
+                    instruments=instruments,
+                    indicators=indicators,
+                    thresholds=thresholds,
+                )
+            except (TypeError, ValueError) as exc:
+                return jsonify({"status": "error", "message": str(exc)}), 400
     return jsonify({"status": "success", "data": config.to_dict()}), 200
 
 

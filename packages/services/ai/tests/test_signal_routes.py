@@ -11,6 +11,7 @@ The pipeline is mocked to avoid streaming indicator dependencies.
 
 from __future__ import annotations
 
+import math
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -50,6 +51,23 @@ def _make_pipeline() -> MagicMock:
     p.get_config.return_value = mock_config
     p.update_config.return_value = mock_config
     return p
+
+
+class _TrackingLock:
+    """Minimal context lock that exposes whether the critical section is active."""
+
+    def __init__(self) -> None:
+        self.held = False
+        self.entries = 0
+
+    def __enter__(self) -> _TrackingLock:
+        assert not self.held
+        self.held = True
+        self.entries += 1
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.held = False
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +240,94 @@ class TestSignalsConfigure:
         assert resp.status_code == 200
         pipeline.update_config.assert_called_once_with(instruments=[], indicators=None, thresholds=None)
 
+    def test_recorder_watchlist_mismatch_returns_409(self, client: MagicMock, pipeline: MagicMock) -> None:
+        recorder = MagicMock()
+        recorder.subscription_lock = _TrackingLock()
+        recorder.get_watchlist.return_value = {
+            "ltp": [],
+            "quote": [{"exchange": "NSE", "symbol": "RELIANCE"}],
+            "depth": [],
+        }
+        client.application.config["TICK_RECORDER"] = recorder
+
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            response = client.post(
+                "/api/v1/signals/configure",
+                json={"instruments": ["NSE:TCS"]},
+            )
+
+        assert response.status_code == 409
+        assert "/api/v1/data/ticks/watchlist" in response.get_json()["message"]
+        pipeline.update_config.assert_not_called()
+
+    def test_matching_recorder_watchlist_updates_under_shared_lock(
+        self,
+        client: MagicMock,
+        pipeline: MagicMock,
+    ) -> None:
+        lifecycle_lock = _TrackingLock()
+        lock = _TrackingLock()
+        recorder = MagicMock()
+        recorder.subscription_lock = lock
+        recorder.get_watchlist.return_value = {
+            "ltp": [{"exchange": "NSE", "symbol": "RELIANCE"}],
+            "quote": [{"exchange": "BSE", "symbol": "RELIANCE"}],
+            "depth": [{"exchange": "NSE", "symbol": "RELIANCE"}],
+        }
+        client.application.config["TICK_RECORDER"] = recorder
+        client.application.config["TICK_CAPTURE_LIFECYCLE_LOCK"] = lifecycle_lock
+
+        def update_config(**_kwargs: object) -> MagicMock:
+            assert lifecycle_lock.held
+            assert lock.held
+            return pipeline.get_config.return_value
+
+        pipeline.update_config.side_effect = update_config
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            response = client.post(
+                "/api/v1/signals/configure",
+                json={"instruments": ["nse:reliance", "BSE:RELIANCE"]},
+            )
+
+        assert response.status_code == 200
+        assert lifecycle_lock.entries == 1
+        assert lock.entries == 1
+        pipeline.update_config.assert_called_once_with(
+            instruments=["NSE:RELIANCE", "BSE:RELIANCE"],
+            indicators=None,
+            thresholds=None,
+        )
+
+    def test_threshold_update_uses_recorder_lock_without_comparing_watchlist(
+        self,
+        client: MagicMock,
+        pipeline: MagicMock,
+    ) -> None:
+        lock = _TrackingLock()
+        recorder = MagicMock()
+        recorder.subscription_lock = lock
+        client.application.config["TICK_RECORDER"] = recorder
+
+        def update_config(**_kwargs: object) -> MagicMock:
+            assert lock.held
+            return pipeline.get_config.return_value
+
+        pipeline.update_config.side_effect = update_config
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            response = client.post(
+                "/api/v1/signals/configure",
+                json={"thresholds": {"ema_cross_min_pct": 1.0}},
+            )
+
+        assert response.status_code == 200
+        assert lock.entries == 1
+        recorder.get_watchlist.assert_not_called()
+        pipeline.update_config.assert_called_once_with(
+            instruments=None,
+            indicators=None,
+            thresholds={"ema_cross_min_pct": 1.0},
+        )
+
     def test_instruments_not_list_returns_400(self, client: MagicMock, pipeline: MagicMock) -> None:
         """Passing instruments as a string (not a list) returns HTTP 400.
 
@@ -251,13 +357,111 @@ class TestSignalsConfigure:
             )
         assert resp.status_code == 400
 
-    def test_empty_body_is_accepted(self, client: MagicMock, pipeline: MagicMock) -> None:
-        """Empty body (all fields optional) is accepted and returns success.
-
-        Args:
-            client:   Flask test client.
-            pipeline: Mock pipeline fixture.
-        """
+    def test_empty_object_is_a_non_destructive_snapshot(self, client: MagicMock, pipeline: MagicMock) -> None:
         with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
             resp = client.post("/api/v1/signals/configure", json={})
+
         assert resp.status_code == 200
+        assert resp.get_json()["data"] == pipeline.get_config.return_value.to_dict.return_value
+        pipeline.get_config.assert_called_once_with()
+        pipeline.update_config.assert_not_called()
+
+    def test_no_body_is_a_non_destructive_snapshot(self, client: MagicMock, pipeline: MagicMock) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            resp = client.post("/api/v1/signals/configure")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"] == pipeline.get_config.return_value.to_dict.return_value
+        pipeline.get_config.assert_called_once_with()
+        pipeline.update_config.assert_not_called()
+
+    def test_malformed_json_returns_400(self, client: MagicMock, pipeline: MagicMock) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            resp = client.post(
+                "/api/v1/signals/configure",
+                data='{"thresholds":',
+                content_type="application/json",
+            )
+
+        assert resp.status_code == 400
+        pipeline.update_config.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("body", "content_type"),
+        [
+            ("null", "application/json"),
+            ('{"unexpected": true}', "application/json"),
+            ('{"thresholds": null}', "application/json"),
+        ],
+    )
+    def test_invalid_configuration_objects_return_400(
+        self,
+        client: MagicMock,
+        pipeline: MagicMock,
+        body: str,
+        content_type: str,
+    ) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            resp = client.post("/api/v1/signals/configure", data=body, content_type=content_type)
+
+        assert resp.status_code == 400
+        pipeline.update_config.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"indicators": ["RSI"]},
+            {"indicators": [{"name": "RSI", "params": "14"}]},
+            {"thresholds": {"rsi_oversold": "30"}},
+            {"thresholds": {"rsi_oversold": math.nan}},
+            {"thresholds": {"rsi_oversold": 80, "rsi_overbought": 70}},
+        ],
+    )
+    def test_nested_validation_errors_return_400(self, payload: dict[str, object]) -> None:
+        from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+        from flinttrade_ai.signal_routes import signal_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(signal_bp)
+        app._live_signal_pipeline = LiveSignalPipeline()  # type: ignore[attr-defined]
+
+        with app.test_client() as client:
+            response = client.post("/api/v1/signals/configure", json=payload)
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+
+    def test_non_object_configuration_payload_returns_400(self) -> None:
+        from flinttrade_ai.signal_routes import signal_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(signal_bp)
+
+        with app.test_client() as client:
+            response = client.post("/api/v1/signals/configure", json=["invalid"])
+
+        assert response.status_code == 400
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"indicators": [{"name": "RSI", "params": {"period": 10**400}}]},
+            {"thresholds": {"macd_crossover_min": 10**400}},
+        ],
+    )
+    def test_huge_legal_json_numbers_return_controlled_400(self, payload: dict[str, object]) -> None:
+        from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+        from flinttrade_ai.signal_routes import signal_bp
+
+        app = Flask(__name__)
+        app.config.update(TESTING=True, PROPAGATE_EXCEPTIONS=False)
+        app.register_blueprint(signal_bp)
+        app._live_signal_pipeline = LiveSignalPipeline()  # type: ignore[attr-defined]
+
+        with app.test_client() as client:
+            response = client.post("/api/v1/signals/configure", json=payload)
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"

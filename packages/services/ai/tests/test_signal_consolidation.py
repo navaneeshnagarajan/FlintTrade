@@ -119,7 +119,8 @@ def test_hub_ingests_ml_cycle_into_recent_feed() -> None:
 
     assert len(published) == 1
     event = hub.get_recent_signals(limit=1)[0]
-    assert event is published[0]
+    assert event is not published[0]
+    assert event.to_dict() == published[0].to_dict()
     assert event.event_id == 1
     assert event.source == "ml"
     assert event.signal_type == "BUY"

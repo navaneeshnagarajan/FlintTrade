@@ -15,7 +15,8 @@ import math
 import threading
 from collections import deque
 from collections.abc import Mapping
-from typing import Any
+from copy import deepcopy
+from typing import Any, Literal
 
 from .signal_models import SignalConfig, SignalEvent, now_iso
 from flinttrade_indicators.streaming import StreamingEMA, StreamingRSI
@@ -24,6 +25,45 @@ logger = logging.getLogger("flinttrade.ai.signal_pipeline")
 
 # Maximum number of signals retained in the ring buffer per pipeline instance.
 _MAX_SIGNALS = 100
+
+
+def _nonzero_side(value: float) -> Literal[-1, 1] | None:
+    """Return the sign while treating exact zero as no side transition."""
+    if value > 0.0:
+        return 1
+    if value < 0.0:
+        return -1
+    return None
+
+
+def _normalise_event_number(value: object, *, field_name: str) -> float:
+    """Convert one finite event number without leaking conversion errors."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a finite number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{field_name} must be a finite number") from None
+    if not math.isfinite(result):
+        raise ValueError(f"{field_name} must be a finite number")
+    return result
+
+
+def _normalise_event(signal: SignalEvent) -> SignalEvent:
+    """Build a validated event copy before assigning a hub-owned identifier."""
+    if not isinstance(signal, SignalEvent):
+        raise TypeError("signal must be a SignalEvent")
+    event = deepcopy(signal)
+    event.value = _normalise_event_number(event.value, field_name="value")
+    event.threshold = _normalise_event_number(event.threshold, field_name="threshold")
+    confidence = _normalise_event_number(event.confidence, field_name="confidence")
+    event.confidence = max(0.0, min(1.0, confidence))
+    if not isinstance(event.metadata, Mapping):
+        raise ValueError("metadata must be a mapping")
+    event.metadata = deepcopy(dict(event.metadata))
+    event.timestamp = event.timestamp or now_iso()
+    event.method = event.method or event.indicator
+    return event
 
 
 class _InstrumentState:
@@ -39,6 +79,12 @@ class _InstrumentState:
         self.prev_ema_fast: float | None = None
         self.prev_ema_slow: float | None = None
         self.prev_macd_hist: float | None = None
+        self.ema_armed_direction: Literal["BUY", "SELL"] | None = None
+        self.macd_armed_direction: Literal["BUY", "SELL"] | None = None
+        self.ema_last_nonzero_side: Literal[-1, 1] | None = None
+        self.macd_last_nonzero_side: Literal[-1, 1] | None = None
+        self.ema_side_observed = False
+        self.macd_side_observed = False
         self._init_indicators(config)
 
     def _init_indicators(self, config: SignalConfig) -> None:
@@ -94,12 +140,13 @@ class LiveSignalPipeline:
         thresholds: dict[str, float] | None = None,
     ) -> None:
         default_config = SignalConfig()
-        self.config = SignalConfig(
+        candidate_config = SignalConfig(
             instruments=default_config.instruments if instruments is None else instruments,
             indicators=default_config.indicators if indicators is None else indicators,
             thresholds=default_config.thresholds if thresholds is None else thresholds,
         )
-        self.signals: deque[SignalEvent] = deque(maxlen=_MAX_SIGNALS)
+        self._config = candidate_config
+        self._signals: deque[SignalEvent] = deque(maxlen=_MAX_SIGNALS)
         self._states: dict[tuple[str, str], _InstrumentState] = {}
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
@@ -123,12 +170,12 @@ class LiveSignalPipeline:
         symbol = symbol.strip().upper()
         try:
             ltp = float(ltp)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         if not exchange or not symbol or not math.isfinite(ltp) or ltp <= 0:
             return None
         with self._lock:
-            if f"{exchange}:{symbol}" not in self.config.instruments:
+            if f"{exchange}:{symbol}" not in self._config.instruments:
                 return None
             return self._process_tick_locked(exchange, symbol, ltp, volume)
 
@@ -154,7 +201,7 @@ class LiveSignalPipeline:
             A ``Signal`` instance if a threshold was crossed, else ``None``.
         """
         state = self._get_or_create_state(exchange, symbol)
-        thresholds = self.config.thresholds
+        thresholds = self._config.thresholds
 
         # --- RSI ---
         if state.rsi is not None:
@@ -176,8 +223,7 @@ class LiveSignalPipeline:
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
                         f"below oversold threshold {oversold:.0f}",
                     )
-                    self._publish_locked(sig)
-                    return sig
+                    return self._publish_locked(sig)
 
                 if rsi_val >= overbought:
                     sig = SignalEvent(
@@ -192,8 +238,7 @@ class LiveSignalPipeline:
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
                         f"above overbought threshold {overbought:.0f}",
                     )
-                    self._publish_locked(sig)
-                    return sig
+                    return self._publish_locked(sig)
 
         # --- EMA Crossover ---
         if state.ema_fast is not None and state.ema_slow is not None:
@@ -201,45 +246,52 @@ class LiveSignalPipeline:
             slow_val = state.ema_slow.update(ltp)
 
             if fast_val is not None and slow_val is not None:
-                prev_fast = state.prev_ema_fast
-                prev_slow = state.prev_ema_slow
+                spread_pct = (fast_val - slow_val) / slow_val * 100.0 if slow_val else 0.0
+                minimum = thresholds.get("ema_cross_min_pct", 0.0)
+                bullish_threshold = minimum
+                bearish_threshold = -minimum
 
-                if prev_fast is not None and prev_slow is not None:
-                    # Bullish crossover: fast crosses above slow
-                    if prev_fast <= prev_slow and fast_val > slow_val:
-                        sig = SignalEvent(
-                            timestamp=now_iso(),
-                            symbol=symbol,
-                            exchange=exchange,
-                            signal_type="BUY",
-                            indicator="EMA_Cross",
-                            value=fast_val - slow_val,
-                            threshold=0.0,
-                            confidence=0.65,
-                            message=f"{symbol} EMA({state.ema_fast.period}) crossed above EMA({state.ema_slow.period})",
-                        )
-                        self._publish_locked(sig)
-                        state.prev_ema_fast = fast_val
-                        state.prev_ema_slow = slow_val
-                        return sig
+                side = _nonzero_side(spread_pct)
+                if not state.ema_side_observed:
+                    state.ema_side_observed = True
+                    state.ema_last_nonzero_side = side
+                elif side is not None and side != state.ema_last_nonzero_side:
+                    state.ema_last_nonzero_side = side
+                    state.ema_armed_direction = "BUY" if side > 0 else "SELL"
 
-                    # Bearish crossover: fast crosses below slow
-                    if prev_fast >= prev_slow and fast_val < slow_val:
-                        sig = SignalEvent(
-                            timestamp=now_iso(),
-                            symbol=symbol,
-                            exchange=exchange,
-                            signal_type="SELL",
-                            indicator="EMA_Cross",
-                            value=fast_val - slow_val,
-                            threshold=0.0,
-                            confidence=0.65,
-                            message=f"{symbol} EMA({state.ema_fast.period}) crossed below EMA({state.ema_slow.period})",
-                        )
-                        self._publish_locked(sig)
-                        state.prev_ema_fast = fast_val
-                        state.prev_ema_slow = slow_val
-                        return sig
+                if state.ema_armed_direction == "BUY" and spread_pct > bullish_threshold:
+                    state.ema_armed_direction = None
+                    sig = SignalEvent(
+                        timestamp=now_iso(),
+                        symbol=symbol,
+                        exchange=exchange,
+                        signal_type="BUY",
+                        indicator="EMA_Cross",
+                        value=spread_pct,
+                        threshold=bullish_threshold,
+                        confidence=0.65,
+                        message=f"{symbol} EMA({state.ema_fast.period}) crossed above EMA({state.ema_slow.period})",
+                    )
+                    state.prev_ema_fast = fast_val
+                    state.prev_ema_slow = slow_val
+                    return self._publish_locked(sig)
+
+                if state.ema_armed_direction == "SELL" and spread_pct < bearish_threshold:
+                    state.ema_armed_direction = None
+                    sig = SignalEvent(
+                        timestamp=now_iso(),
+                        symbol=symbol,
+                        exchange=exchange,
+                        signal_type="SELL",
+                        indicator="EMA_Cross",
+                        value=spread_pct,
+                        threshold=bearish_threshold,
+                        confidence=0.65,
+                        message=f"{symbol} EMA({state.ema_fast.period}) crossed below EMA({state.ema_slow.period})",
+                    )
+                    state.prev_ema_fast = fast_val
+                    state.prev_ema_slow = slow_val
+                    return self._publish_locked(sig)
 
                 state.prev_ema_fast = fast_val
                 state.prev_ema_slow = slow_val
@@ -255,42 +307,49 @@ class LiveSignalPipeline:
 
                 if signal_line is not None:
                     macd_hist = macd_line - signal_line
-                    prev_hist = state.prev_macd_hist
+                    minimum = thresholds.get("macd_crossover_min", 0.0)
+                    bullish_threshold = minimum
+                    bearish_threshold = -minimum
 
-                    if prev_hist is not None:
-                        # Bullish: histogram crosses from negative to positive
-                        if prev_hist <= 0 and macd_hist > 0:
-                            sig = SignalEvent(
-                                timestamp=now_iso(),
-                                symbol=symbol,
-                                exchange=exchange,
-                                signal_type="BUY",
-                                indicator="MACD",
-                                value=macd_hist,
-                                threshold=0.0,
-                                confidence=0.60,
-                                message=f"{symbol} MACD histogram turned positive ({macd_hist:.2f})",
-                            )
-                            self._publish_locked(sig)
-                            state.prev_macd_hist = macd_hist
-                            return sig
+                    side = _nonzero_side(macd_hist)
+                    if not state.macd_side_observed:
+                        state.macd_side_observed = True
+                        state.macd_last_nonzero_side = side
+                    elif side is not None and side != state.macd_last_nonzero_side:
+                        state.macd_last_nonzero_side = side
+                        state.macd_armed_direction = "BUY" if side > 0 else "SELL"
 
-                        # Bearish: histogram crosses from positive to negative
-                        if prev_hist >= 0 and macd_hist < 0:
-                            sig = SignalEvent(
-                                timestamp=now_iso(),
-                                symbol=symbol,
-                                exchange=exchange,
-                                signal_type="SELL",
-                                indicator="MACD",
-                                value=macd_hist,
-                                threshold=0.0,
-                                confidence=0.60,
-                                message=f"{symbol} MACD histogram turned negative ({macd_hist:.2f})",
-                            )
-                            self._publish_locked(sig)
-                            state.prev_macd_hist = macd_hist
-                            return sig
+                    if state.macd_armed_direction == "BUY" and macd_hist > bullish_threshold:
+                        state.macd_armed_direction = None
+                        sig = SignalEvent(
+                            timestamp=now_iso(),
+                            symbol=symbol,
+                            exchange=exchange,
+                            signal_type="BUY",
+                            indicator="MACD",
+                            value=macd_hist,
+                            threshold=bullish_threshold,
+                            confidence=0.60,
+                            message=f"{symbol} MACD histogram turned positive ({macd_hist:.2f})",
+                        )
+                        state.prev_macd_hist = macd_hist
+                        return self._publish_locked(sig)
+
+                    if state.macd_armed_direction == "SELL" and macd_hist < bearish_threshold:
+                        state.macd_armed_direction = None
+                        sig = SignalEvent(
+                            timestamp=now_iso(),
+                            symbol=symbol,
+                            exchange=exchange,
+                            signal_type="SELL",
+                            indicator="MACD",
+                            value=macd_hist,
+                            threshold=bearish_threshold,
+                            confidence=0.60,
+                            message=f"{symbol} MACD histogram turned negative ({macd_hist:.2f})",
+                        )
+                        state.prev_macd_hist = macd_hist
+                        return self._publish_locked(sig)
 
                     state.prev_macd_hist = macd_hist
 
@@ -302,16 +361,20 @@ class LiveSignalPipeline:
             return self._publish_locked(signal)
 
     def _publish_locked(self, signal: SignalEvent) -> SignalEvent:
-        """Publish while the hub lock is held and wake SSE subscribers."""
-        self._sequence += 1
-        signal.event_id = self._sequence
-        signal.timestamp = signal.timestamp or now_iso()
-        signal.confidence = max(0.0, min(1.0, float(signal.confidence)))
-        if not signal.method:
-            signal.method = signal.indicator
-        self.signals.appendleft(signal)
+        """Validate and publish an isolated event while the hub lock is held."""
+        published = _normalise_event(signal)
+        next_event_id = self._sequence + 1
+        published.event_id = next_event_id
+        self._signals.appendleft(deepcopy(published))
+        self._sequence = next_event_id
         self._condition.notify_all()
-        return signal
+        return published
+
+    @property
+    def signals(self) -> deque[SignalEvent]:
+        """Return an isolated snapshot of the retained event ring."""
+        with self._lock:
+            return deque((deepcopy(signal) for signal in self._signals), maxlen=_MAX_SIGNALS)
 
     @property
     def latest_event_id(self) -> int:
@@ -323,7 +386,7 @@ class LiveSignalPipeline:
         """Return retained events newer than ``event_id`` in emission order."""
         with self._lock:
             return sorted(
-                (signal for signal in self.signals if signal.event_id > event_id),
+                (deepcopy(signal) for signal in self._signals if signal.event_id > event_id),
                 key=lambda signal: signal.event_id,
             )
 
@@ -332,11 +395,14 @@ class LiveSignalPipeline:
         event_id: int,
         timeout: float,
     ) -> list[SignalEvent]:
-        """Wait for a newer event, then return every retained event after it."""
+        """Wait for a retained newer event, then return every matching replay event."""
         with self._condition:
-            self._condition.wait_for(lambda: self._sequence > event_id, timeout=timeout)
+            self._condition.wait_for(
+                lambda: any(signal.event_id > event_id for signal in self._signals),
+                timeout=timeout,
+            )
             return sorted(
-                (signal for signal in self.signals if signal.event_id > event_id),
+                (deepcopy(signal) for signal in self._signals if signal.event_id > event_id),
                 key=lambda signal: signal.event_id,
             )
 
@@ -404,7 +470,7 @@ class LiveSignalPipeline:
             List of ``Signal`` instances ordered newest first.
         """
         with self._lock:
-            return list(self.signals)[:limit]
+            return [deepcopy(signal) for signal in list(self._signals)[:limit]]
 
     def update_config(
         self,
@@ -420,22 +486,41 @@ class LiveSignalPipeline:
             The updated ``SignalConfig``.
         """
         with self._lock:
-            if instruments is not None:
-                self.config.instruments = SignalConfig(instruments=instruments).instruments
-            if indicators is not None:
-                self.config.indicators = indicators
-            if thresholds is not None:
-                self.config.thresholds = thresholds
-            # Reset per-instrument state so indicators re-initialise with new params.
-            # The sequence remains monotonic so SSE reconnect cursors cannot wedge.
-            self._states.clear()
-            self.signals.clear()
-        logger.info("Signal pipeline config updated: %s", self.config.to_dict())
-        return self.config
+            merged_thresholds = (
+                self._config.thresholds
+                if thresholds is None
+                else {**self._config.thresholds, **thresholds}
+            )
+            candidate_config = SignalConfig(
+                instruments=self._config.instruments if instruments is None else instruments,
+                indicators=self._config.indicators if indicators is None else indicators,
+                thresholds=merged_thresholds,
+            )
+            state_config_changed = (
+                set(candidate_config.instruments) != set(self._config.instruments)
+                or candidate_config.indicators != self._config.indicators
+                or candidate_config.thresholds != self._config.thresholds
+            )
+            if state_config_changed:
+                self._config = candidate_config
+                # Indicator state belongs to the old configuration; shared event
+                # history and its monotonic IDs remain valid across the update.
+                self._states.clear()
+            else:
+                candidate_config = self._config
+            snapshot = SignalConfig.from_dict(candidate_config.to_dict())
+        logger.info("Signal pipeline config updated: %s", snapshot.to_dict())
+        return snapshot
 
     def get_config(self) -> SignalConfig:
-        """Return the current pipeline configuration."""
-        return self.config
+        """Return an isolated, validated snapshot of the current configuration."""
+        with self._lock:
+            return SignalConfig.from_dict(self._config.to_dict())
+
+    @property
+    def config(self) -> SignalConfig:
+        """Return a compatibility snapshot without exposing live mutable state."""
+        return self.get_config()
 
     # ------------------------------------------------------------------
     # Internal
@@ -445,7 +530,7 @@ class LiveSignalPipeline:
         """Lazily create per-instrument indicator state."""
         identity = (exchange, symbol)
         if identity not in self._states:
-            self._states[identity] = _InstrumentState(self.config)
+            self._states[identity] = _InstrumentState(self._config)
         return self._states[identity]
 
 
@@ -453,6 +538,6 @@ def _as_float(value: Any) -> float:
     """Convert external numeric metadata without allowing NaN or infinities."""
     try:
         result = float(value or 0.0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0.0
     return result if result == result and result not in {float("inf"), float("-inf")} else 0.0
