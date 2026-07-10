@@ -7,8 +7,11 @@ skew). Predicts BUY/SELL/HOLD for next N candles with a confidence score.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import math
+import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -17,6 +20,7 @@ from typing import Any
 try:
     from numpy.typing import NDArray
     import numpy as np
+
     _NUMPY_AVAILABLE = True
 except ImportError:  # numpy not installed — use plain lists throughout
     _NUMPY_AVAILABLE = False
@@ -63,6 +67,7 @@ class FeatureSet:
 # Feature engineering
 # ---------------------------------------------------------------------------
 
+
 def _safe_div(a: float, b: float) -> float:
     return a / b if b != 0 else 0.0
 
@@ -97,7 +102,10 @@ def compute_ema(values: list[float], period: int) -> list[float]:
 
 
 def compute_macd(
-    closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9,
+    closes: list[float],
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
 ) -> tuple[list[float], list[float]]:
     """MACD line and signal line."""
     ema_fast = compute_ema(closes, fast)
@@ -111,7 +119,7 @@ def compute_bollinger_pct(closes: list[float], period: int = 20) -> list[float]:
     """Bollinger Band %B — where price sits within the bands (0=lower, 1=upper)."""
     result: list[float] = [0.5] * min(period, len(closes))
     for i in range(period, len(closes)):
-        window = closes[i - period: i]
+        window = closes[i - period : i]
         mean = sum(window) / period
         std = (sum((v - mean) ** 2 for v in window) / period) ** 0.5
         if std > 0:
@@ -148,12 +156,24 @@ def engineer_features(
     ema_21 = compute_ema(closes, 21)
 
     feature_names = [
-        "return_1", "return_5", "return_10",
-        "high_low_range", "close_vs_high", "close_vs_low",
+        "return_1",
+        "return_5",
+        "return_10",
+        "high_low_range",
+        "close_vs_high",
+        "close_vs_low",
         "volume_ratio_5",
-        "rsi_14", "macd_hist", "bb_pct",
+        "volume_ratio_20",
+        "rsi_14",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "bb_pct",
+        "body_pct",
         "ema_cross",  # ema9 - ema21 normalised
-        "pcr", "max_pain_dist", "iv_percentile",
+        "pcr",
+        "max_pain_dist",
+        "iv_percentile",
     ]
 
     rows: list[list[float]] = []
@@ -169,25 +189,47 @@ def engineer_features(
         close_vs_l = 1.0 - close_vs_h
 
         # Volume
-        avg_vol_5 = sum(volumes[i - 5: i]) / 5 if i >= 5 else max(volumes[i], 1)
+        avg_vol_5 = sum(volumes[i - 5 : i]) / 5 if i >= 5 else max(volumes[i], 1)
         vol_ratio = _safe_div(volumes[i], avg_vol_5) if avg_vol_5 > 0 else 1.0
+        avg_vol_20 = sum(volumes[i - 19 : i + 1]) / 20
+        vol_ratio_20 = _safe_div(volumes[i], avg_vol_20) if avg_vol_20 > 0 else 1.0
 
         # Indicators
         rsi_val = rsi_14[i] / 100 if i < len(rsi_14) else 0.5
+        macd_value = macd_line[i] if i < len(macd_line) else 0.0
+        macd_signal_value = macd_signal[i] if i < len(macd_signal) else 0.0
         macd_h = (macd_line[i] - macd_signal[i]) / closes[i] * 100 if i < len(macd_line) else 0
         bb_val = bb_pct[i] if i < len(bb_pct) else 0.5
         ema_c = _safe_div(ema_9[i] - ema_21[i], closes[i]) if i < min(len(ema_9), len(ema_21)) else 0
+        body_pct = _safe_div(abs(closes[i] - float(bars[i]["open"])), highs[i] - lows[i])
 
         # OI / IV features (default 0 if not provided)
         pcr = pcr_values[i] if pcr_values and i < len(pcr_values) else 0.0
         mp_dist = max_pain_values[i] if max_pain_values and i < len(max_pain_values) else 0.0
         iv_pct = iv_percentile_values[i] if iv_percentile_values and i < len(iv_percentile_values) else 0.0
 
-        rows.append([
-            ret_1, ret_5, ret_10, hl_range, close_vs_h, close_vs_l,
-            vol_ratio, rsi_val, macd_h, bb_val, ema_c,
-            pcr, mp_dist, iv_pct,
-        ])
+        rows.append(
+            [
+                ret_1,
+                ret_5,
+                ret_10,
+                hl_range,
+                close_vs_h,
+                close_vs_l,
+                vol_ratio,
+                vol_ratio_20,
+                rsi_val,
+                macd_value,
+                macd_signal_value,
+                macd_h,
+                bb_val,
+                body_pct,
+                ema_c,
+                pcr,
+                mp_dist,
+                iv_pct,
+            ]
+        )
 
     return FeatureSet(names=feature_names, values=rows)
 
@@ -268,7 +310,9 @@ def generate_sharpe_labels(
             continue
 
         mean_ret = sum(fwd_returns) / len(fwd_returns)
-        variance = sum((r - mean_ret) ** 2 for r in fwd_returns) / ((len(fwd_returns) - 1) if len(fwd_returns) > 1 else 1)
+        variance = sum((r - mean_ret) ** 2 for r in fwd_returns) / (
+            (len(fwd_returns) - 1) if len(fwd_returns) > 1 else 1
+        )
         std_ret = math.sqrt(variance) if variance > 0 else 0.0
 
         if std_ret == 0:
@@ -284,9 +328,9 @@ def generate_sharpe_labels(
         sharpe = mean_ret / std_ret
 
         if sharpe > min_sharpe:
-            labels.append(1)   # BUY
+            labels.append(1)  # BUY
         elif sharpe < -min_sharpe:
-            labels.append(0)   # SELL
+            labels.append(0)  # SELL
         else:
             labels.append(-1)  # HOLD
 
@@ -326,11 +370,7 @@ def compute_turbulence(
         time-axis.  Values before the first full window are ``0.0``.
     """
     # Determine if multi-asset (2-D numpy array)
-    is_multi = (
-        _NUMPY_AVAILABLE
-        and isinstance(returns, np.ndarray)
-        and returns.ndim == 2
-    )
+    is_multi = _NUMPY_AVAILABLE and isinstance(returns, np.ndarray) and returns.ndim == 2
 
     if is_multi:
         return _compute_turbulence_multi(returns, window)  # type: ignore[arg-type]
@@ -365,9 +405,9 @@ def _compute_turbulence_multi(returns: "np.ndarray", window: int) -> "np.ndarray
     scores = np.zeros(n, dtype=np.float64)
 
     for i in range(window, n):
-        hist = returns[i - window: i]          # (window, M)
-        mu = hist.mean(axis=0)                  # (M,)
-        cov = np.cov(hist, rowvar=False)        # (M, M)
+        hist = returns[i - window : i]  # (window, M)
+        mu = hist.mean(axis=0)  # (M,)
+        cov = np.cov(hist, rowvar=False)  # (M, M)
 
         # Add small jitter to avoid singular covariance matrix
         cov += np.eye(m) * 1e-8
@@ -378,7 +418,7 @@ def _compute_turbulence_multi(returns: "np.ndarray", window: int) -> "np.ndarray
             scores[i] = 0.0
             continue
 
-        diff = returns[i] - mu                  # (M,)
+        diff = returns[i] - mu  # (M,)
         scores[i] = float(diff @ cov_inv @ diff)
 
     return scores
@@ -495,14 +535,25 @@ class SignalGenerator:
         if not features.values:
             return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
 
-        # Use the last feature row
-        row = features.values[-1]
+        available_features = dict(zip(features.names, features.values[-1], strict=True))
+        unknown_features = [name for name in self._feature_names if name not in available_features]
+        if unknown_features:
+            logger.error(
+                "Signal model for %s has unsupported persisted features: %s",
+                symbol or "<unknown>",
+                ", ".join(unknown_features),
+            )
+            return MLSignal(action="HOLD", confidence=0.0, symbol=symbol)
+
+        # Persisted model schemas are the source of truth: older models need
+        # their original column order, while new models receive the full union.
+        row = [available_features[name] for name in self._feature_names]
         probs = self._model.predict([row])[0]
         pred_class = max(range(3), key=lambda c: probs[c])
         confidence = float(probs[pred_class])
 
         action_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
-        feat_dict = dict(zip(self._feature_names, row))
+        feat_dict = dict(zip(self._feature_names, row, strict=True))
 
         return MLSignal(
             action=action_map[pred_class],
@@ -513,22 +564,72 @@ class SignalGenerator:
         )
 
     def save(self, path: str) -> None:
-        """Save trained model to disk."""
+        """Save trained model to disk with a SHA-256 integrity sidecar."""
         try:
             import joblib
         except ImportError:
             raise ImportError("joblib required — pip install joblib")
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump({"model": self._model, "feature_names": self._feature_names}, path)
+        model_path = Path(path)
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump({"model": self._model, "feature_names": self._feature_names}, model_path)
+        self._checksum_path(model_path).write_text(self._compute_sha256(model_path), encoding="ascii")
         logger.info("Signal model saved to %s", path)
 
     def load(self, path: str) -> None:
-        """Load a trained model from disk."""
+        """Load a trained model after validating its SHA-256 integrity sidecar."""
         try:
             import joblib
         except ImportError:
             raise ImportError("joblib required — pip install joblib")
-        data = joblib.load(path)
-        self._model = data["model"]
-        self._feature_names = data["feature_names"]
+        model_path = Path(path)
+        checksum_path = self._checksum_path(model_path)
+        actual = self._compute_sha256(model_path)
+
+        if checksum_path.exists():
+            expected = checksum_path.read_text(encoding="ascii").strip()
+            if not hmac.compare_digest(expected, actual):
+                raise RuntimeError(f"Refusing to load {model_path.name}: SHA-256 checksum mismatch")
+        elif not self._trust_unverified_model():
+            raise RuntimeError(f"Refusing to load {model_path.name}: no SHA-256 sidecar found at {checksum_path.name}")
+        else:
+            logger.warning(
+                "Loading %s WITHOUT sha256 verification because "
+                "FLINTTRADE_SIGNAL_MODEL_TRUST_UNVERIFIED is set. Do not use in production.",
+                model_path,
+            )
+
+        data = joblib.load(model_path)
+        try:
+            model = data["model"]
+            feature_names = data["feature_names"]
+        except (KeyError, TypeError) as exc:
+            raise ValueError("Signal model payload is missing required fields") from exc
+        if not isinstance(feature_names, list) or not all(isinstance(name, str) for name in feature_names):
+            raise ValueError("Signal model payload has invalid feature names")
+
+        self._model = model
+        self._feature_names = feature_names
         logger.info("Signal model loaded from %s", path)
+
+    @staticmethod
+    def _checksum_path(model_path: Path) -> Path:
+        """Return the SHA-256 sidecar path for a persisted model."""
+        return Path(f"{model_path}.sha256")
+
+    @staticmethod
+    def _compute_sha256(path: Path) -> str:
+        """Compute a model digest without deserialising its contents."""
+        digest = hashlib.sha256()
+        with path.open("rb") as model_file:
+            for chunk in iter(lambda: model_file.read(1 << 16), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _trust_unverified_model() -> bool:
+        """Return whether the explicit legacy-model trust override is set."""
+        return os.environ.get("FLINTTRADE_SIGNAL_MODEL_TRUST_UNVERIFIED", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }

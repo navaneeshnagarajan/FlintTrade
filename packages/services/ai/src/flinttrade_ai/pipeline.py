@@ -135,12 +135,14 @@ class SignalPipeline:
         self._generator = SignalGenerator()
         model_file = Path(self.model_path)
         if model_file.exists():
-            self._generator.load(self.model_path)
-            logger.info("Loaded signal model from %s", model_file)
+            try:
+                self._generator.load(self.model_path)
+            except Exception as exc:  # noqa: BLE001 - corrupt models must preserve scheduled fallback
+                logger.warning("Could not load signal model from %s; using fallback: %s", model_file, exc)
+            else:
+                logger.info("Loaded signal model from %s", model_file)
         else:
-            logger.warning(
-                "No trained model at %s — signals will use fallback", model_file
-            )
+            logger.warning("No trained model at %s — signals will use fallback", model_file)
 
     def fetch_bars(self, symbol: str, exchange: str, count: int = 200) -> list[dict]:
         """Fetch OHLCV bars from OpenAlgo history API."""
@@ -227,17 +229,18 @@ class SignalPipeline:
                     from .signals import compute_turbulence
 
                     # Compute per-bar returns for the last window+1 bars
-                    tail = closes[-(self._turbulence_window + 1):]
+                    tail = closes[-(self._turbulence_window + 1) :]
                     recent_returns = [
-                        (tail[i + 1] - tail[i]) / tail[i] if tail[i] != 0 else 0.0
-                        for i in range(len(tail) - 1)
+                        (tail[i + 1] - tail[i]) / tail[i] if tail[i] != 0 else 0.0 for i in range(len(tail) - 1)
                     ]
                     turb = compute_turbulence(recent_returns, window=self._turbulence_window)
                     turbulence_score = float(turb[-1]) if len(turb) > 0 else 0.0
                     if turbulence_score > self._turbulence_threshold:
                         logger.info(
                             "Turbulence override for %s: score=%.3f > threshold=%.3f — forcing HOLD",
-                            key, turbulence_score, self._turbulence_threshold,
+                            key,
+                            turbulence_score,
+                            self._turbulence_threshold,
                         )
                         raw_signal = "HOLD"
                         method = f"{method}+turbulence_override"
@@ -287,9 +290,7 @@ class SignalPipeline:
             ema.append(data[i] * k + ema[-1] * (1 - k))
         return ema
 
-    def train_model(
-        self, bars_list: list[list[dict]], lookahead: int = 5
-    ) -> bool:
+    def train_model(self, bars_list: list[list[dict]], lookahead: int = 5) -> bool:
         """Train the signal model on multiple sets of historical bars.
 
         Each element in *bars_list* is a list of OHLCV bar dicts for one
@@ -308,9 +309,7 @@ class SignalPipeline:
                     all_bars.extend(bars)
 
             if len(all_bars) < 100:
-                logger.warning(
-                    "Not enough training data (%d bars, need 100+)", len(all_bars)
-                )
+                logger.warning("Not enough training data (%d bars, need 100+)", len(all_bars))
                 return False
 
             metrics = gen.train(all_bars, lookahead=lookahead)
