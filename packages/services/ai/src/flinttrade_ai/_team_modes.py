@@ -52,6 +52,7 @@ class AnalysisState:
     final_reasoning: str = ""
     confidence: float = 0.0
     errors: list[str] = field(default_factory=list)
+    error_codes: dict[str, str] = field(default_factory=dict)
 
 
 def _accepts_keyword(callable_object: Callable[..., Any], keyword: str) -> bool:
@@ -110,12 +111,14 @@ class AnalystChain:
                 node(state)
             except Exception as exc:  # noqa: BLE001
                 state.errors.append(f"{name}: {_ANALYSIS_FAILED}")
+                state.error_codes[name] = self._analyst_error_code(name, exc)
                 logger.warning("Analyst node '%s' failed: %s", name, exc)
 
         try:
             self._judge_node(state)
         except Exception as exc:  # noqa: BLE001
             state.errors.append(f"judge: {_ANALYSIS_FAILED}")
+            state.error_codes["judge"] = self._provider_error_code(exc)
             logger.warning("Judge node failed: %s", exc)
 
         return state
@@ -143,6 +146,7 @@ class AnalystChain:
                 await call_runner.run(lambda node=node, draft=draft: node(draft), timeout_seconds)
             except TimeoutError:
                 state.errors.append(f"{name}: analysis timed out")
+                state.error_codes[name] = "timeout"
                 await TeamDagRunner._emit(
                     on_event,
                     TeamEvent(
@@ -154,6 +158,7 @@ class AnalystChain:
                 )
             except Exception as exc:  # noqa: BLE001
                 state.errors.append(f"{name}: {_ANALYSIS_FAILED}")
+                state.error_codes[name] = self._analyst_error_code(name, exc)
                 logger.warning("Analyst node '%s' failed: %s", name, exc)
                 await TeamDagRunner._emit(
                     on_event,
@@ -180,6 +185,7 @@ class AnalystChain:
             await call_runner.run(lambda: self._judge_node(draft), timeout_seconds)
         except TimeoutError:
             state.errors.append("judge: analysis timed out")
+            state.error_codes["judge"] = "timeout"
             await TeamDagRunner._emit(
                 on_event,
                 TeamEvent(
@@ -191,6 +197,7 @@ class AnalystChain:
             )
         except Exception as exc:  # noqa: BLE001
             state.errors.append(f"judge: {_ANALYSIS_FAILED}")
+            state.error_codes["judge"] = self._provider_error_code(exc)
             logger.warning("Judge node failed: %s", exc)
             await TeamDagRunner._emit(
                 on_event,
@@ -208,6 +215,20 @@ class AnalystChain:
                 TeamEvent(task_id="judge", agent_role="judge", event_type="completed"),
             )
         return state
+
+    @staticmethod
+    def _analyst_error_code(name: str, exc: Exception) -> str:
+        """Classify an analyst failure without exposing exception text."""
+        if isinstance(exc, TimeoutError):
+            return "timeout"
+        if name not in {"market", "sentiment", "fundamentals"}:
+            return "invalid_configuration"
+        return "provider_failure"
+
+    @staticmethod
+    def _provider_error_code(exc: Exception) -> str:
+        """Classify a provider-side failure without exposing exception text."""
+        return "timeout" if isinstance(exc, TimeoutError) else "provider_failure"
 
     def _get_node(self, name: str) -> Callable[[AnalysisState], None]:
         """Return the requested analyst node or reject an unknown name."""
@@ -444,6 +465,7 @@ class DebateResult:
     reasoning: str = ""
     full_transcript: str = ""
     timestamp: str = ""
+    error_codes: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.timestamp:
@@ -574,6 +596,7 @@ class RiskDebate:
             logger.warning("Judge failed: %s", exc)
             result.verdict = "HOLD"
             result.reasoning = _JUDGE_FAILED
+            result.error_codes["judge"] = AnalystChain._provider_error_code(exc)
 
         return result
 
@@ -619,8 +642,10 @@ class RiskDebate:
                 current[role] = value
                 if failure:
                     failures[role] = failure
+                    result.error_codes[role] = failure
                 else:
                     failures.pop(role, None)
+                    result.error_codes.pop(role, None)
                 full_history += f"\n\n[Round {round_num} - {role.title()}]: {value}"
             result.rounds.append(debate_round)
 
@@ -637,6 +662,7 @@ class RiskDebate:
         except TimeoutError:
             failures["judge"] = "timeout"
             result.reasoning = "Judge analysis timed out"
+            result.error_codes["judge"] = "timeout"
             await TeamDagRunner._emit(
                 on_event,
                 TeamEvent(
@@ -649,6 +675,7 @@ class RiskDebate:
         except Exception as exc:  # noqa: BLE001
             failures["judge"] = "error"
             result.reasoning = _JUDGE_FAILED
+            result.error_codes["judge"] = AnalystChain._provider_error_code(exc)
             logger.warning("Judge failed: %s", exc)
             await TeamDagRunner._emit(
                 on_event,

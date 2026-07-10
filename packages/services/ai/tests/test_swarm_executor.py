@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from typing import Any
 
 import pytest
 
+import flinttrade_ai.swarm_executor as legacy_swarm
+from flinttrade_ai._team_dag import (
+    TeamEvent,
+    TeamTask,
+    _safe_format as canonical_safe_format,
+    build_dag as canonical_build_dag,
+    detect_cycle as canonical_detect_cycle,
+    topological_layers as canonical_topological_layers,
+)
+from flinttrade_ai.llm_client import LLMMessage, LLMResponse
 from flinttrade_ai.swarm_executor import (
     SwarmEvent,
     SwarmExecutor,
@@ -62,6 +72,63 @@ class _AsyncFakeLLMClient:
     async def async_complete(self, system_prompt: str, user_prompt: str) -> str:
         self.calls.append((system_prompt, user_prompt))
         return self._response
+
+
+class _CanonicalFakeLLMClient:
+    """Canonical chat client used to prove the compatibility delegation."""
+
+    def chat(self, messages: list[LLMMessage]) -> LLMResponse:
+        return LLMResponse(content=messages[-1].content)
+
+
+def test_public_models_and_dag_helpers_are_canonical_re_exports() -> None:
+    """The retired module must not retain a second graph implementation."""
+    assert issubclass(SwarmTask, TeamTask)
+    assert issubclass(SwarmEvent, TeamEvent)
+    assert SwarmTask.__name__ == "SwarmTask"
+    assert SwarmEvent.__name__ == "SwarmEvent"
+    assert (
+        SwarmEvent(
+            task_id="custom",
+            agent_role="observer",
+            event_type="legacy_custom_event",
+        ).event_type
+        == "legacy_custom_event"
+    )
+    assert build_dag is canonical_build_dag
+    assert detect_cycle is canonical_detect_cycle
+    assert legacy_swarm._canonical_topological_layers is canonical_topological_layers
+    assert _safe_format is canonical_safe_format
+
+
+@pytest.mark.asyncio
+async def test_executor_delegates_to_canonical_team_dag_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy execution remains a boundary over the canonical runner."""
+    client = _CanonicalFakeLLMClient()
+    task = _make_task("delegated")
+    observed: dict[str, Any] = {}
+
+    async def execute(
+        runner: Any,
+        tasks: list[TeamTask],
+        on_event: Any = None,
+        max_concurrent: int = 4,
+    ) -> dict[str, str]:
+        observed.update(
+            runner=runner,
+            tasks=tasks,
+            on_event=on_event,
+            max_concurrent=max_concurrent,
+        )
+        return {"delegated": "canonical"}
+
+    monkeypatch.setattr(legacy_swarm.TeamDagRunner, "execute", execute)
+
+    result = await SwarmExecutor(client).execute([task])
+
+    assert result == {"delegated": "canonical"}
+    assert observed["tasks"] == [task]
+    assert observed["runner"]._quick_llm is client
 
 
 # ---------------------------------------------------------------------------
@@ -236,16 +303,13 @@ class TestSwarmExecutorSyncClient:
         executor = SwarmExecutor(llm_client=client)
         tasks = [
             _make_task("macro", prompt="Analyse macro."),
-            _make_task("risk", depends_on=["macro"],
-                       prompt="Given macro: {macro} — assess risk."),
+            _make_task("risk", depends_on=["macro"], prompt="Given macro: {macro} — assess risk."),
         ]
         results = await executor.execute(tasks)
         assert "macro" in results
         assert "risk" in results
         # The risk task's prompt should have had {macro} replaced
-        risk_call = next(
-            (call for call in client.calls if "Given macro" in call[1]), None
-        )
+        risk_call = next((call for call in client.calls if "Given macro" in call[1]), None)
         assert risk_call is not None, "Risk prompt was not injected with macro result"
 
     @pytest.mark.asyncio
@@ -295,6 +359,7 @@ class TestSwarmExecutorSyncClient:
         event_types = [e.event_type for e in events]
         assert "started" in event_types
         assert "completed" in event_types
+        assert all(isinstance(event, SwarmEvent) for event in events)
 
     @pytest.mark.asyncio
     async def test_sync_event_callback_supported(self) -> None:
@@ -324,6 +389,20 @@ class TestSwarmExecutorAsyncClient:
         assert results["z"] == "async_ok"
         assert len(client.calls) == 1
 
+    @pytest.mark.asyncio
+    async def test_async_client_runs_on_the_callers_event_loop(self) -> None:
+        caller_loop = asyncio.get_running_loop()
+
+        class LoopBoundClient:
+            async def async_complete(self, system_prompt: str, user_prompt: str) -> str:
+                del system_prompt, user_prompt
+                assert asyncio.get_running_loop() is caller_loop
+                return "same_loop"
+
+        result = await SwarmExecutor(LoopBoundClient()).execute([_make_task("loop_bound")])
+
+        assert result == {"loop_bound": "same_loop"}
+
 
 # ---------------------------------------------------------------------------
 # Timeout handling
@@ -334,11 +413,11 @@ class TestSwarmExecutorTimeout:
     @pytest.mark.asyncio
     async def test_timeout_returns_sentinel_string(self) -> None:
         async def slow_complete(system_prompt: str, user_prompt: str) -> str:
-            await asyncio.sleep(999)
+            await asyncio.sleep(1.1)
             return "never"
 
-        client = MagicMock()
-        client.async_complete = slow_complete
+        client = _AsyncFakeLLMClient()
+        client.async_complete = slow_complete  # type: ignore[method-assign]
 
         executor = SwarmExecutor(llm_client=client)
         tasks = [_make_task("slow", timeout_seconds=1)]
@@ -348,11 +427,11 @@ class TestSwarmExecutorTimeout:
     @pytest.mark.asyncio
     async def test_timeout_event_emitted(self) -> None:
         async def slow_complete(system_prompt: str, user_prompt: str) -> str:
-            await asyncio.sleep(999)
+            await asyncio.sleep(1.1)
             return "never"
 
-        client = MagicMock()
-        client.async_complete = slow_complete
+        client = _AsyncFakeLLMClient()
+        client.async_complete = slow_complete  # type: ignore[method-assign]
 
         executor = SwarmExecutor(llm_client=client)
         events: list[SwarmEvent] = []
@@ -362,6 +441,26 @@ class TestSwarmExecutorTimeout:
 
         await executor.execute([_make_task("slow", timeout_seconds=1)], on_event=capture)
         assert any(e.event_type == "timeout" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_timeout_cancels_async_client_on_the_caller_loop(self) -> None:
+        cancelled = False
+
+        class CancellableClient:
+            async def async_complete(self, system_prompt: str, user_prompt: str) -> str:
+                nonlocal cancelled
+                del system_prompt, user_prompt
+                try:
+                    await asyncio.sleep(1.1)
+                except asyncio.CancelledError:
+                    cancelled = True
+                    raise
+                return "too late"
+
+        result = await SwarmExecutor(CancellableClient()).execute([_make_task("slow", timeout_seconds=1)])
+
+        assert "[TIMEOUT" in result["slow"]
+        assert cancelled is True
 
 
 # ---------------------------------------------------------------------------

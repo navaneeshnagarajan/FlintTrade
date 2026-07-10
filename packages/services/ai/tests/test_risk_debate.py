@@ -105,12 +105,14 @@ class TestRiskDebate:
         assert llm.chat.call_count == 7
 
     def test_single_round_debate(self) -> None:
-        llm = _make_mock_llm([
-            "Aggressive argument",
-            "Conservative argument",
-            "Neutral argument",
-            "VERDICT: HOLD\nCONFIDENCE: 0.5\nREASONING: No clear edge.",
-        ])
+        llm = _make_mock_llm(
+            [
+                "Aggressive argument",
+                "Conservative argument",
+                "Neutral argument",
+                "VERDICT: HOLD\nCONFIDENCE: 0.5\nREASONING: No clear edge.",
+            ]
+        )
         debate = RiskDebate(llm_client=llm, rounds=1)
         result = debate.run(trade_proposal="SELL RELIANCE")
         assert len(result.rounds) == 1
@@ -125,9 +127,11 @@ class TestRiskDebate:
 
     def test_separate_judge_llm(self) -> None:
         llm = _make_mock_llm()
-        judge_llm = _make_mock_llm([
-            "VERDICT: SELL\nCONFIDENCE: 0.9\nREASONING: Strong bearish case.",
-        ])
+        judge_llm = _make_mock_llm(
+            [
+                "VERDICT: SELL\nCONFIDENCE: 0.9\nREASONING: Strong bearish case.",
+            ]
+        )
         debate = RiskDebate(llm_client=llm, judge_llm_client=judge_llm, rounds=1)
         result = debate.run(trade_proposal="BUY NIFTY")
         # Judge should use the separate LLM
@@ -152,7 +156,9 @@ class TestRiskDebate:
         debate = RiskDebate(llm_client=llm, rounds=1)
         result = debate.run(trade_proposal="BUY NIFTY")
         assert result.verdict == "HOLD"
-        assert "Judge error" in result.reasoning
+        assert result.reasoning == "Judge analysis failed"
+        assert "LLM down" not in result.reasoning
+        assert result.error_codes == {"judge": "provider_failure"}
 
     def test_debate_transcript_accumulates(self) -> None:
         llm = _make_mock_llm()

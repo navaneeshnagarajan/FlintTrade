@@ -35,12 +35,16 @@ def _make_chain(
 
     quick = _make_llm_client(response_text)
     deep = _make_llm_client(deep_response_text or response_text) if deep_response_text else None
-    return AnalystChain(
-        llm_client=quick,
-        deep_llm_client=deep,
-        memory=memory,
-        analysts=analysts,
-    ), quick, deep
+    return (
+        AnalystChain(
+            llm_client=quick,
+            deep_llm_client=deep,
+            memory=memory,
+            analysts=analysts,
+        ),
+        quick,
+        deep,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +437,9 @@ class TestErrorHandling:
         # Assert — error recorded, pipeline did not crash
         assert len(state.errors) == 1
         assert "market" in state.errors[0]
-        assert "LLM timeout" in state.errors[0]
+        assert "analysis failed" in state.errors[0]
+        assert "LLM timeout" not in state.errors[0]
+        assert state.error_codes == {"market": "provider_failure"}
 
     def test_unknown_analyst_error_captured(self) -> None:
         # Arrange — analyst list includes a name that doesn't exist
@@ -443,6 +449,7 @@ class TestErrorHandling:
         # Assert — nonexistent node error is captured
         error_names = [e.split(":")[0] for e in state.errors]
         assert "nonexistent" in error_names
+        assert state.error_codes["nonexistent"] == "invalid_configuration"
 
     def test_multiple_analyst_errors_all_captured(self) -> None:
         # Arrange — both market and sentiment nodes fail

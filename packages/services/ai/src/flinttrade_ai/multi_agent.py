@@ -85,6 +85,7 @@ _CANONICAL_PRESET_OUTPUT_CONTRACT = (
 # Default agent roster
 # ---------------------------------------------------------------------------
 
+
 def default_agents() -> list[AgentRole]:
     """Return the default agent roster for a trading team.
 
@@ -212,9 +213,7 @@ class AgentTeam:
     ) -> None:
         self._quick = llm_client
         self._deep = deep_llm_client or llm_client
-        self._agents: list[AgentRole] = (
-            copy.deepcopy(agents) if agents is not None else default_agents()
-        )
+        self._agents: list[AgentRole] = copy.deepcopy(agents) if agents is not None else default_agents()
         self._custom_agents = self._agents
         self._memory = memory
         self._active_preset = ""
@@ -241,19 +240,13 @@ class AgentTeam:
     @property
     def enabled_agents(self) -> list[AgentRole]:
         """Return only enabled agents (excludes aggregator role type)."""
-        return copy.deepcopy([
-            agent
-            for agent in self._agents
-            if agent.enabled and agent.role_type != AgentRoleType.AGGREGATOR
-        ])
+        return copy.deepcopy(
+            [agent for agent in self._agents if agent.enabled and agent.role_type != AgentRoleType.AGGREGATOR]
+        )
 
     def _enabled_custom_agents(self) -> list[AgentRole]:
         """Return enabled agents from the durable custom roster."""
-        return [
-            agent
-            for agent in self._custom_agents
-            if agent.enabled and agent.role_type != AgentRoleType.AGGREGATOR
-        ]
+        return [agent for agent in self._custom_agents if agent.enabled and agent.role_type != AgentRoleType.AGGREGATOR]
 
     # ------------------------------------------------------------------
     # Configuration
@@ -358,14 +351,8 @@ class AgentTeam:
         """
         selected_mode = self._normalise_mode(mode)
         limits_supplied = max_concurrent is not None or task_timeout_seconds is not None
-        effective_max_concurrent = (
-            _DEFAULT_MAX_CONCURRENT if max_concurrent is None else max_concurrent
-        )
-        effective_timeout = (
-            _DEFAULT_TASK_TIMEOUT_SECONDS
-            if task_timeout_seconds is None
-            else task_timeout_seconds
-        )
+        effective_max_concurrent = _DEFAULT_MAX_CONCURRENT if max_concurrent is None else max_concurrent
+        effective_timeout = _DEFAULT_TASK_TIMEOUT_SECONDS if task_timeout_seconds is None else task_timeout_seconds
         if selected_mode is TeamMode.DEBATE and debate_rounds <= 0:
             raise ValueError("debate_rounds must be positive")
         if effective_max_concurrent <= 0:
@@ -373,12 +360,7 @@ class AgentTeam:
         if effective_timeout <= 0:
             raise ValueError("task_timeout_seconds must be positive")
         effective_preset = self._resolve_preset(selected_mode, preset, use_active_preset)
-        if (
-            selected_mode is not TeamMode.FLAT
-            or effective_preset is not None
-            or parallel
-            or limits_supplied
-        ):
+        if selected_mode is not TeamMode.FLAT or effective_preset is not None or parallel or limits_supplied:
             return asyncio.run(
                 self.analyse_async(
                     symbol,
@@ -394,11 +376,7 @@ class AgentTeam:
             )
 
         result = TeamAnalysis(symbol=symbol, exchange=exchange, mode=selected_mode)
-        enabled = (
-            self._enabled_custom_agents()
-            if preset is None and not use_active_preset
-            else self.enabled_agents
-        )
+        enabled = self._enabled_custom_agents() if preset is None and not use_active_preset else self.enabled_agents
 
         if not enabled:
             result.errors.append("No enabled agents in the team")
@@ -408,14 +386,9 @@ class AgentTeam:
 
         # Phase 1: Each agent produces an independent analysis
         if parallel:
-            analyses = asyncio.run(
-                self._run_agents_parallel(enabled, symbol, exchange, market_data)
-            )
+            analyses = asyncio.run(self._run_agents_parallel(enabled, symbol, exchange, market_data))
         else:
-            analyses = [
-                self._run_agent(agent, symbol, exchange, market_data)
-                for agent in enabled
-            ]
+            analyses = [self._run_agent(agent, symbol, exchange, market_data) for agent in enabled]
 
         for analysis in analyses:
             result.agent_analyses.append(analysis)
@@ -714,10 +687,7 @@ class AgentTeam:
         finally:
             call_runner.close()
         result = TeamAnalysis(symbol=symbol, exchange=exchange, mode=TeamMode.SEQUENTIAL)
-        failures = {
-            name: message.strip()
-            for name, message in (error.split(":", 1) for error in state.errors)
-        }
+        failures = {name: message.strip() for name, message in (error.split(":", 1) for error in state.errors)}
         fundamentals = "\n".join(
             part
             for part in (
@@ -739,7 +709,9 @@ class AgentTeam:
                     error=(
                         "Agent analysis timed out"
                         if failures.get(task_id) == "analysis timed out"
-                        else "Agent analysis failed" if task_id in failures else ""
+                        else "Agent analysis failed"
+                        if task_id in failures
+                        else ""
                     ),
                     task_id=task_id,
                 )
@@ -756,6 +728,7 @@ class AgentTeam:
             "bull_thesis": state.bull_thesis,
             "bear_thesis": state.bear_thesis,
             "risk_assessment": state.risk_assessment,
+            "error_codes": dict(state.error_codes),
         }
         await TeamDagRunner._emit(
             on_event,
@@ -812,7 +785,9 @@ class AgentTeam:
                     error=(
                         "Agent analysis timed out"
                         if failures.get(task_id) == "timeout"
-                        else "Agent analysis failed" if task_id in failures else ""
+                        else "Agent analysis failed"
+                        if task_id in failures
+                        else ""
                     ),
                     task_id=task_id,
                 )
@@ -836,6 +811,7 @@ class AgentTeam:
                 for item in debate_result.rounds
             ],
             "full_transcript": debate_result.full_transcript,
+            "error_codes": dict(debate_result.error_codes),
         }
         await TeamDagRunner._emit(
             on_event,
@@ -1107,8 +1083,7 @@ class AgentTeam:
         result.consensus_signal = winner
         result.consensus_confidence = round(votes[winner] / total, 4) if total > 0 else 0.0
         result.consensus_reasoning = (
-            f"Majority vote: {votes['BUY']} BUY, {votes['SELL']} SELL, "
-            f"{votes['HOLD']} HOLD out of {total} agents."
+            f"Majority vote: {votes['BUY']} BUY, {votes['SELL']} SELL, {votes['HOLD']} HOLD out of {total} agents."
         )
 
     # ------------------------------------------------------------------
@@ -1309,7 +1284,10 @@ class AutonomousResearchLoop:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "Autonomous loop: %s/%s failed at iteration %d: %s",
-                        symbol, exchange, iteration, exc,
+                        symbol,
+                        exchange,
+                        iteration,
+                        exc,
                     )
                     record.status = "failed"
                     record.error = "Research iteration failed"
@@ -1326,7 +1304,8 @@ class AutonomousResearchLoop:
 
         logger.info(
             "Autonomous loop completed: %d iterations, %d results",
-            iteration, len(self._results),
+            iteration,
+            len(self._results),
         )
         return self._results
 

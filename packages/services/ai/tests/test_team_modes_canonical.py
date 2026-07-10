@@ -16,8 +16,18 @@ from flinttrade_ai._team_modes import (
     DebateRound,
     RiskDebate,
 )
+from flinttrade_ai.analyst_chain import (
+    AnalysisState as CompatAnalysisState,
+    AnalystChain as CompatAnalystChain,
+    DecisionLiteral as CompatDecisionLiteral,
+)
 from flinttrade_ai.llm_client import LLMMessage, LLMResponse
 from flinttrade_ai.memory import MemoryEntry, MemoryLayer
+from flinttrade_ai.risk_debate import (
+    DebateResult as CompatDebateResult,
+    DebateRound as CompatDebateRound,
+    RiskDebate as CompatRiskDebate,
+)
 
 
 class ScriptedLLM:
@@ -98,10 +108,12 @@ def test_public_models_and_constructor_shapes_are_preserved() -> None:
     assert state.final_reasoning == ""
     assert state.confidence == 0.0
     assert state.errors == []
+    assert state.error_codes == {}
     assert debate_round == DebateRound(round_number=1, aggressive="", conservative="", neutral="")
     assert debate_result.rounds == []
     assert debate_result.verdict == "HOLD"
     assert debate_result.timestamp
+    assert debate_result.error_codes == {}
 
     analyst_params = signature(AnalystChain.__init__).parameters
     assert list(analyst_params) == ["self", "llm_client", "deep_llm_client", "memory", "analysts"]
@@ -113,6 +125,15 @@ def test_public_models_and_constructor_shapes_are_preserved() -> None:
     assert list(debate_params) == ["self", "llm_client", "judge_llm_client", "rounds"]
     assert debate_params["judge_llm_client"].default is None
     assert debate_params["rounds"].default == 2
+
+
+def test_legacy_mode_imports_are_canonical_identity_aliases() -> None:
+    assert CompatAnalysisState is AnalysisState
+    assert CompatAnalystChain is AnalystChain
+    assert CompatDecisionLiteral is str
+    assert CompatDebateRound is DebateRound
+    assert CompatDebateResult is DebateResult
+    assert CompatRiskDebate is RiskDebate
 
 
 def test_risk_debate_runs_rounds_in_order_and_gives_full_transcript_to_judge() -> None:

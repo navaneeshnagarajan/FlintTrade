@@ -21,6 +21,14 @@ from __future__ import annotations
 
 import pytest
 
+from flinttrade_ai import swarm_presets
+from flinttrade_ai._team_presets import (
+    TeamPreset,
+    TeamPresetAgent,
+    get_all_presets as get_all_team_presets,
+    get_preset as get_team_preset,
+    list_presets as list_team_presets,
+)
 from flinttrade_ai.swarm_presets import (
     SwarmAgentDef,
     SwarmPreset,
@@ -46,6 +54,16 @@ EXPECTED_NAMES = {
     "risk_committee",
     "full_house",
 }
+
+
+def test_compatibility_api_is_backed_exclusively_by_canonical_catalogue():
+    assert SwarmAgentDef is TeamPresetAgent
+    assert SwarmPreset is TeamPreset
+    assert list_presets is list_team_presets
+    assert get_preset is get_team_preset
+    assert get_all_presets is get_all_team_presets
+    assert get_preset("derivatives_desk") is get_team_preset("derivatives_desk")
+    assert not hasattr(swarm_presets, "_PRESETS_RAW")
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +165,7 @@ class TestSwarmPresetStructure:
         single_desks = EXPECTED_NAMES - {"full_house"}
         for name in single_desks:
             preset = get_preset(name)
-            assert len(preset.agents) == 3, (
-                f"{name} expected 3 agents, got {len(preset.agents)}"
-            )
+            assert len(preset.agents) == 3, f"{name} expected 3 agents, got {len(preset.agents)}"
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +182,7 @@ class TestSwarmAgentDefStructure:
     @pytest.mark.parametrize("name", sorted(EXPECTED_NAMES))
     def test_all_agents_have_non_empty_system_prompt(self, name):
         for agent in get_preset(name).agents:
-            assert len(agent.system_prompt.strip()) > 50, (
-                f"System prompt too short for {agent.role} in {name}"
-            )
+            assert len(agent.system_prompt.strip()) > 50, f"System prompt too short for {agent.role} in {name}"
 
     @pytest.mark.parametrize("name", sorted(EXPECTED_NAMES))
     def test_all_agents_have_valid_model_tier(self, name):
@@ -182,9 +196,7 @@ class TestSwarmAgentDefStructure:
     def test_each_preset_has_at_least_one_deep_agent(self, name):
         preset = get_preset(name)
         deep_agents = [a for a in preset.agents if a.model_tier == "deep"]
-        assert len(deep_agents) >= 1, (
-            f"Preset {name} has no 'deep' model tier agent"
-        )
+        assert len(deep_agents) >= 1, f"Preset {name} has no 'deep' model tier agent"
 
     def test_quick_agents_outnumber_deep_agents(self):
         # Overall, quick agents should be more numerous (cost efficiency)
@@ -206,9 +218,7 @@ class TestSystemPromptQuality:
         for agent in get_preset(name).agents:
             prompt = agent.system_prompt
             # Every prompt should contain at least one colon-delimited instruction
-            assert ":" in prompt, (
-                f"Agent {agent.role} in {name} has no structured output format"
-            )
+            assert ":" in prompt, f"Agent {agent.role} in {name} has no structured output format"
 
     def test_derivatives_desk_mentions_options(self):
         preset = get_preset("derivatives_desk")
@@ -264,6 +274,7 @@ class TestSerialisation:
     @pytest.mark.parametrize("name", sorted(EXPECTED_NAMES))
     def test_preset_to_dict_is_json_serialisable(self, name):
         import json
+
         preset = get_preset(name)
         # Should not raise
         serialised = json.dumps(preset.to_dict())

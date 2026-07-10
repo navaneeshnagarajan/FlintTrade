@@ -14,7 +14,7 @@ from typing import Any, Literal, TypeAlias, TypeVar
 
 from pydantic import BaseModel, Field
 
-from .llm_client import LLMClient, LLMMessage
+from .llm_client import LLMClient, LLMMessage, LLMResponse
 
 logger = logging.getLogger("flinttrade.ai.team_dag")
 
@@ -59,6 +59,10 @@ class TeamEvent(BaseModel):
 
 
 EventCallback: TypeAlias = Callable[[TeamEvent], Awaitable[None] | None]
+AsyncChatCallback: TypeAlias = Callable[
+    [list[LLMMessage], float | None],
+    Awaitable[LLMResponse],
+]
 
 
 def _validate_graph_references(tasks: list[TeamTask]) -> set[str]:
@@ -271,19 +275,47 @@ class _ThreadCallRunner:
             pass
 
 
+class _AsyncCallRunner:
+    """Bound native async calls and cancel them when their timeout expires."""
+
+    def __init__(self, max_concurrent: int) -> None:
+        if max_concurrent <= 0:
+            raise ValueError("max_concurrent must be positive")
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def run(
+        self,
+        call: Callable[[], Awaitable[_T]],
+        timeout_seconds: float,
+    ) -> _T:
+        """Run one caller-loop coroutine within the shared concurrency bound."""
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+
+        async def invoke() -> _T:
+            async with self._semaphore:
+                return await call()
+
+        return await asyncio.wait_for(invoke(), timeout=timeout_seconds)
+
+
 class TeamDagRunner:
     """Execute validated team tasks layer by layer through ``LLMClient.chat``."""
 
     def __init__(
         self,
-        quick_llm: LLMClient,
+        quick_llm: LLMClient | None,
         deep_llm: LLMClient | None = None,
         *,
         call_runner: _ThreadCallRunner | None = None,
+        async_chat: AsyncChatCallback | None = None,
     ) -> None:
+        if quick_llm is None and async_chat is None:
+            raise ValueError("quick_llm or async_chat is required")
         self._quick_llm = quick_llm
         self._deep_llm = deep_llm or quick_llm
         self._call_runner = call_runner
+        self._async_chat = async_chat
 
     async def execute(
         self,
@@ -301,12 +333,22 @@ class TeamDagRunner:
         results: dict[str, str] = {}
         call_runner = self._call_runner or _ThreadCallRunner(max_concurrent)
         owns_runner = self._call_runner is None
+        async_call_runner = _AsyncCallRunner(max_concurrent) if self._async_chat is not None else None
 
         try:
             for layer in layers:
                 layer_tasks = [tasks_by_id[task_id] for task_id in layer]
                 layer_results = await asyncio.gather(
-                    *(self._run_task(task, results, on_event, call_runner) for task in layer_tasks)
+                    *(
+                        self._run_task(
+                            task,
+                            results,
+                            on_event,
+                            call_runner,
+                            async_call_runner,
+                        )
+                        for task in layer_tasks
+                    )
                 )
                 for task, result in zip(layer_tasks, layer_results, strict=True):
                     results[task.id] = result
@@ -331,6 +373,7 @@ class TeamDagRunner:
         upstream_results: Mapping[str, str],
         on_event: EventCallback | None,
         call_runner: _ThreadCallRunner,
+        async_call_runner: _AsyncCallRunner | None,
     ) -> str:
         """Run one task through the selected client with timeout and events."""
         await self._emit(
@@ -368,11 +411,21 @@ class TeamDagRunner:
         client = self._deep_llm if task.model_tier == "deep" else self._quick_llm
 
         try:
-            chat_kwargs = {"temperature": task.temperature} if task.temperature is not None else {}
-            response = await call_runner.run(
-                lambda: client.chat(messages, **chat_kwargs),
-                task.timeout_seconds,
-            )
+            if self._async_chat is not None:
+                if async_call_runner is None:  # pragma: no cover - constructor invariant
+                    raise RuntimeError("async call runner is unavailable")
+                response = await async_call_runner.run(
+                    lambda: self._async_chat(messages, task.temperature),
+                    task.timeout_seconds,
+                )
+            else:
+                if client is None:  # pragma: no cover - constructor invariant
+                    raise RuntimeError("LLM client is unavailable")
+                chat_kwargs = {"temperature": task.temperature} if task.temperature is not None else {}
+                response = await call_runner.run(
+                    lambda: client.chat(messages, **chat_kwargs),
+                    task.timeout_seconds,
+                )
             if not response.success or not response.content.strip():
                 logger.warning(
                     "Team task %r returned an unsuccessful LLM response: %s",
