@@ -15,14 +15,14 @@ import time
 import zipfile
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import fmean, pstdev
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .signals import FeatureSet, SignalGenerator, engineer_features
+from .signals import FeatureSet, SignalGenerator, TrainingCancelled, engineer_features
 
 try:
     from scipy.stats import ks_2samp as _scipy_ks_2samp
@@ -32,6 +32,8 @@ except (ImportError, OSError):
 logger = logging.getLogger("flinttrade.ai.signal_retraining")
 
 DataFetcher = Callable[[str, str, int], list[dict[str, Any]]]
+Clock = Callable[[], datetime]
+CancellationCheck = Callable[[], bool]
 
 _BUNDLE_VERSION = 1
 _BASELINE_VERSION = 1
@@ -225,7 +227,7 @@ def _read_verified_bundle(
     *,
     symbol: str,
     exchange: str,
-) -> tuple[bytes, str, FeatureSet]:
+) -> tuple[bytes, str, FeatureSet, datetime]:
     """Validate one complete bundle without deserialising its joblib member."""
     with zipfile.ZipFile(path) as bundle:
         names = [member.filename for member in bundle.infolist()]
@@ -255,12 +257,24 @@ def _read_verified_bundle(
         if re.fullmatch(r"[0-9a-f]{64}", checksum) is None or not hmac.compare_digest(checksum, metadata_digest):
             raise ValueError("Signal model bundle checksum metadata does not match")
         baseline = _validate_baseline(metadata.get("baseline"), model_sha256=metadata_digest)
+        raw_accepted_at = metadata.get("accepted_at")
+        if not isinstance(raw_accepted_at, str):
+            raise ValueError("Signal model bundle has no accepted timestamp")
+        try:
+            accepted_at = datetime.fromisoformat(
+                raw_accepted_at[:-1] + "+00:00" if raw_accepted_at.endswith(("Z", "z")) else raw_accepted_at
+            )
+        except ValueError as exc:
+            raise ValueError("Signal model bundle has an invalid accepted timestamp") from exc
+        if accepted_at.tzinfo is None:
+            raise ValueError("Signal model bundle accepted timestamp must include a timezone")
+        accepted_at = accepted_at.astimezone(timezone.utc)
 
         model_bytes = bundle.read("model.joblib")
     actual_digest = hashlib.sha256(model_bytes).hexdigest()
     if not hmac.compare_digest(actual_digest, metadata_digest):
         raise RuntimeError(f"Refusing to load {path.name}: SHA-256 checksum mismatch")
-    return model_bytes, metadata_digest, baseline
+    return model_bytes, metadata_digest, baseline, accepted_at
 
 
 def _write_model_bundle(
@@ -270,6 +284,7 @@ def _write_model_bundle(
     *,
     symbol: str,
     exchange: str,
+    accepted_at: datetime | None = None,
 ) -> None:
     """Write one complete guarded model bundle to ``path`` without publishing it."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,9 +302,12 @@ def _write_model_bundle(
 
         baseline_payload = _baseline_payload(baseline, model_sha256=actual_digest)
         _validate_baseline(baseline_payload, model_sha256=actual_digest)
+        accepted = accepted_at or datetime.now(timezone.utc)
+        if accepted.tzinfo is None:
+            raise ValueError("accepted_at must include a timezone")
         metadata = {
             "bundle_version": _BUNDLE_VERSION,
-            "accepted_at": datetime.now(timezone.utc).isoformat(),
+            "accepted_at": accepted.astimezone(timezone.utc).isoformat(),
             "identity": {
                 "exchange": exchange,
                 "symbol": symbol,
@@ -317,7 +335,7 @@ def _write_model_bundle(
 
 def load_signal_model_bundle(path: Path, *, symbol: str, exchange: str) -> SignalGenerator:
     """Load a verified per-instrument bundle after validating all metadata."""
-    model_bytes, model_sha256, _baseline = _read_verified_bundle(
+    model_bytes, model_sha256, _baseline, _accepted_at = _read_verified_bundle(
         path,
         symbol=symbol,
         exchange=exchange,
@@ -338,12 +356,16 @@ class SignalRetrainer:
         data_fetcher: DataFetcher,
         pipeline: Any | None = None,
         instrument_provider: Callable[[], list[dict[str, str]]] | None = None,
+        clock: Clock | None = None,
+        cancel_requested: CancellationCheck | None = None,
     ) -> None:
         self.config = config
         self.instruments = [dict(instrument) for instrument in instruments]
         self._data_fetcher = data_fetcher
         self._pipeline = pipeline
         self._instrument_provider = instrument_provider
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._cancel_requested = cancel_requested or (lambda: False)
         self._history: deque[RetrainResult] = deque(maxlen=config.max_history)
         self._history_lock = threading.Lock()
         self._promotion_lock = threading.Lock()
@@ -354,13 +376,59 @@ class SignalRetrainer:
         """Return the deterministic per-instrument model path."""
         return signal_model_path(self.config.model_dir, symbol, exchange)
 
+    def _now(self) -> datetime:
+        now = self._clock()
+        if now.tzinfo is None:
+            raise ValueError("Signal retraining clock must return a timezone-aware datetime")
+        return now.astimezone(timezone.utc)
+
+    def _is_cancelled(self) -> bool:
+        return bool(self._cancel_requested())
+
     def run_once(self, symbol: str, exchange: str) -> RetrainResult:
         """Fetch, train, validate, and conditionally promote one instrument."""
         started = time.monotonic()
+        if self._is_cancelled():
+            return self._record_failure(started, symbol, exchange, "Cancelled")
+
+        target = self.model_path(symbol, exchange)
+        incumbent_baseline: FeatureSet | None = None
+        if target.exists():
+            try:
+                _model_bytes, _model_sha256, incumbent_baseline, accepted_at = _read_verified_bundle(
+                    target,
+                    symbol=symbol,
+                    exchange=exchange,
+                )
+            except Exception as exc:  # noqa: BLE001 - corrupt incumbents should be replaced, not trusted
+                logger.warning("Could not verify incumbent model for %s:%s: %s", exchange, symbol, exc)
+            else:
+                age = self._now() - accepted_at
+                interval = timedelta(hours=self.config.retrain_interval_hours)
+                if timedelta(0) <= age < interval:
+                    result = self._result(
+                        started,
+                        symbol,
+                        exchange,
+                        train_accuracy=0.0,
+                        test_accuracy=0.0,
+                        accepted=False,
+                        reason=(
+                            f"Skipped: accepted model is {age.total_seconds() / 3600:.2f}h old; "
+                            f"retrain interval is {self.config.retrain_interval_hours}h"
+                        ),
+                        drift_detected=False,
+                        drift_score=0.0,
+                    )
+                    self._record(result)
+                    return result
+
         try:
             bars = self._data_fetcher(symbol, exchange, self.config.lookback_days)
         except Exception as exc:  # noqa: BLE001 - one instrument must not stop the roster
             return self._record_failure(started, symbol, exchange, f"Data fetch failed: {exc}")
+        if self._is_cancelled():
+            return self._record_failure(started, symbol, exchange, "Cancelled")
 
         if len(bars) < self.config.min_training_rows:
             return self._record_failure(
@@ -371,29 +439,30 @@ class SignalRetrainer:
             )
 
         features = engineer_features(bars)
+        if self._is_cancelled():
+            return self._record_failure(started, symbol, exchange, "Cancelled")
         if not features.values:
             return self._record_failure(started, symbol, exchange, f"Insufficient data: {len(bars)} bars")
 
         drift_detected = False
         drift_score = 0.0
-        target = self.model_path(symbol, exchange)
-        if target.exists():
-            try:
-                _model_bytes, _model_sha256, incumbent_baseline = _read_verified_bundle(
-                    target,
-                    symbol=symbol,
-                    exchange=exchange,
-                )
-            except Exception as exc:  # noqa: BLE001 - invalid baseline means no drift, not failed retraining
-                logger.warning("Could not verify incumbent baseline for %s:%s: %s", exchange, symbol, exc)
-            else:
-                split = int(len(features.values) * (1 - self.config.validation_split))
-                recent = FeatureSet(names=features.names, values=features.values[split:])
-                drift_detected, drift_score = compute_feature_drift(
-                    incumbent_baseline,
-                    recent,
-                    threshold=self.config.drift_threshold,
-                )
+        if incumbent_baseline is not None:
+            split = int(len(features.values) * (1 - self.config.validation_split))
+            recent = FeatureSet(names=features.names, values=features.values[split:])
+            drift_detected, drift_score = compute_feature_drift(
+                incumbent_baseline,
+                recent,
+                threshold=self.config.drift_threshold,
+            )
+        if self._is_cancelled():
+            return self._record_failure(
+                started,
+                symbol,
+                exchange,
+                "Cancelled",
+                drift_detected=drift_detected,
+                drift_score=drift_score,
+            )
 
         training_split = int(len(features.values) * (1 - self.config.validation_split))
         training_baseline = FeatureSet(
@@ -410,6 +479,16 @@ class SignalRetrainer:
                 sell_threshold_pct=self.config.sell_threshold_pct,
                 test_ratio=self.config.validation_split,
                 min_training_rows=self.config.min_training_rows,
+                cancel_requested=self._cancel_requested,
+            )
+        except TrainingCancelled:
+            return self._record_failure(
+                started,
+                symbol,
+                exchange,
+                "Cancelled",
+                drift_detected=drift_detected,
+                drift_score=drift_score,
             )
         except Exception as exc:  # noqa: BLE001 - optional ML dependencies may be absent
             return self._record_failure(
@@ -417,6 +496,15 @@ class SignalRetrainer:
                 symbol,
                 exchange,
                 f"Training failed: {exc}",
+                drift_detected=drift_detected,
+                drift_score=drift_score,
+            )
+        if self._is_cancelled():
+            return self._record_failure(
+                started,
+                symbol,
+                exchange,
+                "Cancelled",
                 drift_detected=drift_detected,
                 drift_score=drift_score,
             )
@@ -440,6 +528,17 @@ class SignalRetrainer:
 
         try:
             self._promote(symbol, exchange, candidate, training_baseline)
+        except TrainingCancelled:
+            return self._record_failure(
+                started,
+                symbol,
+                exchange,
+                "Cancelled",
+                train_accuracy=train_accuracy,
+                test_accuracy=test_accuracy,
+                drift_detected=drift_detected,
+                drift_score=drift_score,
+            )
         except Exception as exc:  # noqa: BLE001 - failed promotion must remain advisory
             return self._record_failure(
                 started,
@@ -469,12 +568,16 @@ class SignalRetrainer:
     def run_all(self) -> list[RetrainResult]:
         """Retrain every pipeline instrument, continuing after any failure."""
         results: list[RetrainResult] = []
+        if self._is_cancelled():
+            return results
         instruments = (
             self._instrument_provider()
             if self._instrument_provider is not None
             else [dict(instrument) for instrument in self.instruments]
         )
         for instrument in instruments:
+            if self._is_cancelled():
+                break
             symbol = str(instrument.get("symbol", ""))
             exchange = str(instrument.get("exchange", ""))
             try:
@@ -487,6 +590,8 @@ class SignalRetrainer:
                     f"Retrain failed: {exc}",
                 )
             results.append(result)
+            if result.reason == "Cancelled" or self._is_cancelled():
+                break
         return results
 
     def get_history(self) -> list[RetrainResult]:
@@ -518,7 +623,10 @@ class SignalRetrainer:
                     training_baseline,
                     symbol=symbol,
                     exchange=exchange,
+                    accepted_at=self._now(),
                 )
+                if self._is_cancelled():
+                    raise TrainingCancelled("Signal model promotion cancelled")
 
                 def _publish() -> None:
                     temp_bundle.replace(target)
@@ -545,7 +653,7 @@ class SignalRetrainer:
         drift_score: float,
     ) -> RetrainResult:
         return RetrainResult(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=self._now(),
             symbol=symbol,
             exchange=exchange,
             train_accuracy=train_accuracy,

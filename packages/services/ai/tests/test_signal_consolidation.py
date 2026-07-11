@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from flask import Flask
 
 
-def _bars(count: int = 60) -> list[dict[str, object]]:
+def _bars(
+    count: int = 60,
+    *,
+    end: datetime | None = None,
+) -> list[dict[str, object]]:
     """Return enough deterministic OHLCV rows for one scheduled cycle."""
+    final_stamp = end or datetime.now(timezone.utc) - timedelta(minutes=5)
+    first_stamp = final_stamp - timedelta(minutes=5 * (count - 1))
     return [
         {
-            "timestamp": f"2026-07-10T09:{index:02d}:00+05:30",
+            "timestamp": (first_stamp + timedelta(minutes=5 * index)).isoformat(),
             "open": 24_000.0 + index,
             "high": 24_010.0 + index,
             "low": 23_990.0 + index,
@@ -96,6 +103,79 @@ def test_sink_failure_does_not_discard_latest_ml_results() -> None:
 
     assert pipeline.get_latest_signals() == results
     assert results["NSE_INDEX:NIFTY"]["signal"] == "HOLD"
+
+
+def test_scheduled_pipeline_rejects_stale_bar_batch() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    generator = MagicMock(is_trained=True)
+    pipeline.fetch_bars = MagicMock(
+        return_value=_bars(end=datetime.now(timezone.utc) - timedelta(days=1)),
+    )
+    pipeline._generator_for = MagicMock(return_value=generator)
+
+    assert pipeline.run_cycle() == {}
+    generator.predict.assert_not_called()
+
+
+def test_scheduled_pipeline_rejects_invalid_latest_bar_stamp() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    bars = _bars()
+    bars[-1]["timestamp"] = "not-a-timestamp"
+    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    generator = MagicMock(is_trained=True)
+    pipeline.fetch_bars = MagicMock(return_value=bars)
+    pipeline._generator_for = MagicMock(return_value=generator)
+
+    assert pipeline.run_cycle() == {}
+    generator.predict.assert_not_called()
+
+
+def test_failed_ml_prediction_uses_fallback_provenance() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+    from flinttrade_ai.signals import MLSignal
+
+    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    generator = MagicMock(is_trained=True)
+    generator.predict.return_value = MLSignal(error="model exploded")
+    pipeline.fetch_bars = MagicMock(return_value=_bars())
+    pipeline._generator_for = MagicMock(return_value=generator)
+
+    result = pipeline.run_cycle()["NSE_INDEX:NIFTY"]
+
+    assert result["method"] == "ema_crossover_fallback"
+    assert result["confidence"] == 0.0
+
+
+def test_scheduled_pipeline_preserves_validated_latest_bar_timestamp() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    bars = _bars()
+    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    pipeline.fetch_bars = MagicMock(return_value=bars)
+    pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
+
+    result = pipeline.run_cycle()["NSE_INDEX:NIFTY"]
+
+    assert result["timestamp"] == bars[-1]["timestamp"]
+
+
+def test_scheduled_pipeline_accepts_openalgo_daily_interval() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    now = datetime(2026, 7, 13, 5, 0, tzinfo=timezone.utc)
+    bars = _bars(end=datetime(2026, 7, 10, 10, 0, tzinfo=timezone.utc))
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        interval="D",
+        clock=lambda: now,
+    )
+    pipeline.fetch_bars = MagicMock(return_value=bars)
+    pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
+
+    assert "NSE_INDEX:NIFTY" in pipeline.run_cycle()
 
 
 def test_scheduled_pipeline_preserves_explicitly_empty_instruments() -> None:
@@ -278,8 +358,50 @@ def test_sse_uses_monotonic_ids_after_deque_is_full() -> None:
     lines = frame.splitlines()
     payload = json.loads(next(line[6:] for line in lines if line.startswith("data: ")))
 
-    assert f"id: {_MAX_SIGNALS + 1}" in lines
+    assert f"id: {hub.sse_event_id(_MAX_SIGNALS + 1)}" in lines
     assert payload["event_id"] == _MAX_SIGNALS + 1
+
+
+def test_sse_cursor_from_prior_process_replays_every_current_process_event() -> None:
+    from flinttrade_ai.signal_models import SignalEvent
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+    from flinttrade_ai.signal_routes import _sse_generator
+
+    prior = LiveSignalPipeline(stream_id="prior-process")
+    prior.publish_signal(SignalEvent(symbol="OLD", source="rule", signal_type="ALERT"))
+    stale_cursor = prior.sse_event_id(prior.latest_event_id)
+
+    current = LiveSignalPipeline(stream_id="current-process")
+    current.publish_signal(SignalEvent(symbol="CURRENT-1", source="rule", signal_type="ALERT"))
+    current.publish_signal(SignalEvent(symbol="CURRENT-2", source="rule", signal_type="ALERT"))
+
+    replay = _sse_generator(current, last_event_id=stale_cursor, heartbeat_interval=0.0)
+    control = next(replay)
+    control_payload = json.loads(control.split("data: ", 1)[1])
+    frames = [next(replay), next(replay)]
+
+    assert control_payload["reason"] == "stream_changed"
+    assert control_payload["requested_event_id"] == 1
+    assert [json.loads(frame.split("data: ", 1)[1])["event_id"] for frame in frames] == [1, 2]
+    assert [frame.splitlines()[0] for frame in frames] == [
+        "id: current-process:1",
+        "id: current-process:2",
+    ]
+
+    legacy_replay = _sse_generator(current, last_event_id="1", heartbeat_interval=0.0)
+    legacy_control = json.loads(next(legacy_replay).split("data: ", 1)[1])
+    assert legacy_control["reason"] == "legacy_cursor"
+    assert [
+        json.loads(next(legacy_replay).split("data: ", 1)[1])["event_id"]
+        for _ in range(2)
+    ] == [1, 2]
+
+    same_process_replay = _sse_generator(
+        current,
+        last_event_id=current.sse_event_id(1),
+        heartbeat_interval=0.0,
+    )
+    assert json.loads(next(same_process_replay).split("data: ", 1)[1])["event_id"] == 2
 
 
 def test_sse_signals_replay_loss_then_replays_retained_ring() -> None:

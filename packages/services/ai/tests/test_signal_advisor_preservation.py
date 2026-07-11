@@ -135,8 +135,21 @@ def test_generate_labels_supports_asymmetric_percentage_thresholds() -> None:
         sell_threshold_pct=-0.25,
     )
 
-    assert buy_sensitive == [2, 1, 1]
-    assert sell_sensitive == [1, 0, 1]
+    assert buy_sensitive == [2, 1]
+    assert sell_sensitive == [1, 0]
+
+
+def test_generate_labels_excludes_rows_without_full_lookahead() -> None:
+    from flinttrade_ai.signals import generate_labels
+
+    labels = generate_labels(
+        [100.0, 101.0, 102.0, 103.0, 104.0],
+        lookahead=2,
+        threshold_pct=0.5,
+        offset=0,
+    )
+
+    assert labels == [2, 2, 2]
 
 
 def test_generate_labels_validates_threshold_signs() -> None:

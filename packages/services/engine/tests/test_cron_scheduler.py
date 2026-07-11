@@ -71,6 +71,23 @@ def _make_scheduler(
     return CronStrategyScheduler(time_scheduler=ts, market_hours_check=check_market)
 
 
+@pytest.mark.parametrize(
+    ("at", "holidays"),
+    [
+        (_ist(10, 0, weekday=5)[0], []),
+        (_ist(10, 0, weekday=0)[0], ["2026-04-13"]),
+    ],
+)
+def test_time_scheduler_market_open_requires_trading_calendar(
+    at: datetime,
+    holidays: list[str],
+) -> None:
+    scheduler = TimeScheduler()
+    scheduler._holidays[str(at.year)] = holidays
+
+    assert scheduler.is_market_open("NSE", at=at) is False
+
+
 # ---------------------------------------------------------------------------
 # _parse_cron_expr
 # ---------------------------------------------------------------------------

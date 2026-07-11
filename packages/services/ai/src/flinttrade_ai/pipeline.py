@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 import shutil
+import tempfile
 import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -16,6 +19,75 @@ from typing import Any
 from .signal_models import normalise_instrument_identity
 
 logger = logging.getLogger("flinttrade.ai.pipeline")
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+_INTERVAL_PATTERN = re.compile(r"(?P<count>[1-9][0-9]*)(?P<unit>[mhd])", re.IGNORECASE)
+
+
+def _parse_bar_timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_IST)
+    return parsed.astimezone(timezone.utc)
+
+
+def _interval_duration(value: str) -> timedelta | None:
+    raw_value = value.strip()
+    if raw_value == "D":
+        return timedelta(days=1)
+    match = _INTERVAL_PATTERN.fullmatch(raw_value)
+    if match is None:
+        return None
+    count = int(match.group("count"))
+    unit = match.group("unit").lower()
+    if unit == "m":
+        return timedelta(minutes=count)
+    if unit == "h":
+        return timedelta(hours=count)
+    return timedelta(days=count)
+
+
+def _temporary_model_path(target: Path) -> Path:
+    descriptor, name = tempfile.mkstemp(
+        prefix=f"{target.name}.candidate.",
+        suffix=target.suffix,
+        dir=target.parent,
+    )
+    os.close(descriptor)
+    return Path(name)
+
+
+def _replace_shared_model_pair(candidate: Path, target: Path) -> None:
+    """Replace the checksum then atomically publish the corresponding model file."""
+    candidate_checksum = Path(f"{candidate}.sha256")
+    target_checksum = Path(f"{target}.sha256")
+    if not candidate.exists() or not candidate_checksum.exists():
+        raise OSError("candidate persistence did not produce model and checksum files")
+
+    previous_checksum = target_checksum.read_bytes() if target_checksum.exists() else None
+    candidate_checksum.replace(target_checksum)
+    try:
+        candidate.replace(target)
+    except BaseException:
+        if previous_checksum is None:
+            target_checksum.unlink(missing_ok=True)
+        else:
+            restore_path = _temporary_model_path(target_checksum)
+            try:
+                restore_path.write_bytes(previous_checksum)
+                restore_path.replace(target_checksum)
+            finally:
+                restore_path.unlink(missing_ok=True)
+        raise
 
 
 def _normalise_scheduled_instruments(
@@ -118,6 +190,7 @@ class SignalPipeline:
         turbulence_threshold: float = 3.0,
         turbulence_window: int = 60,
         signal_sink: Callable[[dict[str, dict[str, Any]]], Any] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         from flinttrade_core.config import Settings
         from flinttrade_core.workspace import workspace_dir
@@ -163,6 +236,7 @@ class SignalPipeline:
         self._turbulence_threshold: float = turbulence_threshold
         self._turbulence_window: int = turbulence_window
         self._signal_sink = signal_sink
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     @property
     def instruments(self) -> list[dict[str, str]]:
@@ -318,15 +392,24 @@ class SignalPipeline:
                 if len(bars) < 50:
                     logger.warning("Not enough bars for %s (%d)", key, len(bars))
                     continue
+                latest_bar_timestamp = self._validated_latest_bar_timestamp(bars, instrument=key)
+                if latest_bar_timestamp is None:
+                    continue
 
                 # Use ML model if trained, otherwise fall back to EMA crossover
                 closes = [float(b.get("close", 0)) for b in bars]
                 generator = self._generator_for(inst["symbol"], inst["exchange"])
                 if generator is not None and generator.is_trained:
                     signal = generator.predict(bars, symbol=inst["symbol"])
-                    raw_signal = signal.action
-                    confidence = signal.confidence
-                    method = "ml_model"
+                    if getattr(signal, "error", ""):
+                        logger.warning("ML prediction failed for %s; using EMA fallback: %s", key, signal.error)
+                        raw_signal = self._ema_crossover_signal(closes)
+                        confidence = 0.0
+                        method = "ema_crossover_fallback"
+                    else:
+                        raw_signal = signal.action
+                        confidence = signal.confidence
+                        method = "ml_model"
                 else:
                     # Fallback: simple EMA crossover
                     raw_signal = self._ema_crossover_signal(closes)
@@ -362,7 +445,7 @@ class SignalPipeline:
                     "signal": raw_signal,
                     "confidence": confidence,
                     "ltp": float(closes[-1]),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": latest_bar_timestamp,
                     "method": method,
                     "turbulence_score": turbulence_score,
                 }
@@ -376,6 +459,37 @@ class SignalPipeline:
             except Exception:  # noqa: BLE001 - a feed sink cannot discard ML state
                 logger.exception("Could not publish scheduled signals to the canonical hub")
         return results
+
+    def _validated_latest_bar_timestamp(
+        self,
+        bars: list[dict[str, Any]],
+        *,
+        instrument: str,
+    ) -> str | None:
+        raw_timestamp = bars[-1].get("timestamp") if bars else None
+        parsed = _parse_bar_timestamp(raw_timestamp)
+        if parsed is None:
+            logger.warning("Skipping %s: latest bar timestamp is missing or invalid", instrument)
+            return None
+
+        now = self._clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        now_utc = now.astimezone(timezone.utc)
+        interval = _interval_duration(self.interval)
+        if interval is None:
+            logger.warning("Skipping %s: unsupported bar interval %r", instrument, self.interval)
+            return None
+        max_age = interval * (4 if interval >= timedelta(days=1) else 2) + timedelta(minutes=1)
+        age = now_utc - parsed
+        if age > max_age or age < -interval:
+            logger.warning(
+                "Skipping %s: latest bar timestamp %s is outside the freshness window",
+                instrument,
+                parsed.isoformat(),
+            )
+            return None
+        return parsed.isoformat()
 
     @classmethod
     def _ema_crossover_signal(cls, closes: list[float]) -> str:
@@ -430,19 +544,26 @@ class SignalPipeline:
                 metrics.get("test_accuracy", 0),
             )
 
-            # Persist
-            model_dir = Path(self.model_path).parent
-            model_dir.mkdir(parents=True, exist_ok=True)
-            gen.save(self.model_path)
+            model_file = Path(self.model_path)
+            model_file.parent.mkdir(parents=True, exist_ok=True)
+            candidate_path = _temporary_model_path(model_file)
+            candidate_checksum = Path(f"{candidate_path}.sha256")
+            try:
+                gen.save(str(candidate_path))
+                with self._generator_lock:
+                    previous_shared = self._generator
+                    _replace_shared_model_pair(candidate_path, model_file)
+                    self._generator = gen
+                    if previous_shared is not None:
+                        self._symbol_generators = {
+                            key: cached
+                            for key, cached in self._symbol_generators.items()
+                            if cached is not previous_shared
+                        }
+            finally:
+                candidate_path.unlink(missing_ok=True)
+                candidate_checksum.unlink(missing_ok=True)
             logger.info("Signal model saved to %s", self.model_path)
-
-            with self._generator_lock:
-                previous_shared = self._generator
-                self._generator = gen
-                if previous_shared is not None:
-                    self._symbol_generators = {
-                        key: cached for key, cached in self._symbol_generators.items() if cached is not previous_shared
-                    }
             return True
         except Exception:
             logger.exception("Model training failed")

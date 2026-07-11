@@ -125,7 +125,7 @@ def signals_recent() -> tuple[Any, int]:
 
 def _sse_generator(
     pipeline: LiveSignalPipeline,
-    last_event_id: int | None = None,
+    last_event_id: int | str | None = None,
     heartbeat_interval: float = 15.0,
 ) -> Generator[str, None, None]:
     """Yield SSE events when new signals arrive.
@@ -142,18 +142,34 @@ def _sse_generator(
     cursor = newest
     replay_events = []
     if last_event_id is not None:
-        requested_cursor = max(0, last_event_id)
-        oldest = retained[0].event_id if retained else None
         replay_loss_reason: str | None = None
-        if last_event_id > newest:
+        if isinstance(last_event_id, int):
+            requested_cursor = max(0, last_event_id)
+        else:
+            raw_cursor = last_event_id.strip()
+            stream_id, separator, raw_sequence = raw_cursor.rpartition(":")
+            if not separator:
+                requested_cursor = 0
+                replay_loss_reason = "legacy_cursor" if raw_cursor.isdigit() else "invalid_cursor"
+            else:
+                try:
+                    requested_cursor = max(0, int(raw_sequence))
+                except ValueError:
+                    requested_cursor = 0
+                    replay_loss_reason = "invalid_cursor"
+                else:
+                    if stream_id != pipeline.stream_id:
+                        replay_loss_reason = "stream_changed"
+        oldest = retained[0].event_id if retained else None
+        if replay_loss_reason is None and requested_cursor > newest:
             replay_loss_reason = "cursor_ahead_of_process"
-        elif oldest is not None and requested_cursor < oldest - 1:
+        elif replay_loss_reason is None and oldest is not None and requested_cursor < oldest - 1:
             replay_loss_reason = "cursor_before_retained"
 
         if replay_loss_reason is not None:
             control = {
                 "reason": replay_loss_reason,
-                "requested_event_id": last_event_id,
+                "requested_event_id": requested_cursor,
                 "oldest_available_event_id": oldest,
                 "newest_available_event_id": newest,
             }
@@ -166,7 +182,7 @@ def _sse_generator(
 
     for signal in replay_events:
         payload = _json.dumps(signal.to_dict())
-        yield f"id: {signal.event_id}\ndata: {payload}\n\n"
+        yield f"id: {pipeline.sse_event_id(signal.event_id)}\ndata: {payload}\n\n"
         cursor = signal.event_id
 
     while True:
@@ -191,7 +207,7 @@ def _sse_generator(
             cursor = oldest - 1
         for signal in events:
             payload = _json.dumps(signal.to_dict())
-            yield f"id: {signal.event_id}\ndata: {payload}\n\n"
+            yield f"id: {pipeline.sse_event_id(signal.event_id)}\ndata: {payload}\n\n"
             cursor = signal.event_id
 
 
@@ -207,12 +223,10 @@ def signals_stream() -> Response:
     """
     pipeline = _get_pipeline()
     raw_last_event_id = request.headers.get("Last-Event-ID")
-    try:
-        last_event_id = int(raw_last_event_id) if raw_last_event_id is not None else None
-    except ValueError:
-        last_event_id = None
     stream = (
-        _sse_generator(pipeline) if last_event_id is None else _sse_generator(pipeline, last_event_id=last_event_id)
+        _sse_generator(pipeline)
+        if raw_last_event_id is None
+        else _sse_generator(pipeline, last_event_id=raw_last_event_id)
     )
     return Response(
         stream,

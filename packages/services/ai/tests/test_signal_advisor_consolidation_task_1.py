@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -22,9 +23,11 @@ class RecordingModel:
 
 def _bars(count: int = 40) -> list[dict[str, float | str]]:
     """Create deterministic OHLCV bars with non-zero candle bodies."""
+    final_stamp = datetime.now(timezone.utc) - timedelta(minutes=5)
+    first_stamp = final_stamp - timedelta(minutes=5 * (count - 1))
     return [
         {
-            "timestamp": f"2026-07-10T09:{index:02d}:00+05:30",
+            "timestamp": (first_stamp + timedelta(minutes=5 * index)).isoformat(),
             "open": 100.0 + index * 0.8,
             "high": 103.0 + index,
             "low": 99.0 + index * 0.6,

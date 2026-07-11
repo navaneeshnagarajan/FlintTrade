@@ -13,6 +13,7 @@ import io
 import logging
 import math
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -32,6 +33,10 @@ logger = logging.getLogger("flinttrade.ai.signals")
 _CANONICAL_PROBABILITY_LABELS = ("SELL", "HOLD", "BUY")
 _LEGACY_PROBABILITY_LABELS = ("BUY", "HOLD", "SELL")
 _LEGACY_FEATURE_NAMES = frozenset({"rsi", "bb_position", "returns_1", "returns_5", "hl_range"})
+
+
+class TrainingCancelled(RuntimeError):
+    """Raised when cooperative model-training cancellation is requested."""
 
 
 class SignalAction(StrEnum):
@@ -284,11 +289,8 @@ def generate_labels(
         raise ValueError("sell_threshold_pct must be negative")
 
     labels: list[int] = []
-    for i in range(offset, len(closes)):
+    for i in range(offset, len(closes) - lookahead):
         future_idx = i + lookahead
-        if future_idx >= len(closes):
-            labels.append(1)  # HOLD for insufficient future data
-            continue
         ret = (closes[future_idx] - closes[i]) / closes[i] * 100
         if ret > buy_threshold:
             labels.append(2)  # BUY
@@ -500,12 +502,18 @@ class SignalGenerator:
         buy_threshold_pct: float | None = None,
         sell_threshold_pct: float | None = None,
         min_training_rows: int = 30,
+        cancel_requested: Callable[[], bool] | None = None,
         **lgb_params: Any,
     ) -> dict[str, Any]:
         """Train a LightGBM classifier on historical bar data.
 
         Returns dict with train_accuracy, test_accuracy, feature_importances.
         """
+        def check_cancelled() -> None:
+            if cancel_requested is not None and cancel_requested():
+                raise TrainingCancelled("Signal model training cancelled")
+
+        check_cancelled()
         if min_training_rows < 30:
             raise ValueError("min_training_rows must be at least 30")
         if len(bars) < min_training_rows:
@@ -517,6 +525,7 @@ class SignalGenerator:
             raise ImportError("lightgbm required — pip install lightgbm")
 
         features = engineer_features(bars)
+        check_cancelled()
         if not features.values:
             raise ValueError("Not enough bars to generate features (need 30+)")
 
@@ -528,6 +537,7 @@ class SignalGenerator:
             buy_threshold_pct=buy_threshold_pct,
             sell_threshold_pct=sell_threshold_pct,
         )
+        check_cancelled()
 
         # Align feature rows and labels
         n = min(len(features.values), len(labels))
@@ -555,18 +565,28 @@ class SignalGenerator:
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=self._feature_names)
         valid_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
 
-        self._model = lgb.train(
+        def cancel_callback(_environment: Any) -> None:
+            check_cancelled()
+
+        callbacks = [lgb.log_evaluation(period=0)]
+        if cancel_requested is not None:
+            callbacks.append(cancel_callback)
+        model = lgb.train(
             params,
             train_data,
             valid_sets=[valid_data],
-            callbacks=[lgb.log_evaluation(period=0)],
+            callbacks=callbacks,
         )
+        check_cancelled()
+        self._model = model
         self._feature_semantics = "canonical"
         self._probability_labels = _CANONICAL_PROBABILITY_LABELS
 
         # Evaluate
         train_preds = [max(range(3), key=lambda c: row[c]) for row in self._model.predict(X_train)]
+        check_cancelled()
         test_preds = [max(range(3), key=lambda c: row[c]) for row in self._model.predict(X_test)]
+        check_cancelled()
         train_acc = sum(1 for a, b in zip(train_preds, y_train) if a == b) / len(y_train) if y_train else 0
         test_acc = sum(1 for a, b in zip(test_preds, y_test) if a == b) / len(y_test) if y_test else 0
 

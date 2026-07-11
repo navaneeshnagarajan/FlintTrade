@@ -113,10 +113,7 @@ class TimeScheduler:
         return EXCHANGE_SCHEDULES.get(exchange)
 
     def is_market_open(self, exchange: str, at: datetime | None = None) -> bool:
-        """Check if the given exchange is currently in trading hours.
-
-        Does NOT account for holidays — use is_trading_day() separately.
-        """
+        """Check whether the exchange is open on the trading calendar and clock."""
         sched = EXCHANGE_SCHEDULES.get(exchange)
         if sched is None:
             return False
@@ -124,8 +121,11 @@ class TimeScheduler:
         if sched.is_24x7:
             return True
 
-        now = (at or self.now_ist()).time().replace(tzinfo=None)
-        return sched.market_open <= now <= sched.market_close
+        current = at or self.now_ist()
+        if not self.is_trading_day(exchange, on=current.date()):
+            return False
+        current_time = current.time().replace(tzinfo=None)
+        return sched.market_open <= current_time <= sched.market_close
 
     def is_trading_day(self, exchange: str, on: date | None = None) -> bool:
         """Check if the given date is a trading day (not weekend, not holiday)."""

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,9 +46,11 @@ class _RecordingPipeline:
 
 
 def _bars(count: int = 80, *, price_shift: float = 0.0) -> list[dict[str, float | str]]:
+    final_stamp = datetime.now(timezone.utc) - timedelta(minutes=5)
+    first_stamp = final_stamp - timedelta(minutes=5 * (count - 1))
     return [
         {
-            "timestamp": f"2026-01-{index + 1:03d}",
+            "timestamp": (first_stamp + timedelta(minutes=5 * index)).isoformat(),
             "open": 100.0 + price_shift + index * 0.7,
             "high": 102.0 + price_shift + index * 0.8,
             "low": 99.0 + price_shift + index * 0.6,
@@ -108,7 +111,14 @@ def _save_generator(path: Path, model: Any) -> Any:
     return generator
 
 
-def _save_bundle(path: Path, model: Any, *, symbol: str, exchange: str) -> Any:
+def _save_bundle(
+    path: Path,
+    model: Any,
+    *,
+    symbol: str,
+    exchange: str,
+    accepted_at: datetime | None = None,
+) -> Any:
     from flinttrade_ai.signal_retraining import _write_model_bundle
     from flinttrade_ai.signals import FeatureSet, SignalGenerator, engineer_features
 
@@ -118,7 +128,14 @@ def _save_bundle(path: Path, model: Any, *, symbol: str, exchange: str) -> Any:
     generator._feature_names = features.names
     split = int(len(features.values) * 0.8)
     baseline = FeatureSet(names=features.names, values=features.values[:split])
-    _write_model_bundle(path, generator, baseline, symbol=symbol, exchange=exchange)
+    _write_model_bundle(
+        path,
+        generator,
+        baseline,
+        symbol=symbol,
+        exchange=exchange,
+        accepted_at=accepted_at or datetime(2000, 1, 1, tzinfo=timezone.utc),
+    )
     return generator
 
 
@@ -138,6 +155,70 @@ def test_retrain_config_preserves_reviewed_defaults() -> None:
     assert config.drift_threshold == 0.1
     assert config.persist_log is True
     assert config.max_history == 1000
+
+
+def test_run_once_skips_bundle_newer_than_retrain_interval(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+
+    now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+    fetcher = MagicMock(return_value=_bars())
+    retrainer = SignalRetrainer(
+        _config(tmp_path, retrain_interval_hours=168),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        data_fetcher=fetcher,
+        clock=lambda: now,
+    )
+    _save_bundle(
+        retrainer.model_path("NIFTY", "NSE_INDEX"),
+        _PredictableModel(),
+        symbol="NIFTY",
+        exchange="NSE_INDEX",
+        accepted_at=now - timedelta(hours=167),
+    )
+
+    result = retrainer.run_once("NIFTY", "NSE_INDEX")
+
+    assert result.accepted is False
+    assert result.reason.startswith("Skipped:")
+    assert "168" in result.reason
+    fetcher.assert_not_called()
+
+
+def test_run_all_cancels_before_training_and_stops_roster(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+    from flinttrade_ai.signals import SignalGenerator
+
+    cancelled = False
+
+    def fetcher(*_args: Any) -> list[dict[str, float | str]]:
+        nonlocal cancelled
+        cancelled = True
+        return _bars()
+
+    train = MagicMock()
+    monkeypatch.setattr(SignalGenerator, "train", train)
+    retrainer = SignalRetrainer(
+        _config(tmp_path),
+        instruments=[
+            {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+            {"symbol": "BANKNIFTY", "exchange": "NSE_INDEX"},
+        ],
+        data_fetcher=fetcher,
+        cancel_requested=lambda: cancelled,
+    )
+
+    results = retrainer.run_all()
+
+    assert len(results) == 1
+    assert results[0].reason == "Cancelled"
+    train.assert_not_called()
 
 
 def test_feature_drift_uses_mean_score_and_has_deterministic_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,13 +346,16 @@ def test_retraining_compares_recent_features_with_verified_incumbent_training_ba
     monkeypatch.setattr(retraining, "_scipy_ks_2samp", None)
     _install_train_stub(monkeypatch, test_accuracy=0.8)
     fetched = iter([_bars(120), _distribution_shifted_bars()])
+    now = [datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)]
     retrainer = retraining.SignalRetrainer(
         _config(tmp_path, drift_threshold=0.3),
         instruments=[],
         data_fetcher=lambda *_args: next(fetched),
+        clock=lambda: now[0],
     )
 
     first = retrainer.run_once("NIFTY", "NSE_INDEX")
+    now[0] += timedelta(hours=24)
     second = retrainer.run_once("NIFTY", "NSE_INDEX")
 
     assert first.accepted is True
@@ -755,6 +839,49 @@ def test_shared_training_replaces_fallback_for_previously_seen_symbols(
     assert current is pipeline._generator
     assert current is not stale_fallback
     assert current.is_trained is True
+
+
+def test_shared_training_keeps_previous_model_visible_until_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+    from flinttrade_ai.signals import SignalGenerator, engineer_features
+
+    target = tmp_path / "shared.joblib"
+    _save_generator(target, _PredictableModel())
+    pipeline = SignalPipeline(model_path=str(target))
+
+    def _train(self: SignalGenerator, bars: list[dict[str, Any]], **_kwargs: Any) -> dict[str, float]:
+        self._model = _SellModel()
+        self._feature_names = engineer_features(bars).names
+        return {"train_accuracy": 0.9, "test_accuracy": 0.8}
+
+    real_save = SignalGenerator.save
+    candidate_saved = threading.Event()
+    allow_publication = threading.Event()
+
+    def _paused_save(self: SignalGenerator, path: str) -> None:
+        real_save(self, path)
+        if isinstance(self._model, _SellModel):
+            candidate_saved.set()
+            assert allow_publication.wait(timeout=5)
+
+    monkeypatch.setattr(SignalGenerator, "train", _train)
+    monkeypatch.setattr(SignalGenerator, "save", _paused_save)
+    outcomes: list[bool] = []
+    publisher = threading.Thread(target=lambda: outcomes.append(pipeline.train_model([_bars(120)])))
+    publisher.start()
+    assert candidate_saved.wait(timeout=5)
+
+    visible_during_publication = pipeline._generator_for("NIFTY", "NSE_INDEX")
+    allow_publication.set()
+    publisher.join(timeout=5)
+
+    assert not publisher.is_alive()
+    assert visible_during_publication._model.__class__ is _PredictableModel
+    assert outcomes == [True]
+    assert pipeline._generator_for("NIFTY", "NSE_INDEX")._model.__class__ is _SellModel
 
 
 def test_pipeline_cache_uses_tuple_keys_for_colon_colliding_instruments(tmp_path: Path) -> None:

@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import threading
 from collections import deque
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any, Literal
+from uuid import uuid4
 
 from .signal_models import SignalConfig, SignalEvent, normalise_instrument_identity, now_iso
 from flinttrade_indicators.streaming import StreamingEMA, StreamingRSI
@@ -25,6 +27,14 @@ logger = logging.getLogger("flinttrade.ai.signal_pipeline")
 
 # Maximum number of signals retained in the ring buffer per pipeline instance.
 _MAX_SIGNALS = 100
+_STREAM_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def _normalise_stream_id(value: str | None) -> str:
+    stream_id = uuid4().hex if value is None else value
+    if not isinstance(stream_id, str) or _STREAM_ID_PATTERN.fullmatch(stream_id) is None:
+        raise ValueError("stream_id must contain only letters, numbers, underscores, or hyphens")
+    return stream_id
 
 
 def _nonzero_side(value: float) -> Literal[-1, 1] | None:
@@ -139,6 +149,8 @@ class LiveSignalPipeline:
         instruments: list[str] | None = None,
         indicators: list[dict[str, object]] | None = None,
         thresholds: dict[str, float] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         default_config = SignalConfig()
         candidate_config = SignalConfig(
@@ -152,6 +164,7 @@ class LiveSignalPipeline:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._sequence = 0
+        self._stream_id = _normalise_stream_id(stream_id)
         self._instrument_observer: Callable[[list[str]], Any] | None = None
 
     # ------------------------------------------------------------------
@@ -393,6 +406,15 @@ class LiveSignalPipeline:
         """Return the newest hub event ID without exposing mutable state."""
         with self._lock:
             return self._sequence
+
+    @property
+    def stream_id(self) -> str:
+        """Return the opaque identity for this process's SSE event sequence."""
+        return self._stream_id
+
+    def sse_event_id(self, event_id: int) -> str:
+        """Qualify a process-local sequence number for the SSE ``id`` field."""
+        return f"{self._stream_id}:{event_id}"
 
     def get_signals_after(self, event_id: int) -> list[SignalEvent]:
         """Return retained events newer than ``event_id`` in emission order."""
