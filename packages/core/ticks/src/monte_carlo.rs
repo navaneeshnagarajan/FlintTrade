@@ -41,7 +41,9 @@ impl Xoshiro256 {
         let s1 = splitmix64(&mut sm);
         let s2 = splitmix64(&mut sm);
         let s3 = splitmix64(&mut sm);
-        Self { s: [s0, s1, s2, s3] }
+        Self {
+            s: [s0, s1, s2, s3],
+        }
     }
 
     /// Next u64 from the generator.
@@ -64,7 +66,11 @@ impl Xoshiro256 {
         // Upper 53 bits give a value in [0, 1); add 0.5 ulp so minimum is
         // ~1.1e-16 rather than 0, which avoids ln(0) in Box-Muller.
         let bits = (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
-        if bits == 0.0 { f64::MIN_POSITIVE } else { bits }
+        if bits == 0.0 {
+            f64::MIN_POSITIVE
+        } else {
+            bits
+        }
     }
 
     /// Standard normal sample via Box-Muller transform.
@@ -98,7 +104,8 @@ fn std_dev(values: &[f64], mean_val: f64) -> f64 {
     if values.len() < 2 {
         return 0.0;
     }
-    let var = values.iter().map(|r| (r - mean_val).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
+    let var =
+        values.iter().map(|r| (r - mean_val).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
     var.sqrt()
 }
 
@@ -181,10 +188,7 @@ pub fn simulate(
 /// let ci = confidence_intervals(&paths, &[0.05, 0.50, 0.95]);
 /// assert!(ci["p50"] > 0.0);
 /// ```
-pub fn confidence_intervals(
-    paths: &[Vec<f64>],
-    levels: &[f64],
-) -> HashMap<String, f64> {
+pub fn confidence_intervals(paths: &[Vec<f64>], levels: &[f64]) -> HashMap<String, f64> {
     let mut terminals: Vec<f64> = paths
         .iter()
         .filter_map(|p| p.last().copied())
@@ -258,7 +262,9 @@ pub fn simulate_correlated(
 ) -> Result<Vec<Vec<Vec<f64>>>, EngineError> {
     let n_assets = asset_returns.len();
     if n_assets == 0 {
-        return Err(EngineError::EmptyInput { context: "asset_returns" });
+        return Err(EngineError::EmptyInput {
+            context: "asset_returns",
+        });
     }
     if correlation_matrix.len() != n_assets * n_assets {
         return Err(EngineError::LengthMismatch {
@@ -360,7 +366,9 @@ mod tests {
     use super::*;
 
     fn sample_returns() -> Vec<f64> {
-        vec![0.001, -0.002, 0.003, 0.0015, -0.001, 0.002, 0.0005, -0.0008, 0.0012, 0.0018]
+        vec![
+            0.001, -0.002, 0.003, 0.0015, -0.001, 0.002, 0.0005, -0.0008, 0.0012, 0.0018,
+        ]
     }
 
     #[test]
@@ -399,8 +407,18 @@ mod tests {
         let paths = simulate(&sample_returns(), 1000, 252).unwrap();
         let ci = confidence_intervals(&paths, &[0.05, 0.50, 0.95]);
         // p5 <= p50 <= p95 (with floating point tolerance)
-        assert!(ci["p5"] <= ci["p50"] + 1e-10, "p5={} p50={}", ci["p5"], ci["p50"]);
-        assert!(ci["p50"] <= ci["p95"] + 1e-10, "p50={} p95={}", ci["p50"], ci["p95"]);
+        assert!(
+            ci["p5"] <= ci["p50"] + 1e-10,
+            "p5={} p50={}",
+            ci["p5"],
+            ci["p50"]
+        );
+        assert!(
+            ci["p50"] <= ci["p95"] + 1e-10,
+            "p50={} p95={}",
+            ci["p50"],
+            ci["p95"]
+        );
     }
 
     #[test]
@@ -430,8 +448,8 @@ mod tests {
         let r2 = sample_returns();
         let corr = vec![1.0, 0.7, 0.7, 1.0];
         let result = simulate_correlated(&[r1, r2], &corr, 100, 50).unwrap();
-        assert_eq!(result.len(), 2);        // 2 assets
-        assert_eq!(result[0].len(), 100);   // 100 paths
+        assert_eq!(result.len(), 2); // 2 assets
+        assert_eq!(result[0].len(), 100); // 100 paths
         assert_eq!(result[0][0].len(), 50); // 50 steps
     }
 

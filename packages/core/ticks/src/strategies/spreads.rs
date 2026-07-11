@@ -69,7 +69,12 @@ impl LegConfig {
     #[new]
     #[pyo3(signature = (option_type, strike, quantity, lot_size = 50))]
     pub fn new(option_type: OptionType, strike: f64, quantity: i32, lot_size: usize) -> Self {
-        LegConfig { option_type, strike, quantity, lot_size }
+        LegConfig {
+            option_type,
+            strike,
+            quantity,
+            lot_size,
+        }
     }
 
     /// True when the leg is a long position.
@@ -136,7 +141,13 @@ impl SpreadConfig {
         max_loss: Option<f64>,
         target_profit: Option<f64>,
     ) -> Self {
-        Self { initial_capital, fees, max_loss, target_profit, legs: Vec::new() }
+        Self {
+            initial_capital,
+            fees,
+            max_loss,
+            target_profit,
+            legs: Vec::new(),
+        }
     }
 
     /// Append a leg to the spread definition.
@@ -167,7 +178,11 @@ struct LegState {
 
 impl LegState {
     fn new(config: LegConfig, entry_premium: f64) -> Self {
-        Self { entry_premium, current_premium: entry_premium, config }
+        Self {
+            entry_premium,
+            current_premium: entry_premium,
+            config,
+        }
     }
 
     /// Unrealised P&L for this leg.
@@ -202,7 +217,12 @@ impl SpreadPosition {
             .iter()
             .map(|l| l.entry_premium * l.config.quantity as f64 * l.config.lot_size as f64)
             .sum();
-        Self { legs, entry_idx, entry_time, entry_net_premium }
+        Self {
+            legs,
+            entry_idx,
+            entry_time,
+            entry_net_premium,
+        }
     }
 
     fn total_unrealised_pnl(&self) -> f64 {
@@ -273,7 +293,7 @@ impl SpreadBacktest {
                     "legs_premiums[{i}] has {} bars but timestamps has {n}",
                     series.len()
                 )));
-        }
+            }
         }
         if entries.len() != n || exits.len() != n {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -281,14 +301,20 @@ impl SpreadBacktest {
             ));
         }
         if n == 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err("timestamps cannot be empty"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "timestamps cannot be empty",
+            ));
         }
 
         Ok(self.simulate_inner(&timestamps, &legs_premiums, &entries, &exits))
     }
 
     fn __repr__(&self) -> String {
-        format!("SpreadBacktest(name='{}', legs={})", self.name, self.config.legs.len())
+        format!(
+            "SpreadBacktest(name='{}', legs={})",
+            self.name,
+            self.config.legs.len()
+        )
     }
 }
 
@@ -321,7 +347,10 @@ impl SpreadBacktest {
                 pos.update_premiums(&current_premiums);
             }
 
-            let unrealised = position.as_ref().map(|p| p.total_unrealised_pnl()).unwrap_or(0.0);
+            let unrealised = position
+                .as_ref()
+                .map(|p| p.total_unrealised_pnl())
+                .unwrap_or(0.0);
 
             // Determine if we should exit
             let should_exit = position.is_some()
@@ -336,7 +365,11 @@ impl SpreadBacktest {
                     let net_pnl = gross_pnl - fees;
                     capital += net_pnl;
 
-                    let ret = if prev_equity > 0.0 { net_pnl / prev_equity } else { 0.0 };
+                    let ret = if prev_equity > 0.0 {
+                        net_pnl / prev_equity
+                    } else {
+                        0.0
+                    };
                     trade_pnls.push(net_pnl);
                     trade_returns.push(ret);
                 }
@@ -359,7 +392,10 @@ impl SpreadBacktest {
             }
 
             // Equity tracking
-            let unrealised = position.as_ref().map(|p| p.total_unrealised_pnl()).unwrap_or(0.0);
+            let unrealised = position
+                .as_ref()
+                .map(|p| p.total_unrealised_pnl())
+                .unwrap_or(0.0);
             let equity = capital + unrealised;
             equity_curve.push(equity);
             prev_equity = equity;
@@ -372,14 +408,22 @@ impl SpreadBacktest {
             let net_pnl = gross_pnl - fees;
             capital += net_pnl;
             trade_pnls.push(net_pnl);
-            trade_returns.push(if initial_capital > 0.0 { net_pnl / initial_capital } else { 0.0 });
+            trade_returns.push(if initial_capital > 0.0 {
+                net_pnl / initial_capital
+            } else {
+                0.0
+            });
         }
         equity_curve.push(capital);
 
         let total_pnl = capital - initial_capital;
         let total_trades = trade_pnls.len();
         let win_count = trade_pnls.iter().filter(|&&p| p > 0.0).count();
-        let win_rate = if total_trades > 0 { win_count as f64 / total_trades as f64 } else { 0.0 };
+        let win_rate = if total_trades > 0 {
+            win_count as f64 / total_trades as f64
+        } else {
+            0.0
+        };
         let max_dd = max_drawdown_frac(&equity_curve);
         let (mcw, mcl) = max_consecutive_streaks(&trade_pnls);
 
@@ -403,11 +447,15 @@ impl SpreadBacktest {
     }
 
     fn check_max_loss(&self, unrealised: f64) -> bool {
-        self.config.max_loss.map_or(false, |limit| unrealised < -limit)
+        self.config
+            .max_loss
+            .map_or(false, |limit| unrealised < -limit)
     }
 
     fn check_target_profit(&self, unrealised: f64) -> bool {
-        self.config.target_profit.map_or(false, |target| unrealised > target)
+        self.config
+            .target_profit
+            .map_or(false, |target| unrealised > target)
     }
 
     fn entry_fees(&self, legs: &[LegState]) -> f64 {
@@ -443,7 +491,13 @@ impl SpreadBacktest {
 /// ```
 #[pyfunction]
 pub fn run_spreads_batch(
-    items: Vec<(SpreadBacktest, Vec<i64>, Vec<Vec<f64>>, Vec<bool>, Vec<bool>)>,
+    items: Vec<(
+        SpreadBacktest,
+        Vec<i64>,
+        Vec<Vec<f64>>,
+        Vec<bool>,
+        Vec<bool>,
+    )>,
 ) -> Vec<BacktestResult> {
     items
         .into_par_iter()
@@ -460,7 +514,14 @@ pub fn run_spreads_batch(
 /// `(name, config, timestamps, legs_premiums, entries, exits)`.
 #[pyfunction]
 pub fn run_batch(
-    items: Vec<(String, SpreadConfig, Vec<i64>, Vec<Vec<f64>>, Vec<bool>, Vec<bool>)>,
+    items: Vec<(
+        String,
+        SpreadConfig,
+        Vec<i64>,
+        Vec<Vec<f64>>,
+        Vec<bool>,
+        Vec<bool>,
+    )>,
 ) -> Vec<BacktestResult> {
     items
         .into_par_iter()
@@ -489,8 +550,13 @@ pub fn straddle_config(
     fees: f64,
 ) -> SpreadConfig {
     let qty = if short { -1 } else { 1 };
-    let mut cfg =
-        SpreadConfig { initial_capital, fees, max_loss: None, target_profit: None, legs: Vec::new() };
+    let mut cfg = SpreadConfig {
+        initial_capital,
+        fees,
+        max_loss: None,
+        target_profit: None,
+        legs: Vec::new(),
+    };
     cfg.add_leg(LegConfig::new(OptionType::Call, strike, qty, lot_size));
     cfg.add_leg(LegConfig::new(OptionType::Put, strike, qty, lot_size));
     cfg
@@ -508,8 +574,13 @@ pub fn strangle_config(
     fees: f64,
 ) -> SpreadConfig {
     let qty = if short { -1 } else { 1 };
-    let mut cfg =
-        SpreadConfig { initial_capital, fees, max_loss: None, target_profit: None, legs: Vec::new() };
+    let mut cfg = SpreadConfig {
+        initial_capital,
+        fees,
+        max_loss: None,
+        target_profit: None,
+        legs: Vec::new(),
+    };
     cfg.add_leg(LegConfig::new(OptionType::Call, call_strike, qty, lot_size));
     cfg.add_leg(LegConfig::new(OptionType::Put, put_strike, qty, lot_size));
     cfg
@@ -531,8 +602,13 @@ pub fn iron_condor_config(
     initial_capital: f64,
     fees: f64,
 ) -> SpreadConfig {
-    let mut cfg =
-        SpreadConfig { initial_capital, fees, max_loss: None, target_profit: None, legs: Vec::new() };
+    let mut cfg = SpreadConfig {
+        initial_capital,
+        fees,
+        max_loss: None,
+        target_profit: None,
+        legs: Vec::new(),
+    };
     cfg.add_leg(LegConfig::new(OptionType::Call, short_call, -1, lot_size));
     cfg.add_leg(LegConfig::new(OptionType::Call, long_call, 1, lot_size));
     cfg.add_leg(LegConfig::new(OptionType::Put, short_put, -1, lot_size));
@@ -578,7 +654,10 @@ mod tests {
         assert_eq!(result.total_trades, 1);
         assert_eq!(result.strategy_name, "SHORT_STRADDLE");
         // Short straddle profits from theta: premiums fell → positive pnl
-        assert!(result.total_pnl > 0.0, "expected positive pnl for short straddle with falling premiums");
+        assert!(
+            result.total_pnl > 0.0,
+            "expected positive pnl for short straddle with falling premiums"
+        );
     }
 
     #[test]
@@ -591,7 +670,9 @@ mod tests {
         let n = 10;
         let ts = make_ts(n);
         // Premium doubles — short position loses
-        let premiums: Vec<f64> = vec![100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0];
+        let premiums: Vec<f64> = vec![
+            100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0,
+        ];
         let entries = {
             let mut e = vec![false; n];
             e[0] = true;
@@ -634,7 +715,12 @@ mod tests {
         let bt = SpreadBacktest::new("ERR".to_string(), cfg);
         let n = 5;
         // Supply only 1 premium series for 2 legs
-        let result = bt.run(make_ts(n), vec![vec![100.0f64; n]], vec![false; n], vec![false; n]);
+        let result = bt.run(
+            make_ts(n),
+            vec![vec![100.0f64; n]],
+            vec![false; n],
+            vec![false; n],
+        );
         assert!(result.is_err());
     }
 }

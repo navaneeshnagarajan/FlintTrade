@@ -82,7 +82,10 @@ impl SessionConfig {
         let open_m = self.market_open_minutes % 60;
         let close_h = self.market_close_minutes / 60;
         let close_m = self.market_close_minutes % 60;
-        format!("SessionConfig({:02}:{:02}–{:02}:{:02} IST)", open_h, open_m, close_h, close_m)
+        format!(
+            "SessionConfig({:02}:{:02}–{:02}:{:02} IST)",
+            open_h, open_m, close_h, close_m
+        )
     }
 }
 
@@ -123,7 +126,8 @@ impl SessionConfig {
     /// Squareoff time in minutes from midnight.
     #[inline]
     pub fn squareoff_minutes(&self) -> u32 {
-        self.market_close_minutes.saturating_sub(self.squareoff_buffer_minutes)
+        self.market_close_minutes
+            .saturating_sub(self.squareoff_buffer_minutes)
     }
 }
 
@@ -251,9 +255,8 @@ impl SessionTracker {
 
         let (day, minutes_from_midnight) = Self::to_ist_components(timestamp_ns);
 
-        let is_market =
-            minutes_from_midnight >= self.config.market_open_minutes
-                && minutes_from_midnight < self.config.market_close_minutes;
+        let is_market = minutes_from_midnight >= self.config.market_open_minutes
+            && minutes_from_midnight < self.config.market_close_minutes;
 
         let is_pre = minutes_from_midnight >= self.config.pre_market_start_minutes
             && minutes_from_midnight < self.config.market_open_minutes;
@@ -375,12 +378,20 @@ impl SessionTracker {
 
     /// Current session high (0.0 if no session started).
     pub fn session_high(&self) -> f64 {
-        if self.session_high == f64::NEG_INFINITY { 0.0 } else { self.session_high }
+        if self.session_high == f64::NEG_INFINITY {
+            0.0
+        } else {
+            self.session_high
+        }
     }
 
     /// Current session low (0.0 if no session started).
     pub fn session_low(&self) -> f64 {
-        if self.session_low == f64::INFINITY { 0.0 } else { self.session_low }
+        if self.session_low == f64::INFINITY {
+            0.0
+        } else {
+            self.session_low
+        }
     }
 
     /// First price of the current session.
@@ -439,7 +450,10 @@ mod tests {
         let ts = make_ts_ns(9, 15);
         let state = tracker.update(0, ts, 100.0, 101.0, 99.0, 100.5, None, None);
         assert!(state.is_market_hours, "9:15 IST should be market hours");
-        assert!(state.session_open, "First market bar should open the session");
+        assert!(
+            state.session_open,
+            "First market bar should open the session"
+        );
         assert!(!state.is_pre_market);
     }
 
@@ -463,12 +477,18 @@ mod tests {
         // 15:25 — squareoff threshold (930 - 5 = 925 minutes)
         let ts_sq = make_ts_ns(15, 25);
         let state1 = tracker.update(1, ts_sq, 100.0, 100.5, 99.5, 100.2, Some(ts_open), None);
-        assert!(state1.squareoff_triggered, "First bar at squareoff time should trigger");
+        assert!(
+            state1.squareoff_triggered,
+            "First bar at squareoff time should trigger"
+        );
 
         // Second bar at 15:26 — should NOT trigger again
         let ts_sq2 = make_ts_ns(15, 26);
         let state2 = tracker.update(2, ts_sq2, 100.2, 100.3, 99.8, 100.1, Some(ts_sq), None);
-        assert!(!state2.squareoff_triggered, "Squareoff should only trigger once");
+        assert!(
+            !state2.squareoff_triggered,
+            "Squareoff should only trigger once"
+        );
     }
 
     #[test]
@@ -509,6 +529,9 @@ mod tests {
         let state2 = tracker2.update(0, ts2, 100.0, 100.5, 99.5, 100.2, None, None);
         assert!(!state2.is_market_hours);
         assert!(!state2.is_pre_market);
-        assert!(!state2.is_post_market, "16:00 should be after post-market window");
+        assert!(
+            !state2.is_post_market,
+            "16:00 should be after post-market window"
+        );
     }
 }

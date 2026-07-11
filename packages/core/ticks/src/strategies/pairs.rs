@@ -23,8 +23,8 @@
 use pyo3::prelude::*;
 
 use crate::metrics::{
-    max_consecutive_streaks, max_drawdown_frac, omega_ratio, payoff_ratio, recovery_factor,
-    sharpe_ratio, sortino_ratio, sqn, avg_win_loss_ratio,
+    avg_win_loss_ratio, max_consecutive_streaks, max_drawdown_frac, omega_ratio, payoff_ratio,
+    recovery_factor, sharpe_ratio, sortino_ratio, sqn,
 };
 use crate::types::{BacktestResult, Signal, Tick};
 
@@ -125,7 +125,9 @@ impl PairsStrategy {
             )));
         }
         if leg1_bars.is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err("bar lists cannot be empty"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "bar lists cannot be empty",
+            ));
         }
 
         let n = leg1_bars.len();
@@ -173,7 +175,11 @@ impl PairsStrategy {
                 // Any open position → close on reversion
                 (_, 0) if self.position != 0 => {
                     let pnl = self.close_position(t1.close, t2.close, &mut capital);
-                    let ret = if initial_capital > 0.0 { pnl / initial_capital } else { 0.0 };
+                    let ret = if initial_capital > 0.0 {
+                        pnl / initial_capital
+                    } else {
+                        0.0
+                    };
                     trade_pnls.push(pnl);
                     trade_returns.push(ret);
                 }
@@ -186,9 +192,12 @@ impl PairsStrategy {
         // Force-close at the end
         if self.position != 0 {
             let last = n - 1;
-            let pnl =
-                self.close_position(leg1_bars[last][4], leg2_bars[last][4], &mut capital);
-            let ret = if initial_capital > 0.0 { pnl / initial_capital } else { 0.0 };
+            let pnl = self.close_position(leg1_bars[last][4], leg2_bars[last][4], &mut capital);
+            let ret = if initial_capital > 0.0 {
+                pnl / initial_capital
+            } else {
+                0.0
+            };
             trade_pnls.push(pnl);
             trade_returns.push(ret);
         }
@@ -197,7 +206,11 @@ impl PairsStrategy {
         let total_pnl = capital - initial_capital;
         let total_trades = trade_pnls.len();
         let win_count = trade_pnls.iter().filter(|&&p| p > 0.0).count();
-        let win_rate = if total_trades > 0 { win_count as f64 / total_trades as f64 } else { 0.0 };
+        let win_rate = if total_trades > 0 {
+            win_count as f64 / total_trades as f64
+        } else {
+            0.0
+        };
 
         let max_dd = max_drawdown_frac(&equity_curve);
         let max_dd_abs = max_dd * initial_capital;
@@ -268,16 +281,21 @@ impl PairsStrategy {
         // Compute the actual z-score of the last residual using rolling stats
         let n = residuals.len() as f64;
         let mean_r = residuals.iter().sum::<f64>() / n;
-        let std_r = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>() / (n - 1.0).max(1.0))
-            .sqrt();
+        let std_r = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>()
+            / (n - 1.0).max(1.0))
+        .sqrt();
         let current_spread = t1.close - hedge * t2.close;
-        let z_score = if std_r > 1e-10 { (current_spread - mean_r) / std_r } else { 0.0 };
+        let z_score = if std_r > 1e-10 {
+            (current_spread - mean_r) / std_r
+        } else {
+            0.0
+        };
 
         let _ = last_z; // suppress warning
 
         let desired = if self.position == 0 {
             if z_score < -self.entry_z {
-                1  // spread below mean → buy spread (long leg1, short leg2)
+                1 // spread below mean → buy spread (long leg1, short leg2)
             } else if z_score > self.entry_z {
                 -1 // spread above mean → sell spread (short leg1, long leg2)
             } else {
@@ -314,8 +332,11 @@ impl PairsStrategy {
         };
         let alpha = (sum_y - beta * sum_x) / n;
 
-        let residuals: Vec<f64> =
-            y.iter().zip(x.iter()).map(|(yi, xi)| yi - alpha - beta * xi).collect();
+        let residuals: Vec<f64> = y
+            .iter()
+            .zip(x.iter())
+            .map(|(yi, xi)| yi - alpha - beta * xi)
+            .collect();
 
         (beta.max(0.01), residuals)
     }
@@ -324,15 +345,23 @@ impl PairsStrategy {
     fn close_position(&mut self, leg1_exit: f64, leg2_exit: f64, capital: &mut f64) -> f64 {
         let (l1_exit, l2_exit) = if self.position > 0 {
             // Long spread exit: sell leg1, buy leg2
-            (leg1_exit * (1.0 - self.slippage_pct), leg2_exit * (1.0 + self.slippage_pct))
+            (
+                leg1_exit * (1.0 - self.slippage_pct),
+                leg2_exit * (1.0 + self.slippage_pct),
+            )
         } else {
             // Short spread exit: buy leg1, sell leg2
-            (leg1_exit * (1.0 + self.slippage_pct), leg2_exit * (1.0 - self.slippage_pct))
+            (
+                leg1_exit * (1.0 + self.slippage_pct),
+                leg2_exit * (1.0 - self.slippage_pct),
+            )
         };
 
         let leg1_pnl = (l1_exit - self.entry_leg1_price) * (self.position as f64) * self.lot_size;
-        let leg2_pnl =
-            (l2_exit - self.entry_leg2_price) * (-self.position as f64) * self.lot_size * self.hedge_ratio;
+        let leg2_pnl = (l2_exit - self.entry_leg2_price)
+            * (-self.position as f64)
+            * self.lot_size
+            * self.hedge_ratio;
         let pnl = leg1_pnl + leg2_pnl - self.commission * 2.0;
 
         *capital += pnl;
@@ -362,8 +391,7 @@ fn zscore(series: &[f64]) -> f64 {
     }
     let n = series.len() as f64;
     let mean = series.iter().sum::<f64>() / n;
-    let std =
-        (series.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+    let std = (series.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
     if std < 1e-10 {
         return 0.0;
     }
@@ -389,13 +417,14 @@ mod tests {
 
     #[test]
     fn test_pairs_run_shape() {
-        let mut strat =
-            PairsStrategy::new("TEST_PAIR".to_string(), 2.0, 0.5, 10, 1.0, 20.0, 0.001);
+        let mut strat = PairsStrategy::new("TEST_PAIR".to_string(), 2.0, 0.5, 10, 1.0, 20.0, 0.001);
 
         let leg1: Vec<f64> = (0..50).map(|i| 100.0 + (i as f64) * 0.1).collect();
         let leg2: Vec<f64> = (0..50).map(|i| 50.0 + (i as f64) * 0.05).collect();
 
-        let result = strat.run(make_bars(&leg1), make_bars(&leg2), 100_000.0).unwrap();
+        let result = strat
+            .run(make_bars(&leg1), make_bars(&leg2), 100_000.0)
+            .unwrap();
         assert_eq!(result.equity_curve.len(), leg1.len() + 2);
         assert_eq!(result.strategy_name, "TEST_PAIR");
     }
@@ -408,8 +437,7 @@ mod tests {
 
     #[test]
     fn test_ols_residuals_returns_hedge() {
-        let mut strat =
-            PairsStrategy::new("P".to_string(), 2.0, 0.5, 5, 1.0, 0.0, 0.0);
+        let mut strat = PairsStrategy::new("P".to_string(), 2.0, 0.5, 5, 1.0, 0.0, 0.0);
         // Perfect linear relationship: leg1 = 2 * leg2
         for i in 0..5 {
             strat.push_prices(2.0 * i as f64, i as f64);
@@ -420,8 +448,7 @@ mod tests {
 
     #[test]
     fn test_mismatched_bar_lengths_error() {
-        let mut strat =
-            PairsStrategy::new("P".to_string(), 2.0, 0.5, 10, 1.0, 20.0, 0.001);
+        let mut strat = PairsStrategy::new("P".to_string(), 2.0, 0.5, 10, 1.0, 20.0, 0.001);
         let r = strat.run(make_bars(&[1.0, 2.0]), make_bars(&[1.0]), 100_000.0);
         assert!(r.is_err());
     }

@@ -29,7 +29,14 @@ pub struct Tick {
 impl Tick {
     #[new]
     pub fn new(timestamp: i64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Self {
-        Tick { timestamp, open, high, low, close, volume }
+        Tick {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -66,11 +73,19 @@ impl Signal {
     #[new]
     #[pyo3(signature = (symbol, qty, price = 0.0, close_position = false))]
     pub fn new(symbol: String, qty: f64, price: f64, close_position: bool) -> Self {
-        Signal { symbol, qty, price, close_position }
+        Signal {
+            symbol,
+            qty,
+            price,
+            close_position,
+        }
     }
 
     fn __repr__(&self) -> String {
-        format!("Signal({} qty={:.2} price={:.2})", self.symbol, self.qty, self.price)
+        format!(
+            "Signal({} qty={:.2} price={:.2})",
+            self.symbol, self.qty, self.price
+        )
     }
 }
 

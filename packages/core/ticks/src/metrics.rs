@@ -54,8 +54,11 @@ pub fn sortino_ratio(returns: &[f64]) -> f64 {
     let n = returns.len() as f64;
     let mean = returns.iter().sum::<f64>() / n;
     // Downside deviation: only negative returns contribute
-    let downside_var =
-        returns.iter().map(|&r| if r < 0.0 { r.powi(2) } else { 0.0 }).sum::<f64>() / (n - 1.0);
+    let downside_var = returns
+        .iter()
+        .map(|&r| if r < 0.0 { r.powi(2) } else { 0.0 })
+        .sum::<f64>()
+        / (n - 1.0);
     let downside_std = downside_var.sqrt();
     if downside_std < 1e-10 {
         return if mean > 0.0 { f64::INFINITY } else { 0.0 };

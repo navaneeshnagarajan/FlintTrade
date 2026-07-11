@@ -75,7 +75,14 @@ pub struct Bar {
 impl Bar {
     #[new]
     pub fn new(timestamp: i64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Self {
-        Bar { timestamp, open, high, low, close, volume }
+        Bar {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -110,7 +117,10 @@ pub struct Trade {
 impl Trade {
     fn __repr__(&self) -> String {
         let dir = if self.direction > 0 { "LONG" } else { "SHORT" };
-        format!("Trade({} entry={:.2} exit={:.2} pnl={:.2})", dir, self.entry_price, self.exit_price, self.pnl)
+        format!(
+            "Trade({} entry={:.2} exit={:.2} pnl={:.2})",
+            dir, self.entry_price, self.exit_price, self.pnl
+        )
     }
 }
 
@@ -175,13 +185,13 @@ pub struct TickSimulator {
 impl TickSimulator {
     #[new]
     #[pyo3(signature = (initial_capital=100_000.0, slippage_pct=0.001, commission=20.0, lot_size=1.0))]
-    pub fn new(
-        initial_capital: f64,
-        slippage_pct: f64,
-        commission: f64,
-        lot_size: f64,
-    ) -> Self {
-        TickSimulator { initial_capital, slippage_pct, commission, lot_size }
+    pub fn new(initial_capital: f64, slippage_pct: f64, commission: f64, lot_size: f64) -> Self {
+        TickSimulator {
+            initial_capital,
+            slippage_pct,
+            commission,
+            lot_size,
+        }
     }
 
     /// Run a simulation with pre-computed signals.
@@ -206,7 +216,9 @@ impl TickSimulator {
             )));
         }
         if bars.is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err("bars cannot be empty"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "bars cannot be empty",
+            ));
         }
 
         let n = bars.len();
@@ -250,10 +262,22 @@ impl TickSimulator {
                 capital += pnl;
 
                 let prev_equity = *equity_curve.last().unwrap_or(&self.initial_capital);
-                let ret = if prev_equity > 0.0 { (capital - prev_equity) / prev_equity } else { 0.0 };
+                let ret = if prev_equity > 0.0 {
+                    (capital - prev_equity) / prev_equity
+                } else {
+                    0.0
+                };
                 trade_returns.push(ret);
 
-                trades.push(Trade { entry_time, exit_time: next_time, entry_price, exit_price, qty: self.lot_size, pnl, direction });
+                trades.push(Trade {
+                    entry_time,
+                    exit_time: next_time,
+                    entry_price,
+                    exit_price,
+                    qty: self.lot_size,
+                    pnl,
+                    direction,
+                });
                 in_trade = false;
                 direction = 0;
             }
@@ -269,17 +293,33 @@ impl TickSimulator {
             capital += pnl;
 
             let prev_equity = *equity_curve.last().unwrap_or(&self.initial_capital);
-            let ret = if prev_equity > 0.0 { (capital - prev_equity) / prev_equity } else { 0.0 };
+            let ret = if prev_equity > 0.0 {
+                (capital - prev_equity) / prev_equity
+            } else {
+                0.0
+            };
             trade_returns.push(ret);
 
-            trades.push(Trade { entry_time, exit_time, entry_price, exit_price, qty: self.lot_size, pnl, direction });
+            trades.push(Trade {
+                entry_time,
+                exit_time,
+                entry_price,
+                exit_price,
+                qty: self.lot_size,
+                pnl,
+                direction,
+            });
         }
         equity_curve.push(capital);
 
         let total_pnl = capital - self.initial_capital;
         let total_trades = trades.len();
         let win_count = trades.iter().filter(|t| t.pnl > 0.0).count();
-        let win_rate = if total_trades > 0 { win_count as f64 / total_trades as f64 } else { 0.0 };
+        let win_rate = if total_trades > 0 {
+            win_count as f64 / total_trades as f64
+        } else {
+            0.0
+        };
 
         Ok(SimulationResult {
             total_pnl,

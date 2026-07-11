@@ -119,7 +119,13 @@ pub fn black_scholes_greeks(
 
     let _ = nd1_neg; // used indirectly
 
-    Greeks { delta, gamma, theta, vega, rho }
+    Greeks {
+        delta,
+        gamma,
+        theta,
+        vega,
+        rho,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +202,15 @@ impl OptionsConfig {
         slippage_pct: f64,
         risk_free_rate: f64,
     ) -> Self {
-        Self { strategy_type, lot_size, strike_interval, short, commission, slippage_pct, risk_free_rate }
+        Self {
+            strategy_type,
+            lot_size,
+            strike_interval,
+            short,
+            commission,
+            slippage_pct,
+            risk_free_rate,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -242,7 +256,11 @@ pub struct OptionsStrategy {
 impl OptionsStrategy {
     #[new]
     pub fn new(name: String, config: OptionsConfig) -> Self {
-        Self { name, config, position: None }
+        Self {
+            name,
+            config,
+            position: None,
+        }
     }
 
     /// Run a full options strategy backtest.
@@ -264,14 +282,15 @@ impl OptionsStrategy {
         initial_capital: f64,
     ) -> PyResult<BacktestResult> {
         let n = spot_bars.len();
-        if call_bars.len() != n || put_bars.len() != n || entries.len() != n || exits.len() != n
-        {
+        if call_bars.len() != n || put_bars.len() != n || entries.len() != n || exits.len() != n {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "All input arrays must have equal length",
             ));
         }
         if n == 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err("bar arrays cannot be empty"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "bar arrays cannot be empty",
+            ));
         }
 
         let mut capital = initial_capital;
@@ -325,14 +344,9 @@ impl OptionsStrategy {
                     let call_exit = self.exit_price(call_prem, true);
                     let put_exit = self.exit_price(put_prem, false);
 
-                    let call_pnl = sign_pnl
-                        * (pos.entry_call_premium - call_exit)
-                        * lots
-                        * lot_size;
-                    let put_pnl = sign_pnl
-                        * (pos.entry_put_premium - put_exit)
-                        * lots
-                        * lot_size;
+                    let call_pnl =
+                        sign_pnl * (pos.entry_call_premium - call_exit) * lots * lot_size;
+                    let put_pnl = sign_pnl * (pos.entry_put_premium - put_exit) * lots * lot_size;
                     let pnl = call_pnl + put_pnl - self.config.commission * 2.0 * lots;
 
                     capital += pnl;
@@ -386,7 +400,11 @@ impl OptionsStrategy {
         let total_pnl = capital - initial_capital;
         let total_trades = trade_pnls.len();
         let win_count = trade_pnls.iter().filter(|&&p| p > 0.0).count();
-        let win_rate = if total_trades > 0 { win_count as f64 / total_trades as f64 } else { 0.0 };
+        let win_rate = if total_trades > 0 {
+            win_count as f64 / total_trades as f64
+        } else {
+            0.0
+        };
         let max_dd = max_drawdown_frac(&equity_curve);
         let (mcw, mcl) = max_consecutive_streaks(&trade_pnls);
 
@@ -410,7 +428,10 @@ impl OptionsStrategy {
     }
 
     fn __repr__(&self) -> String {
-        format!("OptionsStrategy(name='{}', config={:?})", self.name, self.config.strategy_type)
+        format!(
+            "OptionsStrategy(name='{}', config={:?})",
+            self.name, self.config.strategy_type
+        )
     }
 }
 
@@ -482,7 +503,11 @@ fn norm_cdf(x: f64) -> f64 {
             + t * (-0.356_563_782
                 + t * (1.781_477_937 + t * (-1.821_255_978 + t * 1.330_274_429))));
     let approx = 1.0 - norm_pdf(x) * poly;
-    if x >= 0.0 { approx } else { 1.0 - approx }
+    if x >= 0.0 {
+        approx
+    } else {
+        1.0 - approx
+    }
 }
 
 /// Standard normal PDF.
@@ -516,7 +541,11 @@ mod tests {
     fn test_greeks_put_delta_range() {
         let g = black_scholes_greeks(19500.0, 19500.0, 0.065, 0.15, 0.1, false);
         // ATM put delta is around -0.5
-        assert!(g.delta > -0.6 && g.delta < -0.4, "ATM put delta={}", g.delta);
+        assert!(
+            g.delta > -0.6 && g.delta < -0.4,
+            "ATM put delta={}",
+            g.delta
+        );
     }
 
     #[test]
@@ -529,7 +558,11 @@ mod tests {
     fn test_greeks_theta_negative_long_call() {
         // Theta should be negative for a long call (time decay)
         let g = black_scholes_greeks(19500.0, 19500.0, 0.065, 0.15, 0.25, true);
-        assert!(g.theta < 0.0, "Long call theta should be negative, got {}", g.theta);
+        assert!(
+            g.theta < 0.0,
+            "Long call theta should be negative, got {}",
+            g.theta
+        );
     }
 
     #[test]
@@ -553,7 +586,9 @@ mod tests {
         let mut exits = vec![false; n];
         exits[20] = true;
 
-        let result = strat.run(spot, call, put, entries, exits, 100_000.0).unwrap();
+        let result = strat
+            .run(spot, call, put, entries, exits, 100_000.0)
+            .unwrap();
         assert_eq!(result.strategy_name, "NIFTY_STRADDLE");
         assert!(result.total_trades >= 1);
     }
