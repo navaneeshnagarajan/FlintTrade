@@ -82,6 +82,19 @@ def _configure_openalgo_bridge():
     ws.set("openalgo.api_key", "openalgo-bridge-test-key")
 
 
+class _DrainRouter:
+    """Minimal current-router double for native mutation quiescence tests."""
+
+    def __init__(self, result: bool) -> None:
+        self.result = result
+        self.calls = 0
+
+    def revoke_and_drain(self, *, timeout: float = 5.0) -> bool:
+        del timeout
+        self.calls += 1
+        return self.result
+
+
 def test_connect_upstox_stores_registers_and_establishes_session(client):
     c, app, tmp_path = client
     resp = c.post(
@@ -2059,9 +2072,8 @@ def test_relogin_rejects_unattested_sdk_before_fresh_credential_update(client, m
     assert app.config["CREDENTIAL_STORE"].retrieve_for("upstox", "SDKREL")["access_token"] == "good"
 
 
-def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
-    """The interactive Re-authenticate path probes too — a dead replayed token
-    drops the session and records login-failed (needs_relogin), not a false ok."""
+def test_relogin_dead_candidate_preserves_prior_session(client, monkeypatch):
+    """A rejected candidate must not evict the previously published session."""
     c, app, _tmp = client
     # First connect with the passing stub (fixture default) so the account exists.
     c.post(
@@ -2069,6 +2081,7 @@ def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
         headers=_h(),
         json={"adapter_id": "upstox", "account_id": "UPXRL", "credentials": {"access_token": "tok"}},
     )
+    prior_session = app.config["REGISTRY"].get_session_for("upstox", "UPXRL")
     # Now the token has "gone dead": funds probe fails on re-authenticate.
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -2079,22 +2092,22 @@ def test_relogin_dead_token_surfaces_relogin(client, monkeypatch):
     resp = c.post("/api/v1/native/accounts/upstox/UPXRL/login", headers=_h())
     assert resp.status_code == 502
     assert resp.get_json()["data"]["session"]["has_session"] is False
-    # The accounts list surfaces the honest needs_relogin state.
+    assert app.config["REGISTRY"].get_session_for("upstox", "UPXRL") is prior_session
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
     entry = next(a for a in listing if a["account_id"] == "UPXRL")
-    assert entry["needs_relogin"] is True
+    assert entry["has_session"] is True
+    assert "needs_relogin" not in entry
 
 
-def test_relogin_login_failure_drops_prior_session(client, monkeypatch):
-    """If fresh login throws before registering a replacement session, the old
-    in-memory session must not keep the account looking connected."""
+def test_relogin_login_failure_preserves_prior_session(client, monkeypatch):
+    """A login exception in the isolated candidate leaves the prior session live."""
     c, app, _tmp = client
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
         json={"adapter_id": "upstox", "account_id": "UPXLOGINFAIL", "credentials": {"access_token": "tok"}},
     )
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL").adapter_id == "upstox"
+    prior_session = app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL")
 
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -2111,12 +2124,11 @@ def test_relogin_login_failure_drops_prior_session(client, monkeypatch):
 
     assert resp.status_code == 502
     assert resp.get_json()["data"]["session"]["has_session"] is False
-    with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL")
+    assert app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL") is prior_session
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
     entry = next(a for a in listing if a["account_id"] == "UPXLOGINFAIL")
-    assert entry["has_session"] is False
-    assert entry["needs_relogin"] is True
+    assert entry["has_session"] is True
+    assert "needs_relogin" not in entry
 
 
 def test_native_read_dead_token_drops_session_and_surfaces_relogin(client, monkeypatch):
@@ -2302,15 +2314,15 @@ def test_failed_connect_rollback_preserves_unrelated_concurrent_workspace_edit(c
     import flinttrade_core.native_account_routes as routes
     from flinttrade_core.workspace_migrations import update_workspace_config
 
-    def fail_after_concurrent_edit(adapter_id: str, account_id: str):
+    def fail_after_concurrent_edit(_candidate_store, adapter_id: str, account_id: str):
         def update_ui(config):
             config.setdefault("ui", {})["theme"] = "high-contrast"
             return config
 
         update_workspace_config(tmp_path, update_ui)
-        return {f"{adapter_id}:{account_id}": "needs_relogin"}
+        return {f"{adapter_id}:{account_id}": "needs_relogin"}, None
 
-    monkeypatch.setattr(routes, "_activate_after_credentials", fail_after_concurrent_edit)
+    monkeypatch.setattr(routes, "_activate_candidate_credentials", fail_after_concurrent_edit)
 
     response = c.post(
         "/api/v1/native/accounts",
@@ -2373,6 +2385,508 @@ def test_set_primary_rollback_preserves_unrelated_concurrent_workspace_edit(clie
     config = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
     assert config["ui"]["density"] == "compact"
     assert config["brokers"]["execution"]["default"] == "upstox:PRIMARY-A"
+    rows = {
+        row["account_id"]: row["is_primary"]
+        for row in _app.config["CREDENTIAL_STORE"].list_accounts()
+    }
+    assert rows["PRIMARY-A"] is True
+    assert rows["PRIMARY-B"] is False
+
+
+def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
+    c, app, tmp_path = client
+    router = _DrainRouter(False)
+    app.config["BROKER_ROUTER"] = router
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "DRAINCONNECT",
+            "credentials": {"access_token": "candidate"},
+        },
+    )
+
+    assert response.status_code == 502
+    assert router.calls >= 1
+    assert app.config["CREDENTIAL_STORE"].list_accounts() == []
+    assert _workspace_brokers(tmp_path) == {}
+
+
+def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "DRAINRELOGIN",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "DRAINRELOGIN")
+    router = _DrainRouter(False)
+    app.config["BROKER_ROUTER"] = router
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/DRAINRELOGIN/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 503
+    assert router.calls >= 1
+    assert store.retrieve_for("upstox", "DRAINRELOGIN") == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "DRAINRELOGIN") is prior_session
+
+
+def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
+    c, app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "DRAINREMOVE",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "DRAINREMOVE")
+    router = _DrainRouter(False)
+    app.config["BROKER_ROUTER"] = router
+
+    response = c.delete(
+        "/api/v1/native/accounts/upstox/DRAINREMOVE",
+        headers=_h(),
+    )
+
+    assert response.status_code == 503
+    assert router.calls >= 1
+    assert store.retrieve_for("upstox", "DRAINREMOVE") == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "DRAINREMOVE") is prior_session
+    assert "upstox:DRAINREMOVE" in _workspace_brokers(tmp_path)["registered"]
+
+
+def test_relogin_does_not_persist_fresh_credentials_until_probe_succeeds(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "STAGEREL",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _probe_before_commit(_self, _session):
+        assert app.config["BROKER_ROUTER"] is router
+        assert store.retrieve_for("upstox", "STAGEREL") == {"access_token": "prior"}
+        return {"available_balance": 0.0}
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _probe_before_commit)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/STAGEREL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert router.calls >= 1
+    assert store.retrieve_for("upstox", "STAGEREL") == {"access_token": "candidate"}
+
+
+def test_failed_relogin_preserves_prior_registry_session(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "RESTOREREL",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "RESTOREREL")
+    selector = "upstox:RESTOREREL"
+    app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _dead_probe(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_probe)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/RESTOREREL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 502, response.get_json()
+    assert router.calls >= 1
+    assert store.retrieve_for("upstox", "RESTOREREL") == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "RESTOREREL") is prior_session
+    assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+
+
+def test_failed_existing_reconnect_never_calls_durable_store(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "STAGERECONNECT",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "STAGERECONNECT")
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+    durable_store_calls = 0
+
+    def _unexpected_store(*_args, **_kwargs):
+        nonlocal durable_store_calls
+        durable_store_calls += 1
+        raise RuntimeError("durable store must not run for a rejected candidate")
+
+    monkeypatch.setattr(store, "store", _unexpected_store)
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _dead_probe(_self, _session):
+        raise RuntimeError("401 token expired")
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_probe)
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "STAGERECONNECT",
+            "credentials": {"access_token": "candidate"},
+        },
+    )
+
+    assert response.status_code == 502
+    assert router.calls >= 1
+    assert durable_store_calls == 0
+    assert store.retrieve_for("upstox", "STAGERECONNECT") == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "STAGERECONNECT") is prior_session
+
+
+def test_relogin_persistence_failure_restores_runtime_without_secret_leak(
+    client, monkeypatch, caplog
+):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "PERSISTREL",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "PERSISTREL")
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+    marker = "credential-value-must-stay-private"
+
+    monkeypatch.setattr(
+        store,
+        "update_credentials_for",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(marker)),
+    )
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/PERSISTREL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": marker}},
+    )
+
+    assert response.status_code == 500
+    assert router.calls >= 1
+    assert store.retrieve_for("upstox", "PERSISTREL") == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "PERSISTREL") is prior_session
+    assert marker not in response.get_data(as_text=True)
+    assert marker not in caplog.text
+
+
+def test_successful_relogin_swaps_registry_session_only_after_commit(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "SWAPAFTERCOMMIT",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "SWAPAFTERCOMMIT")
+    selector = "upstox:SWAPAFTERCOMMIT"
+    app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
+    app.config["BROKER_ROUTER"] = _DrainRouter(True)
+    original_stage = store.stage_credentials_for
+    original_put_session = registry.put_session
+
+    def _stage_with_observed_commit(*args, **kwargs):
+        candidate = original_stage(*args, **kwargs)
+        original_commit = candidate.commit
+
+        def _commit() -> None:
+            assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is prior_session
+            assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+            original_commit()
+            assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is prior_session
+            assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+
+        candidate.commit = _commit
+        return candidate
+
+    monkeypatch.setattr(store, "stage_credentials_for", _stage_with_observed_commit)
+
+    def _put_session_after_commit(adapter_id, account_id, session):
+        assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+        original_put_session(adapter_id, account_id, session)
+        assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+
+    monkeypatch.setattr(registry, "put_session", _put_session_after_commit)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/SWAPAFTERCOMMIT/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is not prior_session
+    assert app.config["NATIVE_SESSION_STATUS"][selector] == "ok"
+
+
+def test_relogin_candidate_staging_runs_under_serialisation_lock(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "SERIALREL",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    app.config["BROKER_ROUTER"] = _DrainRouter(True)
+    import flinttrade_core.native_account_routes as routes
+
+    original_stage = store.stage_credentials_for
+    lock_observations: list[bool] = []
+
+    def _stage_under_lock(*args, **kwargs):
+        acquired = routes._CONNECT_LOCK.acquire(blocking=False)
+        if acquired:
+            routes._CONNECT_LOCK.release()
+        lock_observations.append(not acquired)
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(store, "stage_credentials_for", _stage_under_lock)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/SERIALREL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert lock_observations == [True]
+
+
+def test_relogin_fails_closed_when_final_router_rebuild_returns_false(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "REBUILDREL",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    prior_session = app.config["REGISTRY"].get_session_for("upstox", "REBUILDREL")
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+    import flinttrade_core.app as app_module
+
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: False)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/REBUILDREL/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 500
+    assert router.calls >= 1
+    assert store.retrieve_for("upstox", "REBUILDREL") == {"access_token": "candidate"}
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["REGISTRY"].get_session_for("upstox", "REBUILDREL") is prior_session
+
+
+def test_set_primary_restores_vault_when_router_rebuild_returns_false(client, monkeypatch):
+    c, app, tmp_path = client
+    for account_id, is_primary in (("FALSE-A", True), ("FALSE-B", False)):
+        connected = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": account_id,
+                "credentials": {"access_token": "valid"},
+                "is_primary": is_primary,
+            },
+        )
+        assert connected.status_code == 200
+
+    import flinttrade_core.app as app_module
+
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: False)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/FALSE-B/set-primary",
+        headers=_h(),
+    )
+
+    assert response.status_code == 500
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:FALSE-A"
+    rows = {
+        row["account_id"]: row["is_primary"]
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+    }
+    assert rows == {"FALSE-A": True, "FALSE-B": False}
+
+
+def test_router_rebuild_none_requires_a_live_router(client, monkeypatch):
+    c, app, tmp_path = client
+    for account_id, is_primary in (("NONE-A", True), ("NONE-B", False)):
+        connected = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": account_id,
+                "credentials": {"access_token": "valid"},
+                "is_primary": is_primary,
+            },
+        )
+        assert connected.status_code == 200
+
+    import flinttrade_core.app as app_module
+
+    app.config["BROKER_ROUTER"] = None
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: None)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/NONE-B/set-primary",
+        headers=_h(),
+    )
+
+    assert response.status_code == 500
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:NONE-A"
+    rows = {
+        row["account_id"]: row["is_primary"]
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+    }
+    assert rows == {"NONE-A": True, "NONE-B": False}
+
+
+def test_router_rebuild_none_is_failure_even_with_live_router_test_double(client, monkeypatch):
+    c, app, _tmp_path = client
+    for account_id in ("LIVE-A", "LIVE-B"):
+        connected = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": account_id,
+                "credentials": {"access_token": "valid"},
+            },
+        )
+        assert connected.status_code == 200
+
+    import flinttrade_core.app as app_module
+
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: None)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/LIVE-B/set-primary",
+        headers=_h(),
+    )
+
+    assert response.status_code == 500
+    assert app.config["BROKER_ROUTER"] is None
+
+
+def test_remove_fails_closed_when_router_rebuild_returns_false(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "REMOVEFALSE",
+            "credentials": {"access_token": "valid"},
+        },
+    )
+    assert connected.status_code == 200
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+    import flinttrade_core.app as app_module
+
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: False)
+
+    response = c.delete(
+        "/api/v1/native/accounts/upstox/REMOVEFALSE",
+        headers=_h(),
+    )
+
+    assert response.status_code == 500
+    assert router.calls >= 1
+    with pytest.raises(Exception):
+        app.config["REGISTRY"].get_session_for("upstox", "REMOVEFALSE")
 
 
 def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):

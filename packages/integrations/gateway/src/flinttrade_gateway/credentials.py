@@ -87,6 +87,113 @@ _COMPOSITE_INDEX_SQL: str = (
 )
 
 
+def _copy_credential_payload(credentials: dict[str, Any]) -> dict[str, Any]:
+    """Validate and detach a credential payload without exposing its values."""
+    try:
+        encoded = json.dumps(credentials)
+        copied = json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise CredentialError("Cannot serialise staged credentials") from exc
+    if not isinstance(copied, dict):  # pragma: no cover - input annotation + JSON invariant
+        raise CredentialError("Staged credentials must be an object")
+    return copied
+
+
+class StagedCredentialStore:
+    """One-selector, in-memory credential overlay used for candidate login.
+
+    Router activation and native login can read and rewrite the candidate through
+    the normal credential-store surface, while the backing SQLite row remains
+    untouched. ``commit`` is the only operation that writes to the durable vault.
+    """
+
+    def __init__(
+        self,
+        store: CredentialStore,
+        *,
+        adapter_id: str,
+        account_id: str,
+        credentials: dict[str, Any],
+        metadata: dict[str, Any],
+        replace_metadata: bool,
+    ) -> None:
+        self._store = store
+        self._adapter_id = adapter_id
+        self._account_id = account_id
+        self._credentials = _copy_credential_payload(credentials)
+        self._metadata = dict(metadata)
+        self._replace_metadata = replace_metadata
+        self._active = True
+
+    def __repr__(self) -> str:
+        state = "pending" if self._active else "closed"
+        return f"<StagedCredentialStore state={state}>"
+
+    def _ensure_active(self) -> None:
+        if not self._active:
+            raise CredentialError("Staged credentials are no longer available")
+
+    def _ensure_selector(self, adapter_id: str, account_id: str) -> None:
+        self._ensure_active()
+        if (adapter_id, account_id) != (self._adapter_id, self._account_id):
+            raise CredentialError("Staged credential access is limited to its selector")
+
+    def list_accounts(self) -> list[dict[str, Any]]:
+        """Return backing metadata with the candidate selector overlaid."""
+        self._ensure_active()
+        rows = [dict(row) for row in self._store.list_accounts()]
+        for index, row in enumerate(rows):
+            if (
+                str(row.get("adapter_id") or row.get("broker") or "") == self._adapter_id
+                and str(row.get("account_id") or "") == self._account_id
+            ):
+                rows[index] = dict(self._metadata)
+                break
+        else:
+            rows.append(dict(self._metadata))
+        return rows
+
+    def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
+        """Return a detached copy of the staged candidate payload."""
+        self._ensure_selector(adapter_id, account_id)
+        return _copy_credential_payload(self._credentials)
+
+    def update_credentials_for(
+        self,
+        adapter_id: str,
+        account_id: str,
+        credentials: dict[str, Any],
+    ) -> None:
+        """Stage replayable credentials produced by a successful adapter login."""
+        self._ensure_selector(adapter_id, account_id)
+        self._credentials = _copy_credential_payload(credentials)
+
+    def commit(self) -> None:
+        """Atomically publish the candidate payload to the backing vault."""
+        self._ensure_active()
+        if self._replace_metadata:
+            self._store.store(
+                self._account_id,
+                str(self._metadata["broker"]),
+                str(self._metadata["label"]),
+                self._credentials,
+                is_primary=bool(self._metadata["is_primary"]),
+                adapter_id=self._adapter_id,
+            )
+        else:
+            self._store.update_credentials_for(
+                self._adapter_id,
+                self._account_id,
+                self._credentials,
+            )
+        self.discard()
+
+    def discard(self) -> None:
+        """Forget the candidate without touching the durable vault."""
+        self._credentials.clear()
+        self._active = False
+
+
 # ---------------------------------------------------------------------------
 # CredentialStore
 # ---------------------------------------------------------------------------
@@ -344,6 +451,65 @@ class CredentialStore:
                 f"Account not found for selector {adapter_id!r}:{account_id!r}"
             )
 
+    def stage_credentials_for(
+        self,
+        adapter_id: str,
+        account_id: str,
+        credentials: dict[str, Any],
+        *,
+        broker: str | None = None,
+        label: str | None = None,
+        is_primary: bool | None = None,
+    ) -> StagedCredentialStore:
+        """Build a non-persistent one-selector credential view.
+
+        Omitting all metadata stages a payload-only update for an existing row.
+        Supplying metadata stages a full store/upsert, used by native connect.
+        The candidate is activation-visible through ``list_accounts`` but does
+        not alter SQLite until its explicit ``commit``.
+        """
+        rows = self.list_accounts()
+        same_account = next(
+            (row for row in rows if str(row.get("account_id") or "") == account_id),
+            None,
+        )
+        if same_account is not None:
+            existing_adapter = str(
+                same_account.get("adapter_id") or same_account.get("broker") or ""
+            )
+            if existing_adapter != adapter_id:
+                raise CredentialError(
+                    "A different broker already uses this account identifier"
+                )
+
+        supplied_metadata = (broker, label, is_primary)
+        replace_metadata = any(value is not None for value in supplied_metadata)
+        if replace_metadata and not all(value is not None for value in supplied_metadata):
+            raise CredentialError("Staged credential metadata must be complete")
+        if not replace_metadata and same_account is None:
+            raise CredentialError("Cannot stage a payload update for a missing account")
+
+        if replace_metadata:
+            metadata = {
+                "account_id": account_id,
+                "adapter_id": adapter_id,
+                "broker": str(broker),
+                "label": str(label),
+                "is_primary": bool(is_primary),
+                "created_at": same_account.get("created_at") if same_account else None,
+            }
+        else:
+            metadata = dict(same_account or {})
+
+        return StagedCredentialStore(
+            self,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            credentials=credentials,
+            metadata=metadata,
+            replace_metadata=replace_metadata,
+        )
+
     def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
         """Decrypt and return credentials by composite ``(adapter_id, account_id)``.
 
@@ -514,6 +680,38 @@ class CredentialStore:
                 "CASE WHEN account_id = ? THEN 1 ELSE 0 END",
                 (account_id,),
             )
+
+    def snapshot_primary_metadata(self) -> dict[str, bool]:
+        """Snapshot every vault row's primary flag without decrypting credentials."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT account_id, is_primary FROM accounts"
+            ).fetchall()
+        return {str(row["account_id"]): bool(row["is_primary"]) for row in rows}
+
+    def restore_primary_metadata(self, snapshot: dict[str, bool]) -> None:
+        """Atomically restore a prior primary-flag snapshot.
+
+        A changed account set means the snapshot is stale. Refuse it instead of
+        overwriting primary metadata created by a concurrent vault mutation.
+        """
+        with self._get_connection() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                current_ids = {
+                    str(row["account_id"])
+                    for row in conn.execute("SELECT account_id FROM accounts").fetchall()
+                }
+                if current_ids != set(snapshot):
+                    raise CredentialError("Primary metadata snapshot is stale")
+                conn.executemany(
+                    "UPDATE accounts SET is_primary = ? WHERE account_id = ?",
+                    [(int(is_primary), account_id) for account_id, is_primary in snapshot.items()],
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def account_exists(self, account_id: str) -> bool:
         """Check whether an account is stored in the database.

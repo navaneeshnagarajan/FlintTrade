@@ -275,6 +275,131 @@ class TestUpdateCredentialsFor:
             store.update_credentials_for("dhan", "nope", {"access_token": "x"})
 
 
+class TestStagedCredentials:
+    """Candidate auth material must stay outside the durable vault until commit."""
+
+    def test_existing_candidate_is_not_persisted_until_commit(self, store: CredentialStore) -> None:
+        store.store(
+            "acc1",
+            "upstox",
+            "Original label",
+            {"access_token": "prior-token"},
+            is_primary=True,
+            adapter_id="upstox",
+        )
+
+        candidate = store.stage_credentials_for(
+            "upstox",
+            "acc1",
+            {"access_token": "candidate-token"},
+        )
+
+        assert candidate.retrieve_for("upstox", "acc1") == {
+            "access_token": "candidate-token"
+        }
+        assert store.retrieve_for("upstox", "acc1") == {"access_token": "prior-token"}
+
+        candidate.update_credentials_for(
+            "upstox",
+            "acc1",
+            {"access_token": "replayable-token"},
+        )
+        assert store.retrieve_for("upstox", "acc1") == {"access_token": "prior-token"}
+
+        candidate.commit()
+
+        assert store.retrieve_for("upstox", "acc1") == {
+            "access_token": "replayable-token"
+        }
+        row = next(row for row in store.list_accounts() if row["account_id"] == "acc1")
+        assert row["label"] == "Original label"
+        assert row["is_primary"] is True
+
+    def test_new_candidate_is_activation_visible_but_discarded_without_a_row(
+        self, store: CredentialStore
+    ) -> None:
+        candidate = store.stage_credentials_for(
+            "upstox",
+            "new-account",
+            {"access_token": "candidate-token"},
+            broker="upstox",
+            label="New account",
+            is_primary=False,
+        )
+
+        assert store.list_accounts() == []
+        assert candidate.list_accounts() == [
+            {
+                "account_id": "new-account",
+                "adapter_id": "upstox",
+                "broker": "upstox",
+                "label": "New account",
+                "is_primary": False,
+                "created_at": None,
+            }
+        ]
+
+        candidate.discard()
+
+        assert store.list_accounts() == []
+        with pytest.raises(CredentialError):
+            candidate.retrieve_for("upstox", "new-account")
+
+    def test_candidate_rejects_writes_for_an_unrelated_selector(self, store: CredentialStore) -> None:
+        candidate = store.stage_credentials_for(
+            "upstox",
+            "acc1",
+            {"access_token": "candidate-token"},
+            broker="upstox",
+            label="Candidate",
+            is_primary=False,
+        )
+
+        with pytest.raises(CredentialError):
+            candidate.update_credentials_for(
+                "dhan",
+                "other",
+                {"access_token": "must-not-persist"},
+            )
+        assert store.list_accounts() == []
+
+    def test_candidate_repr_does_not_expose_credentials(self, store: CredentialStore) -> None:
+        candidate = store.stage_credentials_for(
+            "upstox",
+            "acc1",
+            {"access_token": "credential-value-that-must-not-leak"},
+            broker="upstox",
+            label="Candidate",
+            is_primary=False,
+        )
+
+        assert "credential-value-that-must-not-leak" not in repr(candidate)
+
+
+class TestPrimaryMetadataSnapshot:
+    def test_restore_primary_metadata_restores_exact_flags(
+        self, populated_store: CredentialStore
+    ) -> None:
+        populated_store.set_primary("acc_A")
+        snapshot = populated_store.snapshot_primary_metadata()
+        populated_store.set_primary("acc_B")
+
+        populated_store.restore_primary_metadata(snapshot)
+
+        accounts = {row["account_id"]: row["is_primary"] for row in populated_store.list_accounts()}
+        assert accounts == {"acc_A": True, "acc_B": False, "acc_C": False}
+
+    def test_restore_primary_metadata_can_restore_no_primary(self, store: CredentialStore) -> None:
+        store.store("acc_A", "upstox", "A", {"token": "a"}, adapter_id="upstox")
+        store.store("acc_B", "dhan", "B", {"token": "b"}, adapter_id="dhan")
+        snapshot = store.snapshot_primary_metadata()
+        store.set_primary("acc_B")
+
+        store.restore_primary_metadata(snapshot)
+
+        assert all(row["is_primary"] is False for row in store.list_accounts())
+
+
 class TestCrossAdapterCollisionGuard:
     """Audit finding: the accounts PK is account_id alone, but the selector is
     composite (adapter_id, account_id). store() must refuse a second adapter

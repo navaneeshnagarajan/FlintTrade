@@ -596,54 +596,182 @@ def _stored_native_account(store: Any, adapter_id: str, account_id: str) -> dict
     return None
 
 
-def _activate_after_credentials(adapter_id: str, account_id: str) -> dict[str, Any]:
-    """Rebuild the router and log the native in; return its login result.
+class _RouterRebuildError(RuntimeError):
+    """Raised when a router generation cannot be built and published safely."""
 
-    ``verify=True``: this is an interactive operator action (connect / daily
-    re-auth), so probe the freshly-established session against the broker — a
-    dead token must report ``needs_relogin`` here, not a false "connected".
+
+def _disable_broker_routing() -> None:
+    """Unpublish every routing-generation surface as one fail-closed state."""
+    current_app.config["BROKER_ROUTER"] = None
+    current_app.config["SMART_ROUTING"] = {}
+    current_app.config["NATIVE_ADAPTERS"] = {}
+    current_app.config["RECONCILE_TARGETS"] = None
+
+
+def _workspace_execution_default_is_disabled() -> bool:
+    """Return whether the operator intentionally has no default write selector."""
+    from .workspace import Workspace  # noqa: PLC0415
+
+    try:
+        return not str(Workspace().get("brokers.execution.default", "") or "").strip()
+    except Exception:  # noqa: BLE001 - unknown config is not an intentional disable
+        return False
+
+
+def _configure_broker_router_checked(store: Any, registry: Any) -> Any:
+    """Build a router and reject swallowed or explicit rebuild failures.
+
+    The app-owned builder publishes one complete generation and returns ``True``.
+    Every other return value is failure, even if a stale test double left a router
+    in app config.
     """
-    from .app import _reestablish_native_sessions, configure_broker_router  # noqa: PLC0415
+    from .app import configure_broker_router  # noqa: PLC0415
 
     app = current_app._get_current_object()  # type: ignore[attr-defined]
-    configure_broker_router(
-        app,
-        app.config.get("REGISTRY"),
-        app.config.get("CREDENTIAL_STORE"),
-        app.config.get("CLIENT"),
-    )
-    results = _reestablish_native_sessions(app, verify=True)
-    return results
+    try:
+        result = configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+    except Exception:
+        app.config["BROKER_ROUTER"] = None
+        raise _RouterRebuildError("Broker router rebuild raised") from None
+    router = app.config.get("BROKER_ROUTER")
+    if result is not True or router is None:
+        app.config["BROKER_ROUTER"] = None
+        raise _RouterRebuildError("Broker router rebuild failed")
+    return router
 
 
-def _restore_vault_after_failed_store(
-    store: Any,
-    *,
-    account_id: str,
+def _restore_router_from_vault(store: Any, registry: Any) -> bool:
+    """Rebuild from durable state, leaving routing unavailable on failure."""
+    try:
+        _configure_broker_router_checked(store, registry)
+    except _RouterRebuildError:
+        _disable_broker_routing()
+        logger.warning("Native account transaction could not restore broker routing")
+        return False
+    return True
+
+
+def _quiesce_current_router() -> bool:
+    """Revoke the current router generation and wait for admitted writes."""
+    router = current_app.config.get("BROKER_ROUTER")
+    if router is None:
+        return True
+    revoke_and_drain = getattr(router, "revoke_and_drain", None)
+    if not callable(revoke_and_drain):
+        logger.error("Native account mutation refused: broker router cannot drain")
+        return False
+    try:
+        drained = revoke_and_drain()
+    except Exception as exc:  # noqa: BLE001 - reject without exposing exception text
+        logger.warning(
+            "Native account mutation refused: broker router drain raised (%s)",
+            type(exc).__name__,
+        )
+        return False
+    if drained is not True:
+        logger.warning("Native account mutation refused: broker router did not drain")
+        return False
+    return True
+
+
+def _activate_candidate_credentials(
+    candidate_store: Any,
     adapter_id: str,
-    label: str,
-    is_new_account: bool,
-    prior_meta: dict[str, Any] | None,
-    prior_credentials: dict[str, Any] | None,
+    account_id: str,
+) -> tuple[dict[str, Any], Any | None]:
+    """Authenticate and probe through a standalone, unpublished native adapter."""
+    import asyncio  # noqa: PLC0415
+
+    from flinttrade_gateway.brokers.native_factory import build_native_adapters  # noqa: PLC0415
+    from flinttrade_gateway.native_login import establish_native_sessions  # noqa: PLC0415
+    from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
+
+    candidate_registry = BrokerRegistry()
+    native_adapters = build_native_adapters(
+        [adapter_id],
+        attest_ok=lambda broker_id: broker_id == adapter_id,
+        has_credentials=lambda broker_id: broker_id == adapter_id,
+    )
+    if adapter_id not in native_adapters:
+        raise _RouterRebuildError("Candidate native adapter did not initialise")
+    selector = f"{adapter_id}:{account_id}"
+
+    async def _run() -> dict[str, Any]:
+        return await establish_native_sessions(
+            native_adapters,
+            candidate_registry,
+            candidate_store,
+            [selector],
+            verify=True,
+        )
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        results = asyncio.run(_run())
+    else:
+        box: dict[str, Any] = {}
+
+        def _thread_run() -> None:
+            try:
+                box["results"] = asyncio.run(_run())
+            except BaseException as exc:  # noqa: BLE001 - re-raised without values
+                box["error"] = exc
+
+        thread = threading.Thread(
+            target=_thread_run,
+            name="native-candidate-login",
+            daemon=True,
+        )
+        thread.start()
+        thread.join()
+        if "error" in box:
+            raise _RouterRebuildError("Candidate native login runner failed") from None
+        results = box.get("results", {})
+
+    try:
+        candidate_session = candidate_registry.get_session_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001 - failed candidates intentionally have no session
+        candidate_session = None
+    return results, candidate_session
+
+
+def _candidate_session_status(session: Any | None) -> dict[str, Any]:
+    """Return the public status snapshot for an isolated candidate session."""
+    if session is None:
+        return {"has_session": False, "expires_at": None, "read_only": False}
+    return {
+        "has_session": True,
+        "expires_at": getattr(session, "expires_at", None),
+        "read_only": bool(getattr(session, "is_read_only", False)),
+    }
+
+
+def _registry_session_or_none(registry: Any, adapter_id: str, account_id: str) -> Any | None:
+    """Snapshot one shared registry selector without raising."""
+    try:
+        return registry.get_session_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001 - a disconnected selector has no prior session
+        return None
+
+
+def _restore_registry_session(
+    registry: Any,
+    adapter_id: str,
+    account_id: str,
+    prior_session: Any | None,
 ) -> None:
-    """Undo the vault overwrite made by a failed connect transaction."""
-    if is_new_account:
+    """Restore a prior shared session, or leave the selector sessionless."""
+    try:
+        if prior_session is None:
+            registry.remove_session_for(adapter_id, account_id)
+        else:
+            registry.put_session(adapter_id, account_id, prior_session)
+    except Exception:  # noqa: BLE001 - routing is disabled by the caller on failure
         try:
-            remove_for = getattr(store, "remove_for", None)
-            if callable(remove_for):
-                remove_for(adapter_id, account_id)
-            else:
-                store.remove(account_id)
-        except Exception:  # noqa: BLE001 - best effort; nothing to clean up
-            pass
-    elif prior_credentials is not None:
-        try:
-            store.store(
-                account_id, adapter_id, str((prior_meta or {}).get("label") or label),
-                prior_credentials, is_primary=bool((prior_meta or {}).get("is_primary")), adapter_id=adapter_id,
-            )
+            registry.remove_session_for(adapter_id, account_id)
         except Exception:  # noqa: BLE001
-            logger.warning("Could not restore prior native broker vault row")
+            pass
 
 
 def _demote_read_only_vault_primary(
@@ -707,16 +835,10 @@ def _demote_read_only_connected_account(
             adapter_id=adapter_id,
             fallback_label=fallback_label,
         )
-
-        from .app import configure_broker_router  # noqa: PLC0415
-
-        app = current_app._get_current_object()  # type: ignore[attr-defined]
-        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
     except Exception:  # noqa: BLE001 - demotion is metadata hygiene, not connect-critical
         logger.warning(
-            "Read-only write-default demotion deferred for %s — workspace/router update failed",
+            "Read-only write-default demotion deferred for %s — persistent update failed",
             selector_ref(adapter_id, account_id),
-            exc_info=True,
         )
         return (
             "This account's session is read-only, but the write-default "
@@ -724,6 +846,7 @@ def _demote_read_only_connected_account(
             "account is connected; review the write default in Settings → "
             "Brokers."
         )
+
     return notice
 
 
@@ -735,14 +858,7 @@ def _do_connect(
     credentials: dict[str, Any],
     is_primary: bool,
 ) -> tuple[dict[str, Any], int]:
-    """Store creds → register + ACL → rebuild router → login → session.
-
-    The shared connect transaction used by both the direct-credential POST and
-    the OAuth callback. Returns ``(response_body, http_status)``. Fail-closed at
-    each stage. Serialised by ``_CONNECT_LOCK`` (see above) so an overlapping
-    connect's failure-rollback can never clobber another connect's workspace
-    write.
-    """
+    """Authenticate a staged candidate, then commit and publish it atomically."""
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")
     if store is None or registry is None:
@@ -751,33 +867,52 @@ def _do_connect(
     if sdk_not_ready is not None:
         return sdk_not_ready, 503
 
-    # Track everything the connect will mutate for a transactional rollback on
-    # failure. New-vs-existing is decided by PRESENCE via
-    # list_accounts (which never decrypts), so an existing-but-undecryptable row
-    # is not misread as brand-new and destroyed. Workspace registration returns
-    # an exact mutation receipt so rollback cannot overwrite unrelated edits.
-    prior_meta: dict[str, Any] | None = None
     try:
-        for row in store.list_accounts():
-            if (
-                str(row.get("adapter_id") or row.get("broker") or "") == adapter_id
-                and str(row.get("account_id") or "") == account_id
-            ):
-                prior_meta = row
-                break
-    except Exception:  # noqa: BLE001 - treat an unreadable listing as no prior row
-        prior_meta = None
-    is_new_account = prior_meta is None
-    prior_credentials: dict[str, Any] | None = None
-    if not is_new_account:
-        try:
-            prior_credentials = store.retrieve_for(adapter_id, account_id)
-        except Exception:  # noqa: BLE001 - existing but undecryptable: keep the row, can't restore creds
-            prior_credentials = None
-    try:
-        store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
+        candidate_store = store.stage_credentials_for(
+            adapter_id,
+            account_id,
+            credentials,
+            broker=adapter_id,
+            label=label,
+            is_primary=is_primary,
+        )
     except Exception:  # noqa: BLE001
-        return {"status": "error", "message": "Could not store broker auth material"}, 500
+        return {"status": "error", "message": "Could not stage broker auth material"}, 500
+
+    if not _quiesce_current_router():
+        candidate_store.discard()
+        return {"status": "error", "message": "Broker router is still processing writes"}, 503
+
+    prior_session = _registry_session_or_none(registry, adapter_id, account_id)
+    try:
+        login_results, candidate_session = _activate_candidate_credentials(
+            candidate_store,
+            adapter_id,
+            account_id,
+        )
+    except _RouterRebuildError:
+        candidate_store.discard()
+        _restore_router_from_vault(store, registry)
+        return {"status": "error", "message": "Could not activate broker candidate"}, 500
+
+    selector = f"{adapter_id}:{account_id}"
+    login_state = login_results.get(selector, "not-activated")
+    session_status = _candidate_session_status(candidate_session)
+    connected = session_status["has_session"]
+    if not connected:
+        candidate_store.discard()
+        _restore_router_from_vault(store, registry)
+        return {
+            "status": "error",
+            "data": {
+                "adapter_id": adapter_id,
+                "account_id": account_id,
+                "connected": False,
+                "login": login_state,
+                "session": session_status,
+            },
+            "message": f"Login did not establish a session ({login_state}); credentials were not kept.",
+        }, 502
 
     actor_id = _operator_actor_id()
     try:
@@ -789,99 +924,72 @@ def _do_connect(
         )
     except Exception:  # noqa: BLE001
         logger.error("Failed to register native broker selector in workspace")
-        _restore_vault_after_failed_store(
-            store,
-            account_id=account_id,
-            adapter_id=adapter_id,
-            label=label,
-            is_new_account=is_new_account,
-            prior_meta=prior_meta,
-            prior_credentials=prior_credentials,
-        )
+        candidate_store.discard()
+        _restore_router_from_vault(store, registry)
         return {"status": "error", "message": "Could not register broker selector"}, 500
 
-    login_results = _activate_after_credentials(adapter_id, account_id)
-    selector = f"{adapter_id}:{account_id}"
-    login_state = login_results.get(selector, "not-activated")
-    session_status = _session_status(registry, adapter_id, account_id)
-    connected = session_status["has_session"]
-    demotion_notice: str | None = None
-    if connected:
-        if bool(session_status.get("read_only")):
-            demotion_notice = _demote_read_only_connected_account(
-                store,
-                registry,
-                account_id=account_id,
-                adapter_id=adapter_id,
-                fallback_label=label,
-                prior_execution_default=workspace_mutation.prior_default,
-            )
-        # G5: give the freshly connected broker a daily 08:05 IST refresh job on
-        # the already-running rotator (configure_session_rotation only scheduled
-        # brokers present at boot). Idempotent (replace_existing).
-        _schedule_refresh_job(adapter_id)
-    else:
-        # Failed connect: undo only this transaction's selector, ACL, and
-        # execution.default fields, then fix up the vault row.
+    try:
+        candidate_store.commit()
+    except Exception:  # noqa: BLE001 - candidate values must never reach logs
+        candidate_store.discard()
         try:
             _rollback_selector_workspace(workspace_mutation)
         except Exception:  # noqa: BLE001
-            logger.warning("Workspace rollback failed for native broker connect")
-        if is_new_account:
-            # Brand-new connect that never established a session — purge the
-            # just-stored row so a dead OAuth code / stale TOTP is not replayed.
-            _restore_vault_after_failed_store(
-                store,
-                account_id=account_id,
-                adapter_id=adapter_id,
-                label=label,
-                is_new_account=is_new_account,
-                prior_meta=prior_meta,
-                prior_credentials=prior_credentials,
-            )
-        elif prior_credentials is not None:
-            # Re-connect of an existing account: restore the FULL prior vault row
-            # (credentials + label + is_primary) the store.store() overwrite just
-            # clobbered — update_credentials_for alone would leave the metadata
-            # wrong.
-            _restore_vault_after_failed_store(
-                store,
-                account_id=account_id,
-                adapter_id=adapter_id,
-                label=label,
-                is_new_account=is_new_account,
-                prior_meta=prior_meta,
-                prior_credentials=prior_credentials,
-            )
-        # ``_activate_after_credentials`` rebuilt the live router from the
-        # attempted selector before the broker probe failed. Rebuild again only
-        # after both persistent rollback steps so the in-memory default cannot
-        # remain pointed at a rejected account until the next restart.
-        from .app import configure_broker_router  # noqa: PLC0415
+            logger.warning("Workspace rollback failed after native credential commit failure")
+        _restore_router_from_vault(store, registry)
+        return {"status": "error", "message": "Could not persist broker auth material"}, 500
 
-        app = current_app._get_current_object()  # type: ignore[attr-defined]
-        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+    try:
+        registry.put_session(adapter_id, account_id, candidate_session)
+    except Exception:  # noqa: BLE001
+        _restore_registry_session(registry, adapter_id, account_id, prior_session)
+        _disable_broker_routing()
+        return {"status": "error", "message": "Could not publish broker session"}, 500
+
+    demotion_notice: str | None = None
+    if bool(session_status.get("read_only")):
+        demotion_notice = _demote_read_only_connected_account(
+            store,
+            registry,
+            account_id=account_id,
+            adapter_id=adapter_id,
+            fallback_label=label,
+            prior_execution_default=workspace_mutation.prior_default,
+        )
+
+    if _workspace_execution_default_is_disabled():
+        _disable_broker_routing()
+    else:
+        try:
+            _configure_broker_router_checked(store, registry)
+        except _RouterRebuildError:
+            _restore_registry_session(registry, adapter_id, account_id, prior_session)
+            _disable_broker_routing()
+            return {"status": "error", "message": "Could not publish broker routing"}, 500
+
+    status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
+    status.update(login_results)
+
+    # G5: runtime connects join the already-running daily refresh schedule.
+    _schedule_refresh_job(adapter_id)
+
     body: dict[str, Any] = {
-        "status": "success" if connected else "error",
+        "status": "success",
         "data": {
             "adapter_id": adapter_id,
             "account_id": account_id,
-            "connected": connected,
+            "connected": True,
             "login": login_state,
             "session": session_status,
         },
-        "message": (
-            f"{adapter_id} account {account_id} connected."
-            if connected
-            else f"Login did not establish a session ({login_state}); credentials were not kept."
-        ),
+        "message": f"{adapter_id} account {account_id} connected.",
     }
     if demotion_notice:
         # Surface the write-default change so the UI can tell the operator —
         # a silent workspace.json diff is exactly the failure mode the
         # fail-closed demotion policy exists to prevent.
         body["data"]["notice"] = demotion_notice
-    return body, (200 if connected else 502)
+    return body, 200
 
 
 @native_accounts_bp.route("/brokers", methods=["GET"])
@@ -1197,6 +1305,7 @@ def native_broker_postback(adapter_id: str) -> Any:
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/login", methods=["POST"])
+@_serialized
 def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     """Re-authenticate a native account (daily re-auth / token refresh).
 
@@ -1217,28 +1326,79 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     if sdk_not_ready is not None:
         return jsonify(sdk_not_ready), 503
 
+    try:
+        row = _stored_native_account(store, adapter_id, account_id)
+    except Exception:  # noqa: BLE001
+        return jsonify({"status": "error", "message": "Could not list accounts"}), 500
+    if row is None:
+        return jsonify({"status": "error", "message": "Native broker account not found."}), 404
+
     body: dict[str, Any] = request.get_json(silent=True) or {}
     fresh = body.get("credentials")
-    if isinstance(fresh, dict) and fresh:
-        # Payload-only update: re-authenticating an EXISTING account must not
-        # reset its label to the adapter id or clear its is_primary flag (which
-        # store()'s ON CONFLICT upsert would). update_credentials_for swaps just
-        # the encrypted payload and leaves the metadata + created_at intact.
-        try:
-            store.update_credentials_for(adapter_id, account_id, fresh)
-        except Exception:  # noqa: BLE001
-            return jsonify({"status": "error", "message": "Could not store fresh credentials"}), 500
+    try:
+        credentials = (
+            fresh
+            if isinstance(fresh, dict) and fresh
+            else store.retrieve_for(adapter_id, account_id)
+        )
+        candidate_store = store.stage_credentials_for(
+            adapter_id,
+            account_id,
+            credentials,
+        )
+    except Exception:  # noqa: BLE001
+        return jsonify({"status": "error", "message": "Could not stage broker credentials"}), 500
 
-    login_results = _activate_after_credentials(adapter_id, account_id)
+    if not _quiesce_current_router():
+        candidate_store.discard()
+        return jsonify({
+            "status": "error",
+            "message": "Broker router is still processing writes; account was not changed.",
+        }), 503
+
+    prior_session = _registry_session_or_none(registry, adapter_id, account_id)
+    try:
+        login_results, candidate_session = _activate_candidate_credentials(
+            candidate_store,
+            adapter_id,
+            account_id,
+        )
+    except _RouterRebuildError:
+        candidate_store.discard()
+        _restore_router_from_vault(store, registry)
+        return jsonify({"status": "error", "message": "Could not activate broker login."}), 500
+
     selector = f"{adapter_id}:{account_id}"
-    session_status = _session_status(registry, adapter_id, account_id)
+    session_status = _candidate_session_status(candidate_session)
     connected = session_status["has_session"]
+    if not connected:
+        candidate_store.discard()
+        _restore_router_from_vault(store, registry)
+        return jsonify({
+            "status": "error",
+            "data": {
+                "login": login_results.get(selector, "not-activated"),
+                "session": session_status,
+            },
+        }), 502
+
+    try:
+        candidate_store.commit()
+    except Exception:  # noqa: BLE001 - never log candidate credential values
+        candidate_store.discard()
+        _restore_router_from_vault(store, registry)
+        logger.warning("Could not persist verified native broker credentials")
+        return jsonify({"status": "error", "message": "Could not persist broker credentials."}), 500
+
+    try:
+        registry.put_session(adapter_id, account_id, candidate_session)
+    except Exception:  # noqa: BLE001
+        _restore_registry_session(registry, adapter_id, account_id, prior_session)
+        _disable_broker_routing()
+        return jsonify({"status": "error", "message": "Could not publish broker session."}), 500
+
     demotion_notice: str | None = None
-    if connected and bool(session_status.get("read_only")):
-        try:
-            row = _stored_native_account(store, adapter_id, account_id) or {}
-        except Exception:  # noqa: BLE001
-            row = {}
+    if bool(session_status.get("read_only")):
         demotion_notice = _demote_read_only_connected_account(
             store,
             registry,
@@ -1246,6 +1406,20 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             account_id=account_id,
             fallback_label=str(row.get("label") or adapter_id),
         )
+
+    if _workspace_execution_default_is_disabled():
+        _disable_broker_routing()
+    else:
+        try:
+            _configure_broker_router_checked(store, registry)
+        except _RouterRebuildError:
+            _restore_registry_session(registry, adapter_id, account_id, prior_session)
+            _disable_broker_routing()
+            return jsonify({"status": "error", "message": "Could not publish broker routing."}), 500
+
+    status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
+    status.update(login_results)
+
     data: dict[str, Any] = {
         "login": login_results.get(selector, "not-activated"),
         "session": session_status,
@@ -1253,9 +1427,9 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     if demotion_notice:
         data["notice"] = demotion_notice
     return jsonify({
-        "status": "success" if connected else "error",
+        "status": "success",
         "data": data,
-    }), (200 if connected else 502)
+    }), 200
 
 
 @native_accounts_bp.route("/accounts", methods=["GET"])
@@ -1760,6 +1934,15 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
             "message": "Broker account is read-only and cannot be used as the live write default.",
         }), 409
 
+    snapshot_primary = getattr(store, "snapshot_primary_metadata", None)
+    restore_primary = getattr(store, "restore_primary_metadata", None)
+    if not callable(snapshot_primary) or not callable(restore_primary):
+        return jsonify({"status": "error", "message": "Credential store cannot update primary metadata."}), 500
+    try:
+        prior_primary_metadata = snapshot_primary()
+    except Exception:  # noqa: BLE001
+        return jsonify({"status": "error", "message": "Could not snapshot primary metadata."}), 500
+
     workspace_mutation: _SelectorWorkspaceMutation | None = None
     try:
         workspace_mutation = _register_selector_in_workspace(
@@ -1774,20 +1957,24 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
             raise RuntimeError("Credential store cannot set primary accounts")
         set_primary(account_id)
 
-        from .app import configure_broker_router  # noqa: PLC0415
-
-        app = current_app._get_current_object()  # type: ignore[attr-defined]
-        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+        _configure_broker_router_checked(store, registry)
     except Exception:  # noqa: BLE001
+        rollback_ok = True
         if workspace_mutation is not None:
-            _rollback_selector_workspace(workspace_mutation)
+            try:
+                _rollback_selector_workspace(workspace_mutation)
+            except Exception:  # noqa: BLE001
+                rollback_ok = False
+                logger.warning("Could not restore workspace primary metadata")
         try:
-            from .app import configure_broker_router  # noqa: PLC0415
-
-            app = current_app._get_current_object()  # type: ignore[attr-defined]
-            configure_broker_router(app, registry, store, app.config.get("CLIENT"))
-        except Exception:  # noqa: BLE001 - best-effort rollback refresh
-            pass
+            restore_primary(prior_primary_metadata)
+        except Exception:  # noqa: BLE001
+            rollback_ok = False
+            logger.warning("Could not restore vault primary metadata")
+        if rollback_ok:
+            _restore_router_from_vault(store, registry)
+        else:
+            current_app.config["BROKER_ROUTER"] = None
         logger.warning("Could not set native primary broker account")
         return jsonify({"status": "error", "message": "Could not set primary native account."}), 500
 
@@ -1836,6 +2023,12 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         logger.warning("Could not read native broker credentials before removal")
         return jsonify({"status": "error", "message": "Could not remove native account."}), 500
 
+    if not _quiesce_current_router():
+        return jsonify({
+            "status": "error",
+            "message": "Broker router is still processing writes; account was not changed.",
+        }), 503
+
     try:
         remove_for = getattr(store, "remove_for", None)
         if callable(remove_for):
@@ -1844,6 +2037,7 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
             store.remove(account_id)
     except Exception:  # noqa: BLE001
         logger.warning("Credential delete failed for %s", selector_ref(adapter_id, account_id))
+        _restore_router_from_vault(store, registry)
         return jsonify({"status": "error", "message": "Could not remove native account."}), 500
 
     # Commit workspace state before evicting the live session. If the workspace
@@ -1875,24 +2069,29 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
                 registry.remove_session_for(adapter_id, account_id)
             except Exception:  # noqa: BLE001 - the router rebuild is the safety boundary
                 pass
-            from .app import configure_broker_router  # noqa: PLC0415
-
-            app = current_app._get_current_object()  # type: ignore[attr-defined]
-            configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+        _restore_router_from_vault(store, registry)
         logger.warning("Selector deregister failed for %s", selector_ref(adapter_id, account_id))
         return jsonify({"status": "error", "message": "Could not remove native account."}), 500
 
-    # Persistent state is now committed. Publish the rebuilt router before
-    # evicting the old session, so new dispatches stop resolving this selector at
-    # the same transition instead of observing a credential-less live account.
-    from .app import configure_broker_router  # noqa: PLC0415
-
-    app = current_app._get_current_object()  # type: ignore[attr-defined]
-    configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+    # The old generation is drained and persistent removal is committed. Evict
+    # the session before publishing a replacement so the new router cannot ever
+    # resolve a removed selector through a stale registry entry.
     try:
         registry.remove_session_for(adapter_id, account_id)
     except Exception:  # noqa: BLE001 - no session is fine
         pass
+    if _workspace_execution_default_is_disabled():
+        _disable_broker_routing()
+    else:
+        try:
+            _configure_broker_router_checked(store, registry)
+        except _RouterRebuildError:
+            _disable_broker_routing()
+            logger.warning("Native account removed but broker routing rebuild failed")
+            return jsonify({
+                "status": "error",
+                "message": "Native account removed; routing is unavailable.",
+            }), 500
 
     # Drop any stale login-status entry so a later re-add of the same selector
     # doesn't inherit a phantom "needs fresh login" from the removed account.
