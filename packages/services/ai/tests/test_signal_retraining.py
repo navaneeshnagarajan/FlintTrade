@@ -971,13 +971,24 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     assert _wire_ml_signal_runtime(app, cron, MagicMock()) is True
 
     calls = {call.args[0]: call for call in cron.register.call_args_list}
-    assert set(calls) == {"ml_signal_cycle", "ml_signal_retrain"}
+    assert set(calls) == {
+        "ml_signal_cycle",
+        "ml_signal_retrain",
+        "ml_signal_retrain_late",
+    }
     retrain_call = calls["ml_signal_retrain"]
     assert retrain_call.kwargs["trigger_type"] == "cron"
     assert retrain_call.kwargs["trigger_args"] == {
         "hour": 16,
         "minute": 0,
         "day_of_week": "mon-fri",
+        "timezone": "Asia/Kolkata",
+    }
+    late_retrain_call = calls["ml_signal_retrain_late"]
+    assert late_retrain_call.kwargs["trigger_type"] == "cron"
+    assert late_retrain_call.kwargs["trigger_args"] == {
+        "hour": 23,
+        "minute": 59,
         "timezone": "Asia/Kolkata",
     }
     assert isinstance(app.config["ML_SIGNAL_RETRAINER"], SignalRetrainer)
@@ -987,6 +998,10 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     cancel_event.set()
     assert app.config["ML_SIGNAL_RETRAINER"]._is_cancelled() is True
     assert app.config["ML_SIGNAL_RETRAIN_JOB"] == "ml_signal_retrain"
+    assert app.config["ML_SIGNAL_RETRAIN_JOBS"] == (
+        "ml_signal_retrain",
+        "ml_signal_retrain_late",
+    )
     assert app.config["ML_SIGNAL_JOB"] == "ml_signal_cycle"
 
 
@@ -1013,6 +1028,71 @@ def test_retrainer_reads_the_pipeline_roster_at_execution_time(tmp_path: Path) -
     retrainer.run_all()
 
     retrainer.run_once.assert_called_once_with("RELIANCE", "NSE")
+
+
+def test_retrainer_explicit_roster_overrides_the_default_provider(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.signal_retraining import RetrainConfig, SignalRetrainer
+
+    provider = MagicMock(return_value=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    retrainer = SignalRetrainer(
+        RetrainConfig(model_dir=tmp_path),
+        instruments=[],
+        data_fetcher=MagicMock(),
+        instrument_provider=provider,
+    )
+    retrainer.run_once = MagicMock(return_value=MagicMock(reason="Accepted"))
+
+    retrainer.run_all(instruments=[{"symbol": "GOLDM", "exchange": "MCX"}])
+
+    provider.assert_not_called()
+    retrainer.run_once.assert_called_once_with("GOLDM", "MCX")
+
+
+def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuous_markets(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from flask import Flask
+
+    from flinttrade_core.app import _wire_ml_signal_runtime
+
+    instruments = [
+        {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+        {"symbol": "GOLDM", "exchange": "MCX"},
+        {"symbol": "EURUSD29JUL26FUT", "exchange": "CDS"},
+        {"symbol": "BTCUSD", "exchange": "DELTA"},
+    ]
+    app = Flask(__name__)
+    pipeline = MagicMock()
+    pipeline.model_path = str(tmp_path / "signal_model.joblib")
+    pipeline.instruments = instruments
+    app.config["ML_SIGNAL_PIPELINE"] = pipeline
+    cron = MagicMock()
+    time_scheduler = MagicMock()
+    time_scheduler.get_schedule.side_effect = lambda exchange: SimpleNamespace(
+        is_24x7=exchange == "DELTA"
+    )
+    open_now = {("MCX", "GOLDM"), ("CDS", "EURUSD29JUL26FUT")}
+    time_scheduler.is_market_open.side_effect = (
+        lambda exchange, *, symbol: (exchange, symbol) in open_now
+    )
+
+    assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
+    retrainer = app.config["ML_SIGNAL_RETRAINER"]
+    retrainer.run_all = MagicMock(return_value=[])
+    calls = {call.args[0]: call for call in cron.register.call_args_list}
+
+    calls["ml_signal_retrain"].kwargs["handler"]()
+    retrainer.run_all.assert_called_once_with(instruments=[instruments[0]])
+
+    retrainer.run_all.reset_mock()
+    open_now.clear()
+    calls["ml_signal_retrain_late"].kwargs["handler"]()
+    retrainer.run_all.assert_called_once_with(instruments=instruments)
 
 
 def test_runtime_threads_configurable_label_policy_into_scheduled_retrainer(tmp_path: Path) -> None:

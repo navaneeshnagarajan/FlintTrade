@@ -1563,7 +1563,9 @@ def _wire_ml_signal_runtime(
         "ml_signal_cycle",
         handler=make_ml_signal_job(
             pipeline,
-            lambda exchange: bool(time_scheduler.is_market_open(exchange)),
+            lambda exchange, symbol: bool(
+                time_scheduler.is_market_open(exchange, symbol=symbol)
+            ),
         ),
         description="Publish scheduled LightGBM signals into the canonical feed",
         trigger_type="interval",
@@ -1599,12 +1601,64 @@ def _wire_ml_signal_runtime(
             cancel_requested=retrain_cancel_event.is_set,
         )
 
-        def _run_signal_retrain() -> list[Any]:
+        def _closed_retrain_instruments(
+            *,
+            include_continuous: bool,
+        ) -> list[dict[str, str]]:
+            eligible: list[dict[str, str]] = []
+            for instrument in pipeline.instruments:
+                exchange = str(instrument.get("exchange") or "")
+                symbol = str(instrument.get("symbol") or "")
+                if not exchange or not symbol:
+                    continue
+                try:
+                    schedule = time_scheduler.get_schedule(exchange)
+                except Exception:  # noqa: BLE001 - an unknown calendar must fail closed
+                    logger.exception(
+                        "Signal retraining calendar lookup failed for %s:%s",
+                        exchange,
+                        symbol,
+                    )
+                    continue
+                if schedule is None:
+                    logger.warning(
+                        "Signal retraining skipped unknown market calendar %s:%s",
+                        exchange,
+                        symbol,
+                    )
+                    continue
+                if schedule.is_24x7:
+                    if include_continuous:
+                        eligible.append(dict(instrument))
+                    continue
+                try:
+                    is_open = bool(
+                        time_scheduler.is_market_open(exchange, symbol=symbol)
+                    )
+                except Exception:  # noqa: BLE001 - a calendar failure must fail closed
+                    logger.exception(
+                        "Signal retraining market-hours lookup failed for %s:%s",
+                        exchange,
+                        symbol,
+                    )
+                    continue
+                if not is_open:
+                    eligible.append(dict(instrument))
+            return eligible
+
+        def _run_signal_retrain(*, include_continuous: bool = False) -> list[Any]:
             try:
-                return retrainer.run_all()
+                return retrainer.run_all(
+                    instruments=_closed_retrain_instruments(
+                        include_continuous=include_continuous
+                    )
+                )
             except Exception as exc:  # noqa: BLE001 - scheduler and app must remain available
                 logger.warning("Scheduled signal retraining failed: %s", exc)
                 return []
+
+        def _run_late_signal_retrain() -> list[Any]:
+            return _run_signal_retrain(include_continuous=True)
 
         cron.register(
             "ml_signal_retrain",
@@ -1618,12 +1672,27 @@ def _wire_ml_signal_runtime(
                 "timezone": "Asia/Kolkata",
             },
         )
+        cron.register(
+            "ml_signal_retrain_late",
+            handler=_run_late_signal_retrain,
+            description="Retrain late-closing and continuous-market signal models",
+            trigger_type="cron",
+            trigger_args={
+                "hour": 23,
+                "minute": 59,
+                "timezone": "Asia/Kolkata",
+            },
+        )
     except Exception as exc:  # noqa: BLE001 - optional ML runtime must not prevent app boot
         logger.warning("Scheduled signal retraining not wired: %s", exc)
     else:
         app.config["ML_SIGNAL_RETRAIN_CONFIG"] = retrain_config
         app.config["ML_SIGNAL_RETRAINER"] = retrainer
         app.config["ML_SIGNAL_RETRAIN_JOB"] = "ml_signal_retrain"
+        app.config["ML_SIGNAL_RETRAIN_JOBS"] = (
+            "ml_signal_retrain",
+            "ml_signal_retrain_late",
+        )
         app.config["ML_SIGNAL_RETRAIN_CANCEL_EVENT"] = retrain_cancel_event
     return True
 

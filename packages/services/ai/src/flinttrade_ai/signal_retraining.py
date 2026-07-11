@@ -636,17 +636,25 @@ class SignalRetrainer:
         self._record(result)
         return result
 
-    def run_all(self) -> list[RetrainResult]:
+    def run_all(
+        self,
+        *,
+        instruments: list[dict[str, str]] | None = None,
+    ) -> list[RetrainResult]:
         """Retrain every pipeline instrument, continuing after any failure."""
         results: list[RetrainResult] = []
         if self._is_cancelled():
             return results
-        instruments = (
-            self._instrument_provider()
-            if self._instrument_provider is not None
-            else [dict(instrument) for instrument in self.instruments]
+        selected_instruments = (
+            [dict(instrument) for instrument in instruments]
+            if instruments is not None
+            else (
+                self._instrument_provider()
+                if self._instrument_provider is not None
+                else [dict(instrument) for instrument in self.instruments]
+            )
         )
-        for instrument in instruments:
+        for instrument in selected_instruments:
             if self._is_cancelled():
                 break
             symbol = str(instrument.get("symbol", ""))

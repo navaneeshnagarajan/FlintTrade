@@ -175,7 +175,9 @@ def test_scheduled_pipeline_skips_each_closed_exchange_independently() -> None:
     pipeline.fetch_bars = MagicMock(return_value=_bars())
     pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
 
-    results = pipeline.run_cycle(market_is_open=lambda exchange: exchange == "MCX")
+    results = pipeline.run_cycle(
+        market_is_open=lambda exchange, _symbol: exchange == "MCX"
+    )
 
     assert list(results) == ["MCX:GOLDM"]
     pipeline.fetch_bars.assert_called_once_with("GOLDM", "MCX")
@@ -609,7 +611,7 @@ def test_non_default_live_roster_drives_the_installed_ml_job(monkeypatch, tmp_pa
     ml_pipeline.fetch_bars = MagicMock(return_value=_bars())
     ml_pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
 
-    results = make_ml_signal_job(ml_pipeline, lambda _exchange: True)()
+    results = make_ml_signal_job(ml_pipeline, lambda _exchange, _symbol: True)()
 
     assert list(results) == ["NSE:RELIANCE"]
     ml_pipeline.fetch_bars.assert_called_once_with("RELIANCE", "NSE")
@@ -619,20 +621,24 @@ def test_ml_signal_job_runs_only_when_market_is_open() -> None:
     from flinttrade_ai.signal_routes import make_ml_signal_job
 
     ml_pipeline = MagicMock()
-    ml_pipeline.instruments = [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}]
+    ml_pipeline.instruments = [
+        {"symbol": "USDINR29JUL26FUT", "exchange": "CDS"},
+        {"symbol": "EURUSD29JUL26FUT", "exchange": "CDS"},
+    ]
     market_is_open = MagicMock(return_value=False)
     job = make_ml_signal_job(ml_pipeline, market_is_open)
 
     assert job() == {}
     ml_pipeline.run_cycle.assert_not_called()
 
-    market_is_open.return_value = True
-    ml_pipeline.run_cycle.return_value = {"NSE_INDEX:NIFTY": {"signal": "BUY"}}
+    market_is_open.side_effect = lambda _exchange, symbol: symbol.startswith("EURUSD")
+    ml_pipeline.run_cycle.return_value = {"CDS:EURUSD29JUL26FUT": {"signal": "BUY"}}
 
-    assert job() == {"NSE_INDEX:NIFTY": {"signal": "BUY"}}
+    assert job() == {"CDS:EURUSD29JUL26FUT": {"signal": "BUY"}}
     ml_pipeline.run_cycle.assert_called_once()
     predicate = ml_pipeline.run_cycle.call_args.kwargs["market_is_open"]
-    assert predicate("NSE_INDEX") is True
+    assert predicate("CDS", "USDINR29JUL26FUT") is False
+    assert predicate("CDS", "EURUSD29JUL26FUT") is True
 
 
 def test_flask_factory_installs_signal_hub_and_ml_source(monkeypatch, tmp_path) -> None:
@@ -673,7 +679,9 @@ def test_runtime_registers_five_minute_per_exchange_market_hours_ml_job(tmp_path
     app.config["ML_SIGNAL_PIPELINE"] = pipeline
     cron = MagicMock()
     time_scheduler = MagicMock()
-    time_scheduler.is_market_open.side_effect = lambda exchange: exchange == "MCX"
+    time_scheduler.is_market_open.side_effect = (
+        lambda exchange, *, symbol: exchange == "MCX" and symbol == "GOLDM"
+    )
 
     assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
 
@@ -686,13 +694,17 @@ def test_runtime_registers_five_minute_per_exchange_market_hours_ml_job(tmp_path
     handler = call.kwargs["handler"]
     pipeline.run_cycle.return_value = {"MCX:GOLDM": {"signal": "BUY"}}
     assert handler() == {"MCX:GOLDM": {"signal": "BUY"}}
-    assert [call.args[0] for call in time_scheduler.is_market_open.call_args_list] == [
-        "NSE_INDEX",
-        "MCX",
+    assert [call.args for call in time_scheduler.is_market_open.call_args_list] == [
+        ("NSE_INDEX",),
+        ("MCX",),
+    ]
+    assert [call.kwargs for call in time_scheduler.is_market_open.call_args_list] == [
+        {"symbol": "NIFTY"},
+        {"symbol": "GOLDM"},
     ]
     predicate = pipeline.run_cycle.call_args.kwargs["market_is_open"]
-    assert predicate("NSE_INDEX") is False
-    assert predicate("MCX") is True
+    assert predicate("NSE_INDEX", "NIFTY") is False
+    assert predicate("MCX", "GOLDM") is True
 
 
 def test_new_signal_model_names_are_exported() -> None:

@@ -194,27 +194,32 @@ def configure_signal_sources(
 
 def make_ml_signal_job(
     pipeline: SignalPipeline,
-    market_is_open: Callable[[str], bool],
+    market_is_open: Callable[[str, str], bool],
 ) -> Callable[[], dict[str, dict[str, Any]]]:
-    """Build a stable per-exchange market-hours guard for one ML cycle."""
+    """Build a symbol-aware market-hours guard for one ML cycle."""
 
     def run() -> dict[str, dict[str, Any]]:
-        open_exchanges: set[str] = set()
-        checked: set[str] = set()
+        open_instruments: set[tuple[str, str]] = set()
         for instrument in pipeline.instruments:
             exchange = str(instrument.get("exchange") or "")
-            if not exchange or exchange in checked:
+            symbol = str(instrument.get("symbol") or "")
+            if not exchange or not symbol:
                 continue
-            checked.add(exchange)
             try:
-                if market_is_open(exchange):
-                    open_exchanges.add(exchange)
+                if market_is_open(exchange, symbol):
+                    open_instruments.add((exchange, symbol))
             except Exception:  # noqa: BLE001 - an unknown calendar must fail closed
-                logger.exception("Scheduled ML market-hours lookup failed for %s", exchange)
-        if not open_exchanges:
-            logger.debug("Scheduled ML signal cycle skipped: all configured exchanges are closed")
+                logger.exception(
+                    "Scheduled ML market-hours lookup failed for %s:%s",
+                    exchange,
+                    symbol,
+                )
+        if not open_instruments:
+            logger.debug("Scheduled ML signal cycle skipped: all configured instruments are closed")
             return {}
-        return pipeline.run_cycle(market_is_open=open_exchanges.__contains__)
+        return pipeline.run_cycle(
+            market_is_open=lambda exchange, symbol: (exchange, symbol) in open_instruments
+        )
 
     return run
 
