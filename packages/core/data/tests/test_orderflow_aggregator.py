@@ -60,7 +60,7 @@ class TestConstructorValidation:
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
 
         agg = OrderFlowAggregator()
-        assert agg.time_bin_seconds == 300
+        assert agg.time_bin_seconds == 60
         assert agg.tick_size == 0.05
 
 
@@ -203,6 +203,18 @@ class TestGetFootprint:
         bins = agg.get_footprint("NIFTY")
         prices = [b.price_level for b in bins]
         assert prices == sorted(prices)
+
+    def test_get_footprint_returns_only_the_latest_ist_trading_session(self):
+        agg = _make_agg(time_bin_seconds=300, tick_size=50.0)
+        previous_session = _BASE_TS
+        latest_session = _BASE_TS + 24 * 3600
+        agg.add_tick("NIFTY", 24500.0, 900, "SELL", timestamp=previous_session)
+        agg.add_tick("NIFTY", 24500.0, 100, "BUY", timestamp=latest_session)
+
+        bins = agg.get_footprint("NIFTY")
+
+        assert {bucket.timestamp_bin for bucket in bins} == {int(latest_session)}
+        assert sum(bucket.delta for bucket in bins) == 100
 
 
 # ===========================================================================
@@ -490,6 +502,33 @@ class TestFeedMarketTick:
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
         agg.feed_market_tick("NIFTY", 24505.0, 1000, timestamp=self._TS + 1)  # no trade
         assert agg.get_footprint("NIFTY") == []
+
+    def test_cumulative_volume_decrease_rebaselines_and_clears_stale_side(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 99.0, 1100, timestamp=self._TS + 1)  # establish SELL
+        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 300)  # feed reset
+        agg.feed_market_tick("NIFTY", 99.0, 150, timestamp=self._TS + 301)  # flat, fresh default BUY
+
+        latest_bin = max(bucket.timestamp_bin for bucket in agg.get_footprint("NIFTY"))
+        latest = [bucket for bucket in agg.get_footprint("NIFTY") if bucket.timestamp_bin == latest_bin]
+
+        assert sum(bucket.buy_volume for bucket in latest) == 50
+        assert sum(bucket.sell_volume for bucket in latest) == 0
+
+    def test_negative_cumulative_volume_clears_baseline_and_stale_side(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 99.0, 1100, timestamp=self._TS + 1)  # establish SELL
+        agg.feed_market_tick("NIFTY", 99.0, -1, timestamp=self._TS + 300)
+        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 301)  # safe baseline only
+        agg.feed_market_tick("NIFTY", 99.0, 125, timestamp=self._TS + 302)  # flat, fresh default BUY
+
+        latest_bin = max(bucket.timestamp_bin for bucket in agg.get_footprint("NIFTY"))
+        latest = [bucket for bucket in agg.get_footprint("NIFTY") if bucket.timestamp_bin == latest_bin]
+
+        assert sum(bucket.buy_volume for bucket in latest) == 25
+        assert sum(bucket.sell_volume for bucket in latest) == 0
 
     def test_exchange_qualified_streams_keep_baselines_sides_and_buckets_isolated(self):
         agg = self._agg()

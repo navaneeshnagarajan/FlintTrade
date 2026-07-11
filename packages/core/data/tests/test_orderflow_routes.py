@@ -151,6 +151,102 @@ def test_orderflow_live_reports_real_bin_width_not_requested(app):
     assert data["requested_interval"] == 60  # the request is echoed separately
 
 
+def test_orderflow_live_reports_unrepresentable_interval_and_tick_size_honestly(app):
+    """Finer requested dimensions cannot be reconstructed from coarser live bins."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    bucket = SimpleNamespace(
+        timestamp_bin=1_700_000_000,
+        price_level=100.0,
+        buy_volume=5,
+        sell_volume=3,
+        delta=2,
+    )
+    aggregator = MagicMock()
+    aggregator.time_bin_seconds = 300
+    aggregator.tick_size = 0.05
+    aggregator.get_footprint.return_value = [bucket]
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&interval=60&tick_size=0.01")
+
+    data = response.get_json()["data"]
+    assert data["is_live"] is True
+    assert data["interval"] == 300
+    assert data.get("tick_size") == 0.05
+    assert data["requested_interval"] == 60
+    assert data.get("requested_tick_size") == 0.01
+    assert data.get("source_interval") == 300
+    assert data.get("source_tick_size") == 0.05
+
+
+def test_orderflow_live_coarsens_exact_interval_multiple_without_losing_volume(app):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    source_start = 1_742_870_700
+    aggregator = MagicMock()
+    aggregator.time_bin_seconds = 300
+    aggregator.tick_size = 0.05
+    aggregator.get_footprint.return_value = [
+        SimpleNamespace(
+            timestamp_bin=source_start + offset,
+            price_level=100.0,
+            buy_volume=buy,
+            sell_volume=sell,
+            delta=buy - sell,
+        )
+        for offset, buy, sell in ((0, 10, 1), (300, 20, 2), (600, 30, 3))
+    ]
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&interval=900&bins=2")
+
+    data = response.get_json()["data"]
+    assert data["is_live"] is True
+    assert data["interval"] == 900
+    assert data.get("source_interval") == 300
+    assert len(data["buckets"]) == 1
+    assert data["buckets"][0]["total_volume"] == 66
+    assert data["buckets"][0]["delta"] == 54
+    aggregator.get_footprint.assert_called_once_with("NIFTY", n_bins=6, exchange="NFO")
+
+
+def test_orderflow_live_coarsens_exact_tick_size_multiple_without_losing_volume(app):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    aggregator = MagicMock()
+    aggregator.time_bin_seconds = 300
+    aggregator.tick_size = 0.5
+    aggregator.get_footprint.return_value = [
+        SimpleNamespace(
+            timestamp_bin=1_700_000_000,
+            price_level=price,
+            buy_volume=buy,
+            sell_volume=sell,
+            delta=buy - sell,
+        )
+        for price, buy, sell in ((100.0, 10, 2), (100.5, 20, 3))
+    ]
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&tick_size=1.0")
+
+    data = response.get_json()["data"]
+    assert data["is_live"] is True
+    assert data.get("tick_size") == 1.0
+    assert data.get("source_tick_size") == 0.5
+    assert data.get("requested_tick_size") == 1.0
+    assert len(data["buckets"][0]["cells"]) == 1
+    assert data["buckets"][0]["total_volume"] == 35
+    assert data["buckets"][0]["delta"] == 25
+
+
 def test_orderflow_synthetic_reports_requested_interval(app):
     """The synthetic fallback genuinely honours the requested interval."""
     with app.test_client() as c:

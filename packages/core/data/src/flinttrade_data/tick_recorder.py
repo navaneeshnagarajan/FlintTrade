@@ -110,6 +110,28 @@ def _bigint_or_none(value: Any) -> int | None:
     return number if _BIGINT_MIN <= number <= _BIGINT_MAX else None
 
 
+def _canonical_identity(exchange: Any, symbol: Any) -> tuple[str, str] | None:
+    """Return one unambiguous canonical subscription identity."""
+    if not isinstance(exchange, str) or not isinstance(symbol, str):
+        return None
+    canonical_exchange = exchange.strip().upper()
+    canonical_symbol = symbol.strip().upper()
+    if not canonical_exchange or not canonical_symbol or ":" in canonical_exchange or ":" in canonical_symbol:
+        return None
+    return canonical_exchange, canonical_symbol
+
+
+def _canonical_instrument(instrument: Any) -> dict[str, str]:
+    """Validate and canonicalise one recorder watchlist entry."""
+    if not isinstance(instrument, dict):
+        raise ValueError("Instrument must be a mapping with exchange and symbol")
+    identity = _canonical_identity(instrument.get("exchange"), instrument.get("symbol"))
+    if identity is None:
+        raise ValueError("Instrument exchange and symbol must be non-empty strings without ':'")
+    exchange, symbol = identity
+    return {"exchange": exchange, "symbol": symbol}
+
+
 class _ReconnectRequired(RuntimeError):
     """Internal marker for a recoverable recorder connection failure."""
 
@@ -145,6 +167,13 @@ class TickRecorder:
         ltp_sink: LtpSink | None = None,
         auth_response_timeout: float = 10.0,
     ) -> None:
+        try:
+            normalised_flush_interval = float(flush_interval)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("flush_interval must be a finite positive number") from exc
+        if not math.isfinite(normalised_flush_interval) or normalised_flush_interval <= 0:
+            raise ValueError("flush_interval must be a finite positive number")
+
         self._storage = storage
         self._state_lock = threading.RLock()
         self._subscription_lock = threading.RLock()
@@ -153,7 +182,7 @@ class TickRecorder:
         self._orderflow = orderflow_aggregator
         self._ws_url = ws_url or _DEFAULT_WS_URL
         self._batch_size = batch_size
-        self._flush_interval = flush_interval
+        self._flush_interval = normalised_flush_interval
         self._reconnect_delay = reconnect_delay
         self._max_reconnect_delay = max_reconnect_delay
         # Serialises access to the (single) DuckDB connection this recorder shares
@@ -176,6 +205,7 @@ class TickRecorder:
             MODE_QUOTE: [],
             MODE_DEPTH: [],
         }
+        self._allowed_identities: set[tuple[str, str]] = set()
 
         self._buffer: list[tuple] = []
         self._running = False
@@ -271,9 +301,11 @@ class TickRecorder:
         with self._subscription_lock:
             if mode not in self._subscriptions:
                 raise ValueError(f"Invalid mode: {mode}. Use {list(_MODE_LABELS)}")
-            for inst in instruments:
+            canonical_instruments = [_canonical_instrument(instrument) for instrument in instruments]
+            for inst in canonical_instruments:
                 if inst not in self._subscriptions[mode]:
-                    self._subscriptions[mode].append(dict(inst))
+                    self._subscriptions[mode].append(inst)
+            self._refresh_allowed_identities_locked()
 
     def remove_symbols(
         self,
@@ -284,11 +316,13 @@ class TickRecorder:
         with self._subscription_lock:
             if mode not in self._subscriptions:
                 raise ValueError(f"Invalid mode: {mode}. Use {list(_MODE_LABELS)}")
-            for inst in instruments:
+            canonical_instruments = [_canonical_instrument(instrument) for instrument in instruments]
+            for inst in canonical_instruments:
                 try:
                     self._subscriptions[mode].remove(inst)
                 except ValueError:
                     pass
+            self._refresh_allowed_identities_locked()
 
     def get_watchlist(self) -> dict[str, list[dict[str, str]]]:
         """Return current subscription watchlist by mode."""
@@ -303,8 +337,21 @@ class TickRecorder:
         with self._subscription_lock:
             if set(watchlist) != set(self._subscriptions):
                 raise ValueError("Watchlist must contain ltp, quote and depth modes")
-            for mode in self._subscriptions:
-                self._subscriptions[mode] = [dict(instrument) for instrument in watchlist[mode]]
+            canonical_watchlist = {
+                mode: [_canonical_instrument(instrument) for instrument in watchlist[mode]]
+                for mode in self._subscriptions
+            }
+            self._subscriptions = canonical_watchlist
+            self._refresh_allowed_identities_locked()
+
+    def _refresh_allowed_identities_locked(self) -> None:
+        """Rebuild the union allowlist while ``_subscription_lock`` is held."""
+        self._allowed_identities = {
+            identity
+            for instruments in self._subscriptions.values()
+            for instrument in instruments
+            if (identity := _canonical_identity(instrument.get("exchange"), instrument.get("symbol"))) is not None
+        }
 
     # ------------------------------------------------------------------
     # WebSocket loop with auto-reconnect
@@ -318,6 +365,7 @@ class TickRecorder:
             self._reconfigure_event = asyncio.Event()
             self._loop = asyncio.get_running_loop()
         delay = self._reconnect_delay
+        flush_task = asyncio.create_task(self._flush_on_interval())
 
         try:
             while self._running:
@@ -376,6 +424,8 @@ class TickRecorder:
                     continue
                 delay = min(delay * 2, self._max_reconnect_delay)
         finally:
+            flush_task.cancel()
+            await asyncio.gather(flush_task, return_exceptions=True)
             with self._state_lock:
                 self._connected = False
                 self._running = False
@@ -549,8 +599,6 @@ class TickRecorder:
 
     async def _consume(self, ws: Any) -> None:
         """Read messages until disconnected or stopped."""
-        last_flush = asyncio.get_event_loop().time()
-
         async for raw in ws:
             if not self._running:
                 break
@@ -573,11 +621,8 @@ class TickRecorder:
             if self._process_tick(data):
                 raise _ReconnectRequired()
 
-            # Periodic flush
-            now = asyncio.get_event_loop().time()
-            if self.pending_tick_count >= self._batch_size or (now - last_flush) >= self._flush_interval:
-                if self._flush():
-                    last_flush = now
+            if self.pending_tick_count >= self._batch_size:
+                self._flush()
 
     def _process_tick(self, data: dict[str, Any]) -> bool:
         """Parse a WebSocket message into a tick tuple and buffer it."""
@@ -585,14 +630,24 @@ class TickRecorder:
         if handled:
             return reconnect
 
-        symbol = data.get("symbol", "")
-        exchange = data.get("exchange", "")
-        if not symbol or not exchange:
+        identity = _canonical_identity(data.get("exchange"), data.get("symbol"))
+        if identity is None:
             return False
+
+        exchange, symbol = identity
+        with self._subscription_lock:
+            if identity not in self._allowed_identities:
+                return False
+            return self._process_allowed_tick(data, exchange=exchange, symbol=symbol)
+
+    def _process_allowed_tick(self, data: dict[str, Any], *, exchange: str, symbol: str) -> bool:
+        """Buffer and dispatch one canonical frame admitted by the allowlist."""
 
         payload = data.get("data") if isinstance(data.get("data"), dict) else data
         ts = datetime.now(timezone.utc)
         mode = self._detect_mode(payload, data.get("mode"))
+        cumulative_volume = _bigint_or_none(payload.get("volume"))
+        persisted_volume = cumulative_volume if cumulative_volume is None or cumulative_volume >= 0 else None
 
         depth_json = None
         if "depth" in payload:
@@ -610,7 +665,7 @@ class TickRecorder:
             _finite_float_or_none(payload.get("high")),
             _finite_float_or_none(payload.get("low")),
             _finite_float_or_none(payload.get("close")),
-            _bigint_or_none(payload.get("volume")),
+            persisted_volume,
             _finite_float_or_none(payload.get("bid")),
             _finite_float_or_none(payload.get("ask")),
             _bigint_or_none(payload.get("oi")),
@@ -630,15 +685,14 @@ class TickRecorder:
         # sharpen the aggressor classification when present.
         if self._orderflow is not None:
             ltp = payload.get("ltp")
-            volume = payload.get("volume")
-            if ltp is not None and volume is not None:
+            if ltp is not None and cumulative_volume is not None:
                 bid = payload.get("bid")
                 ask = payload.get("ask")
                 try:
                     self._orderflow.feed_market_tick(
                         symbol,
                         float(ltp),
-                        int(volume),
+                        cumulative_volume,
                         exchange=exchange,
                         bid=float(bid) if bid is not None else None,
                         ask=float(ask) if ask is not None else None,
@@ -800,6 +854,21 @@ class TickRecorder:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _flush_on_interval(self) -> None:
+        """Flush buffered tails independently of socket traffic and reconnects."""
+        while True:
+            with self._state_lock:
+                stop_event = self._stop_event
+                running = self._running
+            if not running or stop_event is None:
+                return
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=self._flush_interval)
+            except TimeoutError:
+                self._flush()
+                continue
+            return
 
     def _flush(self, *, force: bool = False) -> bool:
         """Write buffered ticks to DuckDB.

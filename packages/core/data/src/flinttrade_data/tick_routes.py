@@ -22,9 +22,12 @@ honest "not recording" rather than empty-success.
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
+
+from .tick_recorder import _canonical_instrument
 
 logger = logging.getLogger("flinttrade.data.tick_routes")
 
@@ -159,9 +162,9 @@ def query_ticks() -> Any:
     try:
         if lock is not None:
             with lock:
-                rows = storage.get_ticks(symbol, exchange, start, end)
+                rows = storage.get_ticks(symbol, exchange, start, end, limit=limit + 1)
         else:
-            rows = storage.get_ticks(symbol, exchange, start, end)
+            rows = storage.get_ticks(symbol, exchange, start, end, limit=limit + 1)
     except Exception as exc:
         logger.warning("Tick query failed for %s:%s %s..%s: %s", exchange, symbol, start, end, exc)
         return jsonify({"status": "error", "message": "Tick query failed"}), 500
@@ -205,36 +208,36 @@ def update_watchlist() -> Any:
     lock, atomically synchronises the signal allowlist, then requests an
     immediate reconnect so the subscription change can take effect.
     """
-    recorder = _recorder()
-    if recorder is None:
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "request body must be a JSON object"}), 400
+
+    action = str(body.get("action", "")).strip().lower()
+    mode = str(body.get("mode", "quote")).strip().lower()
+    raw_instruments = body.get("instruments")
+    if action not in ("add", "remove"):
         return jsonify(
             {
                 "status": "error",
-                "message": "Tick capture is not enabled.",
+                "message": "action must be add or remove",
             }
-        ), 409
-
-    body = request.get_json(silent=True) or {}
-    action = str(body.get("action", "")).strip().lower()
-    mode = str(body.get("mode", "quote")).strip().lower()
-    raw_instruments = body.get("instruments") or []
+        ), 400
+    if not isinstance(raw_instruments, list) or not raw_instruments:
+        return jsonify({"status": "error", "message": "instruments must be a non-empty list"}), 400
 
     instruments: list[dict[str, str]] = []
     for inst in raw_instruments:
         if not isinstance(inst, dict):
-            continue
-        symbol = str(inst.get("symbol", "")).strip().upper()
-        exchange = str(inst.get("exchange", "")).strip().upper()
-        if symbol and exchange:
-            instruments.append({"exchange": exchange, "symbol": symbol})
-
-    if action not in ("add", "remove") or not instruments:
-        return jsonify(
-            {
-                "status": "error",
-                "message": "action must be add|remove with a non-empty instruments list",
-            }
-        ), 400
+            return jsonify({"status": "error", "message": "each instrument must be a JSON object"}), 400
+        try:
+            instruments.append(_canonical_instrument(inst))
+        except ValueError:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "instrument exchange and symbol must be non-empty strings without ':'",
+                }
+            ), 400
 
     def qualified_identities(watchlist: dict[str, list[dict[str, str]]]) -> list[str]:
         return sorted(
@@ -245,84 +248,96 @@ def update_watchlist() -> Any:
             }
         )
 
-    subscription_lock = getattr(recorder, "subscription_lock", None)
-    replace_watchlist = getattr(recorder, "replace_watchlist", None)
-    if subscription_lock is None or not callable(replace_watchlist):
-        return jsonify({"status": "error", "message": "Recorder watchlist control is unavailable."}), 503
-
-    with subscription_lock:
-        previous_watchlist = recorder.get_watchlist()
-        if mode not in previous_watchlist:
+    lifecycle_lock = current_app.config.get("TICK_CAPTURE_LIFECYCLE_LOCK")
+    lifecycle_context: Any = lifecycle_lock if hasattr(lifecycle_lock, "__enter__") else nullcontext()
+    with lifecycle_context:
+        recorder = _recorder()
+        if recorder is None:
             return jsonify(
                 {
                     "status": "error",
-                    "message": "mode must be one of ltp, quote or depth",
+                    "message": "Tick capture is not enabled.",
                 }
-            ), 400
+            ), 409
 
-        try:
-            if action == "add":
-                recorder.add_symbols(instruments, mode=mode)
-            else:
-                recorder.remove_symbols(instruments, mode=mode)
-        except Exception as exc:  # noqa: BLE001 - restore any partial recorder mutation
-            logger.warning("Recorder watchlist update failed (%s)", type(exc).__name__)
-            replace_watchlist(previous_watchlist)
-            return jsonify({"status": "error", "message": "Recorder watchlist update failed."}), 500
+        subscription_lock = getattr(recorder, "subscription_lock", None)
+        replace_watchlist = getattr(recorder, "replace_watchlist", None)
+        if subscription_lock is None or not callable(replace_watchlist):
+            return jsonify({"status": "error", "message": "Recorder watchlist control is unavailable."}), 503
 
-        updated_watchlist = recorder.get_watchlist()
-        if updated_watchlist == previous_watchlist:
-            return jsonify(
-                {
-                    "status": "success",
-                    "data": {
-                        "watchlist": updated_watchlist,
-                        "changed": False,
-                        "reconnect_requested": False,
-                        "applies_on": "unchanged",
-                    },
-                }
-            )
+        with subscription_lock:
+            previous_watchlist = recorder.get_watchlist()
+            if mode not in previous_watchlist:
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": "mode must be one of ltp, quote or depth",
+                    }
+                ), 400
 
-        signal_hub = current_app.config.get("SIGNAL_HUB")
-        update_config = getattr(signal_hub, "update_config", None)
-        if not callable(update_config):
-            replace_watchlist(previous_watchlist)
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Signal hub is unavailable; watchlist was not changed.",
-                }
-            ), 503
-
-        try:
-            update_config(instruments=qualified_identities(updated_watchlist))
-        except Exception as exc:  # noqa: BLE001 - atomic hub update leaves its prior state intact
-            logger.warning("Signal allowlist update failed (%s)", type(exc).__name__)
-            replace_watchlist(previous_watchlist)
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Signal allowlist update failed; watchlist was not changed.",
-                }
-            ), 500
-
-        reconnect_requested = False
-        request_reconnect = getattr(recorder, "request_reconnect", None)
-        if callable(request_reconnect):
             try:
-                reconnect_requested = bool(request_reconnect())
-            except Exception as exc:  # noqa: BLE001 - mutation succeeded; report deferred application
-                logger.warning("Recorder reconnect request failed (%s)", type(exc).__name__)
+                if action == "add":
+                    recorder.add_symbols(instruments, mode=mode)
+                else:
+                    recorder.remove_symbols(instruments, mode=mode)
+            except Exception as exc:  # noqa: BLE001 - restore any partial recorder mutation
+                logger.warning("Recorder watchlist update failed (%s)", type(exc).__name__)
+                replace_watchlist(previous_watchlist)
+                return jsonify({"status": "error", "message": "Recorder watchlist update failed."}), 500
 
-    return jsonify(
-        {
-            "status": "success",
-            "data": {
-                "watchlist": updated_watchlist,
-                "changed": True,
-                "reconnect_requested": reconnect_requested,
-                "applies_on": "reconnect requested" if reconnect_requested else "next WebSocket reconnect",
-            },
-        }
-    )
+            updated_watchlist = recorder.get_watchlist()
+            if updated_watchlist == previous_watchlist:
+                return jsonify(
+                    {
+                        "status": "success",
+                        "data": {
+                            "watchlist": updated_watchlist,
+                            "changed": False,
+                            "reconnect_requested": False,
+                            "applies_on": "unchanged",
+                        },
+                    }
+                )
+
+            signal_hub = current_app.config.get("SIGNAL_HUB")
+            update_config = getattr(signal_hub, "update_config", None)
+            if not callable(update_config):
+                replace_watchlist(previous_watchlist)
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": "Signal hub is unavailable; watchlist was not changed.",
+                    }
+                ), 503
+
+            try:
+                update_config(instruments=qualified_identities(updated_watchlist))
+            except Exception as exc:  # noqa: BLE001 - atomic hub update leaves its prior state intact
+                logger.warning("Signal allowlist update failed (%s)", type(exc).__name__)
+                replace_watchlist(previous_watchlist)
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": "Signal allowlist update failed; watchlist was not changed.",
+                    }
+                ), 500
+
+            reconnect_requested = False
+            request_reconnect = getattr(recorder, "request_reconnect", None)
+            if callable(request_reconnect):
+                try:
+                    reconnect_requested = bool(request_reconnect())
+                except Exception as exc:  # noqa: BLE001 - mutation succeeded; report deferred application
+                    logger.warning("Recorder reconnect request failed (%s)", type(exc).__name__)
+
+        return jsonify(
+            {
+                "status": "success",
+                "data": {
+                    "watchlist": updated_watchlist,
+                    "changed": True,
+                    "reconnect_requested": reconnect_requested,
+                    "applies_on": "reconnect requested" if reconnect_requested else "next WebSocket reconnect",
+                },
+            }
+        )

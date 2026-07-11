@@ -23,10 +23,15 @@ endpoint falls back to the deterministic synthetic generator and returns
 from __future__ import annotations
 
 import logging
+import math
 import time
+from collections import defaultdict
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+
+from .orderflow_aggregator import OrderFlowAggregator
 
 logger = logging.getLogger("flinttrade.data.orderflow_routes")
 
@@ -146,35 +151,87 @@ def _generate_synthetic_buckets(
 # Live aggregator → bucket format converter
 # ---------------------------------------------------------------------------
 
+def _exact_multiple_ratio(requested: int | float, source: int | float) -> int | None:
+    """Return the positive integer ratio when ``requested`` exactly represents ``source``."""
+    try:
+        requested_decimal = Decimal(str(requested))
+        source_decimal = Decimal(str(source))
+        if source_decimal <= 0 or requested_decimal < source_decimal:
+            return None
+        ratio = requested_decimal / source_decimal
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        return None
+    integral_ratio = ratio.to_integral_value()
+    return int(integral_ratio) if ratio == integral_ratio else None
+
+
+def _source_interval(aggregator: Any, fallback: int) -> int:
+    """Read a real positive source interval without trusting mock-like attributes."""
+    value = getattr(aggregator, "time_bin_seconds", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return fallback
+    if not math.isfinite(float(value)) or value <= 0 or int(value) != value:
+        return fallback
+    return int(value)
+
+
+def _source_tick_size(aggregator: Any, fallback: float) -> float:
+    """Read a real positive source tick size without trusting mock-like attributes."""
+    value = getattr(aggregator, "tick_size", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return fallback
+    value = float(value)
+    return value if math.isfinite(value) and value > 0 else fallback
+
+
+def _round_to_tick(price: float, tick_size: float) -> float:
+    """Round a source price onto a coarser exact-multiple tick boundary."""
+    price_decimal = Decimal(str(price))
+    tick_decimal = Decimal(str(tick_size))
+    units = (price_decimal / tick_decimal).to_integral_value(rounding=ROUND_HALF_EVEN)
+    return float(units * tick_decimal)
+
+
 def _live_buckets_to_response(
     live_buckets: list[Any],
     symbol: str,
+    *,
+    coarsen_interval: int | None = None,
+    coarsen_tick_size: float | None = None,
 ) -> list[dict[str, Any]]:
     """Convert OrderFlowAggregatorV2 FootprintBucket list to response format.
 
     Groups flat price-level buckets (one per price level per bin) into the
-    nested cells-dict structure that the frontend expects. Buckets are already
-    binned by the aggregator's fixed width (the caller reports that width).
+    nested cells-dict structure that the frontend expects. Exact-multiple
+    interval and tick-size requests may coarsen source rows; colliding cells
+    are merged by summing both sides so no volume is lost.
 
     Args:
         live_buckets: List of FootprintBucket from the aggregator.
         symbol: Symbol (for logging).
+        coarsen_interval: Wider target interval, or ``None`` to retain source bins.
+        coarsen_tick_size: Wider target tick size, or ``None`` to retain source levels.
 
     Returns:
         List of bucket dicts with ``time_label``, ``cells``, ``poc_price``,
         ``total_volume``, and ``delta``.
     """
-    # Group by timestamp bin
-    from collections import defaultdict  # noqa: PLC0415
-
-    groups: dict[int, list[Any]] = defaultdict(list)
-    for b in live_buckets:
-        groups[b.timestamp_bin].append(b)
+    groups: dict[int, dict[float, list[int]]] = defaultdict(dict)
+    for bucket in live_buckets:
+        bin_start = int(bucket.timestamp_bin)
+        if coarsen_interval is not None:
+            bin_start = OrderFlowAggregator.calculate_aligned_time_bin(bin_start, coarsen_interval)
+        price_level = float(bucket.price_level)
+        if coarsen_tick_size is not None:
+            price_level = _round_to_tick(price_level, coarsen_tick_size)
+        cell = groups[bin_start].setdefault(price_level, [0, 0])
+        cell[0] += int(bucket.buy_volume)
+        cell[1] += int(bucket.sell_volume)
 
     result: list[dict[str, Any]] = []
 
-    for bin_start in sorted(groups.keys()):
-        rows = groups[bin_start]
+    for bin_start in sorted(groups):
+        levels = groups[bin_start]
         time_label = time.strftime("%H:%M:%S", time.localtime(bin_start))
         cells: dict[str, dict[str, int]] = {}
         max_vol = -1
@@ -182,18 +239,19 @@ def _live_buckets_to_response(
         total_volume = 0
         delta = 0
 
-        for row in rows:
-            level_str = str(row.price_level)
+        for price_level in sorted(levels):
+            buy_volume, sell_volume = levels[price_level]
+            level_str = str(price_level)
             cells[level_str] = {
-                "buy_volume": row.buy_volume,
-                "sell_volume": row.sell_volume,
+                "buy_volume": buy_volume,
+                "sell_volume": sell_volume,
             }
-            total = row.buy_volume + row.sell_volume
+            total = buy_volume + sell_volume
             total_volume += total
-            delta += row.delta
+            delta += buy_volume - sell_volume
             if total > max_vol:
                 max_vol = total
-                poc_price = row.price_level
+                poc_price = price_level
 
         result.append({
             "time_label": time_label,
@@ -267,15 +325,29 @@ def orderflow_endpoint() -> tuple[Any, int]:
     # width, so we report ITS real width rather than echoing the request — a
     # 1m/15m selection must not relabel fixed 5-minute footprint bins.
     effective_interval = interval
+    effective_tick_size = tick_size
+    source_interval = interval
+    source_tick_size = tick_size
 
     # Try live aggregator first
     try:
         aggregator = _get_live_aggregator()
         if aggregator is not None:
-            live_data = aggregator.get_footprint(symbol_upper, n_bins=bins, exchange=exchange)
+            source_interval = _source_interval(aggregator, interval)
+            source_tick_size = _source_tick_size(aggregator, tick_size)
+            interval_ratio = _exact_multiple_ratio(interval, source_interval)
+            source_bin_count = bins * interval_ratio if interval_ratio is not None else bins
+            live_data = aggregator.get_footprint(symbol_upper, n_bins=source_bin_count, exchange=exchange)
             if live_data:
-                buckets = _live_buckets_to_response(live_data, symbol_upper)
-                effective_interval = int(getattr(aggregator, "time_bin_seconds", interval))
+                tick_size_ratio = _exact_multiple_ratio(tick_size, source_tick_size)
+                effective_interval = interval if interval_ratio is not None else source_interval
+                effective_tick_size = tick_size if tick_size_ratio is not None else source_tick_size
+                buckets = _live_buckets_to_response(
+                    live_data,
+                    symbol_upper,
+                    coarsen_interval=effective_interval if interval_ratio and interval_ratio > 1 else None,
+                    coarsen_tick_size=effective_tick_size if tick_size_ratio and tick_size_ratio > 1 else None,
+                )[-bins:]
                 is_live = True
     except Exception as exc:
         logger.debug("Live aggregator unavailable for %s: %s", symbol_upper, exc)
@@ -290,6 +362,9 @@ def orderflow_endpoint() -> tuple[Any, int]:
         )
         is_live = False
         effective_interval = interval
+        effective_tick_size = tick_size
+        source_interval = interval
+        source_tick_size = tick_size
 
     return jsonify({
         "status": "success",
@@ -298,7 +373,11 @@ def orderflow_endpoint() -> tuple[Any, int]:
             "symbol": symbol_upper,
             "exchange": exchange,
             "interval": effective_interval,
+            "tick_size": effective_tick_size,
             "requested_interval": interval,
+            "requested_tick_size": tick_size,
+            "source_interval": source_interval,
+            "source_tick_size": source_tick_size,
             "is_live": is_live,
         },
     }), 200

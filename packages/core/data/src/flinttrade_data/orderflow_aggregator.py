@@ -20,7 +20,7 @@ Usage::
 
     from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
 
-    agg = OrderFlowAggregator(time_bin_seconds=300, tick_size=0.05)
+    agg = OrderFlowAggregator(time_bin_seconds=60, tick_size=0.05)
 
     # Feed ticks (e.g. from a trade stream)
     agg.add_tick("NIFTY", 24500.0, 150, "BUY",  timestamp=1743055500.0)
@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, time as dt_time
+from datetime import date, datetime, time as dt_time
 from threading import RLock
 from typing import Literal
 
@@ -76,6 +76,13 @@ _InstrumentIdentity = tuple[str, str]
 def _instrument_identity(symbol: str, exchange: str) -> _InstrumentIdentity:
     """Return the canonical identity for an instrument stream."""
     return exchange.strip().upper(), symbol.strip().upper()
+
+
+def _ist_session_date(timestamp: int) -> date:
+    """Return the IST calendar date represented by one bin timestamp."""
+    if _HAS_TZ and _IST is not None:
+        return datetime.fromtimestamp(timestamp, tz=_IST).date()  # type: ignore[arg-type]
+    return datetime.fromtimestamp(timestamp).date()
 
 
 @dataclass
@@ -172,8 +179,9 @@ class OrderFlowAggregator:
     for all instruments in a trading session.
 
     Args:
-        time_bin_seconds: Width of each time bin in seconds. Default ``300``
-            (5 minutes).
+        time_bin_seconds: Width of each time bin in seconds. Default ``60``
+            (1 minute), allowing exact aggregation to 3-minute and 5-minute
+            response intervals without fabricating finer data.
         tick_size: Price rounding granularity. Default ``0.05`` (suitable for
             USDINR and many equity instruments). Use ``50.0`` for NIFTY
             futures, ``0.25`` for Bank NIFTY options, etc.
@@ -190,7 +198,7 @@ class OrderFlowAggregator:
 
     def __init__(
         self,
-        time_bin_seconds: int = 300,
+        time_bin_seconds: int = 60,
         tick_size: float = 0.05,
     ) -> None:
         if time_bin_seconds <= 0:
@@ -326,12 +334,23 @@ class OrderFlowAggregator:
         """
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
+            current_volume = int(cumulative_volume)
+            if current_volume < 0:
+                self._last_tick.pop(identity, None)
+                self._last_side.pop(identity, None)
+                return
+
             prev = self._last_tick.get(identity)
-            self._last_tick[identity] = (ltp, int(cumulative_volume))
             if prev is None:
+                self._last_tick[identity] = (ltp, current_volume)
                 return
             prev_ltp, prev_vol = prev
-            inc_volume = max(0, int(cumulative_volume) - prev_vol)
+            self._last_tick[identity] = (ltp, current_volume)
+            if current_volume < prev_vol:
+                self._last_side.pop(identity, None)
+                return
+
+            inc_volume = current_volume - prev_vol
             if inc_volume <= 0:
                 return
             side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
@@ -371,7 +390,9 @@ class OrderFlowAggregator:
             # Select the n_bins most recent bin keys and materialise a stable
             # view before another thread can mutate the nested dictionaries.
             all_bins = sorted(symbol_state)
-            recent_bins = all_bins[-n_bins:] if len(all_bins) > n_bins else all_bins
+            latest_session = _ist_session_date(all_bins[-1])
+            session_bins = [bin_start for bin_start in all_bins if _ist_session_date(bin_start) == latest_session]
+            recent_bins = session_bins[-n_bins:] if len(session_bins) > n_bins else session_bins
 
             result: list[FootprintBucket] = []
             for bin_start in recent_bins:

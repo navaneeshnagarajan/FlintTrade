@@ -275,20 +275,36 @@ class StorageManager:
         exchange: str,
         start_date: str,
         end_date: str,
+        *,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Query ticks by symbol, exchange, and date range (YYYY-MM-DD strings)."""
+        """Query ticks by symbol, exchange, and date range (YYYY-MM-DD strings).
+
+        When ``limit`` is supplied, the query reads only the most recent rows
+        from DuckDB and reverses that bounded result for chronological output.
+        """
         start, end = _ist_date_window(start_date, end_date)
+        params: list[Any] = [symbol, exchange, start, end]
+        order_clause = "ORDER BY ts"
+        if limit is not None:
+            if limit <= 0:
+                return []
+            order_clause = "ORDER BY ts DESC LIMIT ?"
+            params.append(limit)
         result = self.connection.execute(
-            """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
-                      volume, bid, ask, oi, prev_close, depth_json
-               FROM ticks
-               WHERE symbol = ? AND exchange = ?
-                 AND ts >= ? AND ts < ?
-               ORDER BY ts""",
-            [symbol, exchange, start, end],
+            f"""SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
+                       volume, bid, ask, oi, prev_close, depth_json
+                FROM ticks
+                WHERE symbol = ? AND exchange = ?
+                  AND ts >= ? AND ts < ?
+                {order_clause}""",  # noqa: S608 - clause is selected from fixed literals above
+            params,
         )
         columns = [desc[0] for desc in result.description]
-        return [dict(zip(columns, row)) for row in result.fetchall()]
+        rows = result.fetchall()
+        if limit is not None:
+            rows.reverse()
+        return [dict(zip(columns, row)) for row in rows]
 
     def get_ticks_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all ticks for a given date."""

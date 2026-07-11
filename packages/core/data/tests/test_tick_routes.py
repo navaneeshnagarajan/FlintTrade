@@ -122,6 +122,7 @@ def wired(app):
     app.config["TICK_RECORDER"] = recorder
     app.config["TICK_STORAGE"] = storage
     app.config["TICK_STORAGE_LOCK"] = threading.Lock()
+    app.config["TICK_CAPTURE_LIFECYCLE_LOCK"] = threading.RLock()
     app.config["SIGNAL_HUB"] = _FakeSignalHub()
     return recorder
 
@@ -262,6 +263,30 @@ class TestQuery:
         # Most recent rows in the window survive truncation.
         assert data["ticks"][-1]["ltp"] == 24005.0
 
+    def test_limit_is_applied_by_storage_with_one_bounded_truncation_sentinel(self, client, app):
+        class LimitAwareStorage:
+            def __init__(self) -> None:
+                self.requested_limit: int | None = None
+                self.rows = [{"ts": index, "ltp": float(index)} for index in range(5)]
+
+            def get_ticks(self, _symbol, _exchange, _start, _end, *, limit=None):
+                self.requested_limit = limit
+                return self.rows if limit is None else self.rows[-limit:]
+
+        storage = LimitAwareStorage()
+        app.config["TICK_STORAGE"] = storage
+        app.config["TICK_STORAGE_LOCK"] = threading.Lock()
+
+        resp = client.get(
+            "/api/v1/data/ticks?symbol=NIFTY&exchange=NSE_INDEX&start=2026-07-06&end=2026-07-06&limit=2"
+        )
+
+        assert resp.status_code == 200
+        assert storage.requested_limit == 3
+        data = resp.get_json()["data"]
+        assert data["truncated"] is True
+        assert [tick["ltp"] for tick in data["ticks"]] == [3.0, 4.0]
+
 
 class TestWatchlist:
     def test_409_when_capture_disabled(self, client):
@@ -297,6 +322,101 @@ class TestWatchlist:
         )
         data = resp.get_json()["data"]
         assert {"exchange": "NSE", "symbol": "RELIANCE"} not in data["watchlist"]["quote"]
+
+    def test_rejects_non_object_json(self, client, app, wired):
+        app.config["PROPAGATE_EXCEPTIONS"] = False
+
+        resp = client.post("/api/v1/data/ticks/watchlist", json=["not", "an", "object"])
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == "request body must be a JSON object"
+
+    @pytest.mark.parametrize("instruments", [None, {}, "NSE:RELIANCE"])
+    def test_rejects_non_list_instruments(self, client, wired, instruments):
+        resp = client.post(
+            "/api/v1/data/ticks/watchlist",
+            json={"action": "add", "instruments": instruments},
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == "instruments must be a non-empty list"
+
+    def test_rejects_non_object_instrument_entries_without_partial_mutation(self, client, wired):
+        previous = wired.get_watchlist()
+
+        resp = client.post(
+            "/api/v1/data/ticks/watchlist",
+            json={
+                "action": "add",
+                "instruments": [
+                    {"exchange": "NSE", "symbol": "RELIANCE"},
+                    "NSE:TCS",
+                ],
+            },
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == "each instrument must be a JSON object"
+        assert wired.get_watchlist() == previous
+
+    @pytest.mark.parametrize(
+        "instrument",
+        [
+            {"exchange": None, "symbol": "RELIANCE"},
+            {"exchange": 123, "symbol": "RELIANCE"},
+            {"exchange": "   ", "symbol": "RELIANCE"},
+            {"exchange": "N:SE", "symbol": "RELIANCE"},
+            {"exchange": "NSE", "symbol": None},
+            {"exchange": "NSE", "symbol": 123},
+            {"exchange": "NSE", "symbol": "   "},
+            {"exchange": "NSE", "symbol": "REL:IANCE"},
+        ],
+    )
+    def test_rejects_invalid_instrument_identities_without_coercion(self, client, wired, instrument):
+        previous = wired.get_watchlist()
+
+        resp = client.post(
+            "/api/v1/data/ticks/watchlist",
+            json={"action": "add", "instruments": [instrument]},
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == (
+            "instrument exchange and symbol must be non-empty strings without ':'"
+        )
+        assert wired.get_watchlist() == previous
+
+    def test_lifecycle_lock_is_acquired_before_resolving_the_active_recorder(self, client, app, wired):
+        retired = wired
+        active = _FakeRecorder()
+
+        class SwapRecorderOnEnter:
+            entered = False
+
+            def __enter__(self):
+                self.entered = True
+                app.config["TICK_RECORDER"] = active
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+        lifecycle_lock = SwapRecorderOnEnter()
+        app.config["TICK_CAPTURE_LIFECYCLE_LOCK"] = lifecycle_lock
+
+        resp = client.post(
+            "/api/v1/data/ticks/watchlist",
+            json={
+                "action": "add",
+                "instruments": [{"exchange": "NSE", "symbol": "RELIANCE"}],
+            },
+        )
+
+        assert resp.status_code == 200
+        assert lifecycle_lock.entered is True
+        instrument = {"exchange": "NSE", "symbol": "RELIANCE"}
+        assert instrument in active.get_watchlist()["quote"]
+        assert instrument not in retired.get_watchlist()["quote"]
 
     def test_watchlist_update_synchronises_signal_allowlist_and_reconnects(self, client, app, wired):
         class SignalHub:
