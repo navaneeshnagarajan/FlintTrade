@@ -8,21 +8,22 @@
 //!
 //! # Example
 //! ```python
-//! from tick_engine import SpreadBacktest, SpreadConfig, LegConfig, run_spreads_batch
+//! from tick_engine import LegConfig, OptionType, SpreadBacktest, SpreadConfig
 //!
 //! cfg = SpreadConfig(initial_capital=100_000.0, max_loss=5000.0)
-//! cfg.add_leg(LegConfig("CE", strike=19800.0, quantity=-1, lot_size=50))
-//! cfg.add_leg(LegConfig("PE", strike=19800.0, quantity=-1, lot_size=50))
+//! cfg.add_leg(LegConfig(OptionType.Call, strike=19800.0, quantity=-1, lot_size=50))
+//! cfg.add_leg(LegConfig(OptionType.Put, strike=19800.0, quantity=-1, lot_size=50))
 //!
 //! backtest = SpreadBacktest("SHORT_STRADDLE", cfg)
 //!
-//! ts     = [...]  # Unix timestamps (seconds)
-//! call_p = [...]  # call premium series
-//! put_p  = [...]  # put premium series
-//! entries = [False, True, False, ...]
-//! exits   = [False, False, ..., True, ...]
+//! ts = [1, 2]
+//! call_p = [10.0, 8.0]
+//! put_p = [12.0, 9.0]
+//! entries = [True, False]
+//! exits = [False, True]
 //!
 //! result = backtest.run(ts, [call_p, put_p], entries, exits)
+//! assert result.total_trades == 1
 //! ```
 
 use pyo3::exceptions::PyTypeError;
@@ -66,7 +67,9 @@ strict_numeric!(StrictUsize, usize);
 // Option type
 // ---------------------------------------------------------------------------
 
-/// Whether a leg is a call or a put.
+/// Whether a spread leg is a call or a put.
+///
+/// Use `OptionType.Call` or `OptionType.Put` when constructing a `LegConfig`.
 #[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionType {
@@ -82,7 +85,7 @@ pub enum OptionType {
 #[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct LegConfig {
-    /// "CE" or "PE" (case-insensitive).
+    /// `OptionType.Call` or `OptionType.Put`.
     pub option_type: OptionType,
     /// Strike price.
     pub strike: f64,
@@ -106,7 +109,10 @@ impl LegConfig {
 #[pymethods]
 impl LegConfig {
     #[new]
-    #[pyo3(signature = (option_type, strike, quantity, lot_size = StrictUsize(50)))]
+    #[pyo3(
+        signature = (option_type, strike, quantity, lot_size = StrictUsize(50)),
+        text_signature = "(option_type, strike, quantity, lot_size=50)"
+    )]
     fn py_new(
         option_type: OptionType,
         strike: StrictF64,
@@ -210,12 +216,15 @@ impl SpreadConfig {
 #[pymethods]
 impl SpreadConfig {
     #[new]
-    #[pyo3(signature = (
-        initial_capital = StrictF64(100_000.0),
-        fees = StrictF64(0.001),
-        max_loss = None,
-        target_profit = None
-    ))]
+    #[pyo3(
+        signature = (
+            initial_capital = StrictF64(100_000.0),
+            fees = StrictF64(0.001),
+            max_loss = None,
+            target_profit = None
+        ),
+        text_signature = "(initial_capital=100000.0, fees=0.001, max_loss=None, target_profit=None)"
+    )]
     fn py_new(
         initial_capital: StrictF64,
         fees: StrictF64,
@@ -274,9 +283,7 @@ impl LegState {
     /// Long legs (quantity > 0) profit when premiums rise:
     ///   pnl = (+1) * (+75) * 50 = +3750  ← correct profit
     fn unrealised_pnl(&self) -> Result<f64, EngineError> {
-        let change = checked_spread_arithmetic(self.current_premium - self.entry_premium)?;
-        let quantity_adjusted = checked_spread_arithmetic((self.config.quantity as f64) * change)?;
-        checked_spread_arithmetic(quantity_adjusted * (self.config.lot_size as f64))
+        leg_unrealised_pnl(&self.config, self.entry_premium, self.current_premium)
     }
 }
 
@@ -541,22 +548,19 @@ impl SpreadBacktest {
     }
 
     fn entry_fees(&self, legs: &[LegState]) -> Result<f64, EngineError> {
-        legs.iter().try_fold(0.0, |total, leg| {
-            let lot_adjusted =
-                checked_spread_arithmetic(leg.entry_premium.abs() * leg.config.lot_size as f64)?;
-            let fee = checked_spread_arithmetic(lot_adjusted * self.config.fees)?;
-            checked_spread_arithmetic(total + fee)
-        })
+        total_side_fees(
+            &self.config,
+            legs.iter().map(|leg| (&leg.config, leg.entry_premium)),
+        )
     }
 
     fn exit_fees(&self, pos: &SpreadPosition) -> Result<f64, EngineError> {
-        pos.legs.iter().try_fold(0.0, |total, leg| {
-            let lot_adjusted =
-                checked_spread_arithmetic(leg.current_premium.abs() * leg.config.lot_size as f64)?;
-            let fee = checked_spread_arithmetic(lot_adjusted * self.config.fees)?;
-            let round_trip_fee = checked_spread_arithmetic(fee * 2.0)?;
-            checked_spread_arithmetic(total + round_trip_fee)
-        })
+        total_side_fees(
+            &self.config,
+            pos.legs
+                .iter()
+                .map(|leg| (&leg.config, leg.current_premium)),
+        )
     }
 }
 
@@ -574,6 +578,34 @@ fn checked_spread_arithmetic(value: f64) -> Result<f64, EngineError> {
     }
 }
 
+fn leg_unrealised_pnl(
+    leg: &LegConfig,
+    entry_premium: f64,
+    current_premium: f64,
+) -> Result<f64, EngineError> {
+    let change = checked_spread_arithmetic(current_premium - entry_premium)?;
+    let quantity_adjusted = checked_spread_arithmetic((leg.quantity as f64) * change)?;
+    checked_spread_arithmetic(quantity_adjusted * (leg.lot_size as f64))
+}
+
+fn leg_side_fee(config: &SpreadConfig, leg: &LegConfig, premium: f64) -> Result<f64, EngineError> {
+    let quantity_adjusted =
+        checked_spread_arithmetic(premium.abs() * f64::from(leg.quantity.unsigned_abs()))?;
+    let lot_adjusted = checked_spread_arithmetic(quantity_adjusted * leg.lot_size as f64)?;
+    checked_spread_arithmetic(lot_adjusted * config.fees)
+}
+
+fn total_side_fees<'a>(
+    config: &SpreadConfig,
+    legs_and_premiums: impl IntoIterator<Item = (&'a LegConfig, f64)>,
+) -> Result<f64, EngineError> {
+    legs_and_premiums
+        .into_iter()
+        .try_fold(0.0, |total, (leg, premium)| {
+            checked_spread_arithmetic(total + leg_side_fee(config, leg, premium)?)
+        })
+}
+
 fn validate_inputs(
     config: &SpreadConfig,
     timestamps: &[i64],
@@ -583,7 +615,8 @@ fn validate_inputs(
 ) -> Result<(), EngineError> {
     validate_input_structure(config, timestamps, legs_premiums, entries, exits)?;
     validate_premiums_parallel(legs_premiums)?;
-    validate_spread_arithmetic(config, legs_premiums)
+    validate_spread_arithmetic(config, legs_premiums)?;
+    validate_cross_bar_arithmetic(config, legs_premiums, entries, exits)
 }
 
 fn validate_input_structure(
@@ -700,14 +733,16 @@ fn validate_spread_arithmetic(
                 let leg_value = quantity_adjusted * leg.lot_size as f64;
                 net_premium += leg_value;
 
-                let lot_adjusted = premium * leg.lot_size as f64;
+                let absolute_quantity_adjusted = premium * f64::from(leg.quantity.unsigned_abs());
+                let lot_adjusted = absolute_quantity_adjusted * leg.lot_size as f64;
                 let entry_fee = lot_adjusted * config.fees;
                 entry_fees += entry_fee;
-                exit_fees += entry_fee * 2.0;
+                exit_fees += entry_fee;
 
                 if !quantity_adjusted.is_finite()
                     || !leg_value.is_finite()
                     || !net_premium.is_finite()
+                    || !absolute_quantity_adjusted.is_finite()
                     || !lot_adjusted.is_finite()
                     || !entry_fee.is_finite()
                     || !entry_fees.is_finite()
@@ -724,6 +759,124 @@ fn validate_spread_arithmetic(
             "spread arithmetic overflow at premium bar {bar_index}"
         )));
     }
+    Ok(())
+}
+
+fn overflow_at_bar(bar_index: usize) -> EngineError {
+    invalid_spread_input(format!(
+        "spread arithmetic overflow at premium bar {bar_index}"
+    ))
+}
+
+fn preflight_value(value: Result<f64, EngineError>, bar_index: usize) -> Result<f64, EngineError> {
+    value.map_err(|_| overflow_at_bar(bar_index))
+}
+
+fn preflight_position_pnl(
+    config: &SpreadConfig,
+    entry_premiums: &[f64],
+    legs_premiums: &[Vec<f64>],
+    bar_index: usize,
+) -> Result<f64, EngineError> {
+    config
+        .legs
+        .iter()
+        .zip(entry_premiums)
+        .zip(legs_premiums)
+        .try_fold(0.0, |total, ((leg, entry_premium), premiums)| {
+            let leg_pnl = preflight_value(
+                leg_unrealised_pnl(leg, *entry_premium, premiums[bar_index]),
+                bar_index,
+            )?;
+            preflight_value(checked_spread_arithmetic(total + leg_pnl), bar_index)
+        })
+}
+
+fn preflight_side_fees(
+    config: &SpreadConfig,
+    legs_premiums: &[Vec<f64>],
+    bar_index: usize,
+) -> Result<f64, EngineError> {
+    preflight_value(
+        total_side_fees(
+            config,
+            config
+                .legs
+                .iter()
+                .zip(legs_premiums)
+                .map(|(leg, premiums)| (leg, premiums[bar_index])),
+        ),
+        bar_index,
+    )
+}
+
+fn validate_cross_bar_arithmetic(
+    config: &SpreadConfig,
+    legs_premiums: &[Vec<f64>],
+    entries: &[bool],
+    exits: &[bool],
+) -> Result<(), EngineError> {
+    let mut capital = config.initial_capital;
+    let mut prev_equity = capital;
+    let mut entry_premiums: Option<Vec<f64>> = None;
+
+    for bar_index in 0..entries.len() {
+        let unrealised = match entry_premiums.as_deref() {
+            Some(entry) => preflight_position_pnl(config, entry, legs_premiums, bar_index)?,
+            None => 0.0,
+        };
+        let should_exit = entry_premiums.is_some()
+            && (exits[bar_index]
+                || config.max_loss.is_some_and(|limit| unrealised < -limit)
+                || config
+                    .target_profit
+                    .is_some_and(|target| unrealised > target));
+
+        if should_exit {
+            let exit_fees = preflight_side_fees(config, legs_premiums, bar_index)?;
+            let net_pnl =
+                preflight_value(checked_spread_arithmetic(unrealised - exit_fees), bar_index)?;
+            capital = preflight_value(checked_spread_arithmetic(capital + net_pnl), bar_index)?;
+            if prev_equity > 0.0 {
+                preflight_value(checked_spread_arithmetic(net_pnl / prev_equity), bar_index)?;
+            }
+            entry_premiums = None;
+        }
+
+        if entry_premiums.is_none() && entries[bar_index] {
+            let entry_fees = preflight_side_fees(config, legs_premiums, bar_index)?;
+            capital = preflight_value(checked_spread_arithmetic(capital - entry_fees), bar_index)?;
+            entry_premiums = Some(
+                legs_premiums
+                    .iter()
+                    .map(|premiums| premiums[bar_index])
+                    .collect(),
+            );
+        }
+
+        let marked_pnl = match entry_premiums.as_deref() {
+            Some(entry) => preflight_position_pnl(config, entry, legs_premiums, bar_index)?,
+            None => 0.0,
+        };
+        prev_equity = preflight_value(checked_spread_arithmetic(capital + marked_pnl), bar_index)?;
+    }
+
+    if let Some(entry) = entry_premiums.as_deref() {
+        let final_bar = entries.len() - 1;
+        let gross_pnl = preflight_position_pnl(config, entry, legs_premiums, final_bar)?;
+        let exit_fees = preflight_side_fees(config, legs_premiums, final_bar)?;
+        let net_pnl = preflight_value(checked_spread_arithmetic(gross_pnl - exit_fees), final_bar)?;
+        capital = preflight_value(checked_spread_arithmetic(capital + net_pnl), final_bar)?;
+        preflight_value(
+            checked_spread_arithmetic(net_pnl / config.initial_capital),
+            final_bar,
+        )?;
+    }
+
+    preflight_value(
+        checked_spread_arithmetic(capital - config.initial_capital),
+        entries.len() - 1,
+    )?;
     Ok(())
 }
 
@@ -821,9 +974,12 @@ fn execute_raw_spread_batch(
 /// ```python
 /// from tick_engine import run_spreads_batch, SpreadBacktest, SpreadConfig, LegConfig, OptionType
 ///
-/// items = [(backtest1, ts, premiums1, entries1, exits1),
-///          (backtest2, ts, premiums2, entries2, exits2)]
+/// config = SpreadConfig(initial_capital=1_000.0, fees=0.0)
+/// config.add_leg(LegConfig(OptionType.Call, strike=100.0, quantity=-1, lot_size=1))
+/// backtest = SpreadBacktest("SHORT_CALL", config)
+/// items = [(backtest, [1, 2], [[10.0, 8.0]], [True, False], [False, True])]
 /// results = run_spreads_batch(items)
+/// assert results[0].total_pnl == 2.0
 /// ```
 pub fn run_spreads_batch(
     items: Vec<(
@@ -838,23 +994,27 @@ pub fn run_spreads_batch(
     execute_spread_batch(items)
 }
 
+/// Run `SpreadBacktest` items in parallel after ordered extraction and preflight.
+///
+/// Each item is `(backtest, timestamps, legs_premiums, entries, exits)`.
 #[pyfunction(name = "run_spreads_batch")]
-pub(crate) fn run_spreads_batch_py(
-    items: Vec<PythonSpreadBatchItem>,
-) -> PyResult<Vec<BacktestResult>> {
-    let items = items
-        .into_iter()
-        .map(|(backtest, timestamps, premiums, entries, exits)| {
-            (
-                backtest,
-                numeric_timestamps(timestamps),
-                numeric_premium_series(premiums),
-                entries,
-                exits,
-            )
-        })
-        .collect();
-    Ok(run_spreads_batch(items)?)
+#[pyo3(signature = (items), text_signature = "(items)")]
+pub(crate) fn run_spreads_batch_py(items: &Bound<'_, PyAny>) -> PyResult<Vec<BacktestResult>> {
+    let mut extracted = Vec::new();
+    for item in items.try_iter()? {
+        let (backtest, timestamps, premiums, entries, exits): PythonSpreadBatchItem =
+            item?.extract()?;
+        let item = (
+            backtest,
+            numeric_timestamps(timestamps),
+            numeric_premium_series(premiums),
+            entries,
+            exits,
+        );
+        validate_inputs(&item.0.config, &item.1, &item.2, &item.3, &item.4)?;
+        extracted.push(item);
+    }
+    Ok(execute_spread_batch(extracted)?)
 }
 
 /// Run a batch of spread backtests supplied as raw parameter tuples.
@@ -877,22 +1037,28 @@ pub fn run_batch(
     execute_raw_spread_batch(items)
 }
 
+/// Run spread backtests supplied as raw parameter tuples.
+///
+/// Each item is `(name, config, timestamps, legs_premiums, entries, exits)`.
 #[pyfunction(name = "run_batch")]
-pub(crate) fn run_batch_py(items: Vec<PythonRawSpreadBatchItem>) -> PyResult<Vec<BacktestResult>> {
-    let items = items
-        .into_iter()
-        .map(|(name, config, timestamps, premiums, entries, exits)| {
-            (
-                name,
-                config,
-                numeric_timestamps(timestamps),
-                numeric_premium_series(premiums),
-                entries,
-                exits,
-            )
-        })
-        .collect();
-    Ok(run_batch(items)?)
+#[pyo3(signature = (items), text_signature = "(items)")]
+pub(crate) fn run_batch_py(items: &Bound<'_, PyAny>) -> PyResult<Vec<BacktestResult>> {
+    let mut extracted = Vec::new();
+    for item in items.try_iter()? {
+        let (name, config, timestamps, premiums, entries, exits): PythonRawSpreadBatchItem =
+            item?.extract()?;
+        let item = (
+            name,
+            config,
+            numeric_timestamps(timestamps),
+            numeric_premium_series(premiums),
+            entries,
+            exits,
+        );
+        validate_inputs(&item.1, &item.2, &item.3, &item.4, &item.5)?;
+        extracted.push(item);
+    }
+    Ok(execute_raw_spread_batch(extracted)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -969,14 +1135,18 @@ pub fn iron_condor_config(
     cfg
 }
 
+/// Create a call-and-put straddle configuration at one strike.
 #[pyfunction(name = "straddle_config")]
-#[pyo3(signature = (
-    strike,
-    lot_size = StrictUsize(50),
-    short = true,
-    initial_capital = StrictF64(100_000.0),
-    fees = StrictF64(0.001)
-))]
+#[pyo3(
+    signature = (
+        strike,
+        lot_size = StrictUsize(50),
+        short = true,
+        initial_capital = StrictF64(100_000.0),
+        fees = StrictF64(0.001)
+    ),
+    text_signature = "(strike, lot_size=50, short=True, initial_capital=100000.0, fees=0.001)"
+)]
 pub(crate) fn straddle_config_py(
     strike: StrictF64,
     lot_size: StrictUsize,
@@ -987,15 +1157,19 @@ pub(crate) fn straddle_config_py(
     straddle_config(strike.0, lot_size.0, short, initial_capital.0, fees.0)
 }
 
+/// Create a call-and-put strangle configuration at separate strikes.
 #[pyfunction(name = "strangle_config")]
-#[pyo3(signature = (
-    call_strike,
-    put_strike,
-    lot_size = StrictUsize(50),
-    short = true,
-    initial_capital = StrictF64(100_000.0),
-    fees = StrictF64(0.001)
-))]
+#[pyo3(
+    signature = (
+        call_strike,
+        put_strike,
+        lot_size = StrictUsize(50),
+        short = true,
+        initial_capital = StrictF64(100_000.0),
+        fees = StrictF64(0.001)
+    ),
+    text_signature = "(call_strike, put_strike, lot_size=50, short=True, initial_capital=100000.0, fees=0.001)"
+)]
 pub(crate) fn strangle_config_py(
     call_strike: StrictF64,
     put_strike: StrictF64,
@@ -1014,16 +1188,20 @@ pub(crate) fn strangle_config_py(
     )
 }
 
+/// Create a four-leg iron-condor configuration.
 #[pyfunction(name = "iron_condor_config")]
-#[pyo3(signature = (
-    short_call,
-    long_call,
-    short_put,
-    long_put,
-    lot_size = StrictUsize(50),
-    initial_capital = StrictF64(100_000.0),
-    fees = StrictF64(0.001)
-))]
+#[pyo3(
+    signature = (
+        short_call,
+        long_call,
+        short_put,
+        long_put,
+        lot_size = StrictUsize(50),
+        initial_capital = StrictF64(100_000.0),
+        fees = StrictF64(0.001)
+    ),
+    text_signature = "(short_call, long_call, short_put, long_put, lot_size=50, initial_capital=100000.0, fees=0.001)"
+)]
 pub(crate) fn iron_condor_config_py(
     short_call: StrictF64,
     long_call: StrictF64,
@@ -1241,6 +1419,68 @@ mod tests {
         .expect_err("finite inputs produced an overflowing spread result");
 
         assert!(error.to_string().contains("spread arithmetic overflow"));
+    }
+
+    #[test]
+    fn test_fees_charge_entry_and_exit_once_per_absolute_quantity() {
+        let mut cfg = SpreadConfig::new(100.0, 0.1, None, None);
+        cfg.add_leg(LegConfig::new(OptionType::Call, 100.0, -3, 2));
+        let backtest = SpreadBacktest::new("FEES".to_string(), cfg);
+
+        let result = backtest
+            .run(
+                vec![1, 2],
+                vec![vec![10.0, 12.0]],
+                vec![true, false],
+                vec![false, true],
+            )
+            .expect("finite fee calculation should run");
+
+        // Gross P&L is -12.0. Entry fee is 10 * 3 * 2 * 0.1 = 6.0;
+        // exit fee is 12 * 3 * 2 * 0.1 = 7.2.
+        assert!((result.total_pnl - -25.2).abs() < 1e-12);
+        assert_eq!(result.total_trades, 1);
+    }
+
+    #[test]
+    fn test_cross_bar_aggregate_overflow_is_rejected_by_preflight() {
+        let mut cfg = SpreadConfig::new(100.0, 0.0, None, None);
+        cfg.add_leg(LegConfig::new(OptionType::Call, 100.0, 1, 1));
+        cfg.add_leg(LegConfig::new(OptionType::Put, 100.0, -1, 1));
+        let large_finite_premium = f64::MAX * 0.75;
+        let timestamps = vec![1, 2];
+        let premiums = vec![
+            vec![0.0, large_finite_premium],
+            vec![large_finite_premium, 0.0],
+        ];
+        let entries = vec![true, false];
+        let exits = vec![false, true];
+
+        let error = validate_inputs(&cfg, &timestamps, &premiums, &entries, &exits)
+            .expect_err("cross-bar aggregate overflow escaped preflight");
+
+        assert_eq!(
+            error.to_string(),
+            "spread arithmetic overflow at premium bar 1"
+        );
+    }
+
+    #[test]
+    fn test_force_close_return_overflow_is_rejected_by_preflight() {
+        let mut cfg = SpreadConfig::new(1e-300, 1.0, None, None);
+        cfg.add_leg(LegConfig::new(OptionType::Call, 100.0, 1, 100));
+        let timestamps = vec![1, 2];
+        let premiums = vec![vec![1e7, 1e7]];
+        let entries = vec![true, false];
+        let exits = vec![false, false];
+
+        let error = validate_inputs(&cfg, &timestamps, &premiums, &entries, &exits)
+            .expect_err("force-close return overflow escaped preflight");
+
+        assert_eq!(
+            error.to_string(),
+            "spread arithmetic overflow at premium bar 1"
+        );
     }
 
     #[test]

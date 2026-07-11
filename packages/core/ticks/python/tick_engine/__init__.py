@@ -43,26 +43,31 @@ Options
 -------
 ``OptionType`` / ``OptionStrategyType`` / ``OptionsConfig`` / ``OptionsStrategy``
 ``Greeks`` / ``black_scholes_greeks``
-    Options backtester and Black-Scholes greeks.
-``LegConfig`` / ``SpreadConfig`` / ``SpreadBacktest`` / ``run_spreads_batch``
+    Options backtester and Black-Scholes greeks. Spread legs use
+    ``OptionType.Call`` or ``OptionType.Put``.
+``LegConfig`` / ``SpreadConfig`` / ``SpreadBacktest``
+``run_spreads_batch`` / ``run_batch``
 ``straddle_config`` / ``strangle_config`` / ``iron_condor_config``
-    Multi-leg spread configuration builders and batch spread backtester.
+    Multi-leg spread configuration builders and object/raw batch runners.
 
 Pairs
 -----
-``PairsStrategy`` / ``run_batch``
-    Pairs-trading strategy and batch runner.
+``PairsStrategy``
+    Pairs-trading strategy.
 
 Example
 -------
->>> from tick_engine import TickSimulator
->>> sim = TickSimulator(initial_capital=100_000, commission=20.0)
->>> bars = [
-...     [1700000000, 19000.0, 19100.0, 18950.0, 19050.0, 500000],
-...     [1700000060, 19050.0, 19200.0, 19000.0, 19150.0, 600000],
-... ]
->>> result = sim.run_ema_crossover(bars, fast_period=9, slow_period=21)
->>> print(result)
+>>> from tick_engine import LegConfig, OptionType, SpreadBacktest, SpreadConfig
+>>> config = SpreadConfig(initial_capital=1_000.0, fees=0.0)
+>>> config.add_leg(LegConfig(OptionType.Call, strike=100.0, quantity=-1, lot_size=1))
+>>> backtest = SpreadBacktest("SHORT_CALL", config)
+>>> result = backtest.run([1, 2], [[10.0, 8.0]], [True, False], [False, True])
+>>> (result.strategy_name, result.total_pnl)
+('SHORT_CALL', 2.0)
+>>> from tick_engine import run_spreads_batch
+>>> batch = run_spreads_batch([(backtest, [1, 2], [[10.0, 8.0]], [True, False], [False, True])])
+>>> [item.total_pnl for item in batch]
+[2.0]
 """
 
 from tick_engine.tick_engine import (

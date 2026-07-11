@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import doctest
+import inspect
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -116,6 +118,135 @@ def test_batch_preserves_valid_extraction_order_and_results(batch_runner: BatchR
 
     assert [result.strategy_name for result in results] == ["rising", "falling"]
     assert [result.total_pnl for result in results] == pytest.approx([2.0, -3.0])
+
+
+def test_spread_fees_charge_exactly_entry_and_exit_per_absolute_quantity() -> None:
+    config = SpreadConfig(initial_capital=100.0, fees=0.1)
+    config.add_leg(LegConfig(OptionType.Call, 100.0, -3, 2))
+
+    result = SpreadBacktest("fees", config).run(
+        [1, 2],
+        [[10.0, 12.0]],
+        [True, False],
+        [False, True],
+    )
+
+    assert result.total_pnl == pytest.approx(-25.2)
+    assert result.equity_curve == pytest.approx([100.0, 94.0, 74.8, 74.8])
+
+
+@pytest.mark.parametrize("runner_kind", ["object", "raw"])
+def test_batch_reports_first_semantic_error_before_later_extraction_error(runner_kind: str) -> None:
+    if runner_kind == "object":
+        first = (
+            SpreadBacktest("first", _config()),
+            [1, 2],
+            [[10.0, -1.0]],
+            [True, False],
+            [False, True],
+        )
+        trailing = (
+            SpreadBacktest("trailing", _config()),
+            [True, 2],
+            [[10.0, 11.0]],
+            [True, False],
+            [False, True],
+        )
+        runner = run_spreads_batch
+    else:
+        first = ("first", _config(), [1, 2], [[10.0, -1.0]], [True, False], [False, True])
+        trailing = ("trailing", _config(), [True, 2], [[10.0, 11.0]], [True, False], [False, True])
+        runner = run_batch
+
+    with pytest.raises(ValueError, match=r"legs_premiums\[0\]\[1\] must be finite and non-negative"):
+        runner([first, trailing])
+
+
+@pytest.mark.parametrize("runner_kind", ["object", "raw"])
+def test_batch_validates_an_item_before_requesting_the_next_item(runner_kind: str) -> None:
+    if runner_kind == "object":
+        first = (
+            SpreadBacktest("first", _config()),
+            [1, 2],
+            [[10.0, -1.0]],
+            [True, False],
+            [False, True],
+        )
+        runner = run_spreads_batch
+    else:
+        first = ("first", _config(), [1, 2], [[10.0, -1.0]], [True, False], [False, True])
+        runner = run_batch
+
+    def items() -> Iterator[object]:
+        yield first
+        raise RuntimeError("later iterator failure")
+
+    with pytest.raises(ValueError, match=r"legs_premiums\[0\]\[1\] must be finite and non-negative"):
+        runner(items())
+
+
+def test_batch_preflight_rejects_cross_bar_aggregate_overflow(
+    configured_batch_runner: ConfiguredBatchRunner,
+) -> None:
+    config = SpreadConfig(initial_capital=100.0, fees=0.0)
+    config.add_leg(LegConfig(OptionType.Call, 100.0, 1, 1))
+    config.add_leg(LegConfig(OptionType.Put, 100.0, -1, 1))
+    large_finite_premium = float.fromhex("0x1.fffffffffffffp+1023") * 0.75
+
+    with pytest.raises(ValueError, match="spread arithmetic overflow at premium bar 1"):
+        configured_batch_runner(
+            config,
+            [[0.0, large_finite_premium], [large_finite_premium, 0.0]],
+        )
+
+
+@pytest.mark.parametrize("runner_kind", ["object", "raw"])
+def test_batch_preflight_rejects_force_close_return_overflow(runner_kind: str) -> None:
+    config = SpreadConfig(initial_capital=1e-300, fees=1.0)
+    config.add_leg(LegConfig(OptionType.Call, 100.0, 1, 100))
+    timestamps = [1, 2]
+    premiums = [[1e7, 1e7]]
+    entries = [True, False]
+    exits = [False, False]
+
+    if runner_kind == "object":
+        item = (SpreadBacktest("overflow", config), timestamps, premiums, entries, exits)
+        runner = run_spreads_batch
+    else:
+        item = ("overflow", config, timestamps, premiums, entries, exits)
+        runner = run_batch
+
+    with pytest.raises(ValueError, match="spread arithmetic overflow at premium bar 1"):
+        runner([item])
+
+
+def test_spread_binding_signatures_and_docs_match_python_contract() -> None:
+    assert str(inspect.signature(LegConfig)) == "(option_type, strike, quantity, lot_size=50)"
+    assert str(inspect.signature(SpreadConfig)) == (
+        "(initial_capital=100000.0, fees=0.001, max_loss=None, target_profit=None)"
+    )
+    assert str(inspect.signature(straddle_config)) == (
+        "(strike, lot_size=50, short=True, initial_capital=100000.0, fees=0.001)"
+    )
+    assert str(inspect.signature(strangle_config)) == (
+        "(call_strike, put_strike, lot_size=50, short=True, initial_capital=100000.0, fees=0.001)"
+    )
+    assert str(inspect.signature(iron_condor_config)) == (
+        "(short_call, long_call, short_put, long_put, lot_size=50, "
+        "initial_capital=100000.0, fees=0.001)"
+    )
+    assert "OptionType.Call" in (OptionType.__doc__ or "")
+    assert "OptionType.Put" in (OptionType.__doc__ or "")
+    assert "SpreadBacktest" in (run_spreads_batch.__doc__ or "")
+    assert "raw parameter tuples" in (run_batch.__doc__ or "")
+
+
+def test_python_facade_examples_are_executable() -> None:
+    import tick_engine
+
+    result = doctest.testmod(tick_engine)
+    assert result.attempted == 9
+    assert result.failed == 0
 
 
 @pytest.mark.parametrize("premium", [float("nan"), float("inf"), float("-inf"), -0.01])
