@@ -11,11 +11,34 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import { useAuthStore } from "@/stores/authStore";
 
 type MarketHoursTarget = string | { exchange: string; symbol: string };
+interface TestHoliday {
+  date: string;
+  description: string;
+  holiday_type: string;
+  closed_exchanges: string[];
+  open_exchanges: Array<{ exchange: string; start_time: number; end_time: number }>;
+}
+
 const marketMocks = vi.hoisted(() => ({
   state: { open: true },
-  isMarketHours: vi.fn((_target?: MarketHoursTarget) => true),
+  isMarketHours: vi.fn((_target?: MarketHoursTarget, _holidays?: TestHoliday[]) => true),
+}));
+
+const holidayMocks = vi.hoisted(() => ({
+  state: {
+    data: undefined as TestHoliday[] | undefined,
+    isPending: false,
+  },
+}));
+
+const helperMocks = vi.hoisted(() => ({
+  buildHeaders: vi.fn((_includeJson: boolean) => ({
+    Authorization: "Bearer terminal-jwt",
+    "X-API-Key": "terminal-api-key",
+  })),
 }));
 
 // ---------------------------------------------------------------------------
@@ -38,7 +61,18 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 
 vi.mock("@/lib/market", () => ({
-  isMarketHours: (target?: MarketHoursTarget) => marketMocks.isMarketHours(target),
+  isMarketHours: (target?: MarketHoursTarget, holidays?: TestHoliday[]) => (
+    marketMocks.isMarketHours(target, holidays)
+  ),
+}));
+
+vi.mock("@/hooks/useMarketStatus", () => ({
+  useHolidays: () => holidayMocks.state,
+}));
+
+vi.mock("@/services/ftApi.helpers", () => ({
+  getBase: () => "/ft-api",
+  buildHeaders: (includeJson: boolean) => helperMocks.buildHeaders(includeJson),
 }));
 
 // ---------------------------------------------------------------------------
@@ -48,14 +82,19 @@ vi.mock("@/lib/market", () => ({
 const mockApiSignals = {
   signals: [
     {
+      event_id: 139,
       timestamp: "2026-04-08T10:00:00Z",
       symbol: "NIFTY",
+      exchange: "NSE_INDEX",
       signal_type: "BUY",
+      source: "rule",
+      method: "RSI",
       indicator: "RSI",
       value: 25.0,
       threshold: 30,
       confidence: 0.8,
       message: "API signal",
+      metadata: {},
     },
   ],
 };
@@ -103,46 +142,41 @@ function createWrapper(queryClient = createQueryClient()) {
   };
 }
 
-class FakeEventSource extends EventTarget {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
-  static readonly instances: FakeEventSource[] = [];
+interface TestSseStream {
+  response: Response;
+  enqueue: (frame: string) => void;
+}
 
-  readonly CONNECTING = FakeEventSource.CONNECTING;
-  readonly OPEN = FakeEventSource.OPEN;
-  readonly CLOSED = FakeEventSource.CLOSED;
-  readonly withCredentials = false;
-  readyState = FakeEventSource.CONNECTING;
-  closed = false;
-  onopen: ((this: EventSource, event: Event) => unknown) | null = null;
-  onerror: ((this: EventSource, event: Event) => unknown) | null = null;
-  onmessage: ((this: EventSource, event: MessageEvent) => unknown) | null = null;
+function createSseStream(initialFrames: string[] = []): TestSseStream {
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(nextController) {
+      controller = nextController;
+      initialFrames.forEach((frame) => nextController.enqueue(encoder.encode(frame)));
+    },
+  });
 
-  constructor(readonly url: string) {
-    super();
-    FakeEventSource.instances.push(this);
-  }
+  return {
+    response: {
+      ok: true,
+      status: 200,
+      body,
+      headers: new Headers({ "Content-Type": "text/event-stream" }),
+    } as Response,
+    enqueue: (frame) => controller?.enqueue(encoder.encode(frame)),
+  };
+}
 
-  open() {
-    this.readyState = FakeEventSource.OPEN;
-    const event = new Event("open");
-    this.onopen?.call(this as unknown as EventSource, event);
-    this.dispatchEvent(event);
-  }
+const fetchMock = vi.fn<typeof fetch>();
+const SIGNAL_CURSOR_KEY = "flinttrade:signals:sse-cursor:v1";
 
-  emit(type: string, data: string) {
-    const event = new MessageEvent(type, { data });
-    if (type === "message") {
-      this.onmessage?.call(this as unknown as EventSource, event);
-    }
-    this.dispatchEvent(event);
-  }
+class DormantEventSource extends EventTarget {
+  onopen: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
 
-  close() {
-    this.closed = true;
-    this.readyState = FakeEventSource.CLOSED;
-  }
+  close() {}
 }
 
 // ---------------------------------------------------------------------------
@@ -153,10 +187,18 @@ beforeEach(() => {
   currentMode = "explore";
   marketMocks.state.open = true;
   marketMocks.isMarketHours.mockReset().mockImplementation(() => marketMocks.state.open);
+  holidayMocks.state.data = undefined;
+  holidayMocks.state.isPending = false;
+  helperMocks.buildHeaders.mockClear();
   mockApiConfig.instruments = ["NSE_INDEX:NIFTY"];
   modeListeners.clear();
-  FakeEventSource.instances.length = 0;
   vi.clearAllMocks();
+  getRecentSignalsMock.mockImplementation((_limit?: number) => Promise.resolve(mockApiSignals));
+  getSignalConfigMock.mockImplementation(() => Promise.resolve(mockApiConfig));
+  updateSignalConfigMock.mockImplementation((_config: unknown) => Promise.resolve(mockApiConfig));
+  localStorage.removeItem(SIGNAL_CURSOR_KEY);
+  useAuthStore.setState({ token: null });
+  vi.stubGlobal("EventSource", DormantEventSource);
 });
 
 afterEach(() => {
@@ -269,13 +311,86 @@ describe("useRecentSignals", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(getRecentSignalsMock).toHaveBeenCalledTimes(1);
-    expect(marketMocks.isMarketHours).toHaveBeenCalledWith(openTarget);
+    expect(marketMocks.isMarketHours).toHaveBeenCalledWith(openTarget, undefined);
 
     getRecentSignalsMock.mockClear();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(getRecentSignalsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the holiday calendar to avoid five-second polling on a weekday closure", async () => {
+    vi.useFakeTimers();
+    currentMode = "live";
+    holidayMocks.state.data = [{
+      date: "2026-01-26",
+      description: "Republic Day",
+      holiday_type: "TRADING_HOLIDAY",
+      closed_exchanges: ["NSE", "NSE_INDEX"],
+      open_exchanges: [],
+    }];
+    marketMocks.isMarketHours.mockImplementation((_target, holidays) => !holidays?.length);
+
+    renderHook(() => useRecentSignals(10), { wrapper: createWrapper() });
+    await vi.waitFor(() => expect(getRecentSignalsMock).toHaveBeenCalledTimes(1));
+
+    getRecentSignalsMock.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(getRecentSignalsMock).not.toHaveBeenCalled();
+    expect(marketMocks.isMarketHours).toHaveBeenCalledWith(
+      { exchange: "NSE_INDEX", symbol: "NIFTY" },
+      holidayMocks.state.data,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(55_000);
+    });
+    expect(getRecentSignalsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older in-flight poll replace a newer cached SSE event", async () => {
+    currentMode = "live";
+    const queryClient = createQueryClient();
+    let resolveRecent: ((value: { signals: typeof mockApiSignals.signals }) => void) | undefined;
+    getRecentSignalsMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRecent = resolve;
+    }));
+
+    const { result } = renderHook(() => useRecentSignals(10), {
+      wrapper: createWrapper(queryClient),
+    });
+    await waitFor(() => expect(getRecentSignalsMock).toHaveBeenCalledOnce());
+
+    const newerSignal = {
+      ...mockApiSignals.signals[0],
+      event_id: 140,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      message: "newer SSE signal",
+    };
+    act(() => {
+      queryClient.setQueryData(
+        ["signals", "recent", "live", 10],
+        { signals: [newerSignal] },
+      );
+    });
+
+    await act(async () => {
+      resolveRecent?.({
+        signals: [{
+          ...mockApiSignals.signals[0],
+          event_id: 139,
+          timestamp: "2026-07-11T09:59:00+05:30",
+          message: "older poll signal",
+        }],
+      });
+    });
+
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(result.current.data?.signals.map((signal) => signal.event_id)).toEqual([140, 139]);
   });
 });
 
@@ -328,40 +443,9 @@ describe("useSignalConfig", () => {
 });
 
 describe("useSignalStream", () => {
-  it("handles named replay-loss events, exposes clearable state, and reconciles recent signals", async () => {
+  it("authenticates fetch SSE, resumes a boot-aware cursor, and persists the next frame ID", async () => {
     currentMode = "live";
-    vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
-    const queryClient = createQueryClient();
-    const onSignal = vi.fn();
-    const { result, unmount } = renderHook(() => ({
-      recent: useRecentSignals(10),
-      stream: useSignalStream(onSignal),
-    }), { wrapper: createWrapper(queryClient) });
-
-    await waitFor(() => expect(result.current.recent.isSuccess).toBe(true));
-    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-    const source = FakeEventSource.instances[0];
-    expect(source.url).toBe("/ft-api/api/v1/signals/stream");
-
-    act(() => source.open());
-    expect(result.current.stream.connected).toBe(true);
-
-    getRecentSignalsMock.mockClear();
-    const replayLoss = {
-      reason: "cursor_before_retained",
-      requested_event_id: 12,
-      oldest_available_event_id: 40,
-      newest_available_event_id: 139,
-    };
-    act(() => source.emit("replay-loss", JSON.stringify(replayLoss)));
-
-    await waitFor(() => expect(result.current.stream.replayLoss).toEqual(replayLoss));
-    await waitFor(() => expect(getRecentSignalsMock).toHaveBeenCalledWith(10));
-    expect(onSignal).not.toHaveBeenCalled();
-
-    act(() => result.current.stream.clearReplayLoss());
-    expect(result.current.stream.replayLoss).toBeNull();
-
+    localStorage.setItem(SIGNAL_CURSOR_KEY, "prior-boot:139");
     const signal = {
       event_id: 140,
       timestamp: "2026-07-11T10:00:00+05:30",
@@ -377,48 +461,113 @@ describe("useSignalStream", () => {
       message: "NIFTY RSI below threshold",
       metadata: {},
     };
-    act(() => source.emit("message", JSON.stringify(signal)));
-    expect(onSignal).toHaveBeenCalledWith(signal);
+    const stream = createSseStream([
+      `id: current-boot:140\ndata: ${JSON.stringify(signal)}\n\n`,
+    ]);
+    fetchMock.mockResolvedValue(stream.response);
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = createQueryClient();
+    const onSignal = vi.fn();
+    const { result, unmount } = renderHook(() => useSignalStream(onSignal), {
+      wrapper: createWrapper(queryClient),
+    });
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/ft-api/api/v1/signals/stream",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: "text/event-stream",
+          Authorization: "Bearer terminal-jwt",
+          "Last-Event-ID": "prior-boot:139",
+          "X-API-Key": "terminal-api-key",
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(helperMocks.buildHeaders).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(onSignal).toHaveBeenCalledWith(signal));
+    expect(localStorage.getItem(SIGNAL_CURSOR_KEY)).toBe("current-boot:140");
+    expect(result.current.connected).toBe(true);
+
+    const signalUsed = fetchMock.mock.calls[0][1]?.signal;
     unmount();
-    expect(source.closed).toBe(true);
+    expect(signalUsed?.aborted).toBe(true);
   });
 
-  it("rejects a late frame from the previous mode stream", async () => {
+  it("parses named replay-loss frames and refreshes recent signals", async () => {
     currentMode = "live";
-    vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
-    const onSignal = vi.fn();
-    renderHook(() => useSignalStream(onSignal), { wrapper: createWrapper() });
-    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-    const liveSource = FakeEventSource.instances[0];
-
-    act(() => {
-      currentMode = "practice";
-      modeListeners.forEach((listener) => listener());
-    });
-    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
-    const practiceSource = FakeEventSource.instances[1];
-    const signal = {
-      event_id: 141,
-      timestamp: "2026-07-11T10:01:00+05:30",
-      symbol: "NIFTY",
-      exchange: "NSE_INDEX",
-      signal_type: "BUY",
-      source: "rule",
-      method: "RSI",
-      indicator: "RSI",
-      value: 28,
-      threshold: 30,
-      confidence: 0.8,
-      message: "NIFTY RSI below threshold",
-      metadata: {},
+    localStorage.setItem(SIGNAL_CURSOR_KEY, "prior-boot:12");
+    const replayLoss = {
+      reason: "cursor_before_retained",
+      requested_event_id: 12,
+      oldest_available_event_id: 40,
+      newest_available_event_id: 139,
     };
+    const stream = createSseStream([
+      `event: replay-loss\ndata: ${JSON.stringify(replayLoss)}\n\n`,
+    ]);
+    fetchMock.mockResolvedValue(stream.response);
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = createQueryClient();
+    const onSignal = vi.fn();
+    const { result } = renderHook(() => ({
+      recent: useRecentSignals(10),
+      stream: useSignalStream(onSignal),
+    }), { wrapper: createWrapper(queryClient) });
 
-    act(() => liveSource.emit("message", JSON.stringify(signal)));
+    await waitFor(() => expect(result.current.stream.replayLoss).toEqual(replayLoss));
+    await waitFor(() => expect(getRecentSignalsMock).toHaveBeenCalledWith(10));
+    expect(localStorage.getItem(SIGNAL_CURSOR_KEY)).toBeNull();
     expect(onSignal).not.toHaveBeenCalled();
 
-    act(() => practiceSource.emit("message", JSON.stringify(signal)));
-    expect(onSignal).toHaveBeenCalledOnce();
+    act(() => result.current.stream.clearReplayLoss());
+    expect(result.current.stream.replayLoss).toBeNull();
+  });
+
+  it("stops reconnecting after a terminal authentication response", async () => {
+    vi.useFakeTimers();
+    currentMode = "live";
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      body: null,
+      headers: new Headers(),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderHook(() => useSignalStream(vi.fn()), { wrapper: createWrapper() });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("drops the connected state while changed credentials establish a replacement stream", async () => {
+    currentMode = "live";
+    const firstStream = createSseStream();
+    let resolveReplacement: ((response: Response) => void) | undefined;
+    fetchMock
+      .mockResolvedValueOnce(firstStream.response)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveReplacement = resolve;
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useSignalStream(vi.fn()), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    act(() => useAuthStore.setState({ token: "replacement-token" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(result.current.connected).toBe(false);
+
+    resolveReplacement?.(createSseStream().response);
+    await waitFor(() => expect(result.current.connected).toBe(true));
   });
 });
 
@@ -501,7 +650,16 @@ describe("signalEventSchema", () => {
   });
 
   it("defaults new identity fields for an older live-rule frame", () => {
-    const event = signalEventSchema.parse(mockApiSignals.signals[0]);
+    const event = signalEventSchema.parse({
+      timestamp: "2026-04-08T10:00:00Z",
+      symbol: "NIFTY",
+      signal_type: "BUY",
+      indicator: "RSI",
+      value: 25,
+      threshold: 30,
+      confidence: 0.8,
+      message: "Legacy API signal",
+    });
 
     expect(event.event_id).toBe(0);
     expect(event.source).toBe("rule");

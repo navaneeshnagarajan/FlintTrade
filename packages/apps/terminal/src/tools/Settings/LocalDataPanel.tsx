@@ -16,9 +16,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Activity, Database, Download, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { get, getV1, postV1 } from "@/services/ftApi.helpers";
 import { SectionTitle } from "./shared";
-
-const FT_BASE = "/ft-api";
 
 // --- Tick capture status -----------------------------------------------------
 
@@ -41,11 +40,7 @@ interface TickStatus {
 }
 
 async function fetchTickStatus(): Promise<TickStatus> {
-  const res = await fetch(`${FT_BASE}/api/v1/data/ticks/status`);
-  if (!res.ok) throw new Error("Tick status unavailable");
-  const json = (await res.json()) as { data?: TickStatus };
-  if (!json.data) throw new Error("Tick status malformed");
-  return json.data;
+  return get<TickStatus>("data/ticks/status");
 }
 
 const CAPTURE_WATCHLIST_MODES = ["ltp", "quote", "depth"] as const;
@@ -75,11 +70,10 @@ interface StoreTable {
 }
 
 async function fetchStoreSummary(): Promise<Record<string, StoreTable>> {
-  const res = await fetch(`${FT_BASE}/v1/historify/bars/summary`);
-  if (!res.ok) throw new Error("Store summary unavailable");
-  const json = (await res.json()) as { data?: { tables: Record<string, StoreTable> } };
-  if (!json.data) throw new Error("Store summary malformed");
-  return json.data.tables;
+  const data = await getV1<{ tables: Record<string, StoreTable> }>(
+    "historify/bars/summary",
+  );
+  return data.tables;
 }
 
 // --- Bhavcopy download --------------------------------------------------------
@@ -91,18 +85,7 @@ interface BhavcopyResult {
 }
 
 async function startBhavcopyDownload(start: string, end: string): Promise<BhavcopyResult> {
-  const res = await fetch(`${FT_BASE}/v1/historify/bhavcopy/download`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ start, end }),
-  });
-  const json = (await res.json().catch(() => null)) as
-    | { data?: BhavcopyResult; message?: string }
-    | null;
-  if (!res.ok || !json?.data) {
-    throw new Error(json?.message ?? "Bhavcopy download failed");
-  }
-  return json.data;
+  return postV1<BhavcopyResult>("historify/bhavcopy/download", { start, end });
 }
 
 function isoDaysAgo(days: number): string {
@@ -201,6 +184,13 @@ export function LocalDataPanel() {
         {storeQuery.isLoading ? (
           <div className="text-xs text-text-muted flex items-center gap-1">
             <Loader2 size={11} className="animate-spin" /> Loading…
+          </div>
+        ) : storeQuery.isError ? (
+          <div role="alert" className="text-xs text-loss flex items-center gap-1">
+            <AlertTriangle size={12} className="shrink-0" />
+            {storeQuery.error instanceof Error
+              ? storeQuery.error.message
+              : "Local OHLCV store unavailable"}
           </div>
         ) : nonEmptyTables.length === 0 ? (
           <div className="text-xs text-text-muted">

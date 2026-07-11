@@ -8,9 +8,8 @@
  * highlighted per column with a yellow border.
  *
  * Data is fetched from the FlintTrade backend via the useOrderFlow hook
- * (GET /ft-api/v1/orderflow). The backend currently returns synthetic
- * footprint data; when the live WebSocket tick pipeline is wired, the
- * same endpoint will serve real aggregated order flow buckets.
+ * (GET /ft-api/api/v1/data/orderflow). The endpoint serves fresh or retained
+ * aggregator buckets when available and deterministic sample data otherwise.
  *
  * Canvas layout:
  *   left margin  = 12px  (minimal — bars face outward, no label needed)
@@ -38,7 +37,7 @@ import {
   useCallback,
   memo,
 } from "react";
-import { AlertCircle, BarChart2, Loader2, Grid3x3, BarChart } from "lucide-react";
+import { AlertCircle, BarChart2, Clock3, Loader2, Grid3x3, BarChart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -52,8 +51,9 @@ import { cn } from "@/lib/utils";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
+import { getOrderFlowDataState } from "@/services/ftApi.data";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
-// useOrderFlow hits GET /ft-api/api/v1/data/orderflow and includes is_live flag.
+// useOrderFlow includes the backend freshness state used by the status badge.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -525,7 +525,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
     20,
   );
 
-  const isLive = data?.is_live ?? false;
+  const dataState = getOrderFlowDataState(data);
   const displayIntervalLabel = formatIntervalLabel(data?.interval, intervalLabel);
 
   const columns = useMemo(
@@ -719,7 +719,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
             Error
           </Badge>
         )}
-        {!isLoading && !isError && columns.length > 0 && isLive && (
+        {!isLoading && !isError && columns.length > 0 && dataState === "live" && (
           <Badge
             variant="outline"
             className="text-xs border-emerald-500/40 text-emerald-400 bg-emerald-500/10 h-5 px-1.5"
@@ -729,7 +729,27 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
             Live
           </Badge>
         )}
-        {!isLoading && !isError && columns.length > 0 && !isLive && (
+        {!isLoading && !isError && columns.length > 0 && dataState === "delayed" && (
+          <Badge
+            variant="outline"
+            className="text-xs border-sky-500/40 text-sky-400 bg-sky-500/10 h-5 px-1.5"
+            aria-label="Retained order flow data is delayed and no longer live"
+          >
+            <Clock3 className="size-2.5 mr-1" aria-hidden="true" />
+            Delayed
+          </Badge>
+        )}
+        {!isLoading && !isError && columns.length > 0 && dataState === "stale" && (
+          <Badge
+            variant="outline"
+            className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
+            aria-label="Retained order flow data is stale from an older session"
+          >
+            <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
+            Stale
+          </Badge>
+        )}
+        {!isLoading && !isError && columns.length > 0 && dataState === "sample" && (
           <Badge
             variant="outline"
             className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"

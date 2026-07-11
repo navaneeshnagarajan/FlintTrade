@@ -3,9 +3,9 @@
  * FlintTrade backend (GET /ft-api/api/v1/data/orderflow via Vite proxy).
  *
  * Returns bucketed buy/sell volume per price level, POC, delta, and totals.
- * The backend responds with `is_live: true` when the live
- * OrderFlowAggregatorV2 has data; `is_live: false` when falling back to
- * the synthetic generator.
+ * The backend responds with `is_live: true` only for fresh aggregator data.
+ * `live_state` distinguishes delayed/stale retained buckets from warming or
+ * unavailable states that fall back to the synthetic generator.
  *
  * Auto-refreshes every 5 seconds while the selected exchange is open and every
  * 60 seconds outside its session so the query can self-activate at open.

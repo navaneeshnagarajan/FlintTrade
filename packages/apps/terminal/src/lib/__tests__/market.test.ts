@@ -23,6 +23,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isMarketHours, getMCXStatus, getExchangeStatus, EXCHANGE_HOURS } from "../market";
+import type { MarketHoursTarget } from "../market";
+import type { Holiday } from "@/types/api";
+
+const isMarketHoursWithHolidays = isMarketHours as (
+  target?: MarketHoursTarget,
+  holidays?: Holiday[],
+) => boolean;
 
 // ---------------------------------------------------------------------------
 // Helpers — UTC times that correspond to well-known IST moments
@@ -193,6 +200,45 @@ describe("returns false on weekends regardless of the time", () => {
     vi.setSystemTime(istToUtc(SUN.y, SUN.m, SUN.d, 15, 30));
     expect(isMarketHours()).toBe(false);
   });
+
+  it("keeps DELTA open on Saturday because crypto trades 24/7", () => {
+    vi.setSystemTime(istToUtc(SAT.y, SAT.m, SAT.d, 11, 0));
+    expect(isMarketHours("DELTA")).toBe(true);
+  });
+});
+
+describe("exchange holidays", () => {
+  it("closes NSE index polling during an intraday weekday holiday", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 11, 0));
+    const holidays: Holiday[] = [{
+      date: "2026-03-24",
+      description: "Trading holiday",
+      holiday_type: "TRADING_HOLIDAY",
+      closed_exchanges: ["NSE"],
+      open_exchanges: [],
+    }];
+
+    expect(isMarketHoursWithHolidays(
+      { exchange: "NSE_INDEX", symbol: "NIFTY" },
+      holidays,
+    )).toBe(false);
+  });
+
+  it("does not close DELTA for an Indian exchange holiday", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 11, 0));
+    const holidays: Holiday[] = [{
+      date: "2026-03-24",
+      description: "Trading holiday",
+      holiday_type: "TRADING_HOLIDAY",
+      closed_exchanges: ["NSE", "BSE", "NFO"],
+      open_exchanges: [],
+    }];
+
+    expect(isMarketHoursWithHolidays(
+      { exchange: "DELTA", symbol: "BTCUSD" },
+      holidays,
+    )).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -336,6 +382,14 @@ describe("getExchangeStatus()", () => {
   it("returns 'open' for DELTA at any time", () => {
     vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 3, 0));
     expect(getExchangeStatus("DELTA").status).toBe("open");
+  });
+
+  it("returns 'open' for DELTA on weekends", () => {
+    vi.setSystemTime(istToUtc(SUN.y, SUN.m, SUN.d, 3, 0));
+    expect(getExchangeStatus("DELTA")).toEqual({
+      status: "open",
+      label: "DELTA Open (24/7)",
+    });
   });
 
   it("returns 'closed' for unknown exchange", () => {

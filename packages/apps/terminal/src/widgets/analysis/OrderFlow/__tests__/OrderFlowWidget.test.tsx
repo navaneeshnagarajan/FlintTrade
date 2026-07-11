@@ -247,6 +247,56 @@ describe("OrderFlowWidget", () => {
     expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 
+  it("shows 'Delayed' for retained backend data that is no longer live", () => {
+    const delayedData = {
+      buckets: [
+        {
+          time_label: "09:15",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+        },
+      ],
+      symbol: "NIFTY",
+      exchange: "NFO",
+      interval: 300,
+      is_live: false,
+      live_state: "delayed",
+    };
+    mockUseOrderFlow.mockReturnValue(hookResult({ data: delayedData }));
+
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    expect(screen.getByText("Delayed")).toBeInTheDocument();
+    expect(screen.getByLabelText(/retained order flow data is delayed/i)).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Stale' for retained order flow from an older session", () => {
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      data: {
+        buckets: [{
+          time_label: "15:25",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+        }],
+        symbol: "NIFTY",
+        exchange: "NFO",
+        interval: 300,
+        is_live: false,
+        live_state: "stale",
+      },
+    }));
+
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+  });
+
   it("shows loading skeletons when loading with no data", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({ isLoading: true }));
     render(<OrderFlowWidget {...defaultProps} />);

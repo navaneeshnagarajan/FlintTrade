@@ -5,6 +5,8 @@
  * Hours expressed as minutes-since-midnight for fast comparison.
  */
 
+import type { Holiday } from "@/types/api";
+
 // ---------------------------------------------------------------------------
 // Per-exchange trading hours (minutes since midnight, IST)
 // ---------------------------------------------------------------------------
@@ -69,15 +71,46 @@ function resolveMarketHours(target?: MarketHoursTarget): {
   exchange: string;
   hours: ExchangeHours | undefined;
 } {
-  const exchange = typeof target === "string"
+  const rawExchange = typeof target === "string"
     ? target
     : target?.exchange ?? "NSE";
+  const exchange = rawExchange.trim().toUpperCase();
   const symbol = typeof target === "object" ? target.symbol : undefined;
 
   if (exchange === "CDS" && symbol && isCrossCurrencyCdsSymbol(symbol)) {
     return { exchange, hours: CDS_CROSS_CURRENCY_HOURS };
   }
   return { exchange, hours: EXCHANGE_HOURS[exchange] };
+}
+
+const HOLIDAY_EXCHANGE_ALIASES: Record<string, readonly string[]> = {
+  NSE_INDEX: ["NSE_INDEX", "NSE"],
+  NFO: ["NFO", "NSE"],
+  BSE_INDEX: ["BSE_INDEX", "BSE"],
+  BFO: ["BFO", "BSE"],
+  MCX_INDEX: ["MCX_INDEX", "MCX"],
+};
+
+function exchangeHolidayAliases(exchange: string): readonly string[] {
+  return HOLIDAY_EXCHANGE_ALIASES[exchange] ?? [exchange];
+}
+
+function isClosedByHoliday(exchange: string, holidays: readonly Holiday[], date: Date): boolean {
+  if (holidays.length === 0) return false;
+
+  const dateKey = date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const aliases = exchangeHolidayAliases(exchange);
+  const holiday = holidays.find((candidate) => candidate.date === dateKey);
+  if (!holiday) return false;
+
+  const hasSpecialSession = holiday.open_exchanges.some((session) => (
+    aliases.includes(session.exchange.trim().toUpperCase())
+  ));
+  if (hasSpecialSession) return false;
+
+  return holiday.closed_exchanges.some((closedExchange) => (
+    aliases.includes(closedExchange.trim().toUpperCase())
+  ));
 }
 
 // ---------------------------------------------------------------------------
@@ -92,16 +125,20 @@ function resolveMarketHours(target?: MarketHoursTarget): {
  *
  * DELTA (crypto) is always considered open (24/7).
  */
-export function isMarketHours(target?: MarketHoursTarget): boolean {
+export function isMarketHours(
+  target?: MarketHoursTarget,
+  holidays: readonly Holiday[] = [],
+): boolean {
+  const { exchange, hours } = resolveMarketHours(target);
+  if (exchange === "DELTA") return true;
+
+  const now = new Date();
   const ist = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
   const day = ist.getDay();
   if (day === 0 || day === 6) return false;
-
-  // Delta Exchange — 24/7 crypto
-  const { exchange, hours } = resolveMarketHours(target);
-  if (exchange === "DELTA") return true;
+  if (isClosedByHoliday(exchange, holidays, now)) return false;
 
   if (!hours) return false;
 
@@ -142,17 +179,17 @@ export function getMCXStatus(): MCXMarketStatusInfo {
  * Returns pre-market / open / closed / weekend.
  */
 export function getExchangeStatus(target: MarketHoursTarget): MCXMarketStatusInfo {
+  const { exchange, hours } = resolveMarketHours(target);
+  if (exchange === "DELTA") {
+    return { status: "open", label: "DELTA Open (24/7)" };
+  }
+
   const ist = new Date(
     new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
   const day = ist.getDay();
   if (day === 0 || day === 6) {
     return { status: "weekend", label: "Weekend" };
-  }
-
-  const { exchange, hours } = resolveMarketHours(target);
-  if (exchange === "DELTA") {
-    return { status: "open", label: "DELTA Open (24/7)" };
   }
 
   if (!hours) {

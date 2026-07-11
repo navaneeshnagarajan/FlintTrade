@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
-import { useRecentSignals, useSignalStream } from "@/hooks/useSignals";
+import {
+  reconcileSignalEvents,
+  useRecentSignals,
+  useSignalStream,
+} from "@/hooks/useSignals";
+import type { SignalStreamState } from "@/hooks/useSignals";
 import { useSkillStore } from "@/stores/skillStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -237,22 +242,9 @@ function signalEventToCard(event: SignalEvent): SignalCardModel {
   };
 }
 
-function SignalsSection() {
-  const mode = useModeStore((state) => state.mode);
-  const queryClient = useQueryClient();
+function SignalsSection({ stream }: { stream: SignalStreamState }) {
   const { data, isLoading, isError, refetch } = useRecentSignals(20);
-  const mergeStreamSignal = useCallback((signal: SignalEvent) => {
-    queryClient.setQueryData<{ signals: SignalEvent[] }>(
-      ["signals", "recent", mode, 20],
-      (current) => ({
-        signals: [
-          signal,
-          ...(current?.signals ?? []).filter((item) => item.event_id !== signal.event_id),
-        ].slice(0, 20),
-      }),
-    );
-  }, [mode, queryClient]);
-  const { connected, replayLoss, clearReplayLoss } = useSignalStream(mergeStreamSignal);
+  const { connected, authError, replayLoss, clearReplayLoss } = stream;
 
   const signals = (data?.signals ?? []).map(signalEventToCard);
 
@@ -267,9 +259,11 @@ function SignalsSection() {
             <Badge variant="outline" className="h-6 gap-1.5 text-xs font-normal">
               <span
                 aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-profit" : "bg-text-muted"}`}
+                className={`h-1.5 w-1.5 rounded-full ${
+                  connected ? "bg-profit" : authError ? "bg-loss" : "bg-text-muted"
+                }`}
               />
-              {connected ? "Live" : "Polling"}
+              {connected ? "Live" : authError ? "Auth required" : "Polling"}
             </Badge>
             <Button
               variant="ghost"
@@ -985,7 +979,7 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
   agent: <AgentPanel />,
   suggestions: <AISuggestionsPanel />,
-  signals: <SignalsSection />,
+  signals: null,
   "market-sentiment": <SentimentPanel />,
   regime: <RegimePanel />,
   sentiment: <SentimentSection />,
@@ -1016,6 +1010,8 @@ export default function AIRoute() {
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
   const [shareCopied, setShareCopied] = useState(false);
   const level = useSkillLevel("ai");
+  const mode = useModeStore((state) => state.mode);
+  const queryClient = useQueryClient();
 
   const loadConversation = useAIConversationStore((s) => s.loadConversation);
   const saveConversation = useAIConversationStore((s) => s.saveConversation);
@@ -1060,6 +1056,22 @@ export default function AIRoute() {
   }, [level]);
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
+
+  const mergeStreamSignal = useCallback((signal: SignalEvent) => {
+    const queryKey = ["signals", "recent", mode, 20] as const;
+    const updatedAt = queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? 0;
+    queryClient.setQueryData<{ signals: SignalEvent[] }>(
+      queryKey,
+      (current) => ({
+        signals: reconcileSignalEvents([signal], current?.signals ?? [], 20),
+      }),
+      { updatedAt },
+    );
+  }, [mode, queryClient]);
+  const signalStream = useSignalStream(
+    mergeStreamSignal,
+    visibleSectionIds.includes("signals"),
+  );
 
   const isOverlay = OVERLAY_SECTIONS.has(activeSection);
   const sectionDef = SECTIONS.find((s) => s.id === activeSection);
@@ -1136,7 +1148,9 @@ export default function AIRoute() {
               icon={sectionDef.icon}
               onClose={handleCloseOverlay}
             >
-              {SECTION_CONTENT[activeSection]}
+              {activeSection === "signals"
+                ? <SignalsSection stream={signalStream} />
+                : SECTION_CONTENT[activeSection]}
             </OverlayPanel>
           )}
         </AnimatePresence>

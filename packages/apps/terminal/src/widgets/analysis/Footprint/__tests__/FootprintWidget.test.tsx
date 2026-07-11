@@ -196,6 +196,47 @@ describe("FootprintWidget", () => {
     expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 
+  it("shows 'Delayed' for retained backend data that is no longer live", () => {
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: sampleBuckets,
+          symbol: "NIFTY",
+          exchange: "NFO",
+          interval: 300,
+          is_live: false,
+          live_state: "delayed",
+        },
+      }),
+    );
+
+    render(<FootprintWidget {...defaultProps} />);
+
+    expect(screen.getByText("Delayed")).toBeInTheDocument();
+    expect(screen.getByLabelText(/retained footprint data is delayed/i)).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Stale' for retained footprint data from an older session", () => {
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: sampleBuckets,
+          symbol: "NIFTY",
+          exchange: "NFO",
+          interval: 300,
+          is_live: false,
+          live_state: "stale",
+        },
+      }),
+    );
+
+    render(<FootprintWidget {...defaultProps} />);
+
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+  });
+
   it("renders the canvas element", () => {
     mockUseOrderFlow.mockReturnValue(
       hookResult({

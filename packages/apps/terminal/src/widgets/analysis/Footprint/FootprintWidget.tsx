@@ -31,7 +31,7 @@ import {
   useCallback,
   memo,
 } from "react";
-import { AlertCircle, BarChart, Loader2 } from "lucide-react";
+import { AlertCircle, BarChart, Clock3, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
+import { getOrderFlowDataState } from "@/services/ftApi.data";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -479,7 +480,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
     20,
   );
 
-  const isLive = data?.is_live ?? false;
+  const dataState = getOrderFlowDataState(data);
   const displayIntervalLabel = formatIntervalLabel(data?.interval, intervalLabel);
 
   const columns = useMemo(() => {
@@ -633,7 +634,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
               Error
             </Badge>
           )}
-          {!isLoading && !isError && columns.length > 0 && isLive && (
+          {!isLoading && !isError && columns.length > 0 && dataState === "live" && (
             <Badge
               variant="outline"
               className="text-xs border-emerald-500/40 text-emerald-400 bg-emerald-500/10 h-5 px-1.5"
@@ -646,7 +647,27 @@ function FootprintWidget(props: IDockviewPanelProps) {
               Live
             </Badge>
           )}
-          {!isLoading && !isError && columns.length > 0 && !isLive && (
+          {!isLoading && !isError && columns.length > 0 && dataState === "delayed" && (
+            <Badge
+              variant="outline"
+              className="text-xs border-sky-500/40 text-sky-400 bg-sky-500/10 h-5 px-1.5"
+              aria-label="Retained footprint data is delayed and no longer live"
+            >
+              <Clock3 className="size-2.5 mr-1" aria-hidden="true" />
+              Delayed
+            </Badge>
+          )}
+          {!isLoading && !isError && columns.length > 0 && dataState === "stale" && (
+            <Badge
+              variant="outline"
+              className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
+              aria-label="Retained footprint data is stale from an older session"
+            >
+              <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
+              Stale
+            </Badge>
+          )}
+          {!isLoading && !isError && columns.length > 0 && dataState === "sample" && (
             <Badge
               variant="outline"
               className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"

@@ -20,8 +20,30 @@ export interface OrderFlowResponse {
   symbol: string;
   exchange: string;
   interval: number;
-  /** True when data comes from the live OrderFlowAggregatorV2, false when synthetic. */
+  /** True only when aggregator buckets are fresh for the current session. */
   is_live: boolean;
+  /** Freshness classification for live or retained real buckets. */
+  live_state?: "live" | "delayed" | "stale" | "warming" | "unavailable";
+  freshness?: {
+    state: "live" | "delayed" | "stale" | "unavailable";
+    is_fresh: boolean;
+    last_tick_timestamp: number | null;
+    last_tick_session: string | null;
+    current_session: string | null;
+    age_seconds: number | null;
+  };
+}
+
+export type OrderFlowDataState = "live" | "delayed" | "stale" | "sample";
+
+export function getOrderFlowDataState(
+  data: Pick<OrderFlowResponse, "is_live" | "live_state"> | undefined,
+): OrderFlowDataState {
+  if (data?.is_live) return "live";
+  if (data?.live_state === "delayed" || data?.live_state === "stale") {
+    return data.live_state;
+  }
+  return "sample";
 }
 
 export const getOrderFlow = (

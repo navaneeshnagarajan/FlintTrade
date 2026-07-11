@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { getBase } from "@/services/ftApi.helpers";
+import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { safeParse } from "@/lib/safeParse";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,8 +23,12 @@ import {
 import { signalEventSchema } from "@/services/ftApi.ai";
 import type { SignalConfig, SignalEvent } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useHolidays } from "@/hooks/useMarketStatus";
 import { isMarketHours } from "@/lib/market";
 import type { MarketHoursInstrument } from "@/lib/market";
+import type { Holiday } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Sample data for explore mode
@@ -105,31 +109,69 @@ function parseConfiguredInstrument(identity: string): MarketHoursInstrument | un
   return { exchange: parts[0], symbol: parts[1] };
 }
 
-function isAnyConfiguredMarketOpen(instruments: string[]): boolean {
+function signalIdentity(signal: SignalEvent): string {
+  if (signal.event_id > 0) return `event:${signal.event_id}`;
+  return `legacy:${signal.timestamp}:${signal.exchange}:${signal.symbol}:${signal.method}`;
+}
+
+/** Merge signal snapshots without allowing an older source to evict newer events. */
+export function reconcileSignalEvents(
+  preferred: readonly SignalEvent[],
+  fallback: readonly SignalEvent[],
+  limit: number,
+): SignalEvent[] {
+  const byIdentity = new Map<string, SignalEvent>();
+  for (const signal of fallback) byIdentity.set(signalIdentity(signal), signal);
+  for (const signal of preferred) byIdentity.set(signalIdentity(signal), signal);
+
+  return [...byIdentity.values()]
+    .sort((left, right) => (
+      right.event_id - left.event_id
+      || Date.parse(right.timestamp) - Date.parse(left.timestamp)
+    ))
+    .slice(0, limit);
+}
+
+function isAnyConfiguredMarketOpen(
+  instruments: string[],
+  holidays?: readonly Holiday[],
+): boolean {
   return instruments.some((identity) => {
     const instrument = parseConfiguredInstrument(identity);
-    return instrument ? isMarketHours(instrument) : false;
+    return instrument ? isMarketHours(instrument, holidays) : false;
   });
 }
 
 export function useRecentSignals(limit = 20) {
   const mode = useModeStore((s) => s.mode);
   const configQuery = useSignalConfig();
+  const holidayQuery = useHolidays(mode !== "explore");
+  const qc = useQueryClient();
+  const queryKey = ["signals", "recent", mode, limit] as const;
 
   return useQuery<{ signals: SignalEvent[] }>({
-    queryKey: ["signals", "recent", mode, limit],
-    queryFn: () => {
-      if (mode === "explore") {
-        return Promise.resolve({ signals: SAMPLE_SIGNALS });
-      }
-      return getRecentSignals(limit);
+    queryKey,
+    queryFn: async () => {
+      const incoming = mode === "explore"
+        ? { signals: SAMPLE_SIGNALS }
+        : await getRecentSignals(limit);
+      const cached = qc.getQueryData<{ signals: SignalEvent[] }>(queryKey);
+      return {
+        signals: reconcileSignalEvents(
+          cached?.signals ?? [],
+          incoming.signals,
+          limit,
+        ),
+      };
     },
     staleTime: 5_000,
+    refetchOnMount: "always",
     refetchInterval: () => {
       if (configQuery.isPending) return 5_000;
+      if (mode !== "explore" && holidayQuery.isPending) return 60_000;
       const isOpen = configQuery.data
-        ? isAnyConfiguredMarketOpen(configQuery.data.instruments)
-        : isMarketHours();
+        ? isAnyConfiguredMarketOpen(configQuery.data.instruments, holidayQuery.data)
+        : isMarketHours(undefined, holidayQuery.data);
       return isOpen ? 5_000 : 60_000;
     },
     retry: false,
@@ -173,25 +215,140 @@ export function useUpdateSignalConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// useSignalStream — SSE EventSource for real-time signal events
+// useSignalStream — authenticated fetch/ReadableStream SSE client
 // ---------------------------------------------------------------------------
 
 export const signalReplayLossSchema = z.object({
   reason: z.string().min(1),
-  requested_event_id: z.number().int(),
-  oldest_available_event_id: z.number().int().nullable(),
-  newest_available_event_id: z.number().int(),
+  requested_event_id: z.union([z.number().int(), z.string().min(1)]),
+  oldest_available_event_id: z.union([z.number().int(), z.string().min(1)]).nullable(),
+  newest_available_event_id: z.union([z.number().int(), z.string().min(1)]),
 });
 
 export type SignalReplayLoss = z.infer<typeof signalReplayLossSchema>;
 
+interface ParsedSseEvent {
+  type: string;
+  data: string;
+  id?: string;
+}
+
+const SIGNAL_STREAM_CURSOR_KEY = "flinttrade:signals:sse-cursor:v1";
+const STREAM_RETRY_BASE_MS = 1_000;
+const STREAM_RETRY_MAX_MS = 30_000;
+
+function readSignalCursor(): string | null {
+  try {
+    const cursor = localStorage.getItem(SIGNAL_STREAM_CURSOR_KEY);
+    if (!cursor || cursor.length > 256 || /[\r\n\0]/.test(cursor)) return null;
+    return cursor;
+  } catch {
+    return null;
+  }
+}
+
+function persistSignalCursor(cursor: string): void {
+  if (!cursor || cursor.length > 256 || /[\r\n\0]/.test(cursor)) return;
+  try {
+    localStorage.setItem(SIGNAL_STREAM_CURSOR_KEY, cursor);
+  } catch {
+    // Cursor persistence is best-effort; the live stream remains usable.
+  }
+}
+
+function clearSignalCursor(): void {
+  try {
+    localStorage.removeItem(SIGNAL_STREAM_CURSOR_KEY);
+  } catch {
+    // Cursor persistence is best-effort; the live stream remains usable.
+  }
+}
+
+async function consumeSseStream(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  onEvent: (event: ParsedSseEvent) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventType = "message";
+  let eventId: string | undefined;
+  let dataLines: string[] = [];
+
+  const resetEvent = () => {
+    eventType = "message";
+    eventId = undefined;
+    dataLines = [];
+  };
+  const dispatchEvent = () => {
+    if (dataLines.length > 0) {
+      onEvent({ type: eventType, data: dataLines.join("\n"), id: eventId });
+    }
+    resetEvent();
+  };
+  const processLine = (rawLine: string) => {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line === "") {
+      dispatchEvent();
+      return;
+    }
+    if (line.startsWith(":")) return;
+
+    const separator = line.indexOf(":");
+    const field = separator === -1 ? line : line.slice(0, separator);
+    const rawValue = separator === -1 ? "" : line.slice(separator + 1);
+    const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+    if (field === "event") eventType = value || "message";
+    if (field === "data") dataLines.push(value);
+    if (field === "id" && !value.includes("\0")) eventId = value;
+  };
+  const cancelReader = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener("abort", cancelReader, { once: true });
+
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        processLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf("\n");
+      }
+    }
+
+    if (!signal.aborted) {
+      buffer += decoder.decode();
+      if (buffer) processLine(buffer);
+      dispatchEvent();
+    }
+  } finally {
+    signal.removeEventListener("abort", cancelReader);
+    reader.releaseLock();
+  }
+}
+
+export interface SignalStreamState {
+  connected: boolean;
+  authError: boolean;
+  replayLoss: SignalReplayLoss | null;
+  clearReplayLoss: () => void;
+}
+
 export function useSignalStream(
   onSignal: (signal: SignalEvent) => void,
   enabled = true,
-) {
+): SignalStreamState {
   const mode = useModeStore((s) => s.mode);
-  const esRef = useRef<EventSource | null>(null);
+  const authToken = useAuthStore((s) => s.token);
+  const apiKey = useConnectionStore((s) => s.apiKey);
   const [connected, setConnected] = useState(false);
+  const [authError, setAuthError] = useState(false);
   const [replayLoss, setReplayLoss] = useState<SignalReplayLoss | null>(null);
   const qc = useQueryClient();
   const callbackRef = useRef(onSignal);
@@ -204,49 +361,99 @@ export function useSignalStream(
   useEffect(() => {
     if (mode === "explore" || !enabled) {
       setConnected(false);
+      setAuthError(false);
       return;
     }
 
     const base = getBase();
     const url = `${base}/api/v1/signals/stream`;
-    const es = new EventSource(url);
     const streamMode = mode;
+    let disposed = false;
+    let retryAttempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let controller: AbortController | null = null;
 
-    es.onopen = () => {
-      if (modeRef.current !== streamMode) return;
-      setConnected(true);
+    const handleEvent = (event: ParsedSseEvent) => {
+      if (disposed || modeRef.current !== streamMode) return;
+      if (event.type === "replay-loss") {
+        const control = safeParse(event.data, signalReplayLossSchema);
+        if (!control) return;
+        clearSignalCursor();
+        setReplayLoss(control);
+        void qc.resetQueries({ queryKey: ["signals", "recent"] });
+        return;
+      }
+      if (event.type !== "message") return;
+
+      const signal = safeParse(event.data, signalEventSchema);
+      if (!signal) return;
+      callbackRef.current(signal);
+      if (event.id) persistSignalCursor(event.id);
     };
-    es.onerror = () => {
-      if (modeRef.current !== streamMode) return;
-      setConnected(false);
-      // EventSource auto-reconnects — no manual reconnect needed
-    };
-    es.onmessage = (event) => {
-      if (modeRef.current !== streamMode) return;
-      const signal = safeParse(event.data as string, signalEventSchema);
-      if (signal) callbackRef.current(signal);
-      // Malformed frames and heartbeat comments are silently discarded
-    };
-    const handleReplayLoss = (event: Event) => {
-      if (modeRef.current !== streamMode) return;
-      const control = safeParse(
-        (event as MessageEvent).data as string,
-        signalReplayLossSchema,
+
+    const scheduleReconnect = () => {
+      if (disposed || retryTimer !== null) return;
+      const delay = Math.min(
+        STREAM_RETRY_BASE_MS * 2 ** retryAttempt,
+        STREAM_RETRY_MAX_MS,
       );
-      if (!control) return;
-      setReplayLoss(control);
-      void qc.invalidateQueries({ queryKey: ["signals", "recent"] });
+      retryAttempt += 1;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void connect();
+      }, delay);
     };
-    es.addEventListener("replay-loss", handleReplayLoss);
 
-    esRef.current = es;
+    async function connect(): Promise<void> {
+      controller = new AbortController();
+      const cursor = readSignalCursor();
+      const headers: Record<string, string> = {
+        ...buildHeaders(false),
+        Accept: "text/event-stream",
+      };
+      if (cursor) headers["Last-Event-ID"] = cursor;
+
+      try {
+        const response = await fetch(url, {
+          headers,
+          signal: controller.signal,
+        });
+        if (disposed || modeRef.current !== streamMode) return;
+        if (response.status === 401 || response.status === 403) {
+          setConnected(false);
+          setAuthError(true);
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(`Signal stream HTTP ${response.status}`);
+        }
+        if (!response.body) {
+          throw new Error("Signal stream response has no body");
+        }
+
+        retryAttempt = 0;
+        setAuthError(false);
+        setConnected(true);
+        await consumeSseStream(response.body, controller.signal, handleEvent);
+        if (disposed || controller.signal.aborted) return;
+        setConnected(false);
+        scheduleReconnect();
+      } catch {
+        if (disposed || controller.signal.aborted) return;
+        setConnected(false);
+        scheduleReconnect();
+      }
+    }
+
+    setAuthError(false);
+    setConnected(false);
+    void connect();
     return () => {
-      es.removeEventListener("replay-loss", handleReplayLoss);
-      es.close();
-      if (esRef.current === es) esRef.current = null;
-      setConnected(false);
+      disposed = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      controller?.abort();
     };
-  }, [enabled, mode, qc]);
+  }, [apiKey, authToken, enabled, mode, qc]);
 
-  return { connected, replayLoss, clearReplayLoss };
+  return { connected, authError, replayLoss, clearReplayLoss };
 }

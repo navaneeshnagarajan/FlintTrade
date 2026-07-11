@@ -165,6 +165,13 @@ describe("AIRoute", () => {
     expect(screen.getByText("AI Center")).toBeInTheDocument();
   });
 
+  it("owns the signal stream at route scope before the Signals overlay opens", () => {
+    renderAI();
+
+    expect(screen.queryByText("Trading Signals")).not.toBeInTheDocument();
+    expect(signalStreamMocks.hook).toHaveBeenCalled();
+  });
+
   it("shows navigation with Chat and Signals buttons", () => {
     renderAI();
 

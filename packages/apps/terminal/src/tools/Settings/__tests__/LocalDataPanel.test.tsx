@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LocalDataPanel } from "../LocalDataPanel";
+import { useAuthStore } from "@/stores/authStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -61,7 +63,13 @@ describe("LocalDataPanel", () => {
           },
         },
       },
+      "/v1/historify/bhavcopy/download": {
+        status: "success",
+        data: { saved_count: 1, error_count: 0, dest_dir: "/tmp/bhavcopy" },
+      },
     }));
+    useAuthStore.setState({ token: null });
+    useConnectionStore.setState({ apiKey: "" });
   });
 
   afterEach(() => {
@@ -91,6 +99,65 @@ describe("LocalDataPanel", () => {
     });
     expect(screen.queryByText("ohlcv_1m")).not.toBeInTheDocument();
     expect(screen.getByText("5,000")).toBeInTheDocument();
+  });
+
+  it("uses authenticated helpers for tick, OHLCV, and bhavcopy requests", async () => {
+    useAuthStore.setState({ token: "terminal-jwt" });
+    useConnectionStore.setState({ apiKey: "terminal-api-key" });
+    render(<LocalDataPanel />, { wrapper });
+
+    await screen.findByText("ohlcv_1d");
+    fireEvent.click(screen.getByRole("button", { name: /Fetch bhavcopies/i }));
+
+    const activeFetch = vi.mocked(globalThis.fetch);
+    await waitFor(() => {
+      expect(activeFetch.mock.calls.some(([url]) => (
+        String(url).includes("/v1/historify/bhavcopy/download")
+      ))).toBe(true);
+    });
+
+    for (const path of [
+      "/api/v1/data/ticks/status",
+      "/v1/historify/bars/summary",
+      "/v1/historify/bhavcopy/download",
+    ]) {
+      const call = activeFetch.mock.calls.find(([url]) => String(url).includes(path));
+      expect(call?.[1]?.headers).toEqual(expect.objectContaining({
+        Authorization: "Bearer terminal-jwt",
+        "X-API-Key": "terminal-api-key",
+      }));
+    }
+  });
+
+  it("surfaces the backend OHLCV summary error instead of showing an empty store", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/v1/historify/bars/summary")) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({ message: "OHLCV store is locked" }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: "success",
+          data: {
+            enabled: false,
+            running: false,
+            connected: false,
+            tick_count: 0,
+            watchlist: {},
+          },
+        }),
+      } as Response;
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    expect(await screen.findByText("OHLCV store is locked")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing downloaded yet/)).not.toBeInTheDocument();
   });
 
   it("shows the off hint when capture is disabled", async () => {
