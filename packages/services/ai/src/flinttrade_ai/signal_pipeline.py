@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Literal
 
-from .signal_models import SignalConfig, SignalEvent, now_iso
+from .signal_models import SignalConfig, SignalEvent, normalise_instrument_identity, now_iso
 from flinttrade_indicators.streaming import StreamingEMA, StreamingRSI
 
 logger = logging.getLogger("flinttrade.ai.signal_pipeline")
@@ -76,6 +76,7 @@ class _InstrumentState:
         self.macd_fast_ema: StreamingEMA | None = None
         self.macd_slow_ema: StreamingEMA | None = None
         self.macd_signal_ema: StreamingEMA | None = None
+        self.rsi_zone: Literal["OVERSOLD", "NEUTRAL", "OVERBOUGHT"] | None = None
         self.prev_ema_fast: float | None = None
         self.prev_ema_slow: float | None = None
         self.prev_macd_hist: float | None = None
@@ -202,6 +203,7 @@ class LiveSignalPipeline:
         """
         state = self._get_or_create_state(exchange, symbol)
         thresholds = self._config.thresholds
+        pending_signal: SignalEvent | None = None
 
         # --- RSI ---
         if state.rsi is not None:
@@ -209,9 +211,17 @@ class LiveSignalPipeline:
             if rsi_val is not None:
                 oversold = thresholds.get("rsi_oversold", 30.0)
                 overbought = thresholds.get("rsi_overbought", 70.0)
-
                 if rsi_val <= oversold:
-                    sig = SignalEvent(
+                    zone: Literal["OVERSOLD", "NEUTRAL", "OVERBOUGHT"] = "OVERSOLD"
+                elif rsi_val >= overbought:
+                    zone = "OVERBOUGHT"
+                else:
+                    zone = "NEUTRAL"
+                entered_zone = zone != state.rsi_zone
+                state.rsi_zone = zone
+
+                if entered_zone and zone == "OVERSOLD":
+                    pending_signal = SignalEvent(
                         timestamp=now_iso(),
                         symbol=symbol,
                         exchange=exchange,
@@ -223,10 +233,8 @@ class LiveSignalPipeline:
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
                         f"below oversold threshold {oversold:.0f}",
                     )
-                    return self._publish_locked(sig)
-
-                if rsi_val >= overbought:
-                    sig = SignalEvent(
+                elif entered_zone and zone == "OVERBOUGHT":
+                    pending_signal = SignalEvent(
                         timestamp=now_iso(),
                         symbol=symbol,
                         exchange=exchange,
@@ -238,7 +246,6 @@ class LiveSignalPipeline:
                         message=f"{symbol} RSI({state.rsi.period}) = {rsi_val:.1f} "
                         f"above overbought threshold {overbought:.0f}",
                     )
-                    return self._publish_locked(sig)
 
         # --- EMA Crossover ---
         if state.ema_fast is not None and state.ema_slow is not None:
@@ -274,9 +281,10 @@ class LiveSignalPipeline:
                     )
                     state.prev_ema_fast = fast_val
                     state.prev_ema_slow = slow_val
-                    return self._publish_locked(sig)
+                    if pending_signal is None:
+                        pending_signal = sig
 
-                if state.ema_armed_direction == "SELL" and spread_pct < bearish_threshold:
+                elif state.ema_armed_direction == "SELL" and spread_pct < bearish_threshold:
                     state.ema_armed_direction = None
                     sig = SignalEvent(
                         timestamp=now_iso(),
@@ -291,7 +299,8 @@ class LiveSignalPipeline:
                     )
                     state.prev_ema_fast = fast_val
                     state.prev_ema_slow = slow_val
-                    return self._publish_locked(sig)
+                    if pending_signal is None:
+                        pending_signal = sig
 
                 state.prev_ema_fast = fast_val
                 state.prev_ema_slow = slow_val
@@ -333,9 +342,10 @@ class LiveSignalPipeline:
                             message=f"{symbol} MACD histogram turned positive ({macd_hist:.2f})",
                         )
                         state.prev_macd_hist = macd_hist
-                        return self._publish_locked(sig)
+                        if pending_signal is None:
+                            pending_signal = sig
 
-                    if state.macd_armed_direction == "SELL" and macd_hist < bearish_threshold:
+                    elif state.macd_armed_direction == "SELL" and macd_hist < bearish_threshold:
                         state.macd_armed_direction = None
                         sig = SignalEvent(
                             timestamp=now_iso(),
@@ -349,11 +359,12 @@ class LiveSignalPipeline:
                             message=f"{symbol} MACD histogram turned negative ({macd_hist:.2f})",
                         )
                         state.prev_macd_hist = macd_hist
-                        return self._publish_locked(sig)
+                        if pending_signal is None:
+                            pending_signal = sig
 
                     state.prev_macd_hist = macd_hist
 
-        return None
+        return self._publish_locked(pending_signal) if pending_signal is not None else None
 
     def publish_signal(self, signal: SignalEvent) -> SignalEvent:
         """Publish one event with a hub-owned monotonic identifier."""
@@ -396,15 +407,34 @@ class LiveSignalPipeline:
         timeout: float,
     ) -> list[SignalEvent]:
         """Wait for a retained newer event, then return every matching replay event."""
+        _, retained = self.wait_for_replay_snapshot_after(event_id, timeout)
+        return [signal for signal in retained if signal.event_id > event_id]
+
+    def wait_for_replay_snapshot_after(
+        self,
+        event_id: int,
+        timeout: float,
+    ) -> tuple[int, list[SignalEvent]]:
+        """Wait for newer data and atomically snapshot the retained replay window."""
         with self._condition:
             self._condition.wait_for(
                 lambda: any(signal.event_id > event_id for signal in self._signals),
                 timeout=timeout,
             )
-            return sorted(
-                (deepcopy(signal) for signal in self._signals if signal.event_id > event_id),
+            retained = sorted(
+                (deepcopy(signal) for signal in self._signals),
                 key=lambda signal: signal.event_id,
             )
+            return self._sequence, retained
+
+    def get_replay_snapshot(self) -> tuple[int, list[SignalEvent]]:
+        """Return one atomic, isolated snapshot of the retained replay window."""
+        with self._lock:
+            retained = sorted(
+                (deepcopy(signal) for signal in self._signals),
+                key=lambda signal: signal.event_id,
+            )
+            return self._sequence, retained
 
     def ingest_ml_cycle(
         self,
@@ -412,52 +442,64 @@ class LiveSignalPipeline:
     ) -> list[SignalEvent]:
         """Convert one scheduled ML cycle into canonical source-tagged events."""
         published: list[SignalEvent] = []
-        for key, info in results.items():
-            symbol = str(info.get("symbol") or key.rsplit(":", 1)[-1])
-            exchange = str(info.get("exchange") or key.partition(":")[0])
-            signal_type = str(info.get("signal", "HOLD")).upper()
-            if signal_type == "NEUTRAL":
-                signal_type = "HOLD"
-            if signal_type not in {"BUY", "SELL", "HOLD", "ALERT"}:
-                logger.warning("Unknown ML signal type %r for %s; emitting ALERT", signal_type, key)
-                signal_type = "ALERT"
+        with self._lock:
+            allowed_instruments = set(self._config.instruments)
+            for key, info in results.items():
+                raw_symbol = str(info.get("symbol") or key.rsplit(":", 1)[-1])
+                raw_exchange = str(info.get("exchange") or key.partition(":")[0])
+                try:
+                    identity = normalise_instrument_identity(f"{raw_exchange}:{raw_symbol}")
+                except ValueError:
+                    logger.warning("Invalid scheduled signal identity %r; event skipped", key)
+                    continue
+                if identity not in allowed_instruments:
+                    logger.debug("Unconfigured scheduled signal identity %s; event skipped", identity)
+                    continue
+                exchange, symbol = identity.split(":", 1)
 
-            method = str(info.get("method", "ml_model"))
-            if method.startswith("ml_model"):
-                source = "ml"
-                indicator = "LightGBM"
-            elif method.startswith("ema_crossover_fallback"):
-                source = "fallback"
-                indicator = "EMA_Cross"
-            else:
-                logger.warning("Unknown scheduled signal method %r for %s; event skipped", method, key)
-                continue
-            ltp = _as_float(info.get("ltp"))
-            turbulence = _as_float(info.get("turbulence_score"))
-            confidence = _as_float(info.get("confidence"))
-            method_label = method.replace("_", " ")
-            message = f"{symbol} scheduled {method_label} signal: {signal_type}"
+                signal_type = str(info.get("signal", "HOLD")).upper()
+                if signal_type == "NEUTRAL":
+                    signal_type = "HOLD"
+                if signal_type not in {"BUY", "SELL", "HOLD", "ALERT"}:
+                    logger.warning("Unknown ML signal type %r for %s; emitting ALERT", signal_type, key)
+                    signal_type = "ALERT"
 
-            published.append(
-                self.publish_signal(
-                    SignalEvent(
-                        timestamp=str(info.get("timestamp") or now_iso()),
-                        symbol=symbol,
-                        exchange=exchange,
-                        signal_type=signal_type,
-                        source=source,
-                        method=method,
-                        indicator=indicator,
-                        value=ltp,
-                        confidence=confidence,
-                        message=message,
-                        metadata={
-                            "ltp": ltp,
-                            "turbulence_score": turbulence,
-                        },
+                method = str(info.get("method", "ml_model"))
+                if method.startswith("ml_model"):
+                    source = "ml"
+                    indicator = "LightGBM"
+                elif method.startswith("ema_crossover_fallback"):
+                    source = "fallback"
+                    indicator = "EMA_Cross"
+                else:
+                    logger.warning("Unknown scheduled signal method %r for %s; event skipped", method, key)
+                    continue
+                ltp = _as_float(info.get("ltp"))
+                turbulence = _as_float(info.get("turbulence_score"))
+                confidence = _as_float(info.get("confidence"))
+                method_label = method.replace("_", " ")
+                message = f"{symbol} scheduled {method_label} signal: {signal_type}"
+
+                published.append(
+                    self._publish_locked(
+                        SignalEvent(
+                            timestamp=str(info.get("timestamp") or now_iso()),
+                            symbol=symbol,
+                            exchange=exchange,
+                            signal_type=signal_type,
+                            source=source,
+                            method=method,
+                            indicator=indicator,
+                            value=ltp,
+                            confidence=confidence,
+                            message=message,
+                            metadata={
+                                "ltp": ltp,
+                                "turbulence_score": turbulence,
+                            },
+                        )
                     )
                 )
-            )
         return published
 
     def get_recent_signals(self, limit: int = 20) -> list[SignalEvent]:

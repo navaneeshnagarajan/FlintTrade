@@ -124,16 +124,63 @@ def _sse_generator(
 
     Monotonic event IDs avoid the old deque-length bug once the 100-item ring
     buffer is full. Reconnecting clients can replay retained events with
-    ``Last-Event-ID``. A heartbeat comment keeps idle connections alive.
+    ``Last-Event-ID``. When that cursor cannot be resumed, a named
+    ``replay-loss`` control event is emitted without an SSE ID, followed by all
+    retained events from the current process. Its data payload contains the
+    reason, requested cursor, and available ID bounds; it is not a
+    ``SignalEvent`` payload. A heartbeat comment keeps idle connections alive.
     """
-    newest = pipeline.latest_event_id
-    cursor = newest if last_event_id is None else max(0, min(last_event_id, newest))
+    newest, retained = pipeline.get_replay_snapshot()
+    cursor = newest
+    replay_events = []
+    if last_event_id is not None:
+        requested_cursor = max(0, last_event_id)
+        oldest = retained[0].event_id if retained else None
+        replay_loss_reason: str | None = None
+        if last_event_id > newest:
+            replay_loss_reason = "cursor_ahead_of_process"
+        elif oldest is not None and requested_cursor < oldest - 1:
+            replay_loss_reason = "cursor_before_retained"
+
+        if replay_loss_reason is not None:
+            control = {
+                "reason": replay_loss_reason,
+                "requested_event_id": last_event_id,
+                "oldest_available_event_id": oldest,
+                "newest_available_event_id": newest,
+            }
+            yield f"event: replay-loss\ndata: {_json.dumps(control)}\n\n"
+            replay_events = retained
+            cursor = oldest - 1 if oldest is not None else 0
+        else:
+            cursor = requested_cursor
+            replay_events = [signal for signal in retained if signal.event_id > cursor]
+
+    for signal in replay_events:
+        payload = _json.dumps(signal.to_dict())
+        yield f"id: {signal.event_id}\ndata: {payload}\n\n"
+        cursor = signal.event_id
 
     while True:
-        events = pipeline.wait_for_signals_after(cursor, timeout=heartbeat_interval)
+        newest, retained = pipeline.wait_for_replay_snapshot_after(
+            cursor,
+            timeout=heartbeat_interval,
+        )
+        events = [signal for signal in retained if signal.event_id > cursor]
         if not events:
             yield ": heartbeat\n\n"
             continue
+        oldest = retained[0].event_id
+        if oldest > cursor + 1:
+            control = {
+                "reason": "cursor_before_retained",
+                "requested_event_id": cursor,
+                "oldest_available_event_id": oldest,
+                "newest_available_event_id": newest,
+            }
+            yield f"event: replay-loss\ndata: {_json.dumps(control)}\n\n"
+            events = retained
+            cursor = oldest - 1
         for signal in events:
             payload = _json.dumps(signal.to_dict())
             yield f"id: {signal.event_id}\ndata: {payload}\n\n"
@@ -145,6 +192,10 @@ def signals_stream() -> Response:
     """SSE endpoint that streams live signals as they are generated.
 
     Connect with ``EventSource("/api/v1/signals/stream")``.
+
+    Clients should listen for the named ``replay-loss`` control event. It means
+    the requested cursor belongs to discarded history or an earlier process;
+    retained current-process signal messages follow immediately.
     """
     pipeline = _get_pipeline()
     raw_last_event_id = request.headers.get("Last-Event-ID")

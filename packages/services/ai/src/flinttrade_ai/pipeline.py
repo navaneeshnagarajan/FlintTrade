@@ -120,10 +120,14 @@ class SignalPipeline:
                 default_model_path,
             )
         self.model_path = model_path or str(default_model_path)
-        self.instruments = instruments or [
-            {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
-            {"symbol": "BANKNIFTY", "exchange": "NSE_INDEX"},
-        ]
+        self.instruments = (
+            instruments
+            if instruments is not None
+            else [
+                {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+                {"symbol": "BANKNIFTY", "exchange": "NSE_INDEX"},
+            ]
+        )
         self.interval = interval
         self.latest_signals: dict[str, dict[str, Any]] = {}
         self._generator: Any = None

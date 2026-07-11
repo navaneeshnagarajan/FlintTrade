@@ -17,8 +17,10 @@ class _SequenceIndicator:
     def __init__(self, values: list[float], period: int = 2) -> None:
         self._values = iter(values)
         self.period = period
+        self.update_count = 0
 
     def update(self, _value: float) -> float:
+        self.update_count += 1
         return next(self._values)
 
 
@@ -223,6 +225,70 @@ class TestLiveSignalPipeline:
         assert signal.signal_type == "SELL"
         assert signal.indicator == "RSI"
         assert signal.exchange == "NSE_INDEX"
+
+    @pytest.mark.parametrize(
+        ("rsi_values", "signal_type"),
+        [
+            ([50.0, 20.0, 10.0, 40.0, 20.0], "BUY"),
+            ([50.0, 80.0, 90.0, 60.0, 80.0], "SELL"),
+        ],
+    )
+    def test_rsi_emits_once_per_zone_entry(
+        self,
+        rsi_values: list[float],
+        signal_type: str,
+    ) -> None:
+        pipeline = self._make_pipeline()
+        state = pipeline._get_or_create_state("NSE_INDEX", "NIFTY")
+        state.rsi = _SequenceIndicator(rsi_values)  # type: ignore[assignment]
+
+        emissions = [
+            (index, signal.signal_type)
+            for index in range(len(rsi_values))
+            if (signal := pipeline.process_tick("NSE_INDEX", "NIFTY", 100.0)) is not None
+        ]
+
+        assert emissions == [(1, signal_type), (4, signal_type)]
+
+    def test_rsi_event_does_not_block_other_indicator_state_updates(self) -> None:
+        from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+
+        pipeline = LiveSignalPipeline(
+            instruments=["NSE:TEST"],
+            indicators=[
+                {"name": "RSI", "params": {"period": 2}},
+                {"name": "EMA_Cross", "params": {"fast": 2, "slow": 4}},
+                {"name": "MACD", "params": {"fast": 2, "slow": 4, "signal": 2}},
+            ],
+            thresholds={
+                "rsi_oversold": 30.0,
+                "rsi_overbought": 70.0,
+                "ema_cross_min_pct": 0.0,
+                "macd_crossover_min": 0.0,
+            },
+        )
+        state = pipeline._get_or_create_state("NSE", "TEST")
+        state.rsi = _SequenceIndicator([50.0, 20.0, 20.0])  # type: ignore[assignment]
+        state.ema_fast = _SequenceIndicator([99.0, 101.0, 102.0])  # type: ignore[assignment]
+        state.ema_slow = _SequenceIndicator([100.0, 100.0, 100.0])  # type: ignore[assignment]
+        state.macd_fast_ema = _SequenceIndicator([-1.0, 1.0, 2.0])  # type: ignore[assignment]
+        state.macd_slow_ema = _SequenceIndicator([0.0, 0.0, 0.0])  # type: ignore[assignment]
+        state.macd_signal_ema = _SequenceIndicator([0.0, 0.0, 0.0])  # type: ignore[assignment]
+
+        assert pipeline.process_tick("NSE", "TEST", 100.0) is None
+        signal = pipeline.process_tick("NSE", "TEST", 100.0)
+
+        assert signal is not None
+        assert signal.indicator == "RSI"
+        assert pipeline.latest_event_id == 1
+        assert state.ema_fast.update_count == 2  # type: ignore[union-attr]
+        assert state.ema_slow.update_count == 2  # type: ignore[union-attr]
+        assert state.macd_fast_ema.update_count == 2  # type: ignore[union-attr]
+        assert state.macd_slow_ema.update_count == 2  # type: ignore[union-attr]
+        assert state.macd_signal_ema.update_count == 2  # type: ignore[union-attr]
+        assert state.ema_last_nonzero_side == 1
+        assert state.macd_last_nonzero_side == 1
+        assert pipeline.process_tick("NSE", "TEST", 100.0) is None
 
     def test_no_signal_when_rsi_in_range(self):
         """Alternating small moves should keep RSI in mid-range and not trigger."""
@@ -685,6 +751,29 @@ class TestLiveSignalPipeline:
         assert published[0].value == 0.0
         assert published[0].confidence == 0.0
         assert published[0].metadata == {"ltp": 0.0, "turbulence_score": 0.0}
+
+    def test_ml_cycle_emits_only_canonical_configured_identities(self) -> None:
+        pipeline = self._make_pipeline(instruments=["nse:reliance"])
+
+        published = pipeline.ingest_ml_cycle(
+            {
+                "BSE:RELIANCE": {
+                    "signal": "SELL",
+                    "method": "ml_model",
+                    "ltp": 1_390.0,
+                },
+                "nse:reliance": {
+                    "signal": "BUY",
+                    "method": "ml_model",
+                    "ltp": 1_400.0,
+                },
+            }
+        )
+
+        assert [(event.event_id, event.exchange, event.symbol) for event in published] == [
+            (1, "NSE", "RELIANCE")
+        ]
+        assert pipeline.latest_event_id == 1
 
     @pytest.mark.parametrize("field_name", ["value", "threshold", "confidence"])
     def test_invalid_event_numbers_do_not_consume_event_ids(self, field_name: str) -> None:

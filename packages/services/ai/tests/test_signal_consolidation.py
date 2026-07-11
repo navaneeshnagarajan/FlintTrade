@@ -98,6 +98,17 @@ def test_sink_failure_does_not_discard_latest_ml_results() -> None:
     assert results["NSE_INDEX:NIFTY"]["signal"] == "HOLD"
 
 
+def test_scheduled_pipeline_preserves_explicitly_empty_instruments() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    pipeline = SignalPipeline(instruments=[])
+    pipeline.fetch_bars = MagicMock()
+
+    assert pipeline.instruments == []
+    assert pipeline.run_cycle() == {}
+    pipeline.fetch_bars.assert_not_called()
+
+
 def test_hub_ingests_ml_cycle_into_recent_feed() -> None:
     from flinttrade_ai.signal_pipeline import LiveSignalPipeline
 
@@ -163,9 +174,7 @@ def test_rule_events_replay_both_exchange_qualified_identities() -> None:
         (payload["event_id"], payload["exchange"], payload["symbol"], payload["signal_type"]) for payload in payloads
     ] == [
         (1, "NSE", "RELIANCE", "SELL"),
-        (2, "NSE", "RELIANCE", "SELL"),
-        (3, "BSE", "RELIANCE", "BUY"),
-        (4, "BSE", "RELIANCE", "BUY"),
+        (2, "BSE", "RELIANCE", "BUY"),
     ]
 
 
@@ -271,6 +280,84 @@ def test_sse_uses_monotonic_ids_after_deque_is_full() -> None:
 
     assert f"id: {_MAX_SIGNALS + 1}" in lines
     assert payload["event_id"] == _MAX_SIGNALS + 1
+
+
+def test_sse_signals_replay_loss_then_replays_retained_ring() -> None:
+    from flinttrade_ai.signal_models import SignalEvent
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline, _MAX_SIGNALS
+    from flinttrade_ai.signal_routes import _sse_generator
+
+    hub = LiveSignalPipeline()
+    for index in range(_MAX_SIGNALS + 2):
+        hub.publish_signal(SignalEvent(symbol=f"TEST{index}", source="rule", signal_type="ALERT"))
+
+    replay = _sse_generator(hub, last_event_id=0, heartbeat_interval=0.0)
+    control = next(replay)
+    control_payload = json.loads(control.split("data: ", 1)[1])
+
+    assert control.startswith("event: replay-loss\n")
+    assert "id:" not in control
+    assert control_payload == {
+        "reason": "cursor_before_retained",
+        "requested_event_id": 0,
+        "oldest_available_event_id": 3,
+        "newest_available_event_id": _MAX_SIGNALS + 2,
+    }
+    replayed_ids = [
+        json.loads(next(replay).split("data: ", 1)[1])["event_id"] for _ in range(_MAX_SIGNALS)
+    ]
+    assert replayed_ids == list(range(3, _MAX_SIGNALS + 3))
+
+
+def test_sse_signals_restart_cursor_loss_then_replays_current_process() -> None:
+    from flinttrade_ai.signal_models import SignalEvent
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+    from flinttrade_ai.signal_routes import _sse_generator
+
+    hub = LiveSignalPipeline()
+    hub.publish_signal(SignalEvent(symbol="CURRENT-1", source="rule", signal_type="ALERT"))
+    hub.publish_signal(SignalEvent(symbol="CURRENT-2", source="rule", signal_type="ALERT"))
+
+    replay = _sse_generator(hub, last_event_id=500, heartbeat_interval=0.0)
+    control = next(replay)
+    control_payload = json.loads(control.split("data: ", 1)[1])
+
+    assert control.startswith("event: replay-loss\n")
+    assert "id:" not in control
+    assert control_payload == {
+        "reason": "cursor_ahead_of_process",
+        "requested_event_id": 500,
+        "oldest_available_event_id": 1,
+        "newest_available_event_id": 2,
+    }
+    replayed_ids = [json.loads(next(replay).split("data: ", 1)[1])["event_id"] for _ in range(2)]
+    assert replayed_ids == [1, 2]
+
+
+def test_sse_signals_replay_loss_after_live_ring_overflow() -> None:
+    from flinttrade_ai.signal_models import SignalEvent
+    from flinttrade_ai.signal_pipeline import LiveSignalPipeline, _MAX_SIGNALS
+    from flinttrade_ai.signal_routes import _sse_generator
+
+    hub = LiveSignalPipeline()
+    stream = _sse_generator(hub, heartbeat_interval=0.0)
+    assert next(stream) == ": heartbeat\n\n"
+
+    for index in range(_MAX_SIGNALS + 2):
+        hub.publish_signal(SignalEvent(symbol=f"LIVE{index}", source="rule", signal_type="ALERT"))
+
+    control = next(stream)
+    control_payload = json.loads(control.split("data: ", 1)[1])
+
+    assert control.startswith("event: replay-loss\n")
+    assert "id:" not in control
+    assert control_payload == {
+        "reason": "cursor_before_retained",
+        "requested_event_id": 0,
+        "oldest_available_event_id": 3,
+        "newest_available_event_id": _MAX_SIGNALS + 2,
+    }
+    assert json.loads(next(stream).split("data: ", 1)[1])["event_id"] == 3
 
 
 def test_configure_signal_sources_wires_one_hub_and_ml_sink() -> None:
