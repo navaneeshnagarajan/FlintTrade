@@ -608,14 +608,18 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full bg-surface-base select-none">
       {/* ─── Toolbar ────────────────────────────────────────────────────── */}
-      <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border-default px-3 py-1.5">
+      <div
+        className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-border-default px-3 py-1.5"
+        role="toolbar"
+        aria-label="Order flow controls"
+      >
         {/* Symbol selector */}
         <span className="sr-only" id="of-symbol-label">
           Symbol
         </span>
         <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
-            className="h-6 w-24 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
+            className="h-6 w-24 max-w-full text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="of-symbol-label"
           >
             <SelectValue />
@@ -692,7 +696,10 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
         </div>
 
         {/* Freshness and source quality */}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <div
+          className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5"
+          data-testid="order-flow-toolbar-status"
+        >
           {isLoading && (
             <Badge
               variant="outline"

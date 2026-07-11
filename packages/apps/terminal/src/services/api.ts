@@ -66,6 +66,7 @@ import {
   listLiveNativeReadAccounts,
   selectNativeReadAccount,
 } from "@/services/brokerAccountsApi";
+import { z } from "zod";
 import { get as getFtApi, post as postFtApi } from "./ftApi.helpers";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
@@ -471,21 +472,51 @@ function normaliseNativeOrderStatus(value: unknown): { status: string } {
   };
 }
 
+const isoCalendarDateSchema = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+}, "Invalid calendar date");
+
+const nativeEpochSchema = z.union([
+  z.number().finite().nonnegative(),
+  z.string().trim().regex(/^\d+(?:\.\d+)?$/).transform(Number).pipe(z.number().finite().nonnegative()),
+]);
+
+const nativeOpenExchangeSchema = z.object({
+  exchange: z.string().trim().min(1),
+  start_time: nativeEpochSchema,
+  end_time: nativeEpochSchema,
+}).refine((session) => session.end_time > session.start_time, {
+  message: "end_time must be after start_time",
+  path: ["end_time"],
+});
+
+const nativeHolidaySchema = z.object({
+  date: isoCalendarDateSchema.optional(),
+  _date: isoCalendarDateSchema.optional(),
+  description: z.string().trim().min(1),
+  holiday_type: z.string().trim().min(1),
+  closed_exchanges: z.array(z.string().trim().min(1)),
+  open_exchanges: z.array(nativeOpenExchangeSchema),
+}).refine((row) => row.date !== undefined || row._date !== undefined, {
+  message: "date or _date is required",
+  path: ["date"],
+}).transform((row): Holiday => ({
+  date: row.date ?? row._date!,
+  description: row.description,
+  holiday_type: row.holiday_type,
+  closed_exchanges: row.closed_exchanges,
+  open_exchanges: row.open_exchanges,
+}));
+
 function normaliseNativeHolidays(value: unknown): Holiday[] {
-  const rows = Array.isArray(value) ? value : [];
-  return rows.filter(isRecord).map((row) => ({
-    date: String(row.date ?? row._date ?? ""),
-    description: String(row.description ?? ""),
-    holiday_type: String(row.holiday_type ?? ""),
-    closed_exchanges: Array.isArray(row.closed_exchanges) ? row.closed_exchanges.map(String) : [],
-    open_exchanges: Array.isArray(row.open_exchanges)
-      ? row.open_exchanges.filter(isRecord).map((entry) => ({
-          exchange: String(entry.exchange ?? ""),
-          start_time: toNumber(entry.start_time),
-          end_time: toNumber(entry.end_time),
-        }))
-      : [],
-  }));
+  const parsed = z.array(nativeHolidaySchema).safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
+    throw new Error(`Invalid native holiday response${path}: ${issue?.message ?? "schema mismatch"}`);
+  }
+  return parsed.data;
 }
 
 function normaliseNativeTimings(value: unknown): MarketTiming[] {

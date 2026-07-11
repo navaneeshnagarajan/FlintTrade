@@ -434,6 +434,43 @@ describe("useRecentSignals", () => {
 
     expect(reconcileSignalEvents([newProcess], [oldProcess], 10)).toHaveLength(2);
   });
+
+  it("keeps reused legacy event IDs from unqualified backend restarts distinct", () => {
+    const oldProcess = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      event_id: 1,
+      timestamp: "2026-07-11T09:59:00+05:30",
+      source: "rule",
+    });
+    const newProcess = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      event_id: 1,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      source: "ml",
+    });
+
+    expect(reconcileSignalEvents([newProcess], [oldProcess], 10)).toHaveLength(2);
+  });
+
+  it("still deduplicates unqualified REST and SSE copies of one event", () => {
+    const restCopy = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      event_id: 42,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      message: "REST copy",
+    });
+    const sseCopy = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      event_id: 42,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      message: "SSE copy",
+    });
+
+    const reconciled = reconcileSignalEvents([sseCopy], [restCopy], 10);
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0].message).toBe("SSE copy");
+  });
 });
 
 // ---------------------------------------------------------------------------

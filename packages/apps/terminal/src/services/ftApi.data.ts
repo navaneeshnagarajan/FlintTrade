@@ -1,4 +1,5 @@
 import { get, getBase, buildHeaders } from "./ftApi.helpers";
+import { z } from "zod";
 
 // ─── Order Flow ───────────────────────────────────────────────────────────────
 
@@ -57,6 +58,194 @@ export type OrderFlowDataState = "live" | "delayed" | "stale" | "sample";
 export interface OrderFlowQualitySummary {
   quality: OrderFlowQuality;
   provenance: OrderFlowProvenance;
+}
+
+const orderFlowQualitySchema = z.enum(["exact", "estimated", "sample", "unknown"]);
+const orderFlowProvenanceSchema = z.enum([
+  "trade_tick",
+  "cumulative_quote_delta",
+  "synthetic",
+  "mixed",
+  "unknown",
+]);
+
+const allowedProvenanceByQuality: Record<OrderFlowQuality, readonly OrderFlowProvenance[]> = {
+  exact: ["trade_tick"],
+  estimated: ["cumulative_quote_delta", "mixed"],
+  sample: ["synthetic"],
+  unknown: ["unknown"],
+};
+
+function validateQualityProvenance(
+  value: { quality: OrderFlowQuality; provenance: OrderFlowProvenance },
+  ctx: z.RefinementCtx,
+): void {
+  if (!allowedProvenanceByQuality[value.quality].includes(value.provenance)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["provenance"],
+      message: `${value.quality} quality cannot use ${value.provenance} provenance`,
+    });
+  }
+}
+
+const orderFlowVolumeSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+const orderFlowCellSchema = z.object({
+  buy_volume: orderFlowVolumeSchema,
+  sell_volume: orderFlowVolumeSchema,
+}).passthrough();
+
+const orderFlowCellsSchema = z.record(z.string(), orderFlowCellSchema).superRefine((cells, ctx) => {
+  for (const price of Object.keys(cells)) {
+    const numericPrice = Number(price);
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: [price],
+        message: "Price level must be a positive finite number",
+      });
+    }
+  }
+});
+
+const orderFlowBucketSchema = z.object({
+  time_label: z.string().trim().min(1),
+  cells: orderFlowCellsSchema,
+  poc_price: z.number().finite().positive(),
+  total_volume: orderFlowVolumeSchema,
+  delta: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  quality: orderFlowQualitySchema,
+  provenance: orderFlowProvenanceSchema,
+}).passthrough().superRefine((bucket, ctx) => {
+  validateQualityProvenance(bucket, ctx);
+
+  const cells = Object.entries(bucket.cells);
+  if (cells.length === 0) return;
+
+  const totalVolume = cells.reduce(
+    (total, [, cell]) => total + cell.buy_volume + cell.sell_volume,
+    0,
+  );
+  const delta = cells.reduce(
+    (total, [, cell]) => total + cell.buy_volume - cell.sell_volume,
+    0,
+  );
+  if (bucket.total_volume !== totalVolume) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["total_volume"],
+      message: "total_volume does not match cell volumes",
+    });
+  }
+  if (bucket.delta !== delta) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["delta"],
+      message: "delta does not match cell volumes",
+    });
+  }
+  if (!cells.some(([price]) => Number(price) === bucket.poc_price)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["poc_price"],
+      message: "poc_price must identify a returned price level",
+    });
+  }
+});
+
+const orderFlowFreshnessSchema = z.object({
+  state: z.enum(["live", "delayed", "stale", "unavailable"]),
+  is_fresh: z.boolean(),
+  last_tick_timestamp: z.number().finite().nonnegative().nullable(),
+  last_tick_session: z.string().min(1).nullable(),
+  current_session: z.string().min(1).nullable(),
+  age_seconds: z.number().finite().nonnegative().nullable(),
+}).passthrough();
+
+const orderFlowResponseSchema = z.object({
+  buckets: z.array(orderFlowBucketSchema),
+  symbol: z.string().trim().min(1),
+  exchange: z.string().trim().min(1),
+  interval: z.number().int().positive(),
+  is_live: z.boolean(),
+  is_sample_data: z.boolean().optional(),
+  quality: orderFlowQualitySchema,
+  provenance: orderFlowProvenanceSchema,
+  tick_size: z.number().finite().positive().optional(),
+  requested_tick_size: z.number().finite().positive().optional(),
+  source_tick_size: z.number().finite().positive().optional(),
+  live_state: z.enum(["live", "delayed", "stale", "warming", "unavailable"]).optional(),
+  freshness: orderFlowFreshnessSchema.optional(),
+}).passthrough().superRefine((response, ctx) => {
+  validateQualityProvenance(response, ctx);
+
+  const isSynthetic = response.quality === "sample" && response.provenance === "synthetic";
+  if (response.is_sample_data === true && !isSynthetic) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["is_sample_data"],
+      message: "Sample data must use sample quality and synthetic provenance",
+    });
+  }
+  if (isSynthetic && response.is_sample_data !== true) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["is_sample_data"],
+      message: "Synthetic order flow must be marked as sample data",
+    });
+  }
+  if (isSynthetic && response.is_live) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["is_live"],
+      message: "Synthetic order flow cannot be live",
+    });
+  }
+  if (response.is_live && response.live_state !== undefined && response.live_state !== "live") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["live_state"],
+      message: "Live order flow must use live_state=live",
+    });
+  }
+
+  if (response.buckets.length === 0) return;
+  if (response.quality === "exact" && response.buckets.some((bucket) => bucket.quality !== "exact")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["buckets"],
+      message: "Exact response quality requires exact buckets",
+    });
+  }
+  if (response.quality === "sample" && response.buckets.some((bucket) => bucket.quality !== "sample")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["buckets"],
+      message: "Sample response quality requires sample buckets",
+    });
+  }
+  if (
+    response.provenance !== "mixed"
+    && response.provenance !== "unknown"
+    && response.buckets.some((bucket) => bucket.provenance !== response.provenance)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["buckets"],
+      message: "Response provenance does not match bucket provenance",
+    });
+  }
+});
+
+function parseOrderFlowResponse(value: unknown): OrderFlowResponse {
+  const parsed = orderFlowResponseSchema.safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
+    throw new Error(`Invalid order-flow response${path}: ${issue?.message ?? "schema mismatch"}`);
+  }
+  return parsed.data;
 }
 
 export function getOrderFlowDataState(
@@ -122,7 +311,7 @@ export const getOrderFlow = (
     interval: String(interval),
     tick_size: String(tickSize),
   });
-  return get<OrderFlowResponse>(`data/orderflow?${params.toString()}`);
+  return get<unknown>(`data/orderflow?${params.toString()}`).then(parseOrderFlowResponse);
 };
 
 // ─── Trade Journal ────────────────────────────────────────────────────────────

@@ -234,6 +234,49 @@ describe("getSignalIdentity", () => {
     expect(getSignalIdentity(restartedCard)).toBe("second-boot:1");
     expect(getSignalIdentity(baseCard)).not.toBe(getSignalIdentity(restartedCard));
   });
+
+  it("uses timestamp and source to qualify reused legacy event IDs", () => {
+    const legacyCard: SignalCardModel = {
+      event_id: 1,
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "BUY",
+      confidence: 0.8,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      indicators: {},
+      source: "rule",
+      method: "RSI",
+      message: "Signal",
+    };
+    const laterRestart = {
+      ...legacyCard,
+      timestamp: "2026-07-11T10:01:00+05:30",
+    };
+    const differentSource = {
+      ...legacyCard,
+      source: "ml" as const,
+    };
+
+    expect(getSignalIdentity(laterRestart)).not.toBe(getSignalIdentity(legacyCard));
+    expect(getSignalIdentity(differentSource)).not.toBe(getSignalIdentity(legacyCard));
+  });
+
+  it("keeps identical unqualified REST and SSE event identities stable", () => {
+    const restCard: SignalCardModel = {
+      event_id: 42,
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "BUY",
+      confidence: 0.8,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      indicators: {},
+      source: "rule",
+      method: "RSI",
+      message: "Signal",
+    };
+
+    expect(getSignalIdentity({ ...restCard })).toBe(getSignalIdentity(restCard));
+  });
 });
 
 describe("startAgent", () => {

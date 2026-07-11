@@ -567,7 +567,11 @@ function FootprintWidget(props: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full bg-surface-base select-none">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default shrink-0">
+      <div
+        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 border-b border-border-default shrink-0"
+        role="toolbar"
+        aria-label="Footprint controls"
+      >
         <BarChart className="size-3.5 text-indigo-400" aria-hidden="true" />
         <span className="text-xs font-medium text-text-secondary">Footprint</span>
 
@@ -575,7 +579,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
         <span className="sr-only" id="fp-symbol-label">Symbol</span>
         <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
-            className="h-6 w-24 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
+            className="h-6 w-24 max-w-full text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="fp-symbol-label"
           >
             <SelectValue />
@@ -615,7 +619,10 @@ function FootprintWidget(props: IDockviewPanelProps) {
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div
+          className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2"
+          data-testid="footprint-toolbar-status"
+        >
           {isLoading && (
             <Badge
               variant="outline"

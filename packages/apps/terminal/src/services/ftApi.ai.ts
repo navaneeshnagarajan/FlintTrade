@@ -11,6 +11,7 @@ export interface SignalIdentityFields {
   symbol: string;
   exchange: string;
   timestamp: string;
+  source: "rule" | "ml" | "fallback";
   method: string;
 }
 
@@ -18,7 +19,6 @@ export interface SignalCardModel extends SignalIdentityFields {
   signal_type: "BUY" | "SELL" | "HOLD";
   confidence: number;
   indicators: Record<string, number>;
-  source: "rule" | "ml" | "fallback";
   message: string;
 }
 
@@ -26,7 +26,6 @@ export type Signal = SignalCardModel;
 
 export interface SignalEvent extends SignalIdentityFields {
   signal_type: "BUY" | "SELL" | "HOLD" | "ALERT";
-  source: "rule" | "ml" | "fallback";
   indicator: string;
   value: number;
   threshold: number;
@@ -40,8 +39,15 @@ export function getSignalIdentity(signal: SignalIdentityFields): string {
   if (signal.event_id > 0 && signal.stream_id) {
     return `${signal.stream_id}:${signal.event_id}`;
   }
-  if (signal.event_id > 0) return `legacy:${signal.event_id}`;
-  return `legacy:${signal.timestamp}:${signal.exchange}:${signal.symbol}:${signal.method}`;
+  const legacyFields = [
+    signal.event_id,
+    signal.timestamp,
+    signal.source,
+    signal.exchange,
+    signal.symbol,
+    signal.method,
+  ].map((field) => encodeURIComponent(String(field)));
+  return `legacy:${legacyFields.join(":")}`;
 }
 
 const signalEventPayloadSchema = z.object({

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -142,6 +142,24 @@ describe("FootprintWidget", () => {
     expect(screen.getByText("1m")).toBeInTheDocument();
     expect(screen.getByText("3m")).toBeInTheDocument();
     expect(screen.getByText("5m")).toBeInTheDocument();
+  });
+
+  it("keeps every toolbar control accessible in a narrow wrapping panel", () => {
+    render(
+      <div style={{ width: "220px" }}>
+        <FootprintWidget {...defaultProps} />
+      </div>,
+    );
+
+    const toolbar = screen.getByRole("toolbar", { name: "Footprint controls" });
+    expect(toolbar).toHaveClass("min-w-0", "flex-wrap");
+    expect(within(toolbar).getByRole("combobox", { name: "Symbol" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "1m interval" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "3m interval" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "5m interval" })).toBeInTheDocument();
+
+    const statusGroup = within(toolbar).getByTestId("footprint-toolbar-status");
+    expect(statusGroup).toHaveClass("min-w-0", "max-w-full", "flex-wrap");
   });
 
   it("labels the bucket-derived line as Latest POC, never LTP", () => {

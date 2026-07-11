@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -167,6 +167,24 @@ describe("OrderFlowWidget", () => {
       "title",
       "Heatmap view",
     );
+  });
+
+  it("keeps every toolbar control accessible in a narrow wrapping panel", () => {
+    render(
+      <div style={{ width: "220px" }}>
+        <OrderFlowWidget {...defaultProps} />
+      </div>,
+    );
+
+    const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
+    expect(toolbar).toHaveClass("min-w-0", "flex-wrap");
+    expect(within(toolbar).getByRole("combobox", { name: "Symbol" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("group", { name: "View mode" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "1m interval" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "Heatmap view" })).toBeInTheDocument();
+
+    const statusGroup = within(toolbar).getByTestId("order-flow-toolbar-status");
+    expect(statusGroup).toHaveClass("min-w-0", "max-w-full", "flex-wrap");
   });
 
   it("labels the bucket-derived value and line as Latest POC, never LTP", () => {

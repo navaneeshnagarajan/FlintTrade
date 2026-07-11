@@ -640,6 +640,41 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
+  it.each([
+    ["non-array payload", { holidays: [] }],
+    ["non-object row", [null]],
+    [
+      "invalid special-session timestamp",
+      [{
+        date: "2026-08-15",
+        description: "Independence Day",
+        holiday_type: "SPECIAL_SESSION",
+        closed_exchanges: ["NSE", "BSE"],
+        open_exchanges: [{
+          exchange: "NSE",
+          start_time: "not-an-epoch",
+          end_time: "1786815000000",
+        }],
+      }],
+    ],
+  ])("rejects a malformed native holiday %s", async (_caseName, payload) => {
+    mockConnectionState.apiKey = "";
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: {
+            accounts: [
+              { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: payload }));
+
+    await expect(getHolidays()).rejects.toThrow(/invalid native holiday response/i);
+  });
+
   it("uses native option Greeks when a live native account is connected without an OpenAlgo key", async () => {
     mockConnectionState.apiKey = "";
     fetchSpy
