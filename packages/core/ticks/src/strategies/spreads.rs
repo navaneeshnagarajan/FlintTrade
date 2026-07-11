@@ -39,7 +39,7 @@ use crate::types::BacktestResult;
 // ---------------------------------------------------------------------------
 
 /// Whether a leg is a call or a put.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionType {
     Call,
@@ -51,7 +51,7 @@ pub enum OptionType {
 // ---------------------------------------------------------------------------
 
 /// Configuration for a single leg of a spread.
-#[pyclass(get_all, set_all)]
+#[pyclass(get_all, set_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct LegConfig {
     /// "CE" or "PE" (case-insensitive).
@@ -104,7 +104,7 @@ impl LegConfig {
 // ---------------------------------------------------------------------------
 
 /// Configuration for a multi-leg spread backtest.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct SpreadConfig {
     /// Starting capital in INR.
@@ -245,7 +245,7 @@ impl SpreadPosition {
 /// Runs an O(n) single-pass simulation across aligned premium series for
 /// each leg. Entry and exit decisions are driven by caller-supplied boolean
 /// arrays, supplemented by optional max-loss and target-profit guardrails.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct SpreadBacktest {
     name: String,

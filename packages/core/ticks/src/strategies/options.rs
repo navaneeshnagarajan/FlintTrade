@@ -46,7 +46,7 @@ use super::pairs::Strategy;
 // ---------------------------------------------------------------------------
 
 /// Computed BSM Greeks for one option.
-#[pyclass(get_all)]
+#[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug, Default)]
 pub struct Greeks {
     pub delta: f64,
@@ -133,7 +133,7 @@ pub fn black_scholes_greeks(
 // ---------------------------------------------------------------------------
 
 /// Which options strategy to backtest.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OptionStrategyType {
     /// ATM call + ATM put (same strike).
@@ -147,7 +147,7 @@ pub enum OptionStrategyType {
 // ---------------------------------------------------------------------------
 
 /// Configuration for an options strategy backtest.
-#[pyclass(get_all, set_all)]
+#[pyclass(get_all, set_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct OptionsConfig {
     /// Straddle or Strangle.

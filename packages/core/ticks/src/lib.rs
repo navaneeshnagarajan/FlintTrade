@@ -60,7 +60,7 @@ pub use types::{BacktestResult, Signal, Tick};
 // ---------------------------------------------------------------------------
 
 /// A single OHLCV bar (legacy v0.1 type — use `Tick` for new code).
-#[pyclass(get_all, set_all)]
+#[pyclass(get_all, set_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct Bar {
     pub timestamp: i64,
@@ -94,7 +94,7 @@ impl Bar {
 }
 
 /// A completed trade record.
-#[pyclass(get_all)]
+#[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct Trade {
     /// Bar timestamp at entry.

@@ -13,7 +13,7 @@ use pyo3::prelude::*;
 ///
 /// Timestamps are Unix epoch **seconds** (i64). Strategies receive ticks
 /// one at a time via `Strategy::on_tick`.
-#[pyclass(get_all)]
+#[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct Tick {
     /// Unix timestamp in seconds.
@@ -55,7 +55,7 @@ impl Tick {
 ///
 /// Positive `qty` means buy/long; negative `qty` means sell/short.
 /// A `qty` of `0` with `close_position = true` exits the current position.
-#[pyclass(get_all)]
+#[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct Signal {
     /// Symbol this signal applies to (e.g. "NIFTY", "RELIANCE").
@@ -94,7 +94,7 @@ impl Signal {
 // ---------------------------------------------------------------------------
 
 /// Outcome of a complete strategy backtest run.
-#[pyclass(get_all)]
+#[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct BacktestResult {
     /// Strategy identifier supplied at construction time.

@@ -30,7 +30,7 @@ const IST_OFFSET_SECS: i64 = 5 * 3600 + 30 * 60;
 /// Market session configuration.
 ///
 /// Defaults to NSE equity hours (09:15–15:30 IST, squareoff at 15:25).
-#[pyclass(get_all, set_all)]
+#[pyclass(get_all, set_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
     /// Market open in minutes from midnight (IST). NSE = 9*60+15 = 555.
@@ -136,7 +136,7 @@ impl SessionConfig {
 // ---------------------------------------------------------------------------
 
 /// Per-bar session state snapshot.
-#[pyclass(get_all)]
+#[pyclass(get_all, from_py_object)]
 #[derive(Clone, Debug, Default)]
 pub struct SessionState {
     /// True on the first bar of a new session.
