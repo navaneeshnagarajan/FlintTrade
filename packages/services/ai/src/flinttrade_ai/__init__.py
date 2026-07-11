@@ -82,7 +82,10 @@ from .pipeline import SignalPipeline
 from .signal_retraining import (
     RetrainConfig,
     RetrainResult,
+    RetrainingRetry,
+    RetrainingRosterPlan,
     SignalRetrainer,
+    plan_retraining_roster,
     select_retraining_roster,
 )
 from .signal_models import LiveSignal, SignalConfig, SignalEvent
@@ -126,6 +129,9 @@ __all__ = [
     "SignalRetrainer",
     "RetrainConfig",
     "RetrainResult",
+    "RetrainingRetry",
+    "RetrainingRosterPlan",
+    "plan_retraining_roster",
     "select_retraining_roster",
     "Signal",
     "MLSignal",

@@ -6,7 +6,7 @@ import hashlib
 import math
 import pickle
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +27,14 @@ LEGACY_FEATURE_NAMES = [
     "hl_range",
     "body_pct",
 ]
+
+
+def _full_day_session(
+    _exchange: str,
+    _symbol: str,
+    _on: date,
+) -> tuple[time, time]:
+    return time(0, 0), time(23, 59)
 
 
 def _bars(count: int = 120) -> list[dict[str, float | str]]:
@@ -508,6 +516,7 @@ def test_retrain_config_and_candidates_use_stronger_training_minimum(
         RetrainConfig(model_dir=tmp_path),
         instruments=[],
         data_fetcher=lambda *_args: _bars(120),
+        market_session_provider=_full_day_session,
     )
 
     result = retrainer.run_once("NIFTY", "NSE_INDEX")

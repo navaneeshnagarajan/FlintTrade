@@ -120,6 +120,93 @@ class TestSignalPipeline:
         ) == bars
         assert session_calls == [("NSE", "RELIANCE", date(2026, 7, 10))]
 
+    def test_intraday_closed_bars_require_full_effective_session_membership(self):
+        from flinttrade_ai.pipeline import _filter_closed_bars
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime(2026, 7, 12, 12, 0, tzinfo=ist)
+        rows = [
+            {"timestamp": "2026-07-09T10:00:00+05:30", "close": 99.0},
+            {"timestamp": "2026-07-10T09:10:00+05:30", "close": 100.0},
+            {"timestamp": "2026-07-10T09:15:00+05:30", "close": 101.0},
+            {"timestamp": "2026-07-10T15:25:00+05:30", "close": 102.0},
+            {"timestamp": "2026-07-10T15:30:00+05:30", "close": 103.0},
+            {"timestamp": "2026-07-11T10:00:00+05:30", "close": 104.0},
+        ]
+
+        def session_for(_exchange: str, _symbol: str, on: date):
+            if on in {date(2026, 7, 9), date(2026, 7, 10)}:
+                return time(9, 15), time(15, 30)
+            return None
+
+        filtered = _filter_closed_bars(
+            rows,
+            interval="5m",
+            now=now,
+            exchange="NSE",
+            symbol="RELIANCE",
+            market_session_provider=session_for,
+        )
+
+        assert [row["close"] for row in filtered] == [99.0, 101.0, 102.0]
+
+    def test_intraday_closed_bars_fail_closed_without_session_provider(self):
+        from flinttrade_ai.pipeline import _filter_closed_bars
+
+        bars = [{"timestamp": "2026-07-10T10:00:00+05:30", "close": 100.0}]
+
+        assert _filter_closed_bars(
+            bars,
+            interval="5m",
+            now=datetime(2026, 7, 10, 16, 0, tzinfo=timezone(timedelta(hours=5, minutes=30))),
+            exchange="NSE",
+            symbol="RELIANCE",
+        ) == []
+
+    def test_intraday_closed_bars_fail_closed_for_malformed_session_values(self):
+        from flinttrade_ai.pipeline import _filter_closed_bars
+
+        bars = [{"timestamp": "2026-07-10T10:00:00+05:30", "close": 100.0}]
+
+        assert _filter_closed_bars(
+            bars,
+            interval="5m",
+            now=datetime(2026, 7, 10, 16, 0, tzinfo=timezone(timedelta(hours=5, minutes=30))),
+            exchange="NSE",
+            symbol="RELIANCE",
+            market_session_provider=lambda *_args: (
+                datetime(2026, 7, 10, 9, 15),
+                datetime(2026, 7, 10, 15, 30),
+            ),
+        ) == []
+
+    def test_intraday_closed_bars_resolve_cross_midnight_rows_to_prior_session(self):
+        from flinttrade_ai.pipeline import _filter_closed_bars
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        rows = [
+            {"timestamp": "2026-04-17T17:55:00+05:30", "close": 99.0},
+            {"timestamp": "2026-04-17T18:00:00+05:30", "close": 100.0},
+            {"timestamp": "2026-04-18T00:35:00+05:30", "close": 101.0},
+            {"timestamp": "2026-04-18T00:45:00+05:30", "close": 102.0},
+        ]
+
+        def session_for(_exchange: str, _symbol: str, on: date):
+            if on == date(2026, 4, 17):
+                return time(18, 0), time(0, 45)
+            return None
+
+        filtered = _filter_closed_bars(
+            rows,
+            interval="5m",
+            now=datetime(2026, 4, 18, 1, 0, tzinfo=ist),
+            exchange="MCX",
+            symbol="GOLDM",
+            market_session_provider=session_for,
+        )
+
+        assert [row["close"] for row in filtered] == [100.0, 101.0]
+
     def test_ema_basic(self):
         from flinttrade_ai.pipeline import SignalPipeline
 

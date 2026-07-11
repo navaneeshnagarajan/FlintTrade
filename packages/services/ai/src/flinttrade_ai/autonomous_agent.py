@@ -22,10 +22,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any
+
+from .pipeline import EffectiveSession, MarketSessionProvider, resolve_effective_session
 
 logger = logging.getLogger("flinttrade.ai.autonomous_agent")
 
@@ -33,10 +36,8 @@ logger = logging.getLogger("flinttrade.ai.autonomous_agent")
 # Constants
 # ---------------------------------------------------------------------------
 
-_IST_OFFSET_HOURS = 5.5  # UTC+5:30
-_MARKET_OPEN = time(9, 15)
-_MARKET_CLOSE = time(15, 30)
-_SQUARE_OFF_TIME = time(15, 15)
+_IST = timezone(timedelta(hours=5, minutes=30))
+_SQUARE_OFF_LEAD = timedelta(minutes=15)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +140,9 @@ class AgentStatus(StrEnum):
 
     IDLE = "IDLE"
     RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
     STOPPED = "STOPPED"
+    STOP_FAILED = "STOP_FAILED"
     ERROR = "ERROR"
 
 
@@ -313,6 +316,8 @@ class AutonomousTrader:
         config: AgentConfig | None = None,
         vault: Any | None = None,
         order_executor: Any | None = None,
+        market_session_provider: MarketSessionProvider | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         """Initialise the autonomous trader.
 
@@ -334,12 +339,19 @@ class AutonomousTrader:
                 e.g. :class:`flinttrade_core.smart_order_routes.GatedChildExecutor`.
                 When None (the default), order placement FAILS CLOSED — the
                 agent can analyse and signal but never reach a broker.
+            market_session_provider: Canonical effective-session lookup called
+                with ``(exchange, symbol, session_date)``. Missing or failed
+                lookups fail closed, so hard-coded exchange hours are never used.
+            clock: Timezone-aware runtime clock. Defaults to current UTC and is
+                converted to IST before session resolution.
         """
         self.llm = llm_client
         self.broker = openalgo_client
         self.config = config or AgentConfig()
         self.vault = vault
         self.order_executor = order_executor
+        self._market_session_provider = market_session_provider
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.state = AgentState(
             trade_counts={sym: 0 for sym in self.config.symbols},
             last_signals={sym: TradeSignal.HOLD for sym in self.config.symbols},
@@ -347,7 +359,8 @@ class AutonomousTrader:
         self._status: AgentStatus = AgentStatus.IDLE
         self._state_lock = asyncio.Lock()
         self._stop_requested = False
-        self._square_off_on_stop = True
+        self._square_off_on_stop = False
+        self._stop_failure = ""
 
     # ------------------------------------------------------------------
     # Status
@@ -357,28 +370,69 @@ class AutonomousTrader:
     def status(self) -> AgentStatus:
         return self._status
 
+    @property
+    def shutdown_complete(self) -> bool:
+        """Whether the session reached an explicit successful terminal state."""
+        return self._status == AgentStatus.STOPPED
+
+    @property
+    def stop_failure(self) -> str:
+        """Return the last incomplete square-off detail for parent shutdown."""
+        return self._stop_failure
+
     # ------------------------------------------------------------------
     # Market hours (IST)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _ist_now() -> datetime:
-        """Current time in IST (UTC+5:30) without pytz dependency."""
-        import datetime as dt
+    def _ist_now(self) -> datetime:
+        """Return the injected clock in IST, rejecting ambiguous naive values."""
+        now = self._clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Autonomous trader clock must return a timezone-aware datetime")
+        return now.astimezone(_IST)
 
-        utc_now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-        ist = utc_now + dt.timedelta(hours=5, minutes=30)
-        return ist
+    def _effective_session(self, symbol: str) -> EffectiveSession | None:
+        """Resolve the canonical session containing the current instant."""
+        try:
+            now = self._ist_now()
+        except (AttributeError, TypeError, ValueError):
+            logger.exception("Autonomous trader clock failed; treating market as closed")
+            return None
+        return resolve_effective_session(
+            self._market_session_provider,
+            self.config.exchange,
+            symbol,
+            now,
+        )
 
-    def _is_market_open(self) -> bool:
-        """Return True if current IST time is within regular trading hours."""
-        now_time = self._ist_now().time()
-        return _MARKET_OPEN <= now_time <= _MARKET_CLOSE
+    def _is_market_open(self, symbol: str | None = None) -> bool:
+        """Return whether any requested instrument has an effective open session."""
+        symbols = [symbol] if symbol is not None else self.config.symbols
+        return any(self._effective_session(candidate) is not None for candidate in symbols)
 
-    def _is_square_off_time(self) -> bool:
-        """Return True at or after the daily square-off time."""
-        now_time = self._ist_now().time()
-        return now_time >= _SQUARE_OFF_TIME
+    def _is_square_off_time(self, symbol: str | None = None) -> bool:
+        """Return True in the final 15 minutes of an effective session."""
+        symbols = [symbol] if symbol is not None else (
+            list(self.state.active_positions) or self.config.symbols
+        )
+        try:
+            now = self._ist_now()
+        except (AttributeError, TypeError, ValueError):
+            logger.exception("Autonomous trader clock failed during square-off check")
+            return False
+        for candidate in symbols:
+            session = resolve_effective_session(
+                self._market_session_provider,
+                self.config.exchange,
+                candidate,
+                now,
+            )
+            if session is None:
+                continue
+            square_off_at = max(session.opens_at, session.closes_at - _SQUARE_OFF_LEAD)
+            if now >= square_off_at:
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Step 1: Fetch market data
@@ -527,13 +581,14 @@ class AutonomousTrader:
     # Step 2: Fetch all symbols in parallel
     # ------------------------------------------------------------------
 
-    async def analyze_all(self) -> dict[str, MarketData]:
-        """Fetch all configured symbols in parallel.
+    async def analyze_all(self, symbols: list[str] | None = None) -> dict[str, MarketData]:
+        """Fetch requested open-session symbols in parallel.
 
         Returns:
             Dict mapping symbol -> MarketData.
         """
-        tasks = [self._fetch_symbol_data(sym) for sym in self.config.symbols]
+        selected = self.config.symbols if symbols is None else symbols
+        tasks = [self._fetch_symbol_data(sym) for sym in selected]
         results = await asyncio.gather(*tasks, return_exceptions=False)
         return {md.symbol: md for md in results}
 
@@ -769,6 +824,10 @@ class AutonomousTrader:
         Returns:
             Dict with order response or error information.
         """
+        if self._stop_requested:
+            logger.info("Execution blocked for %s: stop requested", symbol)
+            return {"status": "blocked", "reason": "stop_requested"}
+
         if not risk.allowed:
             logger.info("Execution blocked for %s: %s", symbol, risk.reason)
             return {"status": "blocked", "reason": risk.reason}
@@ -791,6 +850,9 @@ class AutonomousTrader:
         action = "BUY" if signal == TradeSignal.BUY else "SELL"
         try:
             order = self._build_market_order(symbol, action, risk.position_qty)
+            if self._stop_requested:
+                logger.info("Execution blocked for %s: stop requested", symbol)
+                return {"status": "blocked", "reason": "stop_requested"}
             decision = await self.order_executor.route_order(order)
 
             if getattr(decision, "passed", False):
@@ -921,7 +983,13 @@ class AutonomousTrader:
         Returns:
             Dict summarising actions taken this cycle.
         """
-        if not self._is_market_open():
+        if self._stop_requested:
+            return {"stopped": True, "reason": "stop_requested", "actions": {}}
+
+        open_symbols = [
+            symbol for symbol in self.config.symbols if self._is_market_open(symbol)
+        ]
+        if not open_symbols:
             logger.info("Market is closed — skipping cycle")
             return {"skipped": True, "reason": "market_closed"}
 
@@ -936,15 +1004,33 @@ class AutonomousTrader:
         cycle_result: dict[str, Any] = {"cycle": cycle_count, "actions": {}}
 
         # Parallel fetch
-        all_data = await self.analyze_all()
+        all_data = await self.analyze_all(open_symbols)
+        if self._stop_requested:
+            cycle_result.update(stopped=True, reason="stop_requested")
+            return cycle_result
 
         for symbol, market_data in all_data.items():
+            if self._stop_requested:
+                cycle_result.update(stopped=True, reason="stop_requested")
+                return cycle_result
+            if not self._is_market_open(symbol):
+                cycle_result["actions"][symbol] = {
+                    "skipped": True,
+                    "reason": "market_closed",
+                }
+                continue
             if not market_data.is_valid:
                 logger.debug("Skipping %s — data not available", symbol)
                 continue
 
             signal = await self.decide(market_data)
+            if self._stop_requested:
+                cycle_result.update(stopped=True, reason="stop_requested")
+                return cycle_result
             risk = self._assess_risk(signal, market_data)
+            if self._stop_requested:
+                cycle_result.update(stopped=True, reason="stop_requested")
+                return cycle_result
             exec_result = await self.execute(signal, symbol, risk, entry_price=market_data.ltp)
             cycle_result["actions"][symbol] = {
                 "signal": signal,
@@ -978,8 +1064,29 @@ class AutonomousTrader:
         Args:
             square_off: Square off all tracked positions before stopping.
         """
-        self._square_off_on_stop = square_off
+        self._square_off_on_stop = self._square_off_on_stop or square_off
         self._stop_requested = True
+        if self._status not in {AgentStatus.ERROR, AgentStatus.STOPPED}:
+            self._status = AgentStatus.STOPPING
+
+    async def _finish_square_off(self, reason: str) -> bool:
+        """Attempt gated flattening and retain an explicit failed stop state."""
+        self._status = AgentStatus.STOPPING
+        logger.info("%s — squaring off positions", reason)
+        flat = await self._square_off_all()
+        if flat:
+            self.state.squared_off = True
+            self._stop_failure = ""
+            self._status = AgentStatus.STOPPED
+            return True
+
+        remaining = sorted(self.state.active_positions)
+        self._stop_failure = (
+            "Square-off incomplete; positions remain open: " + ", ".join(remaining)
+        )
+        self._status = AgentStatus.STOP_FAILED
+        logger.error(self._stop_failure)
+        return False
 
     async def run_session(self) -> None:
         """Run the full trading session loop until market close or stop.
@@ -988,7 +1095,9 @@ class AutonomousTrader:
         squares off all positions at square-off time, on cancellation, and
         (by default) on an operator stop request.
         """
-        self._status = AgentStatus.RUNNING
+        self._status = (
+            AgentStatus.STOPPING if self._stop_requested else AgentStatus.RUNNING
+        )
         logger.info(
             "Autonomous trader starting. Symbols: %s, Exchange: %s",
             self.config.symbols,
@@ -996,13 +1105,14 @@ class AutonomousTrader:
         )
 
         try:
-            while self._is_market_open() and not self._stop_requested:
+            while not self._stop_requested and self._is_market_open():
                 if self._is_square_off_time() and not self.state.squared_off:
                     # Only mark squared_off when the broker ACTUALLY flattened
                     # every position — a refused/aborted exit (e.g. the jti was
                     # revoked) must NOT report a false flat state while real
                     # positions remain open at the broker.
-                    self.state.squared_off = await self._square_off_all()
+                    self.request_stop(square_off=True)
+                    await self._finish_square_off("Session square-off time reached")
                     break
 
                 await self.run_cycle()
@@ -1014,22 +1124,34 @@ class AutonomousTrader:
                         break
                     await asyncio.sleep(1)
 
-            if self._stop_requested and self._square_off_on_stop and not self.state.squared_off:
-                logger.info("Stop requested — squaring off positions")
-                self.state.squared_off = await self._square_off_all()
+            if (
+                not self._stop_requested
+                and self.state.active_positions
+                and not self.state.squared_off
+            ):
+                self.request_stop(square_off=True)
+            if (
+                self._stop_requested
+                and self._square_off_on_stop
+                and not self.state.squared_off
+                and self._status != AgentStatus.STOP_FAILED
+            ):
+                await self._finish_square_off("Stop requested")
+            elif self._status not in {AgentStatus.ERROR, AgentStatus.STOP_FAILED}:
+                self._status = AgentStatus.STOPPED
 
         except asyncio.CancelledError:
-            logger.info("Session cancelled — squaring off positions")
-            if await self._square_off_all():
-                self.state.squared_off = True
+            self.request_stop(square_off=True)
+            await self._finish_square_off("Session cancelled")
+            raise
         except Exception as exc:
             self._status = AgentStatus.ERROR
             logger.error("Session error: %s", exc)
             raise
         finally:
-            self._status = AgentStatus.STOPPED
             logger.info(
-                "Session complete. Daily P&L: %.0f, Cycles: %d",
+                "Session ended with status %s. Daily P&L: %.0f, Cycles: %d",
+                self._status,
                 self.state.daily_pnl,
                 self.state.cycle_count,
             )

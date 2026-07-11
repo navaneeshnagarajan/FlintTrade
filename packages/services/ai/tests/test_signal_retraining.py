@@ -26,10 +26,21 @@ class _SellModel:
         return [[0.8, 0.1, 0.1] for _ in rows]
 
 
+def _full_day_session(
+    _exchange: str,
+    _symbol: str,
+    _on: date,
+) -> tuple[time, time]:
+    """Deterministic effective session for tests unrelated to calendars."""
+    return time(0, 0), time(23, 59)
+
+
 class _RecordingPipeline:
     def __init__(self) -> None:
         self.installed: list[tuple[str, str, Any]] = []
         self.model_was_persisted = False
+        self.interval = "5m"
+        self.market_session_provider = _full_day_session
 
     def install_generator(self, symbol: str, exchange: str, generator: Any) -> None:
         self.installed.append((symbol, exchange, generator))
@@ -169,6 +180,18 @@ def test_retrain_config_preserves_reviewed_defaults() -> None:
     assert config.max_history == 1000
 
 
+def test_parent_retry_contract_is_exported_from_ai_package() -> None:
+    from flinttrade_ai import (
+        RetrainingRetry,
+        RetrainingRosterPlan,
+        plan_retraining_roster,
+    )
+
+    assert RetrainingRetry is not None
+    assert RetrainingRosterPlan is not None
+    assert callable(plan_retraining_roster)
+
+
 def test_run_once_skips_bundle_newer_than_retrain_interval(tmp_path: Path) -> None:
     from unittest.mock import MagicMock
 
@@ -242,7 +265,7 @@ def test_next_session_date_retrains_even_within_elapsed_interval(
 
     _install_train_stub(monkeypatch, test_accuracy=0.8)
     now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
-    fetcher = MagicMock(return_value=_bars(120))
+    fetcher = MagicMock(return_value=_bars(120, end_at=now))
     retrainer = SignalRetrainer(
         _config(tmp_path, retrain_interval_hours=24),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
@@ -304,7 +327,7 @@ def test_run_all_cancels_before_training_and_stops_roster(
     train.assert_not_called()
 
 
-def test_run_once_cancels_promptly_while_synchronous_fetch_is_stalled(tmp_path: Path) -> None:
+def test_run_once_reports_pending_cancellation_until_single_fetch_owner_stops(tmp_path: Path) -> None:
     from flinttrade_ai.signal_retraining import SignalRetrainer
 
     fetch_started = threading.Event()
@@ -336,14 +359,31 @@ def test_run_once_cancels_promptly_while_synchronous_fetch_is_stalled(tmp_path: 
         runner.join(timeout=0.5)
 
         assert not runner.is_alive()
-        assert results[0].reason == "Cancelled"
+        assert results[0].completed is False
+        assert results[0].reason == "Cancellation pending: data fetch still running"
+        assert retrainer.has_active_fetch_owner is True
         assert fetch_workers[0].daemon is True
         assert fetch_workers[0].is_alive()
+
+        second = retrainer.run_once("BANKNIFTY", "NSE_INDEX")
+        assert second.completed is False
+        assert "NSE_INDEX:NIFTY" in second.reason
+        assert len(fetch_workers) == 1
+
+        batch = retrainer.run_all()
+        assert len(batch) == 1
+        assert batch[0].completed is False
+        assert "NSE_INDEX:NIFTY" in batch[0].reason
+        assert len(fetch_workers) == 1
     finally:
         release_fetch.set()
         runner.join(timeout=1.0)
-        if fetch_workers:
-            fetch_workers[0].join(timeout=1.0)
+        assert retrainer.wait_for_fetch_owner(timeout=1.0) is True
+
+    completed = retrainer.run_once("NIFTY", "NSE_INDEX")
+    assert completed.completed is True
+    assert completed.reason == "Cancelled"
+    assert retrainer.has_active_fetch_owner is False
 
 
 def test_feature_drift_uses_mean_score_and_has_deterministic_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -455,7 +495,7 @@ def test_accepted_candidate_uses_canonical_train_metrics_and_promotes_per_instru
     assert metadata["model_sha256"] == checksum
     from flinttrade_ai.signals import engineer_features
 
-    expected_features = engineer_features(_bars())
+    expected_features = engineer_features(train_calls[0]["bars"])
     labelled_rows = len(expected_features.values) - retrainer.config.lookahead
     validation_start = int(labelled_rows * 0.8)
     expected_split = validation_start - retrainer.config.lookahead
@@ -470,7 +510,8 @@ def test_retraining_trains_on_sorted_unique_closed_bars_only(
 ) -> None:
     from flinttrade_ai.signal_retraining import SignalRetrainer
 
-    now = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now = datetime(2026, 7, 10, 13, 0, tzinfo=ist)
     first_stamp = now - timedelta(minutes=5 * 40)
     closed_bars = [
         {
@@ -493,6 +534,10 @@ def test_retraining_trains_on_sorted_unique_closed_bars_only(
         instruments=[],
         data_fetcher=lambda *_args: source_bars,
         clock=lambda: now,
+        market_session_provider=lambda _exchange, _symbol, _on: (
+            time(9, 15),
+            time(15, 30),
+        ),
     )
 
     result = retrainer.run_once("NIFTY", "NSE_INDEX")
@@ -525,6 +570,7 @@ def test_retraining_compares_recent_features_with_verified_incumbent_training_ba
         instruments=[],
         data_fetcher=lambda *_args: next(fetched),
         clock=lambda: now[0],
+        market_session_provider=_full_day_session,
     )
 
     first = retrainer.run_once("NIFTY", "NSE_INDEX")
@@ -552,6 +598,7 @@ def test_missing_or_corrupt_incumbent_baseline_reports_no_drift(
         _config(tmp_path),
         instruments=[],
         data_fetcher=lambda *_args: _bars(120),
+        market_session_provider=_full_day_session,
     )
     assert retrainer.run_once("NIFTY", "NSE_INDEX").accepted is True
     target = retrainer.model_path("NIFTY", "NSE_INDEX")
@@ -649,6 +696,7 @@ def test_interrupted_candidate_write_preserves_atomic_bundle_and_restart_loads_o
         _config(tmp_path),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         data_fetcher=lambda *_args: _bars(),
+        market_session_provider=_full_day_session,
     )
     target = retrainer.model_path("NIFTY", "NSE_INDEX")
     _save_bundle(target, _SellModel(), symbol="NIFTY", exchange="NSE_INDEX")
@@ -670,6 +718,7 @@ def test_interrupted_candidate_write_preserves_atomic_bundle_and_restart_loads_o
     restarted = SignalPipeline(
         model_path=str(tmp_path / "missing-shared.joblib"),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
     )
     restarted.fetch_bars = MagicMock(return_value=_bars())
     assert restarted.run_cycle()["NSE_INDEX:NIFTY"]["signal"] == "SELL"
@@ -712,6 +761,7 @@ def test_retrainer_forwards_asymmetric_label_policy_to_candidate(
         ),
         instruments=[],
         data_fetcher=lambda *_args: _bars(),
+        market_session_provider=_full_day_session,
     )
 
     result = retrainer.run_once("NIFTY", "NSE_INDEX")
@@ -735,6 +785,7 @@ def test_concurrent_uncached_reader_sees_old_until_atomic_publication_then_new(
     pipeline = SignalPipeline(
         model_path=str(tmp_path / "missing-shared.joblib"),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
     )
 
     def _train(self: SignalGenerator, bars: list[dict[str, Any]], **_kwargs: Any) -> dict[str, float]:
@@ -858,6 +909,7 @@ def test_history_is_bounded_newest_first_and_jsonl_is_append_only(
         _config(tmp_path, max_history=2),
         instruments=[],
         data_fetcher=lambda *_args: _bars(),
+        market_session_provider=_full_day_session,
     )
 
     retrainer.run_once("FIRST", "NSE")
@@ -881,6 +933,7 @@ def test_log_write_error_is_warning_only(
         _config(tmp_path),
         instruments=[],
         data_fetcher=lambda *_args: _bars(),
+        market_session_provider=_full_day_session,
     )
     monkeypatch.setattr(retrainer, "_append_log", lambda _result: (_ for _ in ()).throw(OSError("read-only")))
 
@@ -933,7 +986,11 @@ def test_pipeline_prefers_verified_per_instrument_model_then_verified_shared_mod
         symbol="NIFTY",
         exchange="NSE_INDEX",
     )
-    pipeline = SignalPipeline(model_path=str(shared_path), instruments=roster)
+    pipeline = SignalPipeline(
+        model_path=str(shared_path),
+        instruments=roster,
+        market_session_provider=_full_day_session,
+    )
     pipeline.fetch_bars = MagicMock(return_value=_bars())
 
     results = pipeline.run_cycle()
@@ -961,7 +1018,11 @@ def test_pipeline_rejects_corrupt_per_instrument_model_and_uses_verified_shared_
     per_instrument = retrainer.model_path("NIFTY", "NSE_INDEX")
     per_instrument.write_bytes(b"corrupt")
     Path(f"{per_instrument}.sha256").write_text("0" * 64, encoding="ascii")
-    pipeline = SignalPipeline(model_path=str(shared_path), instruments=roster)
+    pipeline = SignalPipeline(
+        model_path=str(shared_path),
+        instruments=roster,
+        market_session_provider=_full_day_session,
+    )
     pipeline.fetch_bars = MagicMock(return_value=_bars())
 
     results = pipeline.run_cycle()
@@ -1282,6 +1343,39 @@ def test_cross_midnight_retraining_uses_dated_close_and_waits_for_session_end() 
     assert select("late", datetime(2026, 4, 18, 0, 15, 45, tzinfo=ist)) == [
         instrument
     ]
+
+
+def test_late_retraining_plan_exposes_retry_for_session_closing_after_0030() -> None:
+    from flinttrade_ai.signal_retraining import plan_retraining_roster
+
+    instrument = {"symbol": "GOLDM", "exchange": "MCX"}
+    session_date = date(2026, 4, 17)
+    ist = timezone(timedelta(hours=5, minutes=30))
+
+    def plan(at: datetime):
+        return plan_retraining_roster(
+            [instrument],
+            roster="late",
+            session_date=session_date,
+            run_at=at,
+            is_continuous=lambda _exchange: False,
+            session_for=lambda _exchange, _symbol, _on: (
+                time(18, 0),
+                time(0, 45),
+            ),
+        )
+
+    pending = plan(datetime(2026, 4, 18, 0, 30, tzinfo=ist))
+    assert pending.ready_instruments == []
+    assert len(pending.retries) == 1
+    retry = pending.retries[0]
+    assert retry.instrument == instrument
+    assert retry.session_date == session_date
+    assert retry.retry_at == datetime(2026, 4, 18, 0, 45, tzinfo=ist)
+
+    ready = plan(retry.retry_at)
+    assert ready.ready_instruments == [instrument]
+    assert ready.retries == ()
 
 
 def test_special_session_moves_equity_to_late_roster_and_closed_day_is_skipped() -> None:

@@ -31,6 +31,15 @@ def _bars(
     ]
 
 
+def _full_day_session(
+    _exchange: str,
+    _symbol: str,
+    _on: date,
+) -> tuple[time, time]:
+    """Synthetic effective session for tests unrelated to calendar filtering."""
+    return time(0, 0), time(23, 59)
+
+
 def test_signal_models_have_explicit_names_and_legacy_aliases() -> None:
     """The three unrelated models remain distinct without breaking old imports."""
     from flinttrade_ai.signal_models import LiveSignal, Signal as LegacyLiveSignal, SignalEvent
@@ -79,6 +88,7 @@ def test_scheduled_pipeline_publishes_completed_cycle() -> None:
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         signal_sink=sink,
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
     pipeline.fetch_bars = MagicMock(return_value=_bars())
@@ -98,6 +108,7 @@ def test_scheduled_pipeline_emits_once_when_same_source_candle_runs_concurrently
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         signal_sink=sink,
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
 
@@ -135,6 +146,7 @@ def test_scheduled_candle_claim_survives_temporary_roster_removal() -> None:
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         signal_sink=sink,
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
     pipeline.fetch_bars = MagicMock(return_value=_bars())
@@ -152,6 +164,7 @@ def test_duplicate_candle_does_not_clear_last_accepted_snapshot() -> None:
 
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
     pipeline.fetch_bars = MagicMock(return_value=_bars())
@@ -171,6 +184,7 @@ def test_scheduled_pipeline_skips_each_closed_exchange_independently() -> None:
             {"symbol": "RELIANCE", "exchange": "NSE"},
             {"symbol": "GOLDM", "exchange": "MCX"},
         ],
+        market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(return_value=_bars())
     pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
@@ -190,6 +204,7 @@ def test_sink_failure_does_not_discard_latest_ml_results() -> None:
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         signal_sink=sink,
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
     pipeline.fetch_bars = MagicMock(return_value=_bars())
@@ -207,6 +222,7 @@ def test_sink_failure_releases_candle_for_retry() -> None:
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         signal_sink=sink,
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
     pipeline.fetch_bars = MagicMock(return_value=_bars())
@@ -239,6 +255,7 @@ def test_scheduled_pipeline_sorts_and_deduplicates_bars_before_prediction() -> N
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         clock=lambda: now,
+        market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(return_value=unordered)
     pipeline._generator_for = MagicMock(return_value=generator)
@@ -272,6 +289,7 @@ def test_scheduled_pipeline_uses_latest_closed_candle_when_newest_is_forming() -
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         interval="5m",
         clock=lambda: now,
+        market_session_provider=_full_day_session,
     )
     pipeline._generator = generator
     pipeline.fetch_bars = MagicMock(return_value=bars)
@@ -293,6 +311,7 @@ def test_scheduled_pipeline_rejects_future_candle_start_within_one_interval() ->
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         interval="5m",
         clock=lambda: now,
+        market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(
         return_value=_bars(end=now + timedelta(minutes=4)),
@@ -307,7 +326,10 @@ def test_scheduled_pipeline_rejects_future_candle_start_within_one_interval() ->
 def test_scheduled_pipeline_rejects_stale_bar_batch() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 
-    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
+    )
     generator = MagicMock(is_trained=True)
     pipeline.fetch_bars = MagicMock(
         return_value=_bars(end=datetime.now(timezone.utc) - timedelta(days=1)),
@@ -323,7 +345,10 @@ def test_scheduled_pipeline_rejects_invalid_latest_bar_stamp() -> None:
 
     bars = _bars()
     bars[-1]["timestamp"] = "not-a-timestamp"
-    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
+    )
     generator = MagicMock(is_trained=True)
     pipeline.fetch_bars = MagicMock(return_value=bars)
     pipeline._generator_for = MagicMock(return_value=generator)
@@ -336,7 +361,10 @@ def test_failed_ml_prediction_uses_fallback_provenance() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
     from flinttrade_ai.signals import MLSignal
 
-    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
+    )
     generator = MagicMock(is_trained=True)
     generator.predict.return_value = MLSignal(error="model exploded")
     pipeline.fetch_bars = MagicMock(return_value=_bars())
@@ -352,7 +380,10 @@ def test_scheduled_pipeline_preserves_validated_latest_bar_timestamp() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 
     bars = _bars()
-    pipeline = SignalPipeline(instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}])
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
+    )
     pipeline.fetch_bars = MagicMock(return_value=bars)
     pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
 
@@ -370,6 +401,7 @@ def test_scheduled_pipeline_accepts_openalgo_daily_interval() -> None:
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         interval="D",
         clock=lambda: now,
+        market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(return_value=bars)
     pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
@@ -711,6 +743,7 @@ def test_non_default_live_roster_drives_the_installed_ml_job(monkeypatch, tmp_pa
     app = Flask(__name__)
     hub, ml_pipeline = configure_signal_sources(app, MagicMock())
     assert ml_pipeline is not None
+    ml_pipeline.set_market_session_provider(_full_day_session)
     hub.update_config(instruments=["NSE:RELIANCE"])
     ml_pipeline.fetch_bars = MagicMock(return_value=_bars())
     ml_pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))

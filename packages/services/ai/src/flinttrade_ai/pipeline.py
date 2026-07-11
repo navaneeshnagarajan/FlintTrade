@@ -13,6 +13,7 @@ import shutil
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, time as wall_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,100 @@ MarketSessionProvider = Callable[
     [str, str, date],
     tuple[wall_time, wall_time] | None,
 ]
+
+
+@dataclass(frozen=True)
+class EffectiveSession:
+    """One dated effective market session in IST."""
+
+    session_date: date
+    opens_at: datetime
+    closes_at: datetime
+
+
+def _session_for_date(
+    market_session_provider: MarketSessionProvider | None,
+    exchange: str,
+    symbol: str,
+    session_date: date,
+) -> EffectiveSession | None:
+    """Resolve and validate one canonical dated session, failing closed."""
+    if market_session_provider is None:
+        return None
+    try:
+        session = market_session_provider(exchange, symbol, session_date)
+    except Exception:  # noqa: BLE001 - calendar failures must fail closed
+        logger.exception(
+            "Could not resolve effective session for %s:%s on %s",
+            exchange,
+            symbol,
+            session_date,
+        )
+        return None
+    if session is None:
+        return None
+    try:
+        session_open, session_close = (
+            value.replace(tzinfo=None) for value in session
+        )
+    except (AttributeError, TypeError, ValueError):
+        logger.warning(
+            "Ignoring invalid effective session for %s:%s on %s",
+            exchange,
+            symbol,
+            session_date,
+        )
+        return None
+    if not isinstance(session_open, wall_time) or not isinstance(session_close, wall_time):
+        logger.warning(
+            "Ignoring invalid effective session for %s:%s on %s",
+            exchange,
+            symbol,
+            session_date,
+        )
+        return None
+    if session_open == session_close:
+        return None
+    opens_at = datetime.combine(session_date, session_open, tzinfo=_IST)
+    closes_at = datetime.combine(session_date, session_close, tzinfo=_IST)
+    if session_close < session_open:
+        closes_at += timedelta(days=1)
+    if closes_at <= opens_at:
+        return None
+    return EffectiveSession(
+        session_date=session_date,
+        opens_at=opens_at,
+        closes_at=closes_at,
+    )
+
+
+def resolve_effective_session(
+    market_session_provider: MarketSessionProvider | None,
+    exchange: str,
+    symbol: str,
+    at: datetime,
+) -> EffectiveSession | None:
+    """Return the effective session containing ``at`` for one instrument.
+
+    The prior date is checked because a valid session may cross midnight. A
+    missing, malformed, or raising provider is treated as a closed market.
+    """
+    local_at = (
+        at.replace(tzinfo=_IST)
+        if at.tzinfo is None or at.utcoffset() is None
+        else at.astimezone(_IST)
+    )
+    for day_offset in (0, -1):
+        session_date = local_at.date() + timedelta(days=day_offset)
+        session = _session_for_date(
+            market_session_provider,
+            exchange,
+            symbol,
+            session_date,
+        )
+        if session is not None and session.opens_at <= local_at <= session.closes_at:
+            return session
+    return None
 
 
 def _parse_bar_timestamp(value: object) -> datetime | None:
@@ -223,35 +318,29 @@ def _bar_closes_at(
     market_session_provider: MarketSessionProvider | None,
 ) -> datetime | None:
     """Return a source bar's effective UTC close, or ``None`` if unknown."""
-    if interval != timedelta(days=1) or market_session_provider is None:
+    if interval > timedelta(days=1):
         return timestamp + interval
-
-    session_date = timestamp.astimezone(_IST).date()
-    try:
-        session = market_session_provider(exchange, symbol, session_date)
-    except Exception:  # noqa: BLE001 - calendar failures must fail closed
-        logger.exception(
-            "Could not resolve effective session for %s:%s on %s",
+    if interval == timedelta(days=1):
+        session = _session_for_date(
+            market_session_provider,
             exchange,
             symbol,
-            session_date,
+            timestamp.astimezone(_IST).date(),
         )
-        return None
+        return session.closes_at.astimezone(timezone.utc) if session is not None else None
+
+    session = resolve_effective_session(
+        market_session_provider,
+        exchange,
+        symbol,
+        timestamp,
+    )
     if session is None:
         return None
-
-    session_open, session_close = (
-        value.replace(tzinfo=None) for value in session
-    )
-    if session_open == session_close:
+    closes_at = timestamp + interval
+    if closes_at > session.closes_at.astimezone(timezone.utc):
         return None
-    opens_at = datetime.combine(session_date, session_open, tzinfo=_IST)
-    closes_at = datetime.combine(session_date, session_close, tzinfo=_IST)
-    if session_close < session_open:
-        closes_at += timedelta(days=1)
-    if closes_at <= opens_at:
-        return None
-    return closes_at.astimezone(timezone.utc)
+    return closes_at
 
 
 def _filter_closed_bars(
@@ -270,6 +359,24 @@ def _filter_closed_bars(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     now_utc = now.astimezone(timezone.utc)
+    session_cache: dict[date, tuple[wall_time, wall_time] | None] = {}
+
+    def cached_session_for(
+        provider_exchange: str,
+        provider_symbol: str,
+        session_date: date,
+    ) -> tuple[wall_time, wall_time] | None:
+        if market_session_provider is None:
+            return None
+        if session_date not in session_cache:
+            session_cache[session_date] = market_session_provider(
+                provider_exchange,
+                provider_symbol,
+                session_date,
+            )
+        return session_cache[session_date]
+
+    session_provider = cached_session_for if market_session_provider is not None else None
     closed: list[dict[str, Any]] = []
     for bar in bars:
         timestamp = _parse_bar_timestamp(bar.get("timestamp"))
@@ -280,7 +387,7 @@ def _filter_closed_bars(
             interval=duration,
             exchange=exchange,
             symbol=symbol,
-            market_session_provider=market_session_provider,
+            market_session_provider=session_provider,
         )
         if closes_at is not None and closes_at <= now_utc:
             closed.append(bar)
@@ -396,7 +503,7 @@ class SignalPipeline:
         self,
         provider: MarketSessionProvider | None,
     ) -> None:
-        """Replace the effective-session lookup used for daily candle closure."""
+        """Replace the lookup used for candle membership and effective closure."""
         self._market_session_provider = provider
 
     def _ensure_generator(self) -> None:
@@ -662,7 +769,7 @@ class SignalPipeline:
         exchange: str = "",
         symbol: str = "",
     ) -> list[dict[str, Any]]:
-        """Return bars through the newest interval that has fully closed."""
+        """Return fully closed bars that belong to dated effective sessions."""
         if not bars:
             return []
         if _interval_duration(self.interval) is None:

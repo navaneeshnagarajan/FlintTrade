@@ -15,6 +15,7 @@ import time
 import zipfile
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, time as wall_time, timedelta, timezone
 from pathlib import Path
 from queue import Empty, Queue
@@ -59,7 +60,43 @@ SessionLookup = Callable[[str, str, date], tuple[wall_time, wall_time] | None]
 ContinuousLookup = Callable[[str], bool]
 
 
-def select_retraining_roster(
+@dataclass(frozen=True)
+class RetrainingTarget:
+    """Canonical exchange-qualified retraining target."""
+
+    symbol: str
+    exchange: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"symbol": self.symbol, "exchange": self.exchange}
+
+
+@dataclass(frozen=True)
+class RetrainingRetry:
+    """Parent-facing retry for one dated session that has not closed yet."""
+
+    target: RetrainingTarget
+    session_date: date
+    retry_at: datetime
+
+    @property
+    def instrument(self) -> dict[str, str]:
+        return self.target.to_dict()
+
+
+@dataclass(frozen=True)
+class RetrainingRosterPlan:
+    """Ready targets plus exact dated retries for one roster invocation."""
+
+    ready: tuple[RetrainingTarget, ...]
+    retries: tuple[RetrainingRetry, ...]
+
+    @property
+    def ready_instruments(self) -> list[dict[str, str]]:
+        return [target.to_dict() for target in self.ready]
+
+
+def plan_retraining_roster(
     instruments: list[dict[str, str]],
     *,
     roster: RetrainRoster,
@@ -68,12 +105,13 @@ def select_retraining_roster(
     is_continuous: ContinuousLookup,
     session_for: SessionLookup,
     regular_cutoff: wall_time = wall_time(16, 0),
-) -> list[dict[str, str]]:
-    """Select one non-overlapping regular or late/continuous training roster."""
+) -> RetrainingRosterPlan:
+    """Plan ready targets and retries without losing late cross-midnight sessions."""
     if roster not in {"regular", "late"}:
         raise ValueError("roster must be 'regular' or 'late'")
     cutoff = regular_cutoff.replace(tzinfo=None)
-    selected: list[dict[str, str]] = []
+    ready: list[RetrainingTarget] = []
+    retries: list[RetrainingRetry] = []
     seen: set[tuple[str, str]] = set()
 
     for instrument in instruments:
@@ -82,6 +120,8 @@ def select_retraining_roster(
         identity = (exchange, symbol)
         if not exchange or not symbol or identity in seen:
             continue
+        seen.add(identity)
+        target = RetrainingTarget(symbol=symbol, exchange=exchange)
         try:
             continuous = bool(is_continuous(exchange))
         except Exception:  # noqa: BLE001 - unknown calendar state fails closed
@@ -89,8 +129,7 @@ def select_retraining_roster(
             continue
         if continuous:
             if roster == "late":
-                selected.append({"symbol": symbol, "exchange": exchange})
-                seen.add(identity)
+                ready.append(target)
             continue
         try:
             session = session_for(exchange, symbol, session_date)
@@ -99,9 +138,26 @@ def select_retraining_roster(
             continue
         if session is None:
             continue
-        session_open, session_close = (
-            value.replace(tzinfo=None) for value in session
-        )
+        try:
+            session_open, session_close = (
+                value.replace(tzinfo=None) for value in session
+            )
+        except (AttributeError, TypeError, ValueError):
+            logger.warning(
+                "Ignoring invalid retraining session for %s:%s on %s",
+                exchange,
+                symbol,
+                session_date,
+            )
+            continue
+        if not isinstance(session_open, wall_time) or not isinstance(session_close, wall_time):
+            logger.warning(
+                "Ignoring invalid retraining session for %s:%s on %s",
+                exchange,
+                symbol,
+                session_date,
+            )
+            continue
         if session_open == session_close:
             continue
         closes_at = datetime.combine(session_date, session_close, tzinfo=_IST)
@@ -110,6 +166,8 @@ def select_retraining_roster(
             closes_at += timedelta(days=1)
         cutoff_at = datetime.combine(session_date, cutoff, tzinfo=_IST)
         intended_roster: RetrainRoster = "regular" if closes_at <= cutoff_at else "late"
+        if intended_roster != roster:
+            continue
 
         if isinstance(run_at, datetime):
             run_datetime = (
@@ -122,11 +180,40 @@ def select_retraining_roster(
             run_datetime = datetime.combine(session_date, run_time, tzinfo=_IST)
             if cross_midnight and run_time < cutoff:
                 run_datetime += timedelta(days=1)
-        if intended_roster != roster or run_datetime < closes_at:
+        if run_datetime < closes_at:
+            retries.append(
+                RetrainingRetry(
+                    target=target,
+                    session_date=session_date,
+                    retry_at=closes_at,
+                )
+            )
             continue
-        selected.append({"symbol": symbol, "exchange": exchange})
-        seen.add(identity)
-    return selected
+        ready.append(target)
+
+    return RetrainingRosterPlan(ready=tuple(ready), retries=tuple(retries))
+
+
+def select_retraining_roster(
+    instruments: list[dict[str, str]],
+    *,
+    roster: RetrainRoster,
+    session_date: date,
+    run_at: datetime | wall_time,
+    is_continuous: ContinuousLookup,
+    session_for: SessionLookup,
+    regular_cutoff: wall_time = wall_time(16, 0),
+) -> list[dict[str, str]]:
+    """Select one non-overlapping regular or late/continuous training roster."""
+    return plan_retraining_roster(
+        instruments,
+        roster=roster,
+        session_date=session_date,
+        run_at=run_at,
+        is_continuous=is_continuous,
+        session_for=session_for,
+        regular_cutoff=regular_cutoff,
+    ).ready_instruments
 
 
 def _default_model_dir() -> Path:
@@ -166,6 +253,7 @@ class RetrainResult(BaseModel):
     duration_seconds: float
     drift_detected: bool
     drift_score: float = 0.0
+    completed: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Return a stable JSON-compatible history record."""
@@ -180,7 +268,26 @@ class RetrainResult(BaseModel):
             "duration_seconds": round(self.duration_seconds, 2),
             "drift_detected": self.drift_detected,
             "drift_score": round(self.drift_score, 4),
+            "completed": self.completed,
         }
+
+
+@dataclass
+class _FetchOwner:
+    symbol: str
+    exchange: str
+    outcomes: Queue[tuple[list[dict[str, Any]] | None, Exception | None]]
+    thread: threading.Thread
+
+    @property
+    def identity(self) -> str:
+        return f"{self.exchange}:{self.symbol}"
+
+
+class _FetchOwnerPending(RuntimeError):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 def _feature_columns(features: FeatureSet | None) -> dict[str, list[float]]:
@@ -503,6 +610,8 @@ class SignalRetrainer:
         self._history: deque[RetrainResult] = deque(maxlen=config.max_history)
         self._history_lock = threading.Lock()
         self._promotion_lock = threading.Lock()
+        self._fetch_owner_lock = threading.Lock()
+        self._fetch_owner: _FetchOwner | None = None
         self._live_generators: dict[tuple[str, str], SignalGenerator] = {}
         self.config.model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -519,12 +628,55 @@ class SignalRetrainer:
     def _is_cancelled(self) -> bool:
         return bool(self._cancel_requested())
 
+    @property
+    def active_fetch_owner(self) -> str | None:
+        """Return the sole live data-fetch identity, if any."""
+        owner = self._active_fetch_owner_snapshot()
+        return None if owner is None else owner.identity
+
+    def _active_fetch_owner_snapshot(self) -> _FetchOwner | None:
+        with self._fetch_owner_lock:
+            owner = self._fetch_owner
+            if owner is None or not owner.thread.is_alive():
+                return None
+            return owner
+
+    @property
+    def has_active_fetch_owner(self) -> bool:
+        """Whether retraining still owns a live background data fetch."""
+        return self.active_fetch_owner is not None
+
+    def _discard_finished_fetch_owner(self) -> None:
+        with self._fetch_owner_lock:
+            owner = self._fetch_owner
+            if owner is not None and not owner.thread.is_alive():
+                self._fetch_owner = None
+
+    def wait_for_fetch_owner(self, timeout: float | None = None) -> bool:
+        """Wait for shutdown-owned fetch work without creating blocking workers.
+
+        Returns ``False`` when the sole daemon owner is still running at the
+        deadline. A completed owner's result is intentionally discarded; this
+        method is the parent shutdown/quiescence contract after cancellation.
+        """
+        with self._fetch_owner_lock:
+            owner = self._fetch_owner
+        if owner is None:
+            return True
+        owner.thread.join(timeout=None if timeout is None else max(0.0, float(timeout)))
+        if owner.thread.is_alive():
+            return False
+        with self._fetch_owner_lock:
+            if self._fetch_owner is owner:
+                self._fetch_owner = None
+        return True
+
     def _fetch_bars_with_cancellation(
         self,
         symbol: str,
         exchange: str,
     ) -> list[dict[str, Any]] | None:
-        """Fetch on a daemon worker and return ``None`` promptly on cancellation."""
+        """Fetch through one daemon owner and expose pending cancellation honestly."""
         outcomes: Queue[tuple[list[dict[str, Any]] | None, Exception | None]] = Queue(maxsize=1)
 
         def fetch() -> None:
@@ -535,21 +687,42 @@ class SignalRetrainer:
             else:
                 outcomes.put_nowait((bars, None))
 
-        worker = threading.Thread(
-            target=fetch,
-            name="flinttrade-signal-data-fetch",
-            daemon=True,
-        )
-        worker.start()
-        while worker.is_alive():
-            worker.join(timeout=_FETCH_CANCELLATION_POLL_SECONDS)
+        with self._fetch_owner_lock:
+            existing = self._fetch_owner
+            if existing is not None and existing.thread.is_alive():
+                raise _FetchOwnerPending(
+                    f"Data fetch pending: owner {existing.identity} is still running"
+                )
+            self._fetch_owner = None
+            worker = threading.Thread(
+                target=fetch,
+                name="flinttrade-signal-data-fetch",
+                daemon=True,
+            )
+            owner = _FetchOwner(
+                symbol=symbol,
+                exchange=exchange,
+                outcomes=outcomes,
+                thread=worker,
+            )
+            self._fetch_owner = owner
+            worker.start()
+
+        while owner.thread.is_alive():
+            owner.thread.join(timeout=_FETCH_CANCELLATION_POLL_SECONDS)
             if self._is_cancelled():
-                return None
+                raise _FetchOwnerPending(
+                    "Cancellation pending: data fetch still running"
+                )
+
+        with self._fetch_owner_lock:
+            if self._fetch_owner is owner:
+                self._fetch_owner = None
         if self._is_cancelled():
             return None
 
         try:
-            bars, error = outcomes.get_nowait()
+            bars, error = owner.outcomes.get_nowait()
         except Empty as exc:
             raise RuntimeError("Signal data fetch worker exited without a result") from exc
         if error is not None:
@@ -571,6 +744,15 @@ class SignalRetrainer:
         ):
             raise ValueError("session_date must be a date")
         started = time.monotonic()
+        self._discard_finished_fetch_owner()
+        active_owner = self.active_fetch_owner
+        if active_owner is not None:
+            return self._pending_result(
+                started,
+                symbol,
+                exchange,
+                f"Data fetch pending: owner {active_owner} is still running",
+            )
         if self._is_cancelled():
             return self._record_failure(started, symbol, exchange, "Cancelled")
 
@@ -620,6 +802,13 @@ class SignalRetrainer:
 
         try:
             bars = self._fetch_bars_with_cancellation(symbol, exchange)
+        except _FetchOwnerPending as pending:
+            return self._pending_result(
+                started,
+                symbol,
+                exchange,
+                pending.reason,
+            )
         except Exception as exc:  # noqa: BLE001 - one instrument must not stop the roster
             return self._record_failure(started, symbol, exchange, f"Data fetch failed: {exc}")
         if bars is None:
@@ -806,6 +995,16 @@ class SignalRetrainer:
     ) -> list[RetrainResult]:
         """Retrain every pipeline instrument, continuing after any failure."""
         results: list[RetrainResult] = []
+        active_owner = self._active_fetch_owner_snapshot()
+        if active_owner is not None:
+            return [
+                self._pending_result(
+                    time.monotonic(),
+                    active_owner.symbol,
+                    active_owner.exchange,
+                    f"Data fetch pending: owner {active_owner.identity} is still running",
+                )
+            ]
         if self._is_cancelled():
             return results
         selected_instruments = (
@@ -839,7 +1038,7 @@ class SignalRetrainer:
                     f"Retrain failed: {exc}",
                 )
             results.append(result)
-            if result.reason == "Cancelled" or self._is_cancelled():
+            if not result.completed or result.reason == "Cancelled" or self._is_cancelled():
                 break
         return results
 
@@ -907,6 +1106,7 @@ class SignalRetrainer:
         reason: str,
         drift_detected: bool,
         drift_score: float,
+        completed: bool = True,
     ) -> RetrainResult:
         return RetrainResult(
             timestamp=self._now(),
@@ -919,6 +1119,28 @@ class SignalRetrainer:
             duration_seconds=time.monotonic() - started,
             drift_detected=drift_detected,
             drift_score=drift_score,
+            completed=completed,
+        )
+
+    def _pending_result(
+        self,
+        started: float,
+        symbol: str,
+        exchange: str,
+        reason: str,
+    ) -> RetrainResult:
+        """Build an unrecorded non-terminal result while fetch ownership remains."""
+        return self._result(
+            started,
+            symbol,
+            exchange,
+            train_accuracy=0.0,
+            test_accuracy=0.0,
+            accepted=False,
+            reason=reason,
+            drift_detected=False,
+            drift_score=0.0,
+            completed=False,
         )
 
     def _record_failure(

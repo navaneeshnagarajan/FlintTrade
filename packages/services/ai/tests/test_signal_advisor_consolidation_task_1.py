@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -19,6 +19,14 @@ class RecordingModel:
     def predict(self, rows: list[list[float]]) -> list[list[float]]:
         self.rows.extend(rows)
         return [[0.1, 0.2, 0.7] for _ in rows]
+
+
+def _full_day_session(
+    _exchange: str,
+    _symbol: str,
+    _on: date,
+) -> tuple[time, time]:
+    return time(0, 0), time(23, 59)
 
 
 def _bars(count: int = 40) -> list[dict[str, float | str]]:
@@ -170,6 +178,7 @@ def test_pipeline_uses_ema_fallback_when_model_integrity_is_rejected(tmp_path: P
     pipeline = SignalPipeline(
         model_path=str(model_path),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(return_value=_bars(60))
 
@@ -195,6 +204,7 @@ def test_pipeline_uses_ema_fallback_when_verified_payload_is_corrupt(tmp_path: P
     pipeline = SignalPipeline(
         model_path=str(model_path),
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(return_value=_bars(60))
 

@@ -6,6 +6,8 @@ LLM and broker are mocked to test the agent's logic in isolation.
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,12 +57,15 @@ def make_agent(
     order_status: str = "success",
     quotes_ltp: float = 100.0,
     with_executor: bool = True,
+    exchange: str = "NSE",
+    market_session_provider: Any | None = None,
+    clock: Any | None = None,
 ) -> AutonomousTrader:
     """Build an AutonomousTrader with fully mocked LLM, broker, and executor."""
     symbols = symbols or ["RELIANCE"]
     config = AgentConfig(
         symbols=symbols,
-        exchange="NSE",
+        exchange=exchange,
         product="MIS",
         max_position_size=1,
         stop_loss_pct=2.0,
@@ -112,6 +117,8 @@ def make_agent(
         openalgo_client=mock_broker,
         config=config,
         order_executor=executor,
+        market_session_provider=market_session_provider,
+        clock=clock,
     )
 
 
@@ -605,10 +612,214 @@ def test_initial_status_idle() -> None:
     assert agent.status == AgentStatus.IDLE
 
 
+def test_market_open_fails_closed_without_effective_session_provider() -> None:
+    agent = make_agent(
+        clock=lambda: datetime(2026, 7, 10, 10, 0, tzinfo=timezone(timedelta(hours=5, minutes=30))),
+    )
+
+    assert agent._is_market_open("RELIANCE") is False
+
+
+def test_market_open_resolves_cross_midnight_session_by_exchange_and_symbol() -> None:
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now = datetime(2026, 4, 18, 0, 20, tzinfo=ist)
+    calls: list[tuple[str, str, date]] = []
+
+    def session_for(exchange: str, symbol: str, on: date):
+        calls.append((exchange, symbol, on))
+        if on == date(2026, 4, 17):
+            return time(18, 0), time(0, 45)
+        return None
+
+    agent = make_agent(
+        symbols=["GOLDM"],
+        exchange="MCX",
+        market_session_provider=session_for,
+        clock=lambda: now,
+    )
+
+    assert agent._is_market_open("GOLDM") is True
+    assert calls == [
+        ("MCX", "GOLDM", date(2026, 4, 18)),
+        ("MCX", "GOLDM", date(2026, 4, 17)),
+    ]
+
+
+def test_stop_square_off_intent_is_monotonic() -> None:
+    agent = make_agent()
+
+    agent.request_stop(square_off=True)
+    agent.request_stop(square_off=False)
+
+    assert agent._stop_requested is True
+    assert agent._square_off_on_stop is True
+    assert agent.status == AgentStatus.STOPPING
+
+
+@pytest.mark.asyncio
+async def test_stop_after_analysis_prevents_symbol_decisions_and_execution(monkeypatch) -> None:
+    agent = make_agent()
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+
+    async def analyse_then_stop(*_args: Any) -> dict[str, MarketData]:
+        agent.request_stop(square_off=False)
+        return {"RELIANCE": MarketData(symbol="RELIANCE", ltp=100.0)}
+
+    agent.analyze_all = AsyncMock(side_effect=analyse_then_stop)
+    agent.decide = AsyncMock(return_value="BUY")
+
+    result = await agent.run_cycle()
+
+    assert result["stopped"] is True
+    assert result["reason"] == "stop_requested"
+    agent.decide.assert_not_awaited()
+    agent.order_executor.route_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stop_during_decision_is_rechecked_immediately_before_execution(monkeypatch) -> None:
+    agent = make_agent()
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+    agent.analyze_all = AsyncMock(
+        return_value={"RELIANCE": MarketData(symbol="RELIANCE", ltp=100.0)}
+    )
+
+    async def decide_then_stop(_market_data: MarketData) -> str:
+        agent.request_stop(square_off=False)
+        return "BUY"
+
+    agent.decide = AsyncMock(side_effect=decide_then_stop)
+
+    result = await agent.run_cycle()
+
+    assert result["stopped"] is True
+    assert result["reason"] == "stop_requested"
+    agent.order_executor.route_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stop_between_symbols_prevents_later_symbol_execution(monkeypatch) -> None:
+    agent = make_agent(symbols=["RELIANCE", "TCS"])
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+    agent.analyze_all = AsyncMock(
+        return_value={
+            "RELIANCE": MarketData(symbol="RELIANCE", ltp=100.0),
+            "TCS": MarketData(symbol="TCS", ltp=200.0),
+        }
+    )
+    agent.decide = AsyncMock(return_value="BUY")
+
+    async def execute_then_stop(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+        agent.request_stop(square_off=False)
+        return {"status": "blocked"}
+
+    agent.execute = AsyncMock(side_effect=execute_then_stop)
+
+    result = await agent.run_cycle()
+
+    assert result["stopped"] is True
+    assert result["reason"] == "stop_requested"
+    assert agent.execute.await_count == 1
+    assert agent.execute.await_args.args[1] == "RELIANCE"
+
+
+@pytest.mark.asyncio
+async def test_direct_execution_fails_closed_after_stop_request() -> None:
+    agent = make_agent()
+    agent.request_stop(square_off=False)
+
+    result = await agent.execute(
+        "BUY",
+        "RELIANCE",
+        RiskAssessment(allowed=True, position_qty=1),
+        entry_price=100.0,
+    )
+
+    assert result == {"status": "blocked", "reason": "stop_requested"}
+    agent.order_executor.route_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stop_during_order_construction_is_checked_before_gated_dispatch() -> None:
+    agent = make_agent()
+
+    def build_then_stop(*_args: Any) -> object:
+        agent.request_stop(square_off=False)
+        return object()
+
+    agent._build_market_order = MagicMock(side_effect=build_then_stop)
+
+    result = await agent.execute(
+        "BUY",
+        "RELIANCE",
+        RiskAssessment(allowed=True, position_qty=1),
+        entry_price=100.0,
+    )
+
+    assert result == {"status": "blocked", "reason": "stop_requested"}
+    agent.order_executor.route_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_stop_square_off_remains_observable_as_stop_failed(monkeypatch) -> None:
+    agent = make_agent()
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+    agent.order_executor = make_gated_executor(passed=False, error="kill switch")
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "action": "BUY",
+        "quantity": 1,
+    }
+    agent.request_stop(square_off=True)
+
+    await agent.run_session()
+
+    assert agent.status == AgentStatus.STOP_FAILED
+    assert agent.shutdown_complete is False
+    assert "RELIANCE" in agent.stop_failure
+    assert "RELIANCE" in agent.state.active_positions
+
+
+@pytest.mark.asyncio
+async def test_market_close_with_tracked_position_attempts_square_off_and_preserves_failure(monkeypatch) -> None:
+    agent = make_agent()
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: False)
+    agent.order_executor = make_gated_executor(passed=False, error="market exit refused")
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "action": "BUY",
+        "quantity": 1,
+    }
+
+    await agent.run_session()
+
+    agent.order_executor.route_order.assert_awaited_once()
+    assert agent.status == AgentStatus.STOP_FAILED
+    assert agent.shutdown_complete is False
+
+
+@pytest.mark.asyncio
+async def test_scheduled_square_off_failure_is_not_retried_during_same_unwind(monkeypatch) -> None:
+    agent = make_agent()
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
+    monkeypatch.setattr(agent, "_is_square_off_time", lambda *_args: True)
+    agent.order_executor = make_gated_executor(passed=False, error="scheduled exit refused")
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "action": "BUY",
+        "quantity": 1,
+    }
+
+    await agent.run_session()
+
+    agent.order_executor.route_order.assert_awaited_once()
+    assert agent.status == AgentStatus.STOP_FAILED
+
+
 @pytest.mark.asyncio
 async def test_stop_requested_before_session_entry_prevents_live_cycle(monkeypatch) -> None:
     agent = make_agent()
-    monkeypatch.setattr(agent, "_is_market_open", lambda: True)
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
 
     async def stop_after_first_cycle() -> None:
         agent.request_stop(square_off=False)
@@ -814,7 +1025,7 @@ def test_journal_decision_noops_without_an_available_vault() -> None:
 async def test_run_cycle_journals_each_decision(monkeypatch) -> None:
     agent = make_agent(llm_response="HOLD")
     agent.vault = _vault_mock(snippet="note")
-    monkeypatch.setattr(agent, "_is_market_open", lambda: True)
+    monkeypatch.setattr(agent, "_is_market_open", lambda *_args: True)
 
     await agent.run_cycle()
 
