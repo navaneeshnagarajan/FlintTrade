@@ -69,6 +69,83 @@ describe("getOrderFlow runtime validation", () => {
     );
   });
 
+  it.each([-0.25, -5])("accepts backend-permitted freshness clock skew of %ss", async (ageSeconds) => {
+    const response = {
+      ...validResponse,
+      freshness: { ...validResponse.freshness, age_seconds: ageSeconds },
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(response));
+
+    await expect(getOrderFlow("NIFTY", "NSE_INDEX", 20, 300, 0.05)).resolves.toEqual(response);
+  });
+
+  it("accepts the backend's coherent synthetic warming state", async () => {
+    const response = {
+      ...validResponse,
+      buckets: [{ ...validBucket, quality: "sample", provenance: "synthetic" }],
+      is_live: false,
+      is_sample_data: true,
+      quality: "sample",
+      provenance: "synthetic",
+      live_state: "warming",
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(response));
+
+    await expect(getOrderFlow("NIFTY", "NSE_INDEX", 20, 300, 0.05)).resolves.toEqual(response);
+  });
+
+  it.each([
+    [
+      "freshness age beyond the backend clock-skew tolerance",
+      {
+        ...validResponse,
+        freshness: { ...validResponse.freshness, age_seconds: -5.001 },
+      },
+    ],
+    [
+      "is_live=false with live_state=live",
+      { ...validResponse, is_live: false },
+    ],
+    [
+      "live freshness marked as not fresh",
+      {
+        ...validResponse,
+        freshness: { ...validResponse.freshness, is_fresh: false },
+      },
+    ],
+    [
+      "is_live=true with delayed freshness",
+      {
+        ...validResponse,
+        freshness: { ...validResponse.freshness, state: "delayed", is_fresh: false },
+      },
+    ],
+    [
+      "live_state that disagrees with freshness.state",
+      {
+        ...validResponse,
+        is_live: false,
+        live_state: "delayed",
+        freshness: { ...validResponse.freshness, state: "stale", is_fresh: false },
+      },
+    ],
+    [
+      "non-live freshness marked as fresh",
+      {
+        ...validResponse,
+        is_live: false,
+        live_state: "delayed",
+        freshness: { ...validResponse.freshness, state: "delayed", is_fresh: true },
+      },
+    ],
+  ])("rejects contradictory %s", async (_caseName, payload) => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(payload));
+
+    await expect(
+      getOrderFlow("NIFTY", "NSE_INDEX", 20, 300, 0.05),
+    ).rejects.toThrow(/invalid order-flow response/i);
+  });
+
   it.each([
     [
       "non-array buckets",

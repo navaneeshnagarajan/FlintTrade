@@ -90,6 +90,7 @@ function validateQualityProvenance(
 }
 
 const orderFlowVolumeSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const MAX_SOURCE_CLOCK_SKEW_SECONDS = 5;
 
 const orderFlowCellSchema = z.object({
   buy_volume: orderFlowVolumeSchema,
@@ -160,8 +161,16 @@ const orderFlowFreshnessSchema = z.object({
   last_tick_timestamp: z.number().finite().nonnegative().nullable(),
   last_tick_session: z.string().min(1).nullable(),
   current_session: z.string().min(1).nullable(),
-  age_seconds: z.number().finite().nonnegative().nullable(),
-}).passthrough();
+  age_seconds: z.number().finite().min(-MAX_SOURCE_CLOCK_SKEW_SECONDS).nullable(),
+}).passthrough().superRefine((freshness, ctx) => {
+  if (freshness.is_fresh !== (freshness.state === "live")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["is_fresh"],
+      message: "is_fresh must agree with freshness state",
+    });
+  }
+});
 
 const orderFlowResponseSchema = z.object({
   buckets: z.array(orderFlowBucketSchema),
@@ -208,6 +217,44 @@ const orderFlowResponseSchema = z.object({
       path: ["live_state"],
       message: "Live order flow must use live_state=live",
     });
+  }
+  if (response.live_state === "live" && !response.is_live) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["is_live"],
+      message: "live_state=live requires is_live=true",
+    });
+  }
+
+  if (response.freshness !== undefined) {
+    if (isSynthetic) {
+      const expectedLiveState = response.freshness.state === "live" ? "warming" : "unavailable";
+      if (response.live_state !== undefined && response.live_state !== expectedLiveState) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["live_state"],
+          message: `Synthetic order flow with ${response.freshness.state} freshness must use live_state=${expectedLiveState}`,
+        });
+      }
+    } else {
+      if (response.is_live !== response.freshness.is_fresh) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["is_live"],
+          message: "is_live must agree with freshness.is_fresh",
+        });
+      }
+      if (
+        response.live_state !== undefined
+        && response.live_state !== response.freshness.state
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["live_state"],
+          message: "live_state must agree with freshness.state",
+        });
+      }
+    }
   }
 
   if (response.buckets.length === 0) return;

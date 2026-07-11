@@ -37,8 +37,17 @@ import {
   useCallback,
   memo,
 } from "react";
-import { AlertCircle, BarChart2, Clock3, Loader2, Grid3x3, BarChart } from "lucide-react";
+import { AlertCircle, BarChart2, Clock3, Loader2, Grid3x3, BarChart, Ellipsis } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -54,6 +63,7 @@ import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
 import { OrderFlowQualityBadge } from "../OrderFlowQualityBadge";
+import { useCompactPanelLayout } from "../useCompactPanelLayout";
 // useOrderFlow includes the backend freshness state used by the status badge.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -483,6 +493,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   }));
   const [intervalLabel, setIntervalLabel] = useState("5m");
   const [viewMode, setViewMode] = useState<ViewMode>("footprint");
+  const { isCompact, panelRef } = useCompactPanelLayout<HTMLDivElement>();
 
   useEffect(() => {
     setInstrument((current) => {
@@ -580,6 +591,10 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;
@@ -606,10 +621,15 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   }, []);
 
   return (
-    <div className="flex flex-col h-full bg-surface-base select-none">
+    <div
+      ref={panelRef}
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-surface-base select-none"
+      data-layout={isCompact ? "compact" : "full"}
+      data-testid="order-flow-panel"
+    >
       {/* ─── Toolbar ────────────────────────────────────────────────────── */}
       <div
-        className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-border-default px-3 py-1.5"
+        className="flex h-8 min-w-0 shrink-0 flex-nowrap items-center gap-1.5 overflow-hidden border-b border-border-default px-2"
         role="toolbar"
         aria-label="Order flow controls"
       >
@@ -619,7 +639,10 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
         </span>
         <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
-            className="h-6 w-24 max-w-full text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
+            className={cn(
+              "!h-6 min-w-0 max-w-full px-2 py-0 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0",
+              isCompact ? "w-20" : "w-24",
+            )}
             aria-labelledby="of-symbol-label"
           >
             <SelectValue />
@@ -637,67 +660,71 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
           </SelectContent>
         </Select>
 
-        {/* Interval selector */}
-        <span className="sr-only" id="of-interval-label">
-          Interval
-        </span>
-        <div className="flex items-center gap-0.5" role="group" aria-labelledby="of-interval-label">
-          {INTERVALS.map((iv) => (
-            <button
-              key={iv.label}
-              type="button"
-              onClick={() => setIntervalLabel(iv.label)}
-              className={cn(
-                "h-6 px-1.5 text-xs rounded font-mono transition-colors",
-                intervalLabel === iv.label
-                  ? "bg-surface-active text-text-primary"
-                  : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
-              )}
-              aria-pressed={intervalLabel === iv.label}
-              aria-label={`${iv.label} interval`}
-            >
-              {iv.label}
-            </button>
-          ))}
-        </div>
+        {!isCompact && (
+          <>
+            {/* Interval selector */}
+            <span className="sr-only" id="of-interval-label">
+              Interval
+            </span>
+            <div className="flex items-center gap-0.5" role="group" aria-labelledby="of-interval-label">
+              {INTERVALS.map((iv) => (
+                <button
+                  key={iv.label}
+                  type="button"
+                  onClick={() => setIntervalLabel(iv.label)}
+                  className={cn(
+                    "h-6 px-1.5 text-xs rounded font-mono transition-colors",
+                    intervalLabel === iv.label
+                      ? "bg-surface-active text-text-primary"
+                      : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
+                  )}
+                  aria-pressed={intervalLabel === iv.label}
+                  aria-label={`${iv.label} interval`}
+                >
+                  {iv.label}
+                </button>
+              ))}
+            </div>
 
-        {/* View mode toggle */}
-        <div className="flex items-center gap-0.5 border-l border-border-default pl-2 ml-1" role="group" aria-label="View mode">
-          <button
-            type="button"
-            onClick={() => setViewMode("footprint")}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded transition-colors",
-              viewMode === "footprint"
-                ? "bg-surface-active text-text-primary"
-                : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
-            )}
-            aria-pressed={viewMode === "footprint"}
-            aria-label="Footprint view"
-            title="Footprint view"
-          >
-            <BarChart className="size-3" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("heatmap")}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded transition-colors",
-              viewMode === "heatmap"
-                ? "bg-surface-active text-text-primary"
-                : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
-            )}
-            aria-pressed={viewMode === "heatmap"}
-            aria-label="Heatmap view"
-            title="Heatmap view"
-          >
-            <Grid3x3 className="size-3" aria-hidden="true" />
-          </button>
-        </div>
+            {/* View mode toggle */}
+            <div className="flex items-center gap-0.5 border-l border-border-default pl-2 ml-1" role="group" aria-label="View mode">
+              <button
+                type="button"
+                onClick={() => setViewMode("footprint")}
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded transition-colors",
+                  viewMode === "footprint"
+                    ? "bg-surface-active text-text-primary"
+                    : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
+                )}
+                aria-pressed={viewMode === "footprint"}
+                aria-label="Footprint view"
+                title="Footprint view"
+              >
+                <BarChart className="size-3" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("heatmap")}
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded transition-colors",
+                  viewMode === "heatmap"
+                    ? "bg-surface-active text-text-primary"
+                    : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
+                )}
+                aria-pressed={viewMode === "heatmap"}
+                aria-label="Heatmap view"
+                title="Heatmap view"
+              >
+                <Grid3x3 className="size-3" aria-hidden="true" />
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Freshness and source quality */}
-        <div
-          className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5"
+        {!isCompact && <div
+          className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1.5"
           data-testid="order-flow-toolbar-status"
         >
           {isLoading && (
@@ -753,11 +780,108 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
           {!isLoading && !isError && columns.length > 0 && data && (
             <OrderFlowQualityBadge data={data} />
           )}
-        </div>
+        </div>}
+
+        {isCompact && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="ml-auto flex size-6 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+                aria-label="More order flow controls"
+                title="More order flow controls"
+              >
+                <Ellipsis className="size-4" aria-hidden="true" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-48 border-border-default bg-surface-card text-text-primary"
+            >
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                Interval
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={intervalLabel} onValueChange={setIntervalLabel}>
+                {INTERVALS.map((iv) => (
+                  <DropdownMenuRadioItem
+                    key={iv.label}
+                    value={iv.label}
+                    aria-label={`${iv.label} interval`}
+                    className="text-xs font-mono"
+                  >
+                    {iv.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator className="bg-border-default" />
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                View
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={viewMode}
+                onValueChange={(value) => {
+                  if (value === "footprint" || value === "heatmap") setViewMode(value);
+                }}
+              >
+                <DropdownMenuRadioItem value="footprint" className="text-xs">
+                  <BarChart className="size-3" aria-hidden="true" />
+                  Footprint
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="heatmap" className="text-xs">
+                  <Grid3x3 className="size-3" aria-hidden="true" />
+                  Heatmap
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator className="bg-border-default" />
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                Status
+              </DropdownMenuLabel>
+              <div className="flex items-center justify-between gap-2 px-2 pb-1 text-xs">
+                <span>
+                  {isLoading
+                    ? "Loading"
+                    : isError
+                      ? "Error"
+                      : columns.length === 0
+                        ? "No data"
+                        : dataState === "live"
+                          ? "Live"
+                          : dataState === "delayed"
+                            ? "Delayed"
+                            : dataState === "stale"
+                              ? "Stale"
+                              : "Sample data"}
+                </span>
+                {!isLoading && !isError && columns.length > 0 && data && (
+                  <OrderFlowQualityBadge data={data} />
+                )}
+              </div>
+              <DropdownMenuSeparator className="bg-border-default" />
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                Legend
+              </DropdownMenuLabel>
+              <div
+                className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 pb-1 text-xs text-text-muted"
+                data-testid="order-flow-compact-legend"
+              >
+                <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-profit" aria-hidden="true" />Buy</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-loss" aria-hidden="true" />Sell</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm border border-amber-400" aria-hidden="true" />POC</span>
+                <span className="flex items-center gap-1"><span className="w-3 border-t border-dashed border-indigo-400" aria-hidden="true" />Latest POC</span>
+                <span className="col-span-2 font-mono text-text-secondary">
+                  {latestPoc > 0 ? latestPoc.toLocaleString("en-IN") : "—"} · {columns.length} bars · {displayIntervalLabel}
+                </span>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {/* ─── Legend ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-3 py-1 border-b border-border-default shrink-0">
+      {!isCompact && <div
+        className="flex items-center gap-3 px-3 py-1 border-b border-border-default shrink-0"
+        data-testid="order-flow-legend"
+      >
         <div className="flex items-center gap-1">
           <div className="w-3 h-2 rounded-sm bg-profit" aria-hidden="true" />
           <span className="text-xs text-text-muted">Buy</span>
@@ -783,12 +907,13 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
         <div className="ml-auto text-xs text-text-muted">
           {columns.length} bars &bull; {symbol} {displayIntervalLabel}
         </div>
-      </div>
+      </div>}
 
       {/* ─── Chart canvas ────────────────────────────────────────────────── */}
       <div
         ref={containerRef}
         className="flex-1 relative min-h-0"
+        data-testid="order-flow-chart"
         role="img"
         aria-label={`Order flow footprint chart for ${symbol}, ${displayIntervalLabel} interval. Shows buy volume (green) and sell volume (red) per price level per time bucket. Point of Control (POC) highlighted in amber, with the latest bucket POC marked by a dashed line.`}
       >
@@ -798,27 +923,58 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
           aria-hidden="true"
         />
         {isLoading && columns.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <Skeleton className="h-3 w-48" />
-            <Skeleton className="h-3 w-36" />
-            <Skeleton className="h-3 w-40" />
-            <span className="text-xs text-text-muted mt-1">Loading order flow data...</span>
-          </div>
+          isCompact ? (
+            <div
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-text-muted"
+              data-testid="order-flow-compact-state"
+            >
+              <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+              <span className="truncate">Loading</span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <Skeleton className="h-3 w-48" />
+              <Skeleton className="h-3 w-36" />
+              <Skeleton className="h-3 w-40" />
+              <span className="text-xs text-text-muted mt-1">Loading order flow data...</span>
+            </div>
+          )
         )}
         {isError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-loss/70">
-            <AlertCircle className="size-8" aria-hidden="true" />
-            <span className="text-sm">
-              {error instanceof Error ? error.message : "Failed to load data"}
-            </span>
-            <span className="text-xs text-text-muted">Retrying automatically...</span>
-          </div>
+          isCompact ? (
+            <div
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-loss/70"
+              data-testid="order-flow-compact-state"
+              title={error instanceof Error ? error.message : "Failed to load data"}
+            >
+              <AlertCircle className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">Unable to load</span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-loss/70">
+              <AlertCircle className="size-8" aria-hidden="true" />
+              <span className="text-sm">
+                {error instanceof Error ? error.message : "Failed to load data"}
+              </span>
+              <span className="text-xs text-text-muted">Retrying automatically...</span>
+            </div>
+          )
         )}
         {!isLoading && !isError && columns.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
-            <BarChart2 className="size-8" aria-hidden="true" />
-            <span className="text-sm">No data</span>
-          </div>
+          isCompact ? (
+            <div
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-text-muted"
+              data-testid="order-flow-compact-state"
+            >
+              <BarChart2 className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">No data</span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
+              <BarChart2 className="size-8" aria-hidden="true" />
+              <span className="text-sm">No data</span>
+            </div>
+          )
         )}
       </div>
     </div>

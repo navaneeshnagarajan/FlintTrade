@@ -5,8 +5,8 @@
  * Verifies rendering, toolbar elements, and empty/loading states.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -14,12 +14,26 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // Mocks — must be defined before component import
 // ---------------------------------------------------------------------------
 
-// Stub ResizeObserver (not available in JSDOM)
+const resizeObservations: Array<{
+  callback: ResizeObserverCallback;
+  target: Element;
+}> = [];
+
+// Stub ResizeObserver (not available in JSDOM) while retaining layout callbacks.
 vi.stubGlobal(
   "ResizeObserver",
   class {
-    observe() {}
-    unobserve() {}
+    constructor(private readonly callback: ResizeObserverCallback) {}
+
+    observe(target: Element) {
+      resizeObservations.push({ callback: this.callback, target });
+    }
+
+    unobserve(target: Element) {
+      const index = resizeObservations.findIndex((entry) => entry.target === target);
+      if (index >= 0) resizeObservations.splice(index, 1);
+    }
+
     disconnect() {}
   },
 );
@@ -94,13 +108,27 @@ function hookResult(overrides = {}) {
 
 const defaultProps = makeDockviewPanelProps();
 
+function resizeObservedElement(target: Element, width: number, height: number): void {
+  const observation = resizeObservations.find((entry) => entry.target === target);
+  expect(observation).toBeDefined();
+  act(() => {
+    observation?.callback(
+      [{ target, contentRect: { width, height } } as ResizeObserverEntry],
+      {} as ResizeObserver,
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("OrderFlowWidget", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resizeObservations.length = 0;
     mockUseOrderFlow.mockReturnValue(hookResult());
   });
 
@@ -169,22 +197,113 @@ describe("OrderFlowWidget", () => {
     );
   });
 
-  it("keeps every toolbar control accessible in a narrow wrapping panel", () => {
+  it("replaces a pending paint after resizing clears the canvas backing store", () => {
+    let nextAnimationFrameId = 1;
+    const requestAnimationFrameMock = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((_callback: FrameRequestCallback) => nextAnimationFrameId++);
+    const cancelAnimationFrameMock = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: [
+            {
+              time_label: "09:15",
+              cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+              poc_price: 22500,
+              total_volume: 180,
+              delta: 20,
+            },
+          ],
+          symbol: "NIFTY",
+          exchange: "NSE_INDEX",
+          interval: 300,
+          is_live: false,
+        },
+      }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    const pendingFrameId = requestAnimationFrameMock.mock.results.at(-1)?.value as number;
+    const requestCount = requestAnimationFrameMock.mock.calls.length;
+
+    resizeObservedElement(screen.getByTestId("order-flow-chart"), 220, 64);
+
+    expect(cancelAnimationFrameMock).toHaveBeenCalledWith(pendingFrameId);
+    expect(requestAnimationFrameMock).toHaveBeenCalledTimes(requestCount + 1);
+    const canvas = screen.getByTestId("order-flow-chart").querySelector("canvas");
+    expect(canvas).toHaveAttribute("width", "220");
+    expect(canvas).toHaveAttribute("height", "64");
+  });
+
+  it("uses stable compact controls and preserves chart space at 220x96", () => {
     render(
-      <div style={{ width: "220px" }}>
+      <div style={{ width: "220px", height: "96px" }}>
         <OrderFlowWidget {...defaultProps} />
       </div>,
     );
 
-    const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
-    expect(toolbar).toHaveClass("min-w-0", "flex-wrap");
-    expect(within(toolbar).getByRole("combobox", { name: "Symbol" })).toBeInTheDocument();
-    expect(within(toolbar).getByRole("group", { name: "View mode" })).toBeInTheDocument();
-    expect(within(toolbar).getByRole("button", { name: "1m interval" })).toBeInTheDocument();
-    expect(within(toolbar).getByRole("button", { name: "Heatmap view" })).toBeInTheDocument();
+    const panel = screen.getByTestId("order-flow-panel");
+    resizeObservedElement(panel, 220, 96);
 
-    const statusGroup = within(toolbar).getByTestId("order-flow-toolbar-status");
-    expect(statusGroup).toHaveClass("min-w-0", "max-w-full", "flex-wrap");
+    expect(panel).toHaveAttribute("data-layout", "compact");
+    const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
+    expect(toolbar).toHaveClass("min-w-0", "flex-nowrap");
+    expect(toolbar).not.toHaveClass("flex-wrap");
+    expect(within(toolbar).getByRole("combobox", { name: "Symbol" })).toBeInTheDocument();
+    const moreControls = within(toolbar).getByRole("button", { name: "More order flow controls" });
+    expect(moreControls).toBeInTheDocument();
+    expect(within(toolbar).queryByRole("button", { name: "1m interval" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("order-flow-legend")).not.toBeInTheDocument();
+    expect(screen.getByTestId("order-flow-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("order-flow-compact-state")).toHaveTextContent("No data");
+
+    fireEvent.pointerDown(moreControls, { button: 0, ctrlKey: false });
+    expect(screen.getByTestId("order-flow-compact-legend")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "1m interval" }));
+    expect(mockUseOrderFlow).toHaveBeenLastCalledWith("NIFTY", "NSE_INDEX", 60, 20);
+  });
+
+  it("restores full controls and legend at a normal panel size", () => {
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    const panel = screen.getByTestId("order-flow-panel");
+    resizeObservedElement(panel, 480, 360);
+    expect(panel).toHaveAttribute("data-layout", "compact");
+
+    resizeObservedElement(panel, 640, 360);
+
+    expect(panel).toHaveAttribute("data-layout", "full");
+    expect(screen.queryByRole("button", { name: "More order flow controls" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1m interval" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Heatmap view" })).toBeInTheDocument();
+    expect(screen.getByTestId("order-flow-legend")).toBeInTheDocument();
+  });
+
+  it("uses a bounded error status instead of overflowing a compact chart", () => {
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      isError: true,
+      error: new Error("A backend error message that cannot fit inside a short Dockview panel"),
+    }));
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    const panel = screen.getByTestId("order-flow-panel");
+    resizeObservedElement(panel, 220, 96);
+
+    expect(screen.getByText("Unable to load")).toBeInTheDocument();
+    expect(screen.queryByText("Retrying automatically...")).not.toBeInTheDocument();
+  });
+
+  it("uses a bounded loading status instead of skeleton rows in a compact chart", () => {
+    mockUseOrderFlow.mockReturnValue(hookResult({ isLoading: true }));
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    const panel = screen.getByTestId("order-flow-panel");
+    resizeObservedElement(panel, 220, 96);
+
+    expect(screen.getByTestId("order-flow-compact-state")).toHaveTextContent("Loading");
+    expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
   });
 
   it("labels the bucket-derived value and line as Latest POC, never LTP", () => {

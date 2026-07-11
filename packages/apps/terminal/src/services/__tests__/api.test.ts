@@ -641,8 +641,68 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it.each([
+    "2026-08-15 00:00:00+05:30",
+    "2026-08-15T00:00:00.000Z",
+  ])("normalises a valid Upstox _date datetime %s to its calendar date", async (_date) => {
+    mockConnectionState.apiKey = "";
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: {
+            accounts: [
+              { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: [{
+            _date,
+            description: "Independence Day",
+            holiday_type: "TRADING_HOLIDAY",
+            closed_exchanges: ["NSE", "BSE"],
+            open_exchanges: [],
+          }],
+        }),
+      );
+
+    await expect(getHolidays()).resolves.toEqual([
+      {
+        date: "2026-08-15",
+        description: "Independence Day",
+        holiday_type: "TRADING_HOLIDAY",
+        closed_exchanges: ["NSE", "BSE"],
+        open_exchanges: [],
+      },
+    ]);
+  });
+
+  it.each([
     ["non-array payload", { holidays: [] }],
     ["non-object row", [null]],
+    [
+      "invalid calendar date",
+      [{
+        _date: "2026-02-30 00:00:00+05:30",
+        description: "Invalid holiday",
+        holiday_type: "TRADING_HOLIDAY",
+        closed_exchanges: ["NSE"],
+        open_exchanges: [],
+      }],
+    ],
+    [
+      "invalid datetime",
+      [{
+        _date: "2026-08-15T25:00:00+05:30",
+        description: "Invalid holiday",
+        holiday_type: "TRADING_HOLIDAY",
+        closed_exchanges: ["NSE"],
+        open_exchanges: [],
+      }],
+    ],
     [
       "invalid special-session timestamp",
       [{

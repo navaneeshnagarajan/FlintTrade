@@ -477,6 +477,17 @@ const isoCalendarDateSchema = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).ref
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
 }, "Invalid calendar date");
 
+const nativeHolidayDateSchema = z.string().trim()
+  .regex(
+    /^(\d{4}-\d{2}-\d{2})(?:[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)?)?$/,
+    "Invalid calendar date or datetime",
+  )
+  .refine(
+    (value) => isoCalendarDateSchema.safeParse(value.slice(0, 10)).success,
+    "Invalid calendar date",
+  )
+  .transform((value) => value.slice(0, 10));
+
 const nativeEpochSchema = z.union([
   z.number().finite().nonnegative(),
   z.string().trim().regex(/^\d+(?:\.\d+)?$/).transform(Number).pipe(z.number().finite().nonnegative()),
@@ -492,8 +503,8 @@ const nativeOpenExchangeSchema = z.object({
 });
 
 const nativeHolidaySchema = z.object({
-  date: isoCalendarDateSchema.optional(),
-  _date: isoCalendarDateSchema.optional(),
+  date: nativeHolidayDateSchema.optional(),
+  _date: nativeHolidayDateSchema.optional(),
   description: z.string().trim().min(1),
   holiday_type: z.string().trim().min(1),
   closed_exchanges: z.array(z.string().trim().min(1)),

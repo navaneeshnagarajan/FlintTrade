@@ -31,8 +31,17 @@ import {
   useCallback,
   memo,
 } from "react";
-import { AlertCircle, BarChart, Clock3, Loader2 } from "lucide-react";
+import { AlertCircle, BarChart, Clock3, Ellipsis, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -48,6 +57,7 @@ import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
 import { OrderFlowQualityBadge } from "../OrderFlowQualityBadge";
+import { useCompactPanelLayout } from "../useCompactPanelLayout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +103,7 @@ const MARGIN_TOP = 8;
 const MARGIN_BOTTOM_CHART = 4;   // gap between chart and delta strip
 const DELTA_STRIP_H = 56;        // CSS px height reserved for cumulative delta
 const MARGIN_BOTTOM_DELTA = 20;  // time labels below delta strip
+const MIN_HEIGHT_WITH_DELTA_STRIP = 140;
 
 // Canvas colours
 const C_BG = "#0a0a0f";
@@ -172,15 +183,20 @@ function drawFootprint(
   if (columns.length === 0) return;
 
   // Layout zones
+  const showDeltaStrip = physH / dpr >= MIN_HEIGHT_WITH_DELTA_STRIP;
   const chartLeft = css(MARGIN_LEFT);
   const chartRight = physW - css(MARGIN_RIGHT);
   const chartTop = css(MARGIN_TOP);
-  const deltaStripTop = physH - css(MARGIN_BOTTOM_DELTA) - css(DELTA_STRIP_H);
-  const chartBottom = deltaStripTop - css(MARGIN_BOTTOM_CHART);
+  const deltaStripTop = showDeltaStrip
+    ? physH - css(MARGIN_BOTTOM_DELTA) - css(DELTA_STRIP_H)
+    : physH;
+  const chartBottom = showDeltaStrip
+    ? deltaStripTop - css(MARGIN_BOTTOM_CHART)
+    : physH - css(MARGIN_BOTTOM_CHART);
 
   const chartW = chartRight - chartLeft;
   const chartH = chartBottom - chartTop;
-  const deltaStripH = css(DELTA_STRIP_H);
+  const deltaStripH = showDeltaStrip ? css(DELTA_STRIP_H) : 0;
 
   if (chartW <= 0 || chartH <= 0) return;
 
@@ -283,14 +299,15 @@ function drawFootprint(
       }
     }
 
-    // Time label
-    ctx.save();
-    ctx.fillStyle = C_TEXT;
-    ctx.font = `${css(8)}px "JetBrains Mono", monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(col.time, colMid, deltaStripTop + deltaStripH + css(3));
-    ctx.restore();
+    if (showDeltaStrip) {
+      ctx.save();
+      ctx.fillStyle = C_TEXT;
+      ctx.font = `${css(8)}px "JetBrains Mono", monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(col.time, colMid, deltaStripTop + deltaStripH + css(3));
+      ctx.restore();
+    }
   }
 
   // ── Price scale ───────────────────────────────────────────────────────────
@@ -299,7 +316,7 @@ function drawFootprint(
   ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  const maxLabels = Math.floor(chartH / css(16));
+  const maxLabels = Math.max(1, Math.floor(chartH / css(16)));
   const labelStep = Math.max(1, Math.ceil(numLevels / maxLabels));
   for (let i = 0; i < numLevels; i += labelStep) {
     const y = chartBottom - i * rowH - rowH / 2;
@@ -326,7 +343,7 @@ function drawFootprint(
   }
 
   // ── Cumulative delta strip ────────────────────────────────────────────────
-  if (cumDelta.length > 0) {
+  if (showDeltaStrip && cumDelta.length > 0) {
     const stripLeft = chartLeft;
     const stripRight = chartRight;
     const stripW = stripRight - stripLeft;
@@ -439,6 +456,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
     explicitExchange: panelExchange,
   }));
   const [intervalLabel, setIntervalLabel] = useState("5m");
+  const { isCompact, panelRef } = useCompactPanelLayout<HTMLDivElement>();
 
   useEffect(() => {
     setInstrument((current) => {
@@ -541,6 +559,10 @@ function FootprintWidget(props: IDockviewPanelProps) {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;
@@ -565,21 +587,29 @@ function FootprintWidget(props: IDockviewPanelProps) {
   }, []);
 
   return (
-    <div className="flex flex-col h-full bg-surface-base select-none">
+    <div
+      ref={panelRef}
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-surface-base select-none"
+      data-layout={isCompact ? "compact" : "full"}
+      data-testid="footprint-panel"
+    >
       {/* Toolbar */}
       <div
-        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 border-b border-border-default shrink-0"
+        className="flex h-8 min-w-0 shrink-0 flex-nowrap items-center gap-1.5 overflow-hidden border-b border-border-default px-2"
         role="toolbar"
         aria-label="Footprint controls"
       >
         <BarChart className="size-3.5 text-indigo-400" aria-hidden="true" />
-        <span className="text-xs font-medium text-text-secondary">Footprint</span>
+        {!isCompact && <span className="text-xs font-medium text-text-secondary">Footprint</span>}
 
         {/* Symbol */}
         <span className="sr-only" id="fp-symbol-label">Symbol</span>
         <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
-            className="h-6 w-24 max-w-full text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
+            className={cn(
+              "!h-6 min-w-0 max-w-full px-2 py-0 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0",
+              isCompact ? "w-20" : "w-24",
+            )}
             aria-labelledby="fp-symbol-label"
           >
             <SelectValue />
@@ -597,30 +627,34 @@ function FootprintWidget(props: IDockviewPanelProps) {
           </SelectContent>
         </Select>
 
-        {/* Interval */}
-        <span className="sr-only" id="fp-interval-label">Interval</span>
-        <div className="flex items-center gap-0.5" role="group" aria-labelledby="fp-interval-label">
-          {INTERVALS.map((iv) => (
-            <button
-              key={iv.label}
-              type="button"
-              onClick={() => setIntervalLabel(iv.label)}
-              className={cn(
-                "h-6 px-1.5 text-xs rounded font-mono transition-colors",
-                intervalLabel === iv.label
-                  ? "bg-surface-active text-text-primary"
-                  : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
-              )}
-              aria-pressed={intervalLabel === iv.label}
-              aria-label={`${iv.label} interval`}
-            >
-              {iv.label}
-            </button>
-          ))}
-        </div>
+        {!isCompact && (
+          <>
+            {/* Interval */}
+            <span className="sr-only" id="fp-interval-label">Interval</span>
+            <div className="flex items-center gap-0.5" role="group" aria-labelledby="fp-interval-label">
+              {INTERVALS.map((iv) => (
+                <button
+                  key={iv.label}
+                  type="button"
+                  onClick={() => setIntervalLabel(iv.label)}
+                  className={cn(
+                    "h-6 px-1.5 text-xs rounded font-mono transition-colors",
+                    intervalLabel === iv.label
+                      ? "bg-surface-active text-text-primary"
+                      : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
+                  )}
+                  aria-pressed={intervalLabel === iv.label}
+                  aria-label={`${iv.label} interval`}
+                >
+                  {iv.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
-        <div
-          className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2"
+        {!isCompact && <div
+          className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-2"
           data-testid="footprint-toolbar-status"
         >
           {isLoading && (
@@ -678,11 +712,90 @@ function FootprintWidget(props: IDockviewPanelProps) {
           {!isLoading && !isError && columns.length > 0 && data && (
             <OrderFlowQualityBadge data={data} />
           )}
-        </div>
+        </div>}
+
+        {isCompact && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="ml-auto flex size-6 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+                aria-label="More footprint controls"
+                title="More footprint controls"
+              >
+                <Ellipsis className="size-4" aria-hidden="true" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-48 border-border-default bg-surface-card text-text-primary"
+            >
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                Interval
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={intervalLabel} onValueChange={setIntervalLabel}>
+                {INTERVALS.map((iv) => (
+                  <DropdownMenuRadioItem
+                    key={iv.label}
+                    value={iv.label}
+                    aria-label={`${iv.label} interval`}
+                    className="text-xs font-mono"
+                  >
+                    {iv.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator className="bg-border-default" />
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                Status
+              </DropdownMenuLabel>
+              <div className="flex items-center justify-between gap-2 px-2 pb-1 text-xs">
+                <span>
+                  {isLoading
+                    ? "Loading"
+                    : isError
+                      ? "Error"
+                      : columns.length === 0
+                        ? "No data"
+                        : dataState === "live"
+                          ? "Live"
+                          : dataState === "delayed"
+                            ? "Delayed"
+                            : dataState === "stale"
+                              ? "Stale"
+                              : "Sample data"}
+                </span>
+                {!isLoading && !isError && columns.length > 0 && data && (
+                  <OrderFlowQualityBadge data={data} />
+                )}
+              </div>
+              <DropdownMenuSeparator className="bg-border-default" />
+              <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
+                Legend
+              </DropdownMenuLabel>
+              <div
+                className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 pb-1 text-xs text-text-muted"
+                data-testid="footprint-compact-legend"
+              >
+                <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-profit" aria-hidden="true" />Buy</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-loss" aria-hidden="true" />Sell</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm border border-amber-400" aria-hidden="true" />POC</span>
+                <span className="flex items-center gap-1"><span className="w-3 border-t border-dashed border-indigo-400" aria-hidden="true" />Latest POC</span>
+                <span className="flex items-center gap-1"><span className="w-3 border-t border-indigo-300" aria-hidden="true" />Cum. Δ</span>
+                <span className="col-span-2 font-mono text-text-secondary">
+                  {columns.length} buckets · {symbol} {displayIntervalLabel}
+                </span>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-3 px-3 py-1 border-b border-border-default shrink-0 text-xs text-text-muted">
+      {!isCompact && <div
+        className="flex items-center gap-3 px-3 py-1 border-b border-border-default shrink-0 text-xs text-text-muted"
+        data-testid="footprint-legend"
+      >
         <div className="flex items-center gap-1">
           <div className="w-3 h-2 rounded-sm bg-profit" aria-hidden="true" />
           <span>Buy</span>
@@ -706,12 +819,14 @@ function FootprintWidget(props: IDockviewPanelProps) {
         <span className="ml-auto tabular-nums">
           {columns.length} buckets &bull; {symbol} {displayIntervalLabel}
         </span>
-      </div>
+      </div>}
 
       {/* Canvas */}
       <div
         ref={containerRef}
         className="flex-1 relative min-h-0"
+        data-density={isCompact ? "compact" : "full"}
+        data-testid="footprint-chart"
         role="img"
         aria-label={`Footprint chart for ${symbol} ${displayIntervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. The dashed line marks the latest bucket POC. Cumulative delta line at bottom.`}
       >
@@ -723,27 +838,58 @@ function FootprintWidget(props: IDockviewPanelProps) {
         />
 
         {isLoading && columns.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <Skeleton className="h-3 w-48" />
-            <Skeleton className="h-3 w-36" />
-            <Skeleton className="h-3 w-40" />
-            <span className="text-xs text-text-muted mt-1">Loading footprint data…</span>
-          </div>
+          isCompact ? (
+            <div
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-text-muted"
+              data-testid="footprint-compact-state"
+            >
+              <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+              <span className="truncate">Loading</span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <Skeleton className="h-3 w-48" />
+              <Skeleton className="h-3 w-36" />
+              <Skeleton className="h-3 w-40" />
+              <span className="text-xs text-text-muted mt-1">Loading footprint data…</span>
+            </div>
+          )
         )}
         {isError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-loss/70">
-            <AlertCircle className="size-8" aria-hidden="true" />
-            <span className="text-sm">
-              {error instanceof Error ? error.message : "Failed to load data"}
-            </span>
-            <span className="text-xs text-text-muted">Retrying automatically…</span>
-          </div>
+          isCompact ? (
+            <div
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-loss/70"
+              data-testid="footprint-compact-state"
+              title={error instanceof Error ? error.message : "Failed to load data"}
+            >
+              <AlertCircle className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">Unable to load</span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-loss/70">
+              <AlertCircle className="size-8" aria-hidden="true" />
+              <span className="text-sm">
+                {error instanceof Error ? error.message : "Failed to load data"}
+              </span>
+              <span className="text-xs text-text-muted">Retrying automatically…</span>
+            </div>
+          )
         )}
         {!isLoading && !isError && columns.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
-            <BarChart className="size-8" aria-hidden="true" />
-            <span className="text-sm">No footprint data</span>
-          </div>
+          isCompact ? (
+            <div
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-text-muted"
+              data-testid="footprint-compact-state"
+            >
+              <BarChart className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">No data</span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
+              <BarChart className="size-8" aria-hidden="true" />
+              <span className="text-sm">No footprint data</span>
+            </div>
+          )
         )}
       </div>
     </div>
