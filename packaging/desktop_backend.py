@@ -14,6 +14,12 @@ across relaunches. The watchdog lives here — not in ``flinttrade_core`` —
 because it is desktop-shell behaviour: plain CLI/``make start`` runs never set
 the variable and are unaffected.
 
+PyInstaller one-file builds run this Python application below a separate
+bootloader process. Before importing the backend, this wrapper promotes the
+shell's exact tokenised recovery record to ``os.getpid()`` and announces that
+PID on stdout. Graceful and forced shutdown commands both stay on the inherited
+stdin pipe, so Rust never needs to terminate a PID recovered from disk.
+
 The real serving logic lives in :mod:`flinttrade_core.desktop`.
 """
 
@@ -25,10 +31,15 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TextIO
 
 #: Environment variable the Tauri shell sets to its own OS process id.
 PARENT_PID_ENV = "FLINTTRADE_PARENT_PID"
+
+#: Exact recovery record path and launch token supplied by the Tauri shell.
+SIDECAR_RECORD_PATH_ENV = "FLINTTRADE_SIDECAR_RECORD_PATH"
+LAUNCH_TOKEN_ENV = "FLINTTRADE_LAUNCH_TOKEN"
 
 #: How often (seconds) the POSIX watchdog polls for parent liveness.
 POLL_INTERVAL_SECONDS = 2.0
@@ -36,11 +47,21 @@ POLL_INTERVAL_SECONDS = 2.0
 #: Command the Tauri shell writes to stdin before its bounded hard-kill fallback.
 SHUTDOWN_COMMAND = "FLINTTRADE_SHUTDOWN"
 
+#: Exact-pipe hard stop used only for the application launched by this shell.
+FORCE_EXIT_COMMAND = "FLINTTRADE_FORCE_EXIT"
+
+#: Stdout handshake that identifies the real Python application process.
+APPLICATION_PID_SENTINEL = "FLINTTRADE_BACKEND_PID"
+
 #: Last-resort orphan timeout if graceful unwinding is unable to stop Waitress.
 ORPHAN_GRACE_SECONDS = 12.0
 
 #: Poll interval for forwarding a lock-free SIGTERM flag outside the handler.
 SIGNAL_RELAY_POLL_SECONDS = 0.05
+
+#: Brief wait for Rust to publish the pending record after spawning us.
+RECORD_PUBLISH_WAIT_SECONDS = 2.0
+RECORD_PUBLISH_POLL_SECONDS = 0.01
 
 
 class _ShutdownCoordinator:
@@ -138,6 +159,83 @@ def _parent_pid_from_env(environ: dict[str, str] | None = None) -> int | None:
         print(f"[desktop-sidecar] ignoring non-integer {PARENT_PID_ENV}={raw!r}", file=sys.stderr)
         return None
     return pid if pid > 0 else None
+
+
+def announce_application_pid(*, stream: TextIO | None = None, pid: int | None = None) -> None:
+    """Publish the real Python PID before backend boot or readiness work."""
+    output = sys.stdout if stream is None else stream
+    application_pid = os.getpid() if pid is None else pid
+    print(f"{APPLICATION_PID_SENTINEL} pid={application_pid}", file=output, flush=True)
+
+
+def promote_application_pid_record(
+    *,
+    environ: dict[str, str] | None = None,
+    pid: int | None = None,
+    wait_seconds: float = RECORD_PUBLISH_WAIT_SECONDS,
+) -> bool:
+    """Promote this launch's exact pending record to the real Python PID."""
+    env = os.environ if environ is None else environ
+    raw_path = (env.get(SIDECAR_RECORD_PATH_ENV) or "").strip()
+    launch_token = (env.get(LAUNCH_TOKEN_ENV) or "").strip()
+    shell_pid = _parent_pid_from_env(env)
+    application_pid = os.getpid() if pid is None else pid
+    if (
+        not raw_path
+        or shell_pid is None
+        or application_pid <= 0
+        or len(launch_token) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in launch_token)
+    ):
+        return False
+
+    path = Path(raw_path)
+    deadline = time.monotonic() + max(wait_seconds, 0.0)
+    while True:
+        try:
+            contents_bytes = path.read_bytes()
+        except FileNotFoundError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(RECORD_PUBLISH_POLL_SECONDS)
+            continue
+        except OSError:
+            return False
+
+        try:
+            contents = contents_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+
+        lines = contents.splitlines()
+        if len(lines) != 5 or lines[0].strip() != "v2":
+            return False
+        try:
+            launcher_pid = int(lines[1].strip())
+            recorded_shell_pid = int(lines[3].strip())
+        except ValueError:
+            return False
+        if (
+            launcher_pid <= 0
+            or lines[2].strip() != "pending"
+            or recorded_shell_pid != shell_pid
+            or lines[4].strip() != launch_token
+        ):
+            return False
+
+        promoted = f"v2\n{launcher_pid}\n{application_pid}\n{shell_pid}\n{launch_token}\n".encode("ascii")
+        try:
+            with path.open("r+b") as record_file:
+                if record_file.read() != contents_bytes:
+                    return False
+                record_file.seek(0)
+                record_file.write(promoted)
+                record_file.truncate()
+                record_file.flush()
+                os.fsync(record_file.fileno())
+        except OSError:
+            return False
+        return True
 
 
 def _exit_orphaned(request_shutdown: Callable[[], object] | None = None) -> None:
@@ -294,9 +392,14 @@ def start_stdin_shutdown_listener(
 
     def listen() -> None:
         for line in input_stream:
-            if line.strip() == SHUTDOWN_COMMAND:
-                request_shutdown()
+            command = line.strip()
+            if command == FORCE_EXIT_COMMAND:
+                os._exit(1)
                 return
+            if command == SHUTDOWN_COMMAND:
+                request_shutdown()
+                # Keep the exact inherited pipe alive for Rust's bounded
+                # force-exit fallback if graceful server cleanup wedges.
         request_shutdown()
 
     thread = threading.Thread(
@@ -316,6 +419,14 @@ if __name__ == "__main__":
     start_parent_watchdog(shutdown.request)
     start_stdin_shutdown_listener(shutdown.request)
     start_sigterm_shutdown_relay(shutdown.request)
+
+    # PyInstaller one-file launches through a bootloader process whose PID can
+    # disappear while this Python application remains alive. Publish the real
+    # PID directly into the exact tokenised record first, then announce it so
+    # Rust can independently confirm the process identity.
+    if not promote_application_pid_record():
+        print("[desktop-sidecar] application PID record promotion deferred to shell", file=sys.stderr)
+    announce_application_pid()
 
     from flinttrade_core.desktop import main  # noqa: PLC0415 - after watchdog start, see above
 

@@ -85,6 +85,50 @@ def test_parent_pid_parsing(entry: ModuleType, raw: str | None, expected: int | 
 
 
 @pytest.mark.unit
+def test_application_promotes_exact_pending_record_before_handshake(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    token = "a" * 64
+    record.write_text(f"v2\n1234\npending\n77\n{token}\n", encoding="utf-8")
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+
+    assert entry.promote_application_pid_record(environ=environ, pid=5678) is True
+    assert record.read_text(encoding="utf-8") == f"v2\n1234\n5678\n77\n{token}\n"
+
+
+@pytest.mark.unit
+def test_application_pid_handshake_is_flushed(entry: ModuleType) -> None:
+    stream = io.StringIO()
+
+    entry.announce_application_pid(stream=stream, pid=5678)
+
+    assert stream.getvalue() == "FLINTTRADE_BACKEND_PID pid=5678\n"
+
+
+@pytest.mark.unit
+def test_application_refuses_to_promote_another_launch_record(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text(f"v2\n1234\npending\n77\n{'b' * 64}\n", encoding="utf-8")
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": "a" * 64,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+
+    assert entry.promote_application_pid_record(environ=environ, pid=5678) is False
+    assert record.read_text(encoding="utf-8") == f"v2\n1234\npending\n77\n{'b' * 64}\n"
+
+
+@pytest.mark.unit
 def test_watchdog_off_without_env(entry: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(entry.PARENT_PID_ENV, raising=False)
     assert entry.start_parent_watchdog() is None
@@ -165,6 +209,44 @@ def test_stdin_shutdown_command_requests_graceful_exit(entry: ModuleType) -> Non
 
     thread.join(timeout=1)
     assert requested.is_set()
+
+
+@pytest.mark.unit
+def test_stdin_force_exit_targets_the_exact_python_application(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested = threading.Event()
+    exit_codes: list[int] = []
+    monkeypatch.setattr(entry.os, "_exit", exit_codes.append)
+
+    thread = entry.start_stdin_shutdown_listener(
+        requested.set,
+        stream=io.StringIO("FLINTTRADE_FORCE_EXIT\n"),
+    )
+
+    thread.join(timeout=1)
+    assert exit_codes == [1]
+    assert requested.is_set() is False
+
+
+@pytest.mark.unit
+def test_stdin_listener_keeps_force_fallback_after_graceful_request(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested = threading.Event()
+    exit_codes: list[int] = []
+    monkeypatch.setattr(entry.os, "_exit", exit_codes.append)
+
+    thread = entry.start_stdin_shutdown_listener(
+        requested.set,
+        stream=io.StringIO(f"{entry.SHUTDOWN_COMMAND}\n{entry.FORCE_EXIT_COMMAND}\n"),
+    )
+
+    thread.join(timeout=1)
+    assert requested.is_set() is True
+    assert exit_codes == [1]
 
 
 @pytest.mark.unit
