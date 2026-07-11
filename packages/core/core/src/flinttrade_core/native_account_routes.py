@@ -853,6 +853,14 @@ def _do_connect(
                 prior_meta=prior_meta,
                 prior_credentials=prior_credentials,
             )
+        # ``_activate_after_credentials`` rebuilt the live router from the
+        # attempted selector before the broker probe failed. Rebuild again only
+        # after both persistent rollback steps so the in-memory default cannot
+        # remain pointed at a rejected account until the next restart.
+        from .app import configure_broker_router  # noqa: PLC0415
+
+        app = current_app._get_current_object()  # type: ignore[attr-defined]
+        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
     body: dict[str, Any] = {
         "status": "success" if connected else "error",
         "data": {
@@ -1718,6 +1726,7 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/set-primary", methods=["POST"])
+@_serialized
 def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
     """Promote a live native selector to the workspace execution default."""
     adapter_id = adapter_id.strip().lower()
@@ -1760,15 +1769,15 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
             True,
         )
 
-        from .app import configure_broker_router  # noqa: PLC0415
-
-        app = current_app._get_current_object()  # type: ignore[attr-defined]
-        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
-
         set_primary = getattr(store, "set_primary", None)
         if not callable(set_primary):
             raise RuntimeError("Credential store cannot set primary accounts")
         set_primary(account_id)
+
+        from .app import configure_broker_router  # noqa: PLC0415
+
+        app = current_app._get_current_object()  # type: ignore[attr-defined]
+        configure_broker_router(app, registry, store, app.config.get("CLIENT"))
     except Exception:  # noqa: BLE001
         if workspace_mutation is not None:
             _rollback_selector_workspace(workspace_mutation)
@@ -1796,34 +1805,94 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
 
 
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>", methods=["DELETE"])
+@_serialized
 def remove_native_account(adapter_id: str, account_id: str) -> Any:
-    """Remove a native account: drop its session, credentials, and selector."""
+    """Remove a native account without exposing partially deleted state."""
     adapter_id = adapter_id.strip().lower()
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")
     if store is None or registry is None:
         return jsonify({"status": "error", "message": "Credential store or registry unavailable."}), 503
 
-    # Drop the live session first so no dispatch can race the credential delete.
     try:
-        registry.remove_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - no session is fine
-        pass
+        prior_meta = _stored_native_account(store, adapter_id, account_id)
+    except Exception:  # noqa: BLE001
+        return jsonify({"status": "error", "message": "Could not list accounts"}), 500
+    if prior_meta is None:
+        # DELETE is selector-scoped and idempotent. A wrong adapter must neither
+        # reveal nor remove a same-account-id row owned by another broker.
+        return jsonify({
+            "status": "success",
+            "message": f"{adapter_id} account {account_id} removed.",
+            "data": {},
+        })
+
+    # Capture the encrypted row's plaintext before any mutation. The credentials
+    # never leave this transaction; they are needed only to restore the exact row
+    # if the independently locked workspace write cannot commit.
+    try:
+        prior_credentials = store.retrieve_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read native broker credentials before removal")
+        return jsonify({"status": "error", "message": "Could not remove native account."}), 500
+
     try:
         remove_for = getattr(store, "remove_for", None)
         if callable(remove_for):
             remove_for(adapter_id, account_id)
         else:
             store.remove(account_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Credential delete failed for %s: %s", selector_ref(adapter_id, account_id), exc)
+    except Exception:  # noqa: BLE001
+        logger.warning("Credential delete failed for %s", selector_ref(adapter_id, account_id))
+        return jsonify({"status": "error", "message": "Could not remove native account."}), 500
 
-    # Deregister the selector from workspace.json.
+    # Commit workspace state before evicting the live session. If the workspace
+    # is locked or unwritable, restore the vault row and leave runtime state
+    # untouched so the operator can retry safely.
     default_notice: str | None = None
     try:
         default_notice = _deregister_selector_in_workspace(adapter_id, account_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Selector deregister failed for %s: %s", selector_ref(adapter_id, account_id), exc)
+    except Exception:  # noqa: BLE001
+        vault_restored = True
+        try:
+            store.store(
+                account_id,
+                str(prior_meta.get("broker") or adapter_id),
+                str(prior_meta.get("label") or account_id),
+                prior_credentials,
+                is_primary=bool(prior_meta.get("is_primary")),
+                adapter_id=adapter_id,
+            )
+        except Exception:  # noqa: BLE001
+            vault_restored = False
+            logger.critical("Could not restore native broker vault row after workspace removal failure")
+        if not vault_restored:
+            # The workspace still names the selector but its credential row no
+            # longer exists. Evict the session and rebuild from disk so the
+            # reachable write path fails closed instead of keeping an
+            # unrepairable in-memory account alive.
+            try:
+                registry.remove_session_for(adapter_id, account_id)
+            except Exception:  # noqa: BLE001 - the router rebuild is the safety boundary
+                pass
+            from .app import configure_broker_router  # noqa: PLC0415
+
+            app = current_app._get_current_object()  # type: ignore[attr-defined]
+            configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+        logger.warning("Selector deregister failed for %s", selector_ref(adapter_id, account_id))
+        return jsonify({"status": "error", "message": "Could not remove native account."}), 500
+
+    # Persistent state is now committed. Publish the rebuilt router before
+    # evicting the old session, so new dispatches stop resolving this selector at
+    # the same transition instead of observing a credential-less live account.
+    from .app import configure_broker_router  # noqa: PLC0415
+
+    app = current_app._get_current_object()  # type: ignore[attr-defined]
+    configure_broker_router(app, registry, store, app.config.get("CLIENT"))
+    try:
+        registry.remove_session_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001 - no session is fine
+        pass
 
     # Drop any stale login-status entry so a later re-add of the same selector
     # doesn't inherit a phantom "needs fresh login" from the removed account.
@@ -1843,11 +1912,6 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
     if not remaining:
         _schedule_refresh_job(adapter_id, remove=True)
 
-    # Rebuild so the removed native drops out of routing.
-    from .app import configure_broker_router  # noqa: PLC0415
-
-    app = current_app._get_current_object()  # type: ignore[attr-defined]
-    configure_broker_router(app, registry, store, app.config.get("CLIENT"))
     body: dict[str, Any] = {
         "status": "success",
         "message": f"{adapter_id} account {account_id} removed.",

@@ -186,6 +186,119 @@ def test_list_and_remove_native_account(client):
         app.config["REGISTRY"].get_session_for("upstox", "UPXTEST02")
 
 
+def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypatch):
+    """A failed vault delete is a failed removal, with no partial teardown."""
+    c, app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXREMOVEFAIL",
+            "credentials": {"access_token": "still-valid"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+
+    monkeypatch.setattr(
+        store,
+        "remove_for",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("vault busy")),
+    )
+
+    removed = c.delete(
+        "/api/v1/native/accounts/upstox/UPXREMOVEFAIL",
+        headers=_h(),
+    )
+
+    assert removed.status_code == 500
+    assert store.retrieve_for("upstox", "UPXREMOVEFAIL")["access_token"] == "still-valid"
+    assert app.config["REGISTRY"].get_session_for("upstox", "UPXREMOVEFAIL") is not None
+    assert "upstox:UPXREMOVEFAIL" in _workspace_brokers(tmp_path)["registered"]
+
+
+def test_remove_workspace_failure_restores_vault_and_keeps_session(client, monkeypatch):
+    """A workspace-lock failure must not be reported as successful removal."""
+    c, app, tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXWORKSPACEFAIL",
+            "label": "Workspace rollback",
+            "credentials": {"access_token": "restore-me"},
+            "is_primary": True,
+        },
+    )
+    assert connected.status_code == 200
+
+    import flinttrade_core.native_account_routes as routes
+
+    monkeypatch.setattr(
+        routes,
+        "_deregister_selector_in_workspace",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("workspace busy")),
+    )
+
+    removed = c.delete(
+        "/api/v1/native/accounts/upstox/UPXWORKSPACEFAIL",
+        headers=_h(),
+    )
+
+    assert removed.status_code == 500
+    assert app.config["CREDENTIAL_STORE"].retrieve_for(
+        "upstox", "UPXWORKSPACEFAIL"
+    )["access_token"] == "restore-me"
+    assert app.config["REGISTRY"].get_session_for("upstox", "UPXWORKSPACEFAIL") is not None
+    brokers = _workspace_brokers(tmp_path)
+    assert "upstox:UPXWORKSPACEFAIL" in brokers["registered"]
+    assert brokers["execution"]["default"] == "upstox:UPXWORKSPACEFAIL"
+
+
+def test_remove_restore_failure_evicts_session_and_rebuilds_fail_closed(client, monkeypatch):
+    """If rollback itself fails, no credential-less live session may remain."""
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "UPXRESTOREFAIL",
+            "credentials": {"access_token": "one-use"},
+            "is_primary": True,
+        },
+    )
+    assert connected.status_code == 200
+
+    import flinttrade_core.native_account_routes as routes
+
+    store = app.config["CREDENTIAL_STORE"]
+    monkeypatch.setattr(
+        routes,
+        "_deregister_selector_in_workspace",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("workspace busy")),
+    )
+    monkeypatch.setattr(
+        store,
+        "store",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("vault busy")),
+    )
+
+    removed = c.delete(
+        "/api/v1/native/accounts/upstox/UPXRESTOREFAIL",
+        headers=_h(),
+    )
+
+    assert removed.status_code == 500
+    with pytest.raises(Exception):
+        store.retrieve_for("upstox", "UPXRESTOREFAIL")
+    with pytest.raises(Exception):
+        app.config["REGISTRY"].get_session_for("upstox", "UPXRESTOREFAIL")
+    assert "upstox" not in app.config["NATIVE_ADAPTERS"]
+
+
 def test_remove_primary_native_account_falls_back_to_configured_bridge(client):
     """Deleting the active primary falls back to a CONFIGURED OpenAlgo bridge."""
     c, app, tmp_path = client
@@ -2180,6 +2293,7 @@ def test_failed_new_connect_preserves_a_prior_working_execution_default(client, 
     # The prior working default survives; the failed selector is not registered.
     assert brokers["execution"]["default"] == "upstox:PRIMARY1"
     assert "upstox:BADNEW" not in brokers.get("registered", [])
+    assert app.config["BROKER_ROUTER"].default_selector == "upstox:PRIMARY1"
 
 
 def test_failed_connect_rollback_preserves_unrelated_concurrent_workspace_edit(client, monkeypatch):
