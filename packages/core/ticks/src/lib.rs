@@ -43,7 +43,10 @@ pub mod session;
 pub mod strategies;
 pub mod types;
 
-use strategies::spreads::{run_batch_py, run_spreads_batch_py};
+use strategies::spreads::{
+    iron_condor_config_py, run_batch_py, run_spreads_batch_py, straddle_config_py,
+    strangle_config_py,
+};
 
 // Convenience re-exports
 pub use session::{SessionConfig, SessionState, SessionTracker};
@@ -509,9 +512,9 @@ fn tick_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SpreadBacktest>()?;
 
     // Convenience constructors
-    m.add_function(wrap_pyfunction!(straddle_config, m)?)?;
-    m.add_function(wrap_pyfunction!(strangle_config, m)?)?;
-    m.add_function(wrap_pyfunction!(iron_condor_config, m)?)?;
+    m.add_function(wrap_pyfunction!(straddle_config_py, m)?)?;
+    m.add_function(wrap_pyfunction!(strangle_config_py, m)?)?;
+    m.add_function(wrap_pyfunction!(iron_condor_config_py, m)?)?;
 
     // Parallel batch functions
     m.add_function(wrap_pyfunction!(run_spreads_batch_py, m)?)?;

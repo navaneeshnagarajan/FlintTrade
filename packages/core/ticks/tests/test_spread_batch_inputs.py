@@ -12,8 +12,11 @@ try:
         OptionType,
         SpreadBacktest,
         SpreadConfig,
+        iron_condor_config,
         run_batch,
         run_spreads_batch,
+        straddle_config,
+        strangle_config,
     )
 
     TICK_ENGINE_AVAILABLE = True
@@ -165,3 +168,88 @@ def test_batch_rejects_invalid_financial_config_before_simulation(
 
     with pytest.raises(ValueError, match=message):
         configured_batch_runner(config, [[10.0, 11.0]] if add_leg else [])
+
+
+@pytest.mark.parametrize(
+    "constructor",
+    [
+        lambda: SpreadConfig(initial_capital=True, fees=0.0),
+        lambda: SpreadConfig(initial_capital=100.0, fees=True),
+        lambda: SpreadConfig(initial_capital=100.0, fees=0.0, max_loss=True),
+        lambda: SpreadConfig(initial_capital=100.0, fees=0.0, target_profit=True),
+        lambda: LegConfig(OptionType.Call, True, 1, 1),
+        lambda: LegConfig(OptionType.Call, 100.0, True, 1),
+        lambda: LegConfig(OptionType.Call, 100.0, 1, True),
+    ],
+    ids=[
+        "initial-capital",
+        "fees",
+        "max-loss",
+        "target-profit",
+        "strike",
+        "quantity",
+        "lot-size",
+    ],
+)
+def test_spread_numeric_constructors_reject_booleans(constructor: Callable[[], object]) -> None:
+    with pytest.raises(TypeError, match="boolean"):
+        constructor()
+
+
+@pytest.mark.parametrize("field", ["strike", "quantity", "lot_size"])
+def test_leg_numeric_setters_reject_booleans(field: str) -> None:
+    leg = LegConfig(OptionType.Call, 100.0, 1, 1)
+
+    with pytest.raises(TypeError, match="boolean"):
+        setattr(leg, field, True)
+
+
+@pytest.mark.parametrize(
+    "constructor",
+    [
+        lambda: straddle_config(True),
+        lambda: strangle_config(True, 100.0),
+        lambda: iron_condor_config(True, 110.0, 90.0, 80.0),
+    ],
+    ids=["straddle", "strangle", "iron-condor"],
+)
+def test_spread_convenience_constructors_reject_boolean_numerics(
+    constructor: Callable[[], object],
+) -> None:
+    with pytest.raises(TypeError, match="boolean"):
+        constructor()
+
+
+@pytest.mark.parametrize(
+    ("timestamps", "premiums"),
+    [
+        ([True, 2], [[10.0, 11.0]]),
+        ([1, 2], [[True, 11.0]]),
+    ],
+    ids=["timestamp", "premium"],
+)
+def test_batch_rejects_booleans_in_numeric_series(
+    batch_runner: BatchRunner,
+    timestamps: list[int],
+    premiums: list[list[float]],
+) -> None:
+    with pytest.raises(TypeError, match="boolean"):
+        batch_runner([("invalid", timestamps, premiums, [True, False], [False, True])])
+
+
+@pytest.mark.parametrize(
+    ("timestamps", "premiums"),
+    [
+        ([True, 2], [[10.0, 11.0]]),
+        ([1, 2], [[True, 11.0]]),
+    ],
+    ids=["timestamp", "premium"],
+)
+def test_single_spread_run_rejects_booleans_in_numeric_series(
+    timestamps: list[int],
+    premiums: list[list[float]],
+) -> None:
+    backtest = SpreadBacktest("invalid", _config())
+
+    with pytest.raises(TypeError, match="boolean"):
+        backtest.run(timestamps, premiums, [True, False], [False, True])
