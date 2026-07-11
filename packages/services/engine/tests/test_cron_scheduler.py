@@ -263,6 +263,88 @@ class TestMarketHoursGate:
             gated()
         assert len(fired) == 0
 
+    def test_weekend_special_session_uses_time_scheduler_calendar(self) -> None:
+        time_scheduler = TimeScheduler()
+        time_scheduler.set_holidays(
+            {
+                "data": [
+                    {
+                        "date": "2026-11-08",
+                        "holiday_type": "SPECIAL_SESSION",
+                        "closed_exchanges": ["NSE"],
+                        "open_exchanges": [
+                            {
+                                "exchange": "NSE",
+                                "start_time": "18:00",
+                                "end_time": "19:00",
+                            }
+                        ],
+                    }
+                ]
+            },
+            year="2026",
+        )
+        scheduler = CronStrategyScheduler(time_scheduler=time_scheduler)
+        fired: list[bool] = []
+        config = CronScheduleConfig(
+            strategy_id="weekend-special",
+            cron_expr="5 18 * * *",
+            exchange="NSE",
+        )
+        gated = scheduler._make_gated_callback(
+            config.strategy_id,
+            lambda: fired.append(True),
+            config,
+        )
+
+        with patch("flinttrade_engine.scheduler.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 11, 8, 18, 5, tzinfo=_IST)
+            gated()
+
+        assert fired == [True]
+        assert config.last_skipped_reason == ""
+
+    def test_weekday_dynamic_session_uses_time_scheduler_hours(self) -> None:
+        time_scheduler = TimeScheduler()
+        time_scheduler.set_holidays(
+            {
+                "data": [
+                    {
+                        "date": "2026-04-13",
+                        "holiday_type": "SPECIAL_SESSION",
+                        "closed_exchanges": ["NSE"],
+                        "open_exchanges": [
+                            {
+                                "exchange": "NSE",
+                                "start_time": "18:00",
+                                "end_time": "19:00",
+                            }
+                        ],
+                    }
+                ]
+            },
+            year="2026",
+        )
+        scheduler = CronStrategyScheduler(time_scheduler=time_scheduler)
+        fired: list[bool] = []
+        config = CronScheduleConfig(
+            strategy_id="weekday-special",
+            cron_expr="30 18 * * *",
+            exchange="NSE",
+        )
+        gated = scheduler._make_gated_callback(
+            config.strategy_id,
+            lambda: fired.append(True),
+            config,
+        )
+
+        with patch("flinttrade_engine.scheduler.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 4, 13, 18, 30, tzinfo=_IST)
+            gated()
+
+        assert fired == [True]
+        assert config.last_skipped_reason == ""
+
     # --- Holiday skip ---
 
     def test_market_holiday_skipped(self) -> None:

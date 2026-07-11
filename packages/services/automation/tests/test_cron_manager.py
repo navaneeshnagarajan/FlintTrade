@@ -537,12 +537,8 @@ class TestLoadHolidays:
             return_value={"holidays": ["2026-01-01", "2026-01-26"]}
         )
 
-        async def run():
-            mock_client.holidays = _async_mock({"holidays": ["2026-01-01", "2026-01-26"]})
-            return await load_holidays_from_client(mock_client)
-
         def _async_mock(retval):
-            async def _inner():
+            async def _inner(**_kwargs):
                 return retval
             return _inner
 
@@ -563,7 +559,7 @@ class TestLoadHolidays:
         import asyncio
         from flinttrade_automation.cron_manager import load_holidays_from_client
 
-        async def holidays():
+        async def holidays(**_kwargs):
             return payload
 
         result = asyncio.run(
@@ -614,7 +610,7 @@ class TestLoadHolidays:
             }
         }
 
-        async def holidays():
+        async def holidays(**_kwargs):
             return payload
 
         cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
@@ -622,6 +618,26 @@ class TestLoadHolidays:
         asyncio.run(cron.load_holidays())
 
         assert cron.holiday_payload == payload
+
+    def test_requests_active_year_with_guarded_legacy_fallback(self):
+        import asyncio
+        from flinttrade_automation.cron_manager import load_holidays_from_client
+
+        calls: list[dict[str, object]] = []
+
+        async def holidays(**kwargs):
+            calls.append(kwargs)
+            return {"holidays": ["2027-01-26"]}
+
+        result = asyncio.run(
+            load_holidays_from_client(
+                MagicMock(holidays=holidays),
+                year=2027,
+            )
+        )
+
+        assert result == {"2027-01-26"}
+        assert calls == [{"year": "2027", "allow_legacy_fallback": True}]
 
 
 # ---------------------------------------------------------------------------

@@ -211,16 +211,11 @@ class TimeScheduler:
             return True
 
         current = _as_ist(at) if at is not None else self.now_ist()
-        session = self.get_market_session(
+        return self._active_market_window(
             exchange,
-            on=current.date(),
+            at=current,
             symbol=symbol,
-        )
-        if session is None:
-            return False
-        current_time = current.time().replace(tzinfo=None)
-        market_open, market_close = session
-        return market_open <= current_time <= market_close
+        ) is not None
 
     def get_market_session(
         self,
@@ -279,36 +274,84 @@ class TimeScheduler:
         """Check if the given date is a trading day (not weekend, not holiday)."""
         return self.get_market_session(exchange, on=on, symbol=symbol) is not None
 
-    def time_to_square_off(self, exchange: str, at: datetime | None = None) -> timedelta | None:
+    def _active_market_window(
+        self,
+        exchange: str,
+        *,
+        at: datetime,
+        symbol: str | None = None,
+    ) -> tuple[datetime, datetime] | None:
+        """Return the effective session datetimes when ``at`` is inside them."""
+        for day_offset in (0, -1):
+            session_date = at.date() + timedelta(days=day_offset)
+            session = self.get_market_session(exchange, on=session_date, symbol=symbol)
+            if session is None:
+                continue
+            market_open, market_close = session
+            session_midnight = at.replace(hour=0, minute=0, second=0, microsecond=0)
+            session_midnight += timedelta(days=day_offset)
+            opens_at = session_midnight.replace(
+                hour=market_open.hour,
+                minute=market_open.minute,
+            )
+            closes_at = session_midnight.replace(
+                hour=market_close.hour,
+                minute=market_close.minute,
+            )
+            if market_close < market_open:
+                closes_at += timedelta(days=1)
+            if opens_at <= at <= closes_at:
+                return opens_at, closes_at
+        return None
+
+    @staticmethod
+    def _square_off_offset(schedule: ExchangeSchedule) -> timedelta:
+        """Return the configured pre-close square-off offset."""
+        close_minutes = schedule.market_close.hour * 60 + schedule.market_close.minute
+        square_off_minutes = schedule.square_off.hour * 60 + schedule.square_off.minute
+        if square_off_minutes > close_minutes:
+            close_minutes += 24 * 60
+        return timedelta(minutes=close_minutes - square_off_minutes)
+
+    def time_to_square_off(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+    ) -> timedelta | None:
         """Time remaining until auto square-off. None if market closed or 24/7."""
-        sched = EXCHANGE_SCHEDULES.get(exchange)
+        sched = EXCHANGE_SCHEDULES.get(exchange.strip().upper())
         if sched is None or sched.is_24x7:
             return None
 
         now = _as_ist(at) if at is not None else self.now_ist()
-        now_t = now.time().replace(tzinfo=None)
-        if not (sched.market_open <= now_t <= sched.market_close):
+        active_window = self._active_market_window(exchange, at=now, symbol=symbol)
+        if active_window is None:
             return None
-
-        sq_dt = now.replace(
-            hour=sched.square_off.hour,
-            minute=sched.square_off.minute,
-            second=0, microsecond=0,
-        )
+        _, closes_at = active_window
+        sq_dt = closes_at - self._square_off_offset(sched)
         remaining = sq_dt - now
-        if hasattr(remaining, "total_seconds") and remaining.total_seconds() < 0:
+        if remaining.total_seconds() < 0:
             return timedelta(0)
         return remaining
 
-    def should_square_off(self, exchange: str, at: datetime | None = None) -> bool:
+    def should_square_off(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+    ) -> bool:
         """True if current time is at or past the square-off time."""
-        sched = EXCHANGE_SCHEDULES.get(exchange)
+        sched = EXCHANGE_SCHEDULES.get(exchange.strip().upper())
         if sched is None or sched.is_24x7:
             return False
 
         now = _as_ist(at) if at is not None else self.now_ist()
-        now_t = now.time().replace(tzinfo=None)
-        return now_t >= sched.square_off
+        active_window = self._active_market_window(exchange, at=now, symbol=symbol)
+        if active_window is None:
+            return False
+        _, closes_at = active_window
+        return now >= closes_at - self._square_off_offset(sched)
 
     # ------------------------------------------------------------------
     # Deploy freeze
@@ -378,7 +421,7 @@ class TimeScheduler:
                 )
                 start = _calendar_time(raw_session.get("start_time"))
                 end = _calendar_time(raw_session.get("end_time"))
-                if start is None or end is None or end < start:
+                if start is None or end is None or end == start:
                     if session_exchange:
                         calendar_day.closed_exchanges.add(session_exchange)
                     continue
@@ -583,7 +626,7 @@ class StrategyRunner:
         # whether a deployment freeze is active. Do not gate ticks here.
 
         # Check auto square-off
-        if self.scheduler.should_square_off(exchange):
+        if self.scheduler.should_square_off(exchange, symbol=self.symbol):
             await self._handle_square_off()
             return
 
@@ -733,14 +776,8 @@ _IST_PYTZ_NAME = "Asia/Kolkata"
 class CronStrategyScheduler:
     """Schedule strategy callbacks using cron expressions with market-hours awareness.
 
-    Each registered callback is wrapped so that it is silently skipped when:
-
-    * The current day is a weekend (Saturday / Sunday).
-    * The current date is a market holiday (as reported by the loaded holiday
-      list from :class:`TimeScheduler`).
-    * The current IST time is outside the exchange's trading window (using
-      effective hours from :mod:`flinttrade_engine.market_hours`, which
-      respects special sessions such as Muhurat Trading).
+    Each callback delegates market eligibility to its :class:`TimeScheduler`,
+    including holidays, weekend special sessions, and dynamic trading hours.
 
     The underlying APScheduler ``BackgroundScheduler`` is initialised with the
     ``Asia/Kolkata`` timezone so that all ``CronTrigger`` expressions are
@@ -834,7 +871,7 @@ class CronStrategyScheduler:
         """Register a strategy callback on a cron expression.
 
         The callback is wrapped with a market-hours gate that silently skips
-        execution on weekends, market holidays, and outside trading hours.
+        execution whenever the effective exchange session is closed.
 
         Args:
             strategy_id: Unique identifier for the strategy.  Used as the
@@ -992,11 +1029,8 @@ class CronStrategyScheduler:
         The gate logic (in order):
 
         1. If :attr:`_check_market` is ``False`` — always execute (test bypass).
-        2. Skip on weekends (Saturday / Sunday) unless the exchange is 24×7.
-        3. Skip if today is in the loaded holiday list.
-        4. Skip if the current IST time is outside the exchange's effective
-           trading window (per :func:`~flinttrade_engine.market_hours.get_market_hours`,
-           which accounts for special sessions such as Muhurat Trading).
+        2. Ask the canonical :class:`TimeScheduler` whether the exchange is open.
+        3. If closed, derive a useful skip reason from that scheduler's session.
         """
         time_scheduler = self._time_scheduler
 
@@ -1005,50 +1039,26 @@ class CronStrategyScheduler:
                 callback()
                 return
 
-            now_ist = datetime.now(IST)
+            now_ist = time_scheduler.now_ist()
             today = now_ist.date()
             exchange = config.exchange
-
-            # --- Weekend check ---
             sched = EXCHANGE_SCHEDULES.get(exchange)
-            is_24x7 = sched.is_24x7 if sched is not None else False
-            if not is_24x7 and today.weekday() >= 5:
-                reason = f"weekend ({today.strftime('%A')})"
-                config.last_skipped_reason = reason
-                logger.debug("Cron skip [%s]: %s", strategy_id, reason)
-                return
-
-            # --- Holiday check ---
-            if not time_scheduler.is_trading_day(exchange, on=today):
-                reason = f"market holiday on {today.isoformat()}"
-                config.last_skipped_reason = reason
-                logger.debug("Cron skip [%s]: %s", strategy_id, reason)
-                return
-
-            # --- Market hours check (uses effective hours for special sessions) ---
-            from .market_hours import get_market_hours as _get_market_hours
-
-            try:
-                open_t, close_t = _get_market_hours(exchange, today)
-            except ValueError:
-                # Unknown exchange — fall back to scheduler's built-in data
-                if sched is not None:
-                    open_t = sched.market_open
-                    close_t = sched.market_close
-                else:
-                    # Cannot determine hours — skip to be safe
+            if not time_scheduler.is_market_open(exchange, at=now_ist):
+                session = time_scheduler.get_market_session(exchange, on=today)
+                if sched is None:
                     reason = f"unknown exchange {exchange!r}"
-                    config.last_skipped_reason = reason
-                    logger.warning("Cron skip [%s]: %s", strategy_id, reason)
-                    return
-
-            now_t = now_ist.time().replace(tzinfo=None)
-            if not is_24x7 and not (open_t <= now_t <= close_t):
-                reason = (
-                    f"outside market hours for {exchange} "
-                    f"({open_t.strftime('%H:%M')}-{close_t.strftime('%H:%M')} IST), "
-                    f"current={now_t.strftime('%H:%M')}"
-                )
+                elif session is None and today.weekday() >= 5:
+                    reason = f"weekend ({today.strftime('%A')})"
+                elif session is None:
+                    reason = f"market holiday on {today.isoformat()}"
+                else:
+                    open_t, close_t = session
+                    now_t = now_ist.time().replace(tzinfo=None)
+                    reason = (
+                        f"outside market hours for {exchange} "
+                        f"({open_t.strftime('%H:%M')}-{close_t.strftime('%H:%M')} IST), "
+                        f"current={now_t.strftime('%H:%M')}"
+                    )
                 config.last_skipped_reason = reason
                 logger.debug("Cron skip [%s]: %s", strategy_id, reason)
                 return

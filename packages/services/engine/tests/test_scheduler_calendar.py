@@ -108,6 +108,20 @@ def test_weekend_special_session_overrides_closure_only_inside_session() -> None
     )
 
 
+def test_special_session_preserves_standard_pre_close_square_off_offset() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    scheduler.set_holidays(_calendar_payload(), year="2026")
+
+    before_square_off = datetime(2026, 11, 8, 18, 30, tzinfo=IST)
+    at_square_off = datetime(2026, 11, 8, 18, 45, tzinfo=IST)
+
+    assert scheduler.time_to_square_off("NSE", at=before_square_off) == timedelta(minutes=15)
+    assert not scheduler.should_square_off("NSE", at=before_square_off)
+    assert scheduler.should_square_off("NSE", at=at_square_off)
+
+
 def test_symbol_scoped_special_session_does_not_open_other_contracts() -> None:
     from flinttrade_engine.scheduler import TimeScheduler
 
@@ -117,6 +131,48 @@ def test_symbol_scoped_special_session_does_not_open_other_contracts() -> None:
 
     assert scheduler.is_market_open("CDS", at=at, symbol="EURUSD29JUL26FUT")
     assert not scheduler.is_market_open("CDS", at=at, symbol="USDINR29JUL26FUT")
+
+
+def test_cross_midnight_special_session_continues_into_next_day() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    scheduler.set_holidays(
+        {
+            "data": [
+                {
+                    "date": "2026-04-17",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": ["MCX"],
+                    "open_exchanges": [
+                        {
+                            "exchange": "MCX",
+                            "start_time": "18:00",
+                            "end_time": "00:15",
+                        }
+                    ],
+                }
+            ]
+        },
+        year="2026",
+    )
+
+    assert scheduler.get_market_session("MCX", on=date(2026, 4, 17)) == (
+        time(18, 0),
+        time(0, 15),
+    )
+    assert scheduler.is_market_open(
+        "MCX",
+        at=datetime(2026, 4, 17, 23, 55, tzinfo=IST),
+    )
+    assert scheduler.is_market_open(
+        "MCX",
+        at=datetime(2026, 4, 18, 0, 10, tzinfo=IST),
+    )
+    assert not scheduler.is_market_open(
+        "MCX",
+        at=datetime(2026, 4, 18, 0, 16, tzinfo=IST),
+    )
 
 
 def test_malformed_declared_special_session_fails_closed() -> None:

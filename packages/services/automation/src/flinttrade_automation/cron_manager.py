@@ -402,6 +402,7 @@ async def load_holidays_from_client(
     openalgo_client: Any,
     *,
     payload_sink: Callable[[Any], None] | None = None,
+    year: int | None = None,
 ) -> set[str]:
     """Load market holidays from OpenAlgo API. Must be awaited.
 
@@ -414,7 +415,11 @@ async def load_holidays_from_client(
     import json as _json  # noqa: PLC0415
 
     try:
-        data = await openalgo_client.holidays()
+        calendar_year = year if year is not None else datetime.now(IST).year
+        data = await openalgo_client.holidays(
+            year=str(calendar_year),
+            allow_legacy_fallback=True,
+        )
         if payload_sink is not None:
             payload_sink(data)
         from flinttrade_core.openalgo_client import normalise_holiday_dates  # noqa: PLC0415

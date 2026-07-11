@@ -464,6 +464,7 @@ class SignalPipeline:
                 bars = _prepare_scheduled_bars(
                     self.fetch_bars(inst["symbol"], inst["exchange"])
                 )
+                bars = self._closed_scheduled_bars(bars, instrument=key)
                 if len(bars) < 50:
                     logger.warning("Not enough bars for %s (%d)", key, len(bars))
                     continue
@@ -550,6 +551,45 @@ class SignalPipeline:
                 logger.exception("Could not publish scheduled signals to the canonical hub")
         self._settle_source_candles(reservations, delivered=delivered)
         return results
+
+    def _closed_scheduled_bars(
+        self,
+        bars: list[dict[str, Any]],
+        *,
+        instrument: str,
+    ) -> list[dict[str, Any]]:
+        """Return bars through the newest interval that has fully closed."""
+        if not bars:
+            return []
+        now = self._clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        now_utc = now.astimezone(timezone.utc)
+        interval = _interval_duration(self.interval)
+        if interval is None:
+            logger.warning("Skipping %s: unsupported bar interval %r", instrument, self.interval)
+            return []
+
+        newest = _parse_bar_timestamp(bars[-1].get("timestamp"))
+        if newest is None:
+            return []
+        if newest > now_utc:
+            logger.warning(
+                "Skipping %s: latest bar timestamp %s is in the future",
+                instrument,
+                newest.isoformat(),
+            )
+            return []
+
+        closed_count = len(bars)
+        while closed_count:
+            timestamp = _parse_bar_timestamp(bars[closed_count - 1].get("timestamp"))
+            if timestamp is None:
+                return []
+            if timestamp + interval <= now_utc:
+                break
+            closed_count -= 1
+        return bars[:closed_count]
 
     def _validated_latest_bar_timestamp(
         self,

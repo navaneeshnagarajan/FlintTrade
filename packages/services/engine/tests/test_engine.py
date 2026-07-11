@@ -1049,6 +1049,7 @@ class TestStrategyRunner:
         assert runner.tick_count > 0
         assert len(strategy.ticks) > 0
         scheduler.is_market_open.assert_any_call("NSE", symbol="RELIANCE")
+        scheduler.should_square_off.assert_any_call("NSE", symbol="RELIANCE")
 
     @pytest.mark.asyncio
     async def test_runner_delivers_ticks_when_deploy_frozen(self):
