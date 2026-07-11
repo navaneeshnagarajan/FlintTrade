@@ -34,11 +34,14 @@ Usage::
 from __future__ import annotations
 
 import logging
+import math
 from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, time as dt_time
+from datetime import date, datetime, time as dt_time, timezone
+from itertools import islice
 from threading import RLock
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger("flinttrade.data.orderflow_aggregator")
 
@@ -56,6 +59,10 @@ _SECONDS_PER_DAY = 24 * 60 * 60
 LIVE_MARKET_INGESTION_INTERVAL_SECONDS = 60
 LIVE_MARKET_INGESTION_TICK_SIZE = 0.0001
 LIVE_TICK_FRESHNESS_SECONDS = 120.0
+DEFAULT_RESTORE_MAX_TICKS = 10_000
+MAX_RESTORE_TICKS = 100_000
+_MAX_COUNTER_EPOCHS = 8
+_MAX_PERSISTED_VOLUME = 2**63 - 1
 
 # Attempt to import zoneinfo (3.9+) then fall back to pytz.
 try:
@@ -78,6 +85,8 @@ except Exception:
 # ---------------------------------------------------------------------------
 
 Side = Literal["BUY", "SELL"]
+DataQuality = Literal["exact", "estimated"]
+DataProvenance = Literal["trade_tick", "cumulative_quote_delta", "mixed"]
 _InstrumentIdentity = tuple[str, str]
 
 
@@ -91,6 +100,68 @@ def _ist_session_date(timestamp: int | float) -> date:
     if _HAS_TZ and _IST is not None:
         return datetime.fromtimestamp(timestamp, tz=_IST).date()  # type: ignore[arg-type]
     return datetime.fromtimestamp(timestamp).date()
+
+
+def _persisted_timestamp(value: Any) -> float | None:
+    """Coerce a persisted UTC timestamp to epoch seconds."""
+    try:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, datetime):
+            timestamp = (
+                value.replace(tzinfo=timezone.utc).timestamp()
+                if value.tzinfo is None
+                else value.timestamp()
+            )
+        elif isinstance(value, (int, float)):
+            timestamp = float(value)
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            timestamp = (
+                parsed.replace(tzinfo=timezone.utc).timestamp()
+                if parsed.tzinfo is None
+                else parsed.timestamp()
+            )
+        else:
+            return None
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return timestamp if math.isfinite(timestamp) else None
+
+
+def _persisted_number(value: Any, *, positive: bool = False) -> float | None:
+    """Return one finite persisted numeric field, rejecting booleans."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or (positive and number <= 0):
+        return None
+    return number
+
+
+def _persisted_volume(value: Any) -> int | None:
+    """Return a non-negative integral cumulative volume."""
+    if isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, int):
+            volume = value
+        elif isinstance(value, float):
+            if not math.isfinite(value) or not value.is_integer():
+                return None
+            volume = int(value)
+        elif isinstance(value, str):
+            volume = int(value.strip(), 10)
+        else:
+            volume = int(value)
+            if value != volume:
+                return None
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return volume if 0 <= volume <= _MAX_PERSISTED_VOLUME else None
 
 
 @dataclass
@@ -108,6 +179,9 @@ class FootprintBucket:
         sell_volume: Aggressor sell volume at this level during the bin.
         delta: ``buy_volume - sell_volume`` (positive → buyer aggression).
         timestamp_bin: Unix epoch seconds of the bin start (IST-aligned).
+        quality: ``"exact"`` for explicit trade ticks or ``"estimated"`` for
+            cumulative quote deltas and mixed-source bins.
+        provenance: Source method used to build the bucket.
     """
 
     price_level: float
@@ -115,6 +189,8 @@ class FootprintBucket:
     sell_volume: int
     delta: int
     timestamp_bin: int
+    quality: DataQuality = "exact"
+    provenance: DataProvenance = "trade_tick"
 
     @property
     def total_volume(self) -> int:
@@ -138,8 +214,15 @@ class _BinState:
     bin_start: int  # Unix epoch seconds of bin start
     # price_level → (buy_vol, sell_vol)
     levels: dict[float, list[int]] = field(default_factory=dict)
+    provenances: set[DataProvenance] = field(default_factory=set)
 
-    def add(self, price_level: float, side: Side, volume: int) -> None:
+    def add(
+        self,
+        price_level: float,
+        side: Side,
+        volume: int,
+        provenance: DataProvenance,
+    ) -> None:
         """Accumulate ``volume`` into ``price_level`` for ``side``.
 
         Args:
@@ -153,6 +236,7 @@ class _BinState:
             self.levels[price_level][0] += volume
         else:
             self.levels[price_level][1] += volume
+        self.provenances.add(provenance)
 
     def to_buckets(self) -> list[FootprintBucket]:
         """Convert accumulated levels into a list of :class:`FootprintBucket`.
@@ -160,6 +244,13 @@ class _BinState:
         Returns:
             List sorted by ``price_level`` ascending.
         """
+        provenance: DataProvenance
+        if len(self.provenances) == 1:
+            provenance = next(iter(self.provenances))
+        else:
+            provenance = "mixed"
+        quality: DataQuality = "exact" if provenance == "trade_tick" else "estimated"
+
         result: list[FootprintBucket] = []
         for price_level in sorted(self.levels):
             buy_vol, sell_vol = self.levels[price_level]
@@ -170,6 +261,8 @@ class _BinState:
                     sell_volume=sell_vol,
                     delta=buy_vol - sell_vol,
                     timestamp_bin=self.bin_start,
+                    quality=quality,
+                    provenance=provenance,
                 )
             )
         return result
@@ -252,6 +345,11 @@ class OrderFlowAggregator:
         # Per-instrument baseline for deriving incremental volume + aggressor
         # side from raw market ticks (which carry cumulative volume and no side).
         self._last_tick: dict[_InstrumentIdentity, tuple[float, int, date, float]] = {}
+        # Raw cumulative counters can reset and later recover to an earlier
+        # namespace. Keep a monotonic logical total plus a bounded set of
+        # observed namespace offsets so recovery cannot count volume twice.
+        self._normalised_volume: dict[_InstrumentIdentity, int] = {}
+        self._counter_offsets: dict[_InstrumentIdentity, tuple[int, ...]] = {}
         # A lower intraday cumulative counter needs a second monotonic sample
         # before it can replace the last trusted baseline.
         self._pending_volume_reset: dict[
@@ -296,6 +394,28 @@ class OrderFlowAggregator:
         Raises:
             ValueError: If ``side`` is not ``"BUY"`` or ``"SELL"``.
         """
+        return self._accumulate_tick(
+            symbol,
+            price,
+            volume,
+            side,
+            timestamp=timestamp,
+            exchange=exchange,
+            provenance="trade_tick",
+        )
+
+    def _accumulate_tick(
+        self,
+        symbol: str,
+        price: float,
+        volume: int,
+        side: Side,
+        *,
+        timestamp: float | None,
+        exchange: str,
+        provenance: DataProvenance,
+    ) -> int:
+        """Record one exact or estimated increment with explicit provenance."""
         if side not in ("BUY", "SELL"):
             raise ValueError(f"side must be 'BUY' or 'SELL', got '{side}'")
 
@@ -321,10 +441,10 @@ class OrderFlowAggregator:
 
             bin_state = symbol_state.get(bin_start)
             if bin_state is not None:
-                bin_state.add(price_level, side, volume)
+                bin_state.add(price_level, side, volume, provenance)
         logger.debug(
-            "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d",
-            identity[0], identity[1], price_level, volume, side, bin_start,
+            "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d provenance=%s",
+            identity[0], identity[1], price_level, volume, side, bin_start, provenance,
         )
         return bin_start
 
@@ -336,7 +456,8 @@ class OrderFlowAggregator:
         Lee-Ready style: a trade at or above the ask is buyer-initiated; at or
         below the bid is seller-initiated; otherwise (or with no quote) the tick
         rule — up-trade = buy, down-trade = sell, unchanged = carry the previous
-        side. Not a guess: the standard trade-side classification.
+        side. This is a standard estimate; cumulative quote snapshots do not
+        identify each underlying trade's exact price or aggressor side.
         """
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
@@ -369,12 +490,11 @@ class OrderFlowAggregator:
     ) -> None:
         """Feed a raw market tick (LTP + cumulative day volume, no aggressor).
 
-        Derives the incremental traded volume (this tick's cumulative minus the
-        instrument's last cumulative) and the aggressor side (see
-        :meth:`_classify_side`), then records it via :meth:`add_tick`. A no-op
-        until a second tick establishes a baseline, and when no volume traded
-        between ticks. This is the glue that turns the live tick stream into a
-        real order-flow footprint instead of synthetic data.
+        Estimates incremental volume from changes in the cumulative counter and
+        estimates one side/price for that whole interval (see
+        :meth:`_classify_side`). The resulting buckets remain useful order-flow
+        estimates but are not exact trade-by-trade exchange prints. A first
+        snapshot establishes only a baseline.
         """
         import time as _time
 
@@ -396,10 +516,17 @@ class OrderFlowAggregator:
             self._touch_identity_locked(identity)
             if prev is None or prev[2] != session_date:
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                self._normalised_volume[identity] = current_volume
+                self._counter_offsets[identity] = (0,)
                 self._pending_volume_reset.pop(identity, None)
                 self._last_side.pop(identity, None)
                 return
             prev_ltp, prev_vol, _, _ = prev
+            previous_normalised = self._normalised_volume.get(identity, prev_vol)
+            offsets = self._counter_offsets.get(
+                identity,
+                (previous_normalised - prev_vol,),
+            )
             if current_volume < prev_vol:
                 pending = self._pending_volume_reset.get(identity)
                 if pending is None or pending[2] != session_date:
@@ -424,8 +551,16 @@ class OrderFlowAggregator:
                     return
 
                 self._pending_volume_reset.pop(identity, None)
+                new_offset = previous_normalised - pending_volume
+                normalised, offsets = self._select_counter_namespace(
+                    current_volume,
+                    previous_normalised,
+                    (new_offset, *offsets),
+                )
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
-                inc_volume = current_volume - pending_volume
+                self._normalised_volume[identity] = normalised
+                self._counter_offsets[identity] = offsets
+                inc_volume = normalised - previous_normalised
                 if inc_volume <= 0:
                     return
                 side = self._classify_side(
@@ -436,23 +571,66 @@ class OrderFlowAggregator:
                     ask,
                     exchange=exchange,
                 )
-                self.add_tick(
+                self._accumulate_tick(
                     symbol,
                     ltp,
                     inc_volume,
                     side,
                     timestamp=tick_timestamp,
                     exchange=exchange,
+                    provenance="cumulative_quote_delta",
                 )
                 return
             self._pending_volume_reset.pop(identity, None)
+            normalised, offsets = self._select_counter_namespace(
+                current_volume,
+                previous_normalised,
+                offsets,
+            )
             self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+            self._normalised_volume[identity] = normalised
+            self._counter_offsets[identity] = offsets
 
-            inc_volume = current_volume - prev_vol
+            inc_volume = normalised - previous_normalised
             if inc_volume <= 0:
                 return
             side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
-            self.add_tick(symbol, ltp, inc_volume, side, timestamp=tick_timestamp, exchange=exchange)
+            self._accumulate_tick(
+                symbol,
+                ltp,
+                inc_volume,
+                side,
+                timestamp=tick_timestamp,
+                exchange=exchange,
+                provenance="cumulative_quote_delta",
+            )
+
+    @staticmethod
+    def _select_counter_namespace(
+        raw_volume: int,
+        previous_normalised: int,
+        offsets: tuple[int, ...],
+    ) -> tuple[int, tuple[int, ...]]:
+        """Choose the least non-decreasing interpretation of a raw counter.
+
+        A confirmed reset introduces another ``raw + offset`` namespace. If a
+        feed later recovers an earlier counter, selecting the smallest logical
+        value that does not move backwards avoids counting the same interval a
+        second time.
+        """
+        unique_offsets = tuple(dict.fromkeys(offsets))[:_MAX_COUNTER_EPOCHS] or (0,)
+        candidates = [
+            (raw_volume + offset, index, offset)
+            for index, offset in enumerate(unique_offsets)
+            if raw_volume + offset >= previous_normalised
+        ]
+        if candidates:
+            normalised, _, selected_offset = min(candidates)
+        else:
+            selected_offset = unique_offsets[0]
+            normalised = previous_normalised
+        reordered = (selected_offset, *(offset for offset in unique_offsets if offset != selected_offset))
+        return normalised, reordered[:_MAX_COUNTER_EPOCHS]
 
     def get_market_freshness(
         self,
@@ -498,6 +676,132 @@ class OrderFlowAggregator:
             "age_seconds": age_seconds,
         }
 
+    def restore_current_session(
+        self,
+        ticks: Iterable[Mapping[str, Any]],
+        *,
+        now: float | datetime | None = None,
+        max_ticks: int = DEFAULT_RESTORE_MAX_TICKS,
+    ) -> dict[str, int]:
+        """Replace represented identities with replayed current-session ticks.
+
+        Persisted rows must use the ``StorageManager.get_ticks`` field names.
+        Naive datetimes are interpreted as UTC, matching the DuckDB schema.
+        Input is materialised only up to ``max_ticks + 1``; overflow raises
+        before any live state changes. Invalid and non-current-session rows are
+        skipped. Replay occurs on a scratch aggregator, then swaps into this
+        instance under one lock so a failed replay cannot leave partial state.
+
+        Call this before starting live ingestion. Repeating the same restore is
+        idempotent because represented identities are replaced, not appended.
+        """
+        if isinstance(max_ticks, bool) or not isinstance(max_ticks, int):
+            raise ValueError("max_ticks must be an integer")
+        if not 0 < max_ticks <= MAX_RESTORE_TICKS:
+            raise ValueError(
+                f"max_ticks must be between 1 and {MAX_RESTORE_TICKS}, got {max_ticks}"
+            )
+
+        bounded_ticks = list(islice(ticks, max_ticks + 1))
+        if len(bounded_ticks) > max_ticks:
+            raise ValueError(f"ticks exceeds max_ticks={max_ticks}; query persisted ticks with a matching limit")
+
+        import time as _time
+
+        restore_timestamp = _time.time() if now is None else _persisted_timestamp(now)
+        if restore_timestamp is None:
+            raise ValueError("now must be a finite timestamp or datetime")
+        current_session = _ist_session_date(restore_timestamp)
+
+        prepared: list[tuple[float, int, str, str, float, int, float | None, float | None]] = []
+        for index, row in enumerate(bounded_ticks):
+            if not isinstance(row, Mapping):
+                continue
+            timestamp = _persisted_timestamp(row.get("ts"))
+            symbol_value = row.get("symbol")
+            exchange_value = row.get("exchange")
+            ltp = _persisted_number(row.get("ltp"), positive=True)
+            volume = _persisted_volume(row.get("volume"))
+            if (
+                timestamp is None
+                or not isinstance(symbol_value, str)
+                or not symbol_value.strip()
+                or not isinstance(exchange_value, str)
+                or not exchange_value.strip()
+                or ltp is None
+                or volume is None
+                or not math.isfinite(ltp / self.tick_size)
+            ):
+                continue
+            try:
+                if _ist_session_date(timestamp) != current_session:
+                    continue
+            except (OSError, OverflowError, ValueError):
+                continue
+            prepared.append(
+                (
+                    timestamp,
+                    index,
+                    symbol_value,
+                    exchange_value,
+                    ltp,
+                    volume,
+                    _persisted_number(row.get("bid"), positive=True),
+                    _persisted_number(row.get("ask"), positive=True),
+                )
+            )
+
+        identities = {
+            _instrument_identity(symbol, exchange)
+            for _, _, symbol, exchange, _, _, _, _ in prepared
+        }
+        if len(identities) > self.max_instruments:
+            raise ValueError(
+                f"restore contains {len(identities)} identities, exceeding max_instruments={self.max_instruments}"
+            )
+
+        prepared.sort(key=lambda item: (item[0], item[1]))
+        if prepared:
+            with self._lock:
+                scratch = OrderFlowAggregator(
+                    time_bin_seconds=self.time_bin_seconds,
+                    tick_size=self.tick_size,
+                    max_retained_sessions=self.max_retained_sessions,
+                    max_bins_per_session=self.max_bins_per_session,
+                    max_instruments=self.max_instruments,
+                )
+                for timestamp, _, symbol, exchange, ltp, volume, bid, ask in prepared:
+                    scratch.feed_market_tick(
+                        symbol,
+                        ltp,
+                        volume,
+                        exchange=exchange,
+                        bid=bid,
+                        ask=ask,
+                        timestamp=timestamp,
+                    )
+
+                for identity in identities:
+                    self._drop_identity_locked(identity)
+                    for target, source in (
+                        (self._state, scratch._state),
+                        (self._last_tick, scratch._last_tick),
+                        (self._normalised_volume, scratch._normalised_volume),
+                        (self._counter_offsets, scratch._counter_offsets),
+                        (self._pending_volume_reset, scratch._pending_volume_reset),
+                        (self._last_side, scratch._last_side),
+                    ):
+                        if identity in source:
+                            target[identity] = source[identity]
+                    self._touch_identity_locked(identity)
+
+        return {
+            "input_ticks": len(bounded_ticks),
+            "restored_ticks": len(prepared),
+            "skipped_ticks": len(bounded_ticks) - len(prepared),
+            "identities": len(identities),
+        }
+
     def retain_identities(self, identities: set[_InstrumentIdentity]) -> None:
         """Discard every identity no longer present in the recorder watchlist."""
         allowed = {
@@ -508,6 +812,8 @@ class OrderFlowAggregator:
             known = (
                 set(self._state)
                 | set(self._last_tick)
+                | set(self._normalised_volume)
+                | set(self._counter_offsets)
                 | set(self._pending_volume_reset)
                 | set(self._last_side)
                 | set(self._identity_recency)
@@ -541,8 +847,9 @@ class OrderFlowAggregator:
             Returns an empty list if no data has been accumulated for
             ``symbol``.
         """
+        identity = _instrument_identity(symbol, exchange)
         with self._lock:
-            symbol_state = self._state.get(_instrument_identity(symbol, exchange))
+            symbol_state = self._state.get(identity)
             if not symbol_state:
                 return []
 
@@ -550,7 +857,14 @@ class OrderFlowAggregator:
             # view before another thread can mutate the nested dictionaries.
             all_bins = sorted(symbol_state)
             latest_session = _ist_session_date(all_bins[-1])
-            session_bins = [bin_start for bin_start in all_bins if _ist_session_date(bin_start) == latest_session]
+            active_tick = self._last_tick.get(identity)
+            if active_tick is not None and active_tick[2] > latest_session:
+                latest_session = active_tick[2]
+            session_bins = [
+                bin_start
+                for bin_start in all_bins
+                if _ist_session_date(bin_start) == latest_session
+            ]
             recent_bins = session_bins[-n_bins:] if len(session_bins) > n_bins else session_bins
 
             result: list[FootprintBucket] = []
@@ -571,6 +885,8 @@ class OrderFlowAggregator:
             if symbol is None:
                 self._state.clear()
                 self._last_tick.clear()
+                self._normalised_volume.clear()
+                self._counter_offsets.clear()
                 self._pending_volume_reset.clear()
                 self._last_side.clear()
                 self._identity_recency.clear()
@@ -738,6 +1054,8 @@ class OrderFlowAggregator:
         """Remove one identity from every state map while holding ``_lock``."""
         self._state.pop(identity, None)
         self._last_tick.pop(identity, None)
+        self._normalised_volume.pop(identity, None)
+        self._counter_offsets.pop(identity, None)
         self._pending_volume_reset.pop(identity, None)
         self._last_side.pop(identity, None)
         self._identity_recency.pop(identity, None)
@@ -750,6 +1068,8 @@ class OrderFlowAggregator:
             oldest, _ = self._identity_recency.popitem(last=False)
             self._state.pop(oldest, None)
             self._last_tick.pop(oldest, None)
+            self._normalised_volume.pop(oldest, None)
+            self._counter_offsets.pop(oldest, None)
             self._pending_volume_reset.pop(oldest, None)
             self._last_side.pop(oldest, None)
 

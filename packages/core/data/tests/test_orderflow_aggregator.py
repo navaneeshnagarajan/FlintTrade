@@ -183,6 +183,14 @@ class TestAddTick:
         assert lvl.sell_volume == 80
         assert lvl.delta == 120
 
+    def test_explicit_trade_ticks_are_marked_as_exact(self):
+        agg = _make_agg(tick_size=50.0)
+        agg.add_tick("NIFTY", 24500.0, 100, "BUY", timestamp=_BASE_TS)
+
+        [bucket] = agg.get_footprint("NIFTY")
+        assert bucket.quality == "exact"
+        assert bucket.provenance == "trade_tick"
+
 
 # ===========================================================================
 # Per-symbol isolation
@@ -551,8 +559,8 @@ class TestIntegration:
 
 class TestFeedMarketTick:
     """feed_market_tick derives incremental volume + aggressor side from raw
-    market ticks (cumulative volume, no side) — the glue that makes the live
-    order-flow footprint real instead of synthetic."""
+    market ticks (cumulative volume, no side), producing explicitly estimated
+    order-flow from real quote snapshots instead of synthetic samples."""
 
     _TS = 1_700_000_000.0
 
@@ -566,6 +574,17 @@ class TestFeedMarketTick:
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
         assert agg.get_footprint("NIFTY") == []  # need a baseline first
+
+    def test_new_session_baseline_hides_prior_session_buckets(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+        assert agg.get_footprint("NIFTY")
+
+        next_session = self._TS + 24 * 3600
+        agg.feed_market_tick("NIFTY", 102.0, 2000, timestamp=next_session)
+
+        assert agg.get_footprint("NIFTY") == []
 
     def test_prior_session_last_tick_is_exposed_as_stale(self):
         agg = self._agg()
@@ -629,6 +648,29 @@ class TestFeedMarketTick:
         latest = agg.get_footprint("NIFTY")
         assert sum(bucket.buy_volume for bucket in latest) == 100
         assert sum(bucket.sell_volume for bucket in latest) == 25
+
+    def test_confirmed_reset_then_counter_recovery_does_not_double_count_volume(self):
+        agg = self._agg()
+
+        for offset, volume in enumerate((1000, 1100, 100, 125, 1125)):
+            agg.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                timestamp=self._TS + offset,
+            )
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 125
+
+    def test_cumulative_quote_snapshots_are_marked_as_estimated(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+
+        [bucket] = agg.get_footprint("NIFTY")
+        assert bucket.quality == "estimated"
+        assert bucket.provenance == "cumulative_quote_delta"
 
     def test_negative_cumulative_volume_does_not_clear_valid_baseline(self):
         agg = self._agg()
@@ -825,6 +867,164 @@ class TestResetMarketTickState:
         agg.reset()
 
         assert agg._identity_recency == {}
+
+
+class TestRestoreCurrentSession:
+    _TS = 1_700_000_000.0
+
+    @staticmethod
+    def _agg():
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        return OrderFlowAggregator()
+
+    @staticmethod
+    def _row(timestamp, volume, *, ltp=100.0, symbol="NIFTY", exchange="NFO"):
+        return {
+            "ts": datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(tzinfo=None),
+            "symbol": symbol,
+            "exchange": exchange,
+            "ltp": ltp,
+            "volume": volume,
+            "bid": ltp - 0.05,
+            "ask": ltp + 0.05,
+        }
+
+    def test_restore_replays_current_session_and_restores_the_live_baseline(self):
+        agg = self._agg()
+        rows = [
+            self._row(self._TS, 1000, ltp=100.0),
+            self._row(self._TS + 1, 1100, ltp=101.0),
+        ]
+
+        result = agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
+        agg.feed_market_tick("NIFTY", 102.0, 1125, exchange="NFO", timestamp=self._TS + 2)
+
+        assert result == {
+            "input_ticks": 2,
+            "restored_ticks": 2,
+            "skipped_ticks": 0,
+            "identities": 1,
+        }
+        buckets = agg.get_footprint("NIFTY", exchange="NFO")
+        assert sum(bucket.total_volume for bucket in buckets) == 125
+        assert {bucket.quality for bucket in buckets} == {"estimated"}
+        assert {bucket.provenance for bucket in buckets} == {"cumulative_quote_delta"}
+
+    def test_restore_is_idempotent_for_the_represented_identities(self):
+        agg = self._agg()
+        rows = [
+            self._row(self._TS, 1000),
+            self._row(self._TS + 1, 1100, ltp=101.0),
+        ]
+
+        agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
+        agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
+
+        buckets = agg.get_footprint("NIFTY", exchange="NFO")
+        assert sum(bucket.total_volume for bucket in buckets) == 100
+
+    def test_restore_preserves_bigint_cumulative_volume_precision(self):
+        agg = self._agg()
+        baseline = 2**53 + 1
+        rows = [
+            self._row(self._TS, baseline),
+            self._row(self._TS + 1, baseline + 1, ltp=101.0),
+        ]
+
+        agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
+
+        buckets = agg.get_footprint("NIFTY", exchange="NFO")
+        assert sum(bucket.total_volume for bucket in buckets) == 1
+
+    def test_restore_skips_non_current_and_malformed_rows(self):
+        agg = self._agg()
+        rows = [
+            self._row(self._TS, 900),
+            self._row(self._TS + 24 * 3600, 1000),
+            {**self._row(self._TS + 24 * 3600 + 1, 1100), "ltp": None},
+            self._row(self._TS + 24 * 3600 + 1.5, 10**10_000),
+            self._row(self._TS + 24 * 3600 + 2, 1125, ltp=101.0),
+        ]
+
+        result = agg.restore_current_session(
+            rows,
+            now=self._TS + 24 * 3600 + 3,
+            max_ticks=10,
+        )
+
+        assert result == {
+            "input_ticks": 5,
+            "restored_ticks": 2,
+            "skipped_ticks": 3,
+            "identities": 1,
+        }
+        buckets = agg.get_footprint("NIFTY", exchange="NFO")
+        assert sum(bucket.total_volume for bucket in buckets) == 125
+
+    def test_restore_rejects_overflow_before_mutating_existing_state(self):
+        agg = self._agg()
+        agg.add_tick("EXISTING", 100.0, 7, "BUY", timestamp=self._TS, exchange="NSE")
+        rows = [self._row(self._TS + offset, 1000 + offset) for offset in range(3)]
+
+        with pytest.raises(ValueError, match="max_ticks"):
+            agg.restore_current_session(rows, now=self._TS + 3, max_ticks=2)
+
+        existing = agg.get_footprint("EXISTING", exchange="NSE")
+        assert sum(bucket.total_volume for bucket in existing) == 7
+        assert agg.get_footprint("NIFTY", exchange="NFO") == []
+
+    def test_restore_blocks_a_concurrent_live_writer_until_the_state_swap(self, monkeypatch):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        agg = self._agg()
+        rows = [
+            self._row(self._TS, 1000),
+            self._row(self._TS + 1, 1100, ltp=101.0),
+        ]
+        replay_started = threading.Event()
+        release_replay = threading.Event()
+        writer_done = threading.Event()
+        original_feed = OrderFlowAggregator.feed_market_tick
+
+        def paused_scratch_replay(instance, *args, **kwargs):
+            if instance is not agg and not replay_started.is_set():
+                replay_started.set()
+                assert release_replay.wait(timeout=2)
+            return original_feed(instance, *args, **kwargs)
+
+        monkeypatch.setattr(OrderFlowAggregator, "feed_market_tick", paused_scratch_replay)
+        restore = threading.Thread(
+            target=lambda: agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
+        )
+        writer = threading.Thread(
+            target=lambda: (
+                agg.feed_market_tick(
+                    "NIFTY",
+                    102.0,
+                    1125,
+                    exchange="NFO",
+                    timestamp=self._TS + 2,
+                ),
+                writer_done.set(),
+            )
+        )
+
+        restore.start()
+        assert replay_started.wait(timeout=2)
+        writer.start()
+        try:
+            assert not writer_done.wait(timeout=0.2)
+        finally:
+            release_replay.set()
+            restore.join(timeout=2)
+            writer.join(timeout=2)
+
+        assert not restore.is_alive()
+        assert not writer.is_alive()
+        assert writer_done.is_set()
+        buckets = agg.get_footprint("NIFTY", exchange="NFO")
+        assert sum(bucket.total_volume for bucket in buckets) == 125
 
 
 class TestConcurrentAccess:

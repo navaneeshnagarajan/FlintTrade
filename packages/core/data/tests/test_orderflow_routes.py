@@ -71,6 +71,12 @@ def test_orderflow_ok(client):
     assert body["data"]["symbol"] == "NIFTY"
     assert isinstance(body["data"]["buckets"], list)
     assert body["data"]["is_live"] is False
+    assert body["data"]["is_sample_data"] is True
+    assert body["data"]["live_state"] not in {"live", "delayed", "stale"}
+    assert body["data"]["quality"] == "sample"
+    assert body["data"]["provenance"] == "synthetic"
+    assert {bucket["quality"] for bucket in body["data"]["buckets"]} == {"sample"}
+    assert {bucket["provenance"] for bucket in body["data"]["buckets"]} == {"synthetic"}
 
 
 def test_orderflow_with_exchange(client):
@@ -201,6 +207,60 @@ def test_orderflow_prior_session_buckets_are_reported_as_stale_not_live(app):
     assert data["live_state"] == "stale"
     assert data["freshness"]["is_fresh"] is False
     assert data["freshness"]["last_tick_timestamp"] == prior_session + 1
+
+
+def test_orderflow_new_session_baseline_never_relabels_prior_buckets_as_current(app, monkeypatch):
+    from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+    prior_session = 1_700_000_000.0
+    current_session = prior_session + 24 * 3600
+    aggregator = OrderFlowAggregator()
+    aggregator.feed_market_tick("NIFTY", 100.0, 1000, exchange="NFO", timestamp=prior_session)
+    aggregator.feed_market_tick("NIFTY", 101.0, 1100, exchange="NFO", timestamp=prior_session + 1)
+    aggregator.feed_market_tick("NIFTY", 102.0, 2000, exchange="NFO", timestamp=current_session)
+    monkeypatch.setattr(
+        aggregator,
+        "get_market_freshness",
+        lambda symbol, exchange: {
+            "state": "live",
+            "is_fresh": True,
+            "last_tick_timestamp": current_session,
+            "last_tick_session": "2023-11-16",
+            "current_session": "2023-11-16",
+            "age_seconds": 1.0,
+        },
+    )
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&exchange=NFO")
+
+    data = response.get_json()["data"]
+    assert data["is_live"] is False
+    assert data["is_sample_data"] is True
+    assert data["live_state"] not in {"live", "delayed", "stale"}
+    assert data["quality"] == "sample"
+    assert data["provenance"] == "synthetic"
+    assert data["freshness"]["state"] == "live"
+
+
+def test_orderflow_cumulative_quotes_are_exposed_as_estimated_not_exact(app):
+    from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+    aggregator = OrderFlowAggregator()
+    aggregator.feed_market_tick("NIFTY", 100.0, 1000, exchange="NFO", timestamp=1_700_000_000.0)
+    aggregator.feed_market_tick("NIFTY", 101.0, 1100, exchange="NFO", timestamp=1_700_000_001.0)
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&exchange=NFO")
+
+    data = response.get_json()["data"]
+    assert data["is_sample_data"] is False
+    assert data["quality"] == "estimated"
+    assert data["provenance"] == "cumulative_quote_delta"
+    assert {bucket["quality"] for bucket in data["buckets"]} == {"estimated"}
+    assert {bucket["provenance"] for bucket in data["buckets"]} == {"cumulative_quote_delta"}
 
 
 def test_orderflow_live_reports_unrepresentable_interval_and_tick_size_honestly(app):
@@ -380,3 +440,32 @@ def test_orderflow_synthetic_reports_requested_interval(app):
     assert data["is_live"] is False
     assert data["interval"] == 900
     assert data["requested_interval"] == 900
+
+
+@pytest.mark.parametrize("feed_state", ["live", "delayed", "stale", "unavailable"])
+def test_synthetic_fallback_is_always_labelled_as_sample(app, feed_state):
+    from unittest.mock import MagicMock
+
+    aggregator = MagicMock()
+    aggregator.get_footprint.return_value = []
+    aggregator.get_market_freshness.return_value = {
+        "state": feed_state,
+        "is_fresh": feed_state == "live",
+        "last_tick_timestamp": 1_700_000_000.0,
+        "last_tick_session": "2026-07-11",
+        "current_session": "2026-07-11",
+        "age_seconds": 1.0,
+    }
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&exchange=NFO")
+
+    data = response.get_json()["data"]
+    assert data["is_live"] is False
+    assert data["is_sample_data"] is True
+    assert data["live_state"] not in {"live", "delayed", "stale"}
+    assert data["quality"] == "sample"
+    assert data["provenance"] == "synthetic"
+    assert {bucket["quality"] for bucket in data["buckets"]} == {"sample"}
+    assert {bucket["provenance"] for bucket in data["buckets"]} == {"synthetic"}

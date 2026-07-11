@@ -14,9 +14,10 @@ Query parameters:
     tick_size (float, optional): Price-level granularity.  Default ``0.05``.
 
 The response includes ``is_live: true`` only when retained buckets have a fresh
-current-session source tick. ``live_state`` and ``freshness`` distinguish live,
-delayed, stale, warming, and unavailable data. When no retained buckets exist,
-the endpoint falls back to deterministic synthetic data.
+current-session source tick. ``quality`` and ``provenance`` distinguish exact
+trade ticks, estimated cumulative-quote deltas, and synthetic samples. When no
+retained buckets exist, ``is_sample_data`` is true and ``freshness`` separately
+preserves the underlying feed state.
 """
 
 from __future__ import annotations
@@ -149,6 +150,8 @@ def _generate_synthetic_buckets(
             "poc_price": poc_price,
             "total_volume": total_volume,
             "delta": delta,
+            "quality": "sample",
+            "provenance": "synthetic",
         })
 
     return buckets
@@ -238,6 +241,24 @@ def _round_to_tick(price: float, tick_size: float) -> float:
     return float(units * tick_decimal)
 
 
+def _summarise_quality(values: set[str]) -> str:
+    """Return a conservative quality label for one or more source buckets."""
+    if not values or "unknown" in values:
+        return "unknown"
+    if len(values) == 1:
+        return next(iter(values))
+    if values <= {"exact", "estimated"}:
+        return "estimated"
+    return "unknown"
+
+
+def _summarise_provenance(values: set[str]) -> str:
+    """Return one provenance label, or ``mixed`` when sources differ."""
+    if not values:
+        return "unknown"
+    return next(iter(values)) if len(values) == 1 else "mixed"
+
+
 def _live_buckets_to_response(
     live_buckets: list[Any],
     symbol: str,
@@ -263,6 +284,8 @@ def _live_buckets_to_response(
         ``total_volume``, and ``delta``.
     """
     groups: dict[int, dict[float, list[int]]] = defaultdict(dict)
+    group_qualities: dict[int, set[str]] = defaultdict(set)
+    group_provenances: dict[int, set[str]] = defaultdict(set)
     for bucket in live_buckets:
         bin_start = int(bucket.timestamp_bin)
         if coarsen_interval is not None:
@@ -273,6 +296,16 @@ def _live_buckets_to_response(
         cell = groups[bin_start].setdefault(price_level, [0, 0])
         cell[0] += int(bucket.buy_volume)
         cell[1] += int(bucket.sell_volume)
+        quality = getattr(bucket, "quality", "unknown")
+        provenance = getattr(bucket, "provenance", "unknown")
+        group_qualities[bin_start].add(
+            quality if quality in {"exact", "estimated"} else "unknown"
+        )
+        group_provenances[bin_start].add(
+            provenance
+            if provenance in {"trade_tick", "cumulative_quote_delta", "mixed"}
+            else "unknown"
+        )
 
     result: list[dict[str, Any]] = []
 
@@ -305,6 +338,8 @@ def _live_buckets_to_response(
             "poc_price": poc_price,
             "total_volume": total_volume,
             "delta": delta,
+            "quality": _summarise_quality(group_qualities[bin_start]),
+            "provenance": _summarise_provenance(group_provenances[bin_start]),
         })
 
     return result
@@ -331,7 +366,8 @@ def orderflow_endpoint() -> tuple[Any, int]:
 
     Returns:
         JSON with ``status``, ``data.buckets``, ``data.symbol``,
-        ``data.exchange``, ``data.interval``, and ``data.is_live``.
+        ``data.exchange``, ``data.interval``, ``data.is_live``,
+        ``data.is_sample_data``, ``data.quality``, and ``data.provenance``.
     """
     symbol = (request.args.get("symbol") or "").strip().upper()
     if not symbol:
@@ -376,6 +412,9 @@ def orderflow_endpoint() -> tuple[Any, int]:
     source_tick_size = tick_size
     freshness = _unavailable_market_freshness()
     live_state = "unavailable"
+    is_sample_data = False
+    quality = "unknown"
+    provenance = "unknown"
 
     # Try live aggregator first
     try:
@@ -398,6 +437,8 @@ def orderflow_endpoint() -> tuple[Any, int]:
                     coarsen_interval=effective_interval if interval_ratio and interval_ratio > 1 else None,
                     coarsen_tick_size=effective_tick_size if tick_size_ratio and tick_size_ratio > 1 else None,
                 )[-bins:]
+                quality = _summarise_quality({str(bucket["quality"]) for bucket in buckets})
+                provenance = _summarise_provenance({str(bucket["provenance"]) for bucket in buckets})
                 is_live = freshness["is_fresh"] is True
     except Exception as exc:
         logger.debug("Live aggregator unavailable for %s: %s", symbol_upper, exc)
@@ -415,8 +456,10 @@ def orderflow_endpoint() -> tuple[Any, int]:
         effective_tick_size = tick_size
         source_interval = interval
         source_tick_size = tick_size
-        if live_state == "live":
-            live_state = "warming"
+        live_state = "warming" if freshness["state"] == "live" else "unavailable"
+        is_sample_data = True
+        quality = "sample"
+        provenance = "synthetic"
 
     return jsonify({
         "status": "success",
@@ -431,7 +474,10 @@ def orderflow_endpoint() -> tuple[Any, int]:
             "source_interval": source_interval,
             "source_tick_size": source_tick_size,
             "is_live": is_live,
+            "is_sample_data": is_sample_data,
             "live_state": live_state,
             "freshness": freshness,
+            "quality": quality,
+            "provenance": provenance,
         },
     }), 200
