@@ -989,7 +989,6 @@ class AutonomousTrader:
         (by default) on an operator stop request.
         """
         self._status = AgentStatus.RUNNING
-        self._stop_requested = False
         logger.info(
             "Autonomous trader starting. Symbols: %s, Exchange: %s",
             self.config.symbols,

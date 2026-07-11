@@ -9,6 +9,7 @@ agent actor id in workspace.json.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import Any
@@ -276,6 +277,60 @@ def test_stop_requests_square_off_and_status_reflects(live_auth):
             break
         time.sleep(0.02)
     assert status["running"] is False
+
+
+def test_stop_after_thread_start_before_coroutine_entry_runs_no_live_cycle(
+    live_auth,
+    monkeypatch,
+):
+    from flinttrade_ai.autonomous_agent import AutonomousTrader
+
+    app = _make_app()
+    coroutine_waiting = threading.Event()
+    allow_coroutine_entry = threading.Event()
+    cycles: list[int] = []
+    traders: list[AutonomousTrader] = []
+    real_asyncio_run = asyncio.run
+
+    def build_trader(**kwargs: Any) -> AutonomousTrader:
+        trader = AutonomousTrader(**kwargs)
+        trader._is_market_open = lambda: True  # noqa: SLF001
+
+        async def live_cycle() -> None:
+            cycles.append(1)
+            trader.request_stop(square_off=False)
+
+        trader.run_cycle = live_cycle  # type: ignore[method-assign]
+        traders.append(trader)
+        return trader
+
+    def delayed_asyncio_run(coroutine: Any) -> Any:
+        coroutine_waiting.set()
+        if not allow_coroutine_entry.wait(2.0):
+            coroutine.close()
+            raise TimeoutError("test did not release coroutine entry")
+        return real_asyncio_run(coroutine)
+
+    monkeypatch.setattr(mod, "_trader_factory", build_trader)
+    monkeypatch.setattr(mod.asyncio, "run", delayed_asyncio_run)
+    client = app.test_client()
+
+    started = client.post("/api/v1/ai/agent/start", json=_start_body())
+    assert started.status_code == 202
+    assert coroutine_waiting.wait(1.0)
+    try:
+        stopped = client.post("/api/v1/ai/agent/stop", json={})
+        assert stopped.status_code == 200
+    finally:
+        allow_coroutine_entry.set()
+
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        thread = mod._RUNNER["thread"]  # noqa: SLF001
+    thread.join(2.0)
+
+    assert thread.is_alive() is False
+    assert cycles == []
+    assert traders[0].state.cycle_count == 0
 
 
 def test_stop_without_session_404(live_auth):

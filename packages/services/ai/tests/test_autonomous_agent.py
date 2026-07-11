@@ -605,6 +605,23 @@ def test_initial_status_idle() -> None:
     assert agent.status == AgentStatus.IDLE
 
 
+@pytest.mark.asyncio
+async def test_stop_requested_before_session_entry_prevents_live_cycle(monkeypatch) -> None:
+    agent = make_agent()
+    monkeypatch.setattr(agent, "_is_market_open", lambda: True)
+
+    async def stop_after_first_cycle() -> None:
+        agent.request_stop(square_off=False)
+
+    agent.run_cycle = AsyncMock(side_effect=stop_after_first_cycle)
+    agent.request_stop(square_off=False)
+
+    await agent.run_session()
+
+    agent.run_cycle.assert_not_awaited()
+    assert agent.state.cycle_count == 0
+
+
 # ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
