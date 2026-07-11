@@ -36,7 +36,20 @@ describe("LocalDataPanel", () => {
           persisted_tick_count: 12300,
           pending_tick_count: 45,
           dropped_tick_count: 7,
-          watchlist: { quote: [{ exchange: "NSE_INDEX", symbol: "NIFTY" }], ltp: [], depth: [] },
+          watchlist: {
+            ltp: [
+              { exchange: "NSE_INDEX", symbol: "NIFTY" },
+              { exchange: "NSE", symbol: "RELIANCE" },
+            ],
+            quote: [
+              { exchange: "NSE_INDEX", symbol: "NIFTY" },
+              { exchange: "NSE_INDEX", symbol: "BANKNIFTY" },
+            ],
+            depth: [
+              { exchange: "NSE", symbol: "RELIANCE" },
+              { exchange: "MCX", symbol: "GOLD" },
+            ],
+          },
         },
       },
       "/v1/historify/bars/summary": {
@@ -65,7 +78,9 @@ describe("LocalDataPanel", () => {
     expect(screen.getByText(/12,345 received/)).toBeInTheDocument();
     expect(screen.getByText(/45 pending/)).toBeInTheDocument();
     expect(screen.getByText(/7 dropped/)).toBeInTheDocument();
-    expect(screen.getByText(/NIFTY/)).toBeInTheDocument();
+    expect(screen.getByText(/12,300 persisted/)).toHaveTextContent(
+      /NIFTY, RELIANCE, BANKNIFTY, GOLD$/,
+    );
   });
 
   it("shows only non-empty local store tables", async () => {

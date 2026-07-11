@@ -254,6 +254,49 @@ describe("CDS market hours (9:00–17:00 IST)", () => {
   });
 });
 
+describe("CDS cross-currency market hours (9:00–19:30 IST)", () => {
+  it.each([
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "EURUSD29JUL26FUT",
+    "GBPUSD29JUL261.35PE",
+    "USDJPY29JUL26150CE",
+  ])("keeps %s open after the ordinary CDS session closes", (symbol) => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 18, 0));
+
+    expect(isMarketHours({ exchange: "CDS", symbol })).toBe(true);
+  });
+
+  it("is open at the inclusive 19:30 close boundary", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 19, 30));
+
+    expect(isMarketHours({ exchange: "CDS", symbol: "EURUSD29JUL26FUT" })).toBe(true);
+  });
+
+  it("is closed one minute after the 19:30 close", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 19, 31));
+
+    expect(isMarketHours({ exchange: "CDS", symbol: "EURUSD29JUL26FUT" })).toBe(false);
+  });
+
+  it("does not extend the session for INR currency pairs or exchange-only callers", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 18, 0));
+
+    expect(isMarketHours({ exchange: "CDS", symbol: "USDINR29JUL26FUT" })).toBe(false);
+    expect(isMarketHours("CDS")).toBe(false);
+  });
+
+  it("reports instrument-aware status without changing the CDS label", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 18, 0));
+
+    expect(getExchangeStatus({ exchange: "CDS", symbol: "GBPUSD29JUL26FUT" })).toEqual({
+      status: "open",
+      label: "CDS Open",
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // getMCXStatus()
 // ---------------------------------------------------------------------------

@@ -12,6 +12,24 @@ import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
+const signalStreamMocks = vi.hoisted(() => {
+  const state: {
+    connected: boolean;
+    replayLoss: null | {
+      reason: string;
+      requested_event_id: number;
+      oldest_available_event_id: number | null;
+      newest_available_event_id: number;
+    };
+    clearReplayLoss: ReturnType<typeof vi.fn>;
+  } = {
+    connected: false,
+    replayLoss: null,
+    clearReplayLoss: vi.fn(),
+  };
+  return { state, hook: vi.fn(() => state) };
+});
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -59,6 +77,11 @@ vi.mock("@/lib/tourDefinitions", () => ({
 vi.mock("@/hooks/useSkillLevel", () => ({
   useSkillLevel: vi.fn().mockReturnValue("intermediate"),
 }));
+
+vi.mock("@/hooks/useSignals", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useSignals")>();
+  return { ...actual, useSignalStream: signalStreamMocks.hook };
+});
 
 vi.mock("@/stores/skillStore", () => ({
   useSkillStore: Object.assign(
@@ -131,6 +154,8 @@ function renderAI() {
 describe("AIRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    signalStreamMocks.state.connected = false;
+    signalStreamMocks.state.replayLoss = null;
     useModeStore.setState({ mode: "explore" });
   });
 
@@ -169,10 +194,32 @@ describe("AIRoute", () => {
     expect(screen.getByText("ML")).toBeInTheDocument();
     expect(screen.getByText("Fallback")).toBeInTheDocument();
     expect(screen.getAllByText("NSE_INDEX")).toHaveLength(3);
-    expect(screen.getByText(/Polls every 5s while NSE is open and every 60s while closed/)).toBeInTheDocument();
+    expect(screen.getByText("Polling")).toBeInTheDocument();
+    expect(signalStreamMocks.hook).toHaveBeenCalled();
     expect(screen.queryByText("ML-Powered Signals")).not.toBeInTheDocument();
     expect(screen.queryByText("Signal service unavailable.")).not.toBeInTheDocument();
     expect(getRecentSignals).not.toHaveBeenCalled();
+  });
+
+  it("surfaces live stream and replay-loss state in the production Signals view", async () => {
+    signalStreamMocks.state.connected = true;
+    signalStreamMocks.state.replayLoss = {
+      reason: "cursor_before_retained",
+      requested_event_id: 12,
+      oldest_available_event_id: 40,
+      newest_available_event_id: 139,
+    };
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Signals"));
+
+    expect(await screen.findByText("Live")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Signal history gap detected. Recent signals refreshed.",
+    );
+    await user.click(screen.getByRole("button", { name: "Dismiss signal history notice" }));
+    expect(signalStreamMocks.state.clearReplayLoss).toHaveBeenCalledOnce();
   });
 
   it("renders the generated knowledge answer even when no source chunks are returned", async () => {

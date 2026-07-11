@@ -16,6 +16,15 @@ interface ExchangeHours {
   close: number;
 }
 
+export interface MarketHoursInstrument {
+  /** Backend exchange identity. */
+  exchange: string;
+  /** Exchange symbol or dated contract symbol. */
+  symbol: string;
+}
+
+export type MarketHoursTarget = string | MarketHoursInstrument;
+
 const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
   NSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // 9:15–15:30
   BSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
@@ -37,6 +46,40 @@ const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
   GLOBAL_INDEX: { open: 0,           close: 23 * 60 + 59 },
 };
 
+const CDS_CROSS_CURRENCY_HOURS: ExchangeHours = {
+  open: 9 * 60,
+  close: 19 * 60 + 30,
+};
+
+const CDS_CROSS_CURRENCY_UNDERLYINGS = ["EURUSD", "GBPUSD", "USDJPY"] as const;
+
+/** Return whether a CDS symbol is a supported cross-currency underlying or contract. */
+export function isCrossCurrencyCdsSymbol(symbol: string): boolean {
+  const normalisedSymbol = symbol.trim().toUpperCase();
+  return CDS_CROSS_CURRENCY_UNDERLYINGS.some((underlying) => (
+    normalisedSymbol === underlying
+    || (
+      normalisedSymbol.startsWith(underlying)
+      && /^\d/.test(normalisedSymbol.slice(underlying.length))
+    )
+  ));
+}
+
+function resolveMarketHours(target?: MarketHoursTarget): {
+  exchange: string;
+  hours: ExchangeHours | undefined;
+} {
+  const exchange = typeof target === "string"
+    ? target
+    : target?.exchange ?? "NSE";
+  const symbol = typeof target === "object" ? target.symbol : undefined;
+
+  if (exchange === "CDS" && symbol && isCrossCurrencyCdsSymbol(symbol)) {
+    return { exchange, hours: CDS_CROSS_CURRENCY_HOURS };
+  }
+  return { exchange, hours: EXCHANGE_HOURS[exchange] };
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -49,7 +92,7 @@ const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
  *
  * DELTA (crypto) is always considered open (24/7).
  */
-export function isMarketHours(exchange?: string): boolean {
+export function isMarketHours(target?: MarketHoursTarget): boolean {
   const ist = new Date(
     new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
@@ -57,9 +100,9 @@ export function isMarketHours(exchange?: string): boolean {
   if (day === 0 || day === 6) return false;
 
   // Delta Exchange — 24/7 crypto
+  const { exchange, hours } = resolveMarketHours(target);
   if (exchange === "DELTA") return true;
 
-  const hours = EXCHANGE_HOURS[exchange ?? "NSE"];
   if (!hours) return false;
 
   const mins = ist.getHours() * 60 + ist.getMinutes();
@@ -98,7 +141,7 @@ export function getMCXStatus(): MCXMarketStatusInfo {
  * Get market status for any exchange.
  * Returns pre-market / open / closed / weekend.
  */
-export function getExchangeStatus(exchange: string): MCXMarketStatusInfo {
+export function getExchangeStatus(target: MarketHoursTarget): MCXMarketStatusInfo {
   const ist = new Date(
     new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
@@ -107,11 +150,11 @@ export function getExchangeStatus(exchange: string): MCXMarketStatusInfo {
     return { status: "weekend", label: "Weekend" };
   }
 
+  const { exchange, hours } = resolveMarketHours(target);
   if (exchange === "DELTA") {
     return { status: "open", label: "DELTA Open (24/7)" };
   }
 
-  const hours = EXCHANGE_HOURS[exchange];
   if (!hours) {
     return { status: "closed", label: `${exchange} Unknown` };
   }

@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { getBase } from "@/services/ftApi.helpers";
 import { safeParse } from "@/lib/safeParse";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,6 +24,7 @@ import { signalEventSchema } from "@/services/ftApi.ai";
 import type { SignalConfig, SignalEvent } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { isMarketHours } from "@/lib/market";
+import type { MarketHoursInstrument } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Sample data for explore mode
@@ -79,7 +81,7 @@ const SAMPLE_SIGNALS: SignalEvent[] = [
 ];
 
 const SAMPLE_CONFIG: SignalConfig = {
-  instruments: ["NIFTY", "BANKNIFTY"],
+  instruments: ["NSE_INDEX:NIFTY", "NSE_INDEX:BANKNIFTY"],
   indicators: [
     { name: "RSI", params: { period: 14 } },
     { name: "EMA_Cross", params: { fast: 9, slow: 21 } },
@@ -97,8 +99,22 @@ const SAMPLE_CONFIG: SignalConfig = {
 // useRecentSignals — polls recent signals every 5 seconds
 // ---------------------------------------------------------------------------
 
+function parseConfiguredInstrument(identity: string): MarketHoursInstrument | undefined {
+  const parts = identity.split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return undefined;
+  return { exchange: parts[0], symbol: parts[1] };
+}
+
+function isAnyConfiguredMarketOpen(instruments: string[]): boolean {
+  return instruments.some((identity) => {
+    const instrument = parseConfiguredInstrument(identity);
+    return instrument ? isMarketHours(instrument) : false;
+  });
+}
+
 export function useRecentSignals(limit = 20) {
   const mode = useModeStore((s) => s.mode);
+  const configQuery = useSignalConfig();
 
   return useQuery<{ signals: SignalEvent[] }>({
     queryKey: ["signals", "recent", mode, limit],
@@ -109,7 +125,13 @@ export function useRecentSignals(limit = 20) {
       return getRecentSignals(limit);
     },
     staleTime: 5_000,
-    refetchInterval: () => (isMarketHours() ? 5_000 : 60_000),
+    refetchInterval: () => {
+      if (configQuery.isPending) return 5_000;
+      const isOpen = configQuery.data
+        ? isAnyConfiguredMarketOpen(configQuery.data.instruments)
+        : isMarketHours();
+      return isOpen ? 5_000 : 60_000;
+    },
     retry: false,
   });
 }
@@ -154,6 +176,15 @@ export function useUpdateSignalConfig() {
 // useSignalStream — SSE EventSource for real-time signal events
 // ---------------------------------------------------------------------------
 
+export const signalReplayLossSchema = z.object({
+  reason: z.string().min(1),
+  requested_event_id: z.number().int(),
+  oldest_available_event_id: z.number().int().nullable(),
+  newest_available_event_id: z.number().int(),
+});
+
+export type SignalReplayLoss = z.infer<typeof signalReplayLossSchema>;
+
 export function useSignalStream(
   onSignal: (signal: SignalEvent) => void,
   enabled = true,
@@ -161,38 +192,61 @@ export function useSignalStream(
   const mode = useModeStore((s) => s.mode);
   const esRef = useRef<EventSource | null>(null);
   const [connected, setConnected] = useState(false);
+  const [replayLoss, setReplayLoss] = useState<SignalReplayLoss | null>(null);
+  const qc = useQueryClient();
   const callbackRef = useRef(onSignal);
   callbackRef.current = onSignal;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
-  const connect = useCallback(() => {
-    if (mode === "explore" || !enabled) return;
+  const clearReplayLoss = useCallback(() => setReplayLoss(null), []);
+
+  useEffect(() => {
+    if (mode === "explore" || !enabled) {
+      setConnected(false);
+      return;
+    }
 
     const base = getBase();
     const url = `${base}/api/v1/signals/stream`;
     const es = new EventSource(url);
+    const streamMode = mode;
 
-    es.onopen = () => setConnected(true);
+    es.onopen = () => {
+      if (modeRef.current !== streamMode) return;
+      setConnected(true);
+    };
     es.onerror = () => {
+      if (modeRef.current !== streamMode) return;
       setConnected(false);
       // EventSource auto-reconnects — no manual reconnect needed
     };
     es.onmessage = (event) => {
+      if (modeRef.current !== streamMode) return;
       const signal = safeParse(event.data as string, signalEventSchema);
       if (signal) callbackRef.current(signal);
       // Malformed frames and heartbeat comments are silently discarded
     };
+    const handleReplayLoss = (event: Event) => {
+      if (modeRef.current !== streamMode) return;
+      const control = safeParse(
+        (event as MessageEvent).data as string,
+        signalReplayLossSchema,
+      );
+      if (!control) return;
+      setReplayLoss(control);
+      void qc.invalidateQueries({ queryKey: ["signals", "recent"] });
+    };
+    es.addEventListener("replay-loss", handleReplayLoss);
 
     esRef.current = es;
-  }, [mode, enabled]);
-
-  useEffect(() => {
-    connect();
     return () => {
-      esRef.current?.close();
-      esRef.current = null;
+      es.removeEventListener("replay-loss", handleReplayLoss);
+      es.close();
+      if (esRef.current === es) esRef.current = null;
       setConnected(false);
     };
-  }, [connect]);
+  }, [enabled, mode, qc]);
 
-  return { connected };
+  return { connected, replayLoss, clearReplayLoss };
 }

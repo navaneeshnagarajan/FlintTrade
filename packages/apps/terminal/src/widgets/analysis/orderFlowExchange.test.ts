@@ -3,6 +3,17 @@ import { resolveOrderFlowExchange } from "./orderFlowExchange";
 
 describe("resolveOrderFlowExchange", () => {
   it.each([
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "EURUSD29JUL26FUT",
+    "GBPUSD29JUL261.35PE",
+    "USDJPY29JUL26150CE",
+  ])("keeps the backend exchange identity for cross-currency instrument %s as CDS", (symbol) => {
+    expect(resolveOrderFlowExchange(symbol)).toBe("CDS");
+  });
+
+  it.each([
     ["NIFTY", undefined, "NSE_INDEX"],
     ["BANKNIFTY", undefined, "NSE_INDEX"],
     ["FINNIFTY", undefined, "NSE_INDEX"],

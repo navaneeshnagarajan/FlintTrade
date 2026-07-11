@@ -46,7 +46,7 @@ export function useOrderFlow(
     enabled: !!symbol,
     // Poll every 5 s during market hours; re-check every 60 s otherwise
     // so the widget self-activates when the market opens.
-    refetchInterval: () => (isMarketHours(exchange) ? 5_000 : 60_000),
+    refetchInterval: () => (isMarketHours({ exchange, symbol }) ? 5_000 : 60_000),
     staleTime: 4_000,
     // Retry count is intentionally left at the TanStack Query default (3)
     // so tests can override via QueryClient defaultOptions.

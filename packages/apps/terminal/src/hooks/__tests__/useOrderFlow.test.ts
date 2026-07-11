@@ -18,12 +18,13 @@ import type { OrderFlowData } from "../useOrderFlow";
 // ---------------------------------------------------------------------------
 
 const mockFetch = vi.fn();
+type MarketHoursTarget = string | { exchange: string; symbol: string };
 const mockIsMarketHours = vi.hoisted(
-  () => vi.fn<(exchange?: string) => boolean>(() => false),
+  () => vi.fn<(target?: MarketHoursTarget) => boolean>(() => false),
 );
 
 vi.mock("@/lib/market", () => ({
-  isMarketHours: (exchange?: string) => mockIsMarketHours(exchange),
+  isMarketHours: (target?: MarketHoursTarget) => mockIsMarketHours(target),
 }));
 
 beforeEach(() => {
@@ -151,13 +152,22 @@ describe("useOrderFlow", () => {
     expect(url).toContain("bins=20");
   });
 
-  it.each(["MCX", "CDS"])(
-    "re-evaluates %s polling from 60s when closed to 5s while open",
-    async (exchange) => {
+  it.each([
+    ["MCX", "GOLD"],
+    ["CDS", "USDINR"],
+    ["CDS", "EURUSD29JUL26FUT"],
+  ])(
+    "re-evaluates %s:%s polling from 60s when closed to 5s while open",
+    async (exchange, symbol) => {
       vi.useFakeTimers();
       let isOpen = false;
       mockIsMarketHours.mockImplementation(
-        (candidate) => candidate === exchange && isOpen,
+        (candidate) => (
+          typeof candidate === "object"
+          && candidate.exchange === exchange
+          && candidate.symbol === symbol
+          && isOpen
+        ),
       );
       mockFetch.mockResolvedValue({
         ok: true,
@@ -165,7 +175,7 @@ describe("useOrderFlow", () => {
           status: "success",
           data: {
             buckets: [],
-            symbol: exchange === "MCX" ? "GOLD" : "USDINR",
+            symbol,
             exchange,
             interval: 300,
             is_live: true,
@@ -174,11 +184,11 @@ describe("useOrderFlow", () => {
       });
 
       renderHook(
-        () => useOrderFlow(exchange === "MCX" ? "GOLD" : "USDINR", exchange),
+        () => useOrderFlow(symbol, exchange),
         { wrapper: createWrapper() },
       );
       await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
-      expect(mockIsMarketHours).toHaveBeenCalledWith(exchange);
+      expect(mockIsMarketHours).toHaveBeenCalledWith({ exchange, symbol });
 
       mockFetch.mockClear();
       await act(async () => {

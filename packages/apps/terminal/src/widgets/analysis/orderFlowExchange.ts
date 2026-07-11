@@ -1,4 +1,5 @@
 import { MCX_COMMODITIES } from "@/lib/mcxLots";
+import { isCrossCurrencyCdsSymbol } from "@/lib/market";
 
 const NSE_INDEX_SYMBOLS = new Set([
   "NIFTY",
@@ -134,9 +135,6 @@ const CDS_UNDERLYINGS = [
   "EURINR",
   "GBPINR",
   "JPYINR",
-  "EURUSD",
-  "GBPUSD",
-  "USDJPY",
 ];
 
 function isKnownUnderlyingOrContract(
@@ -164,7 +162,10 @@ export function resolveOrderFlowExchange(symbol: string, explicitExchange?: stri
   const normalisedSymbol = symbol.trim().toUpperCase();
 
   if (isKnownUnderlyingOrContract(normalisedSymbol, MCX_COMMODITIES)) return "MCX";
-  if (isKnownUnderlyingOrContract(normalisedSymbol, CDS_UNDERLYINGS)) return "CDS";
+  if (
+    isKnownUnderlyingOrContract(normalisedSymbol, CDS_UNDERLYINGS)
+    || isCrossCurrencyCdsSymbol(normalisedSymbol)
+  ) return "CDS";
   if (MCX_INDEX_SYMBOLS.has(normalisedSymbol)) return "MCX_INDEX";
   if (GLOBAL_INDEX_SYMBOLS.has(normalisedSymbol)) return "GLOBAL_INDEX";
   if (BSE_INDEX_SYMBOLS.has(normalisedSymbol)) return "BSE_INDEX";

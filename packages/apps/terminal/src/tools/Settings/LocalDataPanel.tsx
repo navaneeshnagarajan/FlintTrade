@@ -22,6 +22,11 @@ const FT_BASE = "/ft-api";
 
 // --- Tick capture status -----------------------------------------------------
 
+interface TickInstrument {
+  exchange: string;
+  symbol: string;
+}
+
 interface TickStatus {
   enabled: boolean;
   running: boolean;
@@ -30,7 +35,7 @@ interface TickStatus {
   persisted_tick_count?: number;
   pending_tick_count?: number;
   dropped_tick_count?: number;
-  watchlist: Record<string, Array<{ exchange: string; symbol: string }>>;
+  watchlist: Record<string, TickInstrument[]>;
   hint?: string;
   last_error?: string;
 }
@@ -41,6 +46,23 @@ async function fetchTickStatus(): Promise<TickStatus> {
   const json = (await res.json()) as { data?: TickStatus };
   if (!json.data) throw new Error("Tick status malformed");
   return json.data;
+}
+
+const CAPTURE_WATCHLIST_MODES = ["ltp", "quote", "depth"] as const;
+
+function getCaptureWatchlist(watchlist?: Record<string, TickInstrument[]>): TickInstrument[] {
+  const instruments: TickInstrument[] = [];
+  const seen = new Set<string>();
+
+  for (const mode of CAPTURE_WATCHLIST_MODES) {
+    for (const instrument of watchlist?.[mode] ?? []) {
+      const identity = `${instrument.exchange}:${instrument.symbol}`.toUpperCase();
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      instruments.push(instrument);
+    }
+  }
+  return instruments;
 }
 
 // --- Local OHLCV store summary ----------------------------------------------
@@ -112,7 +134,7 @@ export function LocalDataPanel() {
   const bhavcopy = useMutation({ mutationFn: () => startBhavcopyDownload(start, end) });
 
   const tick = tickQuery.data;
-  const quoteWatchlist = tick?.watchlist?.quote ?? [];
+  const captureWatchlist = getCaptureWatchlist(tick?.watchlist);
   const persistedTickCount = tick?.persisted_tick_count ?? tick?.tick_count ?? 0;
   const pendingTickCount = tick?.pending_tick_count ?? Math.max(0, (tick?.tick_count ?? 0) - persistedTickCount);
   const droppedTickCount = tick?.dropped_tick_count ?? 0;
@@ -158,7 +180,7 @@ export function LocalDataPanel() {
             {tick.tick_count.toLocaleString("en-IN")} received ·{" "}
             {pendingTickCount.toLocaleString("en-IN")} pending ·{" "}
             {droppedTickCount.toLocaleString("en-IN")} dropped ·{" "}
-            {quoteWatchlist.map((i) => i.symbol).join(", ") || "no symbols"}
+            {captureWatchlist.map((i) => i.symbol).join(", ") || "no symbols"}
           </div>
         ) : (
           <div className="text-xs text-text-muted">
