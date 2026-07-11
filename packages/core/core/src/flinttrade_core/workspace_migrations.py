@@ -3,19 +3,16 @@
 Owns the full transaction: lock acquisition, read, backup, migrate on a
 deep copy, atomic persist, and lock release. On migration failure, the
 on-disk workspace.json is restored from the backup before the exception
-propagates. Concurrent migration attempts are blocked via a PID-tracked
-.migration.lock acquired with O_EXCL; stale locks older than
-STALE_LOCK_SECONDS with a dead owner pid are broken safely.
+propagates. Concurrent migration attempts are serialised by a cross-process
+kernel lock; stale lock-file contents cannot confer or revoke ownership.
 """
 
 from __future__ import annotations
 
 import copy
-import errno
 import json
 import logging
 import os
-import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -23,10 +20,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock, Timeout as FileLockTimeout
+
 logger = logging.getLogger("flinttrade.core.workspace_migrations")
 
 WORKSPACE_VERSION = "1.0.0"
-STALE_LOCK_SECONDS = 600
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -107,49 +105,67 @@ def default_workspace_config(*, initialized: bool = False) -> dict[str, Any]:
 
 
 @contextmanager
-def _migration_lock(workspace_dir: Path) -> Iterator[None]:
-    """Acquire workspace_dir/.migration.lock via O_EXCL."""
+def _migration_lock(
+    workspace_dir: Path,
+    *,
+    wait: bool = False,
+    timeout: float = 10.0,
+) -> Iterator[None]:
+    """Acquire workspace_dir/.migration.lock through a kernel-backed lock."""
     workspace_dir.mkdir(parents=True, exist_ok=True)
     lock_path = workspace_dir / ".migration.lock"
-    while True:
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            try:
-                os.write(fd, f"{os.getpid()}\n{int(time.time())}\n".encode("utf-8"))
-            finally:
-                os.close(fd)
-            break
-        except FileExistsError as exc:
-            holder_pid, holder_ts = _read_lock_metadata(lock_path)
-            if holder_pid is None:
-                _safe_unlink(lock_path)
-                continue
-            stale = (time.time() - holder_ts) > STALE_LOCK_SECONDS
-            alive = _pid_alive(holder_pid)
-            if stale and not alive:
-                logger.warning("breaking stale migration lock (pid %s, age >%ds)", holder_pid, STALE_LOCK_SECONDS)
-                _safe_unlink(lock_path)
-                continue
-            raise MigrationLockError(
-                "another flinttrade process holds the migration lock\n"
-                f"  lock file: {lock_path}\n"
-                f"  pid: {holder_pid} (alive={alive})\n"
-                "  stop the other process, then re-run.\n"
-                "  if certain no other process is running, delete the lock:\n"
-                f"    rm {lock_path}"
-            ) from exc
+    lock = FileLock(lock_path, timeout=max(0.0, timeout) if wait else 0, mode=0o600)
     try:
-        yield
-    finally:
-        _safe_unlink(lock_path)
+        with lock.acquire():
+            yield
+    except FileLockTimeout as exc:
+        raise MigrationLockError(
+            "another FlintTrade process holds the workspace migration lock\n"
+            f"  lock file: {lock_path}\n"
+            "  stop the other process or retry after it finishes"
+        ) from exc
 
 
-def _read_lock_metadata(lock_path: Path) -> tuple[int | None, float]:
-    try:
-        lines = lock_path.read_text(encoding="utf-8").splitlines()
-        return int(lines[0]), float(lines[1]) if len(lines) > 1 else 0.0
-    except (FileNotFoundError, ValueError, IndexError):
-        return None, 0.0
+def write_workspace_config(workspace_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
+    """Atomically replace the current-version workspace under the process lock."""
+    workspace_dir = workspace_dir.expanduser().resolve()
+    candidate = copy.deepcopy(config)
+    if candidate.get("version") != WORKSPACE_VERSION:
+        raise ValueError(
+            f"workspace write requires version {WORKSPACE_VERSION}; got {candidate.get('version')!r}"
+        )
+    with _migration_lock(workspace_dir, wait=True):
+        _atomic_write(
+            workspace_dir / "workspace.json",
+            json.dumps(candidate, indent=2, sort_keys=True),
+        )
+    return candidate
+
+
+def update_workspace_config(
+    workspace_dir: Path,
+    updater: Callable[[dict[str, Any]], dict[str, Any] | None],
+) -> dict[str, Any]:
+    """Read-modify-write workspace.json atomically without stale-snapshot loss."""
+    workspace_dir = workspace_dir.expanduser().resolve()
+    workspace_path = workspace_dir / "workspace.json"
+    with _migration_lock(workspace_dir, wait=True):
+        if workspace_path.exists():
+            current = json.loads(workspace_path.read_text(encoding="utf-8"))
+        else:
+            current = default_workspace_config(initialized=True)
+        if current.get("version") != WORKSPACE_VERSION:
+            raise ValueError(
+                f"workspace update requires version {WORKSPACE_VERSION}; got {current.get('version')!r}"
+            )
+        candidate = copy.deepcopy(current)
+        updated = updater(candidate)
+        if updated is not None:
+            candidate = updated
+        if not isinstance(candidate, dict) or candidate.get("version") != WORKSPACE_VERSION:
+            raise ValueError("workspace updater must return the current-version configuration")
+        _atomic_write(workspace_path, json.dumps(candidate, indent=2, sort_keys=True))
+        return candidate
 
 
 def _safe_unlink(path: Path) -> None:
@@ -157,40 +173,6 @@ def _safe_unlink(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
-
-
-def _pid_alive(pid: int) -> bool:
-    """Return True if pid exists, across POSIX and Windows."""
-    if pid <= 0:
-        return False
-    if sys.platform == "win32":
-        import ctypes
-
-        process_query_limited_information = 0x1000
-        still_active = 259
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
-        if not handle:
-            return False
-        try:
-            exit_code = ctypes.c_ulong()
-            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
-                return False
-            return exit_code.value == still_active
-        finally:
-            kernel32.CloseHandle(handle)
-
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError as exc:
-        return exc.errno != errno.ESRCH
-    return True
-
-
 def _migrate_010_to_050(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg["version"] = "0.5.0"
     return cfg
@@ -300,7 +282,7 @@ def run_migrations(workspace_dir: Path) -> dict[str, Any]:
     workspace_dir = workspace_dir.expanduser().resolve()
     workspace_path = workspace_dir / "workspace.json"
 
-    with _migration_lock(workspace_dir):
+    with _migration_lock(workspace_dir, wait=True):
         if not workspace_path.exists():
             cfg = default_workspace_config(initialized=True)
             _atomic_write(workspace_path, json.dumps(cfg, indent=2, sort_keys=True))

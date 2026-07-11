@@ -4,6 +4,8 @@ import json
 import platform
 from pathlib import Path
 
+import pytest
+
 
 
 class TestWorkspaceResolution:
@@ -137,6 +139,40 @@ class TestWorkspaceLoadSave:
         # Reload from disk
         ws2 = Workspace(home_dir=tmp_path / "ws")
         assert ws2.get("ui.theme") == "light"
+
+    def test_stale_workspace_instances_do_not_clobber_unrelated_updates(self, tmp_path):
+        from flinttrade_core.workspace import Workspace
+
+        first = Workspace(home_dir=tmp_path / "ws")
+        first.initialise()
+        stale = Workspace(home_dir=tmp_path / "ws")
+
+        first.set("ui.theme", "light")
+        stale.set("llm.model", "local-model")
+
+        reloaded = Workspace(home_dir=tmp_path / "ws")
+        assert reloaded.get("ui.theme") == "light"
+        assert reloaded.get("llm.model") == "local-model"
+
+    def test_failed_atomic_save_preserves_previous_workspace(self, tmp_path, monkeypatch):
+        from flinttrade_core import workspace_migrations
+        from flinttrade_core.workspace import Workspace
+
+        workspace = Workspace(home_dir=tmp_path / "ws")
+        workspace.initialise()
+        before = workspace.config_path.read_text(encoding="utf-8")
+        workspace._config["ui"]["theme"] = "light"
+
+        monkeypatch.setattr(
+            workspace_migrations.os,
+            "replace",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("rename failed")),
+        )
+
+        with pytest.raises(OSError, match="rename failed"):
+            workspace.save()
+
+        assert workspace.config_path.read_text(encoding="utf-8") == before
 
     def test_path_expansion(self, tmp_path):
         from flinttrade_core.workspace import Workspace

@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
+from filelock import FileLock
 
 from flinttrade_core.workspace_migrations import (
     MIGRATIONS,
     WORKSPACE_VERSION,
     MigrationLockError,
+    _migration_lock,
     _merge_defaults,
     run_migrations,
 )
@@ -24,6 +29,46 @@ def _seed(workspace_dir: Path, cfg: dict) -> Path:
     path = workspace_dir / "workspace.json"
     path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     return path
+
+
+_HOLD_WORKSPACE_LOCK = """
+import sys
+import time
+from pathlib import Path
+from flinttrade_core.workspace_migrations import _migration_lock
+
+workspace, entered, release = map(Path, sys.argv[1:4])
+with _migration_lock(workspace, wait=True, timeout=5.0):
+    entered.write_text("entered", encoding="utf-8")
+    deadline = time.monotonic() + 10.0
+    while not release.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("test did not release first workspace lock holder")
+        time.sleep(0.01)
+"""
+
+_ENTER_WORKSPACE_LOCK = """
+import sys
+from pathlib import Path
+from flinttrade_core.workspace_migrations import _migration_lock
+
+workspace, entered = map(Path, sys.argv[1:3])
+with _migration_lock(workspace, wait=True, timeout=5.0):
+    entered.write_text("entered", encoding="utf-8")
+"""
+
+
+def _wait_for_process_marker(marker: Path, process: subprocess.Popen[str], timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while not marker.exists():
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            raise AssertionError(
+                f"lock contender exited before entering (code {process.returncode}): {stdout}{stderr}"
+            )
+        if time.monotonic() >= deadline:
+            raise AssertionError("timed out waiting for lock contender to enter")
+        time.sleep(0.01)
 
 
 def test_fresh_install_no_migration(tmp_path):
@@ -95,26 +140,108 @@ def test_partial_failure_restores_on_disk(tmp_path, monkeypatch):
 
 
 def test_concurrent_lock_blocks_second_caller(tmp_path):
-    """A live lock holder blocks concurrent migration."""
-    _seed(tmp_path, {"version": "0.5.2"})
+    """A live kernel-lock holder blocks concurrent migration."""
     lock = tmp_path / ".migration.lock"
-    lock.write_text(f"{os.getpid()}\n{int(time.time())}\n", encoding="utf-8")
-    try:
+    with FileLock(lock, mode=0o600):
         with pytest.raises(MigrationLockError):
-            run_migrations(tmp_path)
-    finally:
-        lock.unlink()
+            with _migration_lock(tmp_path):
+                pytest.fail("non-waiting contender acquired an already-held lock")
 
 
-def test_stale_lock_is_broken(tmp_path):
-    """A dead-pid lock older than the stale threshold is broken."""
+def test_workspace_load_waits_for_active_writer(tmp_path):
+    """Routine reads wait for a valid writer instead of failing transiently."""
+    expected = {"version": WORKSPACE_VERSION, "value": "preserved"}
+    _seed(tmp_path, expected)
+    started = threading.Event()
+    outcomes: list[dict | BaseException] = []
+
+    def load_workspace() -> None:
+        started.set()
+        try:
+            outcomes.append(run_migrations(tmp_path))
+        except BaseException as exc:  # noqa: BLE001 - retained for assertion in the parent
+            outcomes.append(exc)
+
+    lock = FileLock(tmp_path / ".migration.lock", mode=0o600)
+    with lock:
+        reader = threading.Thread(target=load_workspace)
+        reader.start()
+        assert started.wait(1.0)
+        time.sleep(0.05)
+        assert reader.is_alive(), "workspace load failed instead of waiting for the active writer"
+
+    reader.join(2.0)
+    assert reader.is_alive() is False
+    assert outcomes == [expected]
+
+
+def test_unlocked_incomplete_lock_record_does_not_block(tmp_path):
+    """Lock-file contents alone do not represent ownership."""
+    lock = tmp_path / ".migration.lock"
+    lock.write_text("", encoding="utf-8")
+
+    with _migration_lock(tmp_path, wait=True, timeout=0.02):
+        assert lock.exists()
+
+    assert lock.exists()
+
+
+def test_stale_lock_contents_do_not_block(tmp_path):
+    """Stale PID text cannot block or grant kernel-lock ownership."""
     _seed(tmp_path, {"version": "0.5.2"})
     lock = tmp_path / ".migration.lock"
-    lock.write_text(f"{2**22}\n{int(time.time()) - 3600}\n", encoding="utf-8")
+    lock.write_text(f"{2**22}\n0\n", encoding="utf-8")
 
     result = run_migrations(tmp_path)
 
     assert result["version"] == WORKSPACE_VERSION
+
+
+def test_stale_record_cannot_create_overlapping_process_owners(tmp_path):
+    """Two processes serialise even when the lock file starts with stale text."""
+    (tmp_path / ".migration.lock").write_text(f"{2**22}\n0\n", encoding="utf-8")
+    first_entered = tmp_path / "first-entered"
+    release_first = tmp_path / "release-first"
+    second_entered = tmp_path / "second-entered"
+    first = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_WORKSPACE_LOCK, str(tmp_path), str(first_entered), str(release_first)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    second: subprocess.Popen[str] | None = None
+
+    try:
+        _wait_for_process_marker(first_entered, first, 5.0)
+
+        second = subprocess.Popen(
+            [sys.executable, "-c", _ENTER_WORKSPACE_LOCK, str(tmp_path), str(second_entered)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(0.3)
+        assert second.poll() is None, "second lock contender exited while the first held the lock"
+        assert not second_entered.exists(), "second process overlapped the first lock owner"
+
+        release_first.write_text("release", encoding="utf-8")
+        _wait_for_process_marker(second_entered, second, 5.0)
+    finally:
+        release_first.touch(exist_ok=True)
+        for process in (first, second):
+            if process is None:
+                continue
+            try:
+                process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=5.0)
+
+    first_stdout, first_stderr = first.communicate()
+    assert first.returncode == 0, first_stdout + first_stderr
+    assert second is not None
+    second_stdout, second_stderr = second.communicate()
+    assert second.returncode == 0, second_stdout + second_stderr
 
 
 def test_atomic_write_leaves_no_tmp(tmp_path):

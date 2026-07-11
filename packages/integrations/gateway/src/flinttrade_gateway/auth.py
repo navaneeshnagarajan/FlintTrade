@@ -627,17 +627,23 @@ def update_rate_limits() -> Any:
         from flinttrade_core.workspace import Workspace  # noqa: PLC0415
 
         ws = Workspace()
-        overrides = ws.get("brokers.rate_limits", {})
-        overrides = dict(overrides) if isinstance(overrides, dict) else {}
-        existing = overrides.get(broker_id)
-        entry = dict(existing) if isinstance(existing, dict) else {}
-        if order is not None:
-            entry["order"] = order
-        if data is not None:
-            entry["data"] = data
-        overrides[broker_id] = entry
-        ws.set("brokers.rate_limits", overrides)
-        ws.save()
+
+        def update_override(config: dict[str, Any]) -> None:
+            current_brokers = config.get("brokers")
+            brokers = dict(current_brokers) if isinstance(current_brokers, dict) else {}
+            current_overrides = brokers.get("rate_limits")
+            overrides = dict(current_overrides) if isinstance(current_overrides, dict) else {}
+            existing = overrides.get(broker_id)
+            entry = dict(existing) if isinstance(existing, dict) else {}
+            if order is not None:
+                entry["order"] = order
+            if data is not None:
+                entry["data"] = data
+            overrides[broker_id] = entry
+            brokers["rate_limits"] = overrides
+            config["brokers"] = brokers
+
+        ws.update(update_override)
     except Exception as exc:  # noqa: BLE001 - persistence is best-effort
         logger.warning("Could not persist rate-limit override for %s: %s", broker_id, exc)
 

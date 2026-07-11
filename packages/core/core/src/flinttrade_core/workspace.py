@@ -17,10 +17,17 @@ import json
 import logging
 import os
 import platform
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .workspace_migrations import WORKSPACE_VERSION, default_workspace_config, run_migrations
+from .workspace_migrations import (
+    WORKSPACE_VERSION,
+    default_workspace_config,
+    run_migrations,
+    update_workspace_config,
+    write_workspace_config,
+)
 
 logger = logging.getLogger("flinttrade.core.workspace")
 
@@ -178,12 +185,11 @@ class Workspace:
         return self._config
 
     def save(self, config: dict[str, Any] | None = None) -> None:
-        """Write workspace.json (pretty JSON, sorted keys)."""
+        """Atomically replace workspace.json with a complete configuration."""
         if config is not None:
-            self._config = config
+            self._config = copy.deepcopy(config)
         self._home.mkdir(parents=True, exist_ok=True)
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(self._config, f, indent=2, sort_keys=True)
+        self._config = write_workspace_config(self.workspace_dir, self._config)
 
     def initialise(self, config: dict[str, Any] | None = None) -> None:
         """First-time setup — create dirs, write default config.
@@ -210,15 +216,26 @@ class Workspace:
         return node
 
     def set(self, key: str, value: Any) -> None:
-        """Set a config value using dot notation and save."""
+        """Set a value against the latest on-disk snapshot and persist atomically."""
         parts = key.split(".")
-        node = self._config
-        for part in parts[:-1]:
-            if part not in node or not isinstance(node[part], dict):
-                node[part] = {}
-            node = node[part]
-        node[parts[-1]] = value
-        self.save()
+
+        def apply(config: dict[str, Any]) -> None:
+            node = config
+            for part in parts[:-1]:
+                if part not in node or not isinstance(node[part], dict):
+                    node[part] = {}
+                node = node[part]
+            node[parts[-1]] = value
+
+        self._config = update_workspace_config(self.workspace_dir, apply)
+
+    def update(
+        self,
+        updater: Callable[[dict[str, Any]], dict[str, Any] | None],
+    ) -> dict[str, Any]:
+        """Apply one caller-owned mutation to the latest workspace transaction."""
+        self._config = update_workspace_config(self.workspace_dir, updater)
+        return copy.deepcopy(self._config)
 
     def ensure_directories(self) -> None:
         """Create all data directories if they don't exist."""
@@ -227,4 +244,4 @@ class Workspace:
 
     def as_dict(self) -> dict[str, Any]:
         """Return a copy of the current config."""
-        return dict(self._config)
+        return copy.deepcopy(self._config)

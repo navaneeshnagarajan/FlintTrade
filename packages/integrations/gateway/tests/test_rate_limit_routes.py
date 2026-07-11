@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 
 import pytest
 from flask import Flask
@@ -75,6 +78,49 @@ def test_put_persists_to_workspace(client, tmp_path):
     assert ws_file.exists()
     saved = json.loads(ws_file.read_text())
     assert saved["brokers"]["rate_limits"]["dhan"] == {"order": 8.0, "data": 4.0}
+
+
+def test_put_does_not_follow_atomic_set_with_stale_full_save(client, monkeypatch):
+    from flinttrade_core.workspace import Workspace
+
+    redundant_save = Mock()
+    monkeypatch.setattr(Workspace, "save", redundant_save)
+
+    response = client.put("/v1/rate-limits", json={"broker_id": "dhan", "order": 8})
+
+    assert response.status_code == 200
+    redundant_save.assert_not_called()
+
+
+def test_concurrent_broker_updates_do_not_overwrite_each_other(app, tmp_path, monkeypatch):
+    from flinttrade_core.workspace import Workspace
+
+    original_set = Workspace.set
+    stale_writers_ready = threading.Barrier(2)
+
+    def synchronised_legacy_set(self, key, value):
+        stale_writers_ready.wait(timeout=2.0)
+        return original_set(self, key, value)
+
+    monkeypatch.setattr(Workspace, "set", synchronised_legacy_set)
+
+    def update(broker_id: str) -> int:
+        with app.test_client() as thread_client:
+            response = thread_client.put(
+                "/v1/rate-limits",
+                json={"broker_id": broker_id, "order": 8},
+            )
+            return response.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        statuses = list(executor.map(update, ("dhan", "upstox")))
+
+    assert statuses == [200, 200]
+    saved = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
+    assert saved["brokers"]["rate_limits"] == {
+        "dhan": {"order": 8.0},
+        "upstox": {"order": 8.0},
+    }
 
 
 def test_put_requires_broker_id(client):
