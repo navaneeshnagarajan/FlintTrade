@@ -125,6 +125,25 @@ def test_orderflow_invalid_tick_size(client):
     assert resp.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "tick_size",
+    ["nan", "inf", "-inf", "1e308", "1e-320"],
+    ids=["nan", "positive-infinity", "negative-infinity", "overflow-prone", "underflow-prone"],
+)
+def test_orderflow_rejects_non_finite_or_arithmetic_unsafe_tick_size_with_bounded_400(client, tick_size):
+    resp = client.get(
+        "/api/v1/data/orderflow",
+        query_string={"symbol": "NIFTY", "tick_size": tick_size},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {
+        "status": "error",
+        "message": "tick_size must be a finite arithmetic-safe number",
+    }
+    assert len(resp.data) < 256
+
+
 def test_orderflow_negative_interval(client):
     """400 when interval <= 0."""
     resp = client.get("/api/v1/data/orderflow?symbol=NIFTY&interval=-1")
@@ -261,6 +280,27 @@ def test_orderflow_cumulative_quotes_are_exposed_as_estimated_not_exact(app):
     assert data["provenance"] == "cumulative_quote_delta"
     assert {bucket["quality"] for bucket in data["buckets"]} == {"estimated"}
     assert {bucket["provenance"] for bucket in data["buckets"]} == {"cumulative_quote_delta"}
+
+
+def test_orderflow_exact_trade_tick_is_live_with_exact_source_freshness(app):
+    from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+    now = host_time.time()
+    aggregator = OrderFlowAggregator()
+    aggregator.add_tick("NIFTY", 100.0, 25, "BUY", exchange="NFO", timestamp=now)
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&exchange=NFO")
+
+    data = response.get_json()["data"]
+    assert response.status_code == 200
+    assert data["is_live"] is True
+    assert data["is_sample_data"] is False
+    assert data["quality"] == "exact"
+    assert data["provenance"] == "trade_tick"
+    assert data["freshness"]["last_tick_timestamp"] == now
+    assert data["freshness"]["provenance"] == "trade_tick"
 
 
 def test_orderflow_live_reports_unrepresentable_interval_and_tick_size_honestly(app):

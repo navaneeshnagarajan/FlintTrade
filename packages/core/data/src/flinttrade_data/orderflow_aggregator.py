@@ -65,6 +65,12 @@ DEFAULT_RESTORE_MAX_TICKS = 10_000
 MAX_RESTORE_TICKS = 100_000
 _MAX_COUNTER_EPOCHS = 8
 _MAX_PERSISTED_VOLUME = 2**63 - 1
+_MAX_SAFE_VOLUME = 2**53 - 1
+_MAX_SAFE_TICK_GRID_UNITS = float(2**53 - 1)
+_MAX_SYNTHETIC_TICK_SPAN = 4096.0
+_TICK_SIZE_REFERENCE_PRICE = 100_000.0
+ORDERFLOW_STATE_VERSION = 1
+_MAX_STATE_PRICE_LEVELS = 1_000_000
 
 # Attempt to import zoneinfo (3.9+) then fall back to pytz.
 try:
@@ -166,6 +172,48 @@ def _persisted_volume(value: Any) -> int | None:
     return volume if 0 <= volume <= _MAX_PERSISTED_VOLUME else None
 
 
+def _persisted_session(value: Any, timestamp: float) -> date | None:
+    """Parse an ISO date only when it agrees with the source timestamp."""
+    if not isinstance(value, str):
+        return None
+    try:
+        session = date.fromisoformat(value)
+        return session if session == _ist_session_date(timestamp) else None
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _exact_trade_volume(value: Any) -> int | None:
+    """Return an exactly represented, JSON-safe trade volume."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        volume = value
+    elif isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            return None
+        volume = int(value)
+    else:
+        return None
+    return volume if 0 <= volume <= _MAX_SAFE_VOLUME else None
+
+
+def is_arithmetic_safe_tick_size(value: Any) -> bool:
+    """Return whether a tick size is finite and safe for float grid arithmetic."""
+    if isinstance(value, bool):
+        return False
+    try:
+        tick_size = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    if not math.isfinite(tick_size) or tick_size <= 0:
+        return False
+    return (
+        math.isfinite(tick_size * _MAX_SYNTHETIC_TICK_SPAN)
+        and _TICK_SIZE_REFERENCE_PRICE / tick_size <= _MAX_SAFE_TICK_GRID_UNITS
+    )
+
+
 @dataclass
 class FootprintBucket:
     """Aggregated order-flow data for one time bin at one price level.
@@ -232,12 +280,14 @@ class _BinState:
             side: ``"BUY"`` or ``"SELL"``.
             volume: Volume to add (must be non-negative).
         """
+        current = self.levels.get(price_level, [0, 0])
+        side_index = 0 if side == "BUY" else 1
+        updated = current[side_index] + volume
+        if updated > _MAX_SAFE_VOLUME:
+            raise ValueError("volume accumulation exceeds the safe integer range")
         if price_level not in self.levels:
-            self.levels[price_level] = [0, 0]  # [buy, sell]
-        if side == "BUY":
-            self.levels[price_level][0] += volume
-        else:
-            self.levels[price_level][1] += volume
+            self.levels[price_level] = current
+        self.levels[price_level][side_index] = updated
         self.provenances.add(provenance)
 
     def to_buckets(self) -> list[FootprintBucket]:
@@ -319,10 +369,8 @@ class OrderFlowAggregator:
             raise ValueError(
                 f"time_bin_seconds must be positive, got {time_bin_seconds}"
             )
-        if tick_size <= 0:
-            raise ValueError(
-                f"tick_size must be positive, got {tick_size}"
-            )
+        if not is_arithmetic_safe_tick_size(tick_size):
+            raise ValueError("tick_size must be a finite arithmetic-safe number")
         if max_retained_sessions <= 0:
             raise ValueError(
                 f"max_retained_sessions must be positive, got {max_retained_sessions}"
@@ -335,7 +383,7 @@ class OrderFlowAggregator:
             raise ValueError(f"max_instruments must be positive, got {max_instruments}")
 
         self.time_bin_seconds = time_bin_seconds
-        self.tick_size = tick_size
+        self.tick_size = float(tick_size)
         self.max_retained_sessions = max_retained_sessions
         self.max_bins_per_session = max_bins_per_session or (
             (_SECONDS_PER_DAY + time_bin_seconds - 1) // time_bin_seconds + 1
@@ -359,6 +407,12 @@ class OrderFlowAggregator:
             _InstrumentIdentity, tuple[float, int, date, float]
         ] = {}
         self._last_side: dict[_InstrumentIdentity, Side] = {}
+        # Freshness describes returned footprint data, not transport activity.
+        # (session, source timestamp, provenance) advances only after a positive
+        # volume is successfully represented in a retained bucket.
+        self._last_data_tick: dict[
+            _InstrumentIdentity, tuple[date, float, DataProvenance]
+        ] = {}
         self._identity_recency: OrderedDict[_InstrumentIdentity, None] = OrderedDict()
         # feed_market_tick nests classification and recording under one state
         # transaction, so this must permit re-entry.
@@ -429,7 +483,11 @@ class OrderFlowAggregator:
             ts, self.time_bin_seconds, _MARKET_OPEN_DEFAULT
         )
         price_level = self._round_to_tick(price)
-        volume = max(0, int(volume))
+        exact_volume = _exact_trade_volume(volume)
+        if exact_volume is None:
+            raise ValueError("volume must be a non-negative safe integer")
+        if exact_volume == 0:
+            return bin_start
 
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
@@ -444,10 +502,11 @@ class OrderFlowAggregator:
 
             bin_state = symbol_state.get(bin_start)
             if bin_state is not None:
-                bin_state.add(price_level, side, volume, provenance)
+                bin_state.add(price_level, side, exact_volume, provenance)
+                self._record_data_tick_locked(identity, float(ts), provenance)
         logger.debug(
             "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d provenance=%s",
-            identity[0], identity[1], price_level, volume, side, bin_start, provenance,
+            identity[0], identity[1], price_level, exact_volume, side, bin_start, provenance,
         )
         return bin_start
 
@@ -709,16 +768,16 @@ class OrderFlowAggregator:
         exchange: str = "",
         now: float | None = None,
     ) -> dict[str, str | float | bool | None]:
-        """Return last-tick recency and IST-session freshness for an identity."""
+        """Return recency for the newest source event represented in returned data."""
         import time as _time
 
         now_timestamp = _time.time() if now is None else float(now)
         current_session = _ist_session_date(now_timestamp)
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
-            last_tick = self._last_tick.get(identity)
+            last_data_tick = self._last_data_tick.get(identity)
 
-        if last_tick is None:
+        if last_data_tick is None:
             return {
                 "state": "unavailable",
                 "is_fresh": False,
@@ -726,10 +785,10 @@ class OrderFlowAggregator:
                 "last_tick_session": None,
                 "current_session": current_session.isoformat(),
                 "age_seconds": None,
+                "provenance": None,
             }
 
-        last_timestamp = last_tick[3]
-        last_session = last_tick[2]
+        last_session, last_timestamp, provenance = last_data_tick
         age_seconds = now_timestamp - last_timestamp
         if last_session != current_session:
             state = "stale"
@@ -744,6 +803,212 @@ class OrderFlowAggregator:
             "last_tick_session": last_session.isoformat(),
             "current_session": current_session.isoformat(),
             "age_seconds": age_seconds,
+            "provenance": provenance,
+        }
+
+    def export_state(self) -> dict[str, Any]:
+        """Export a versioned, JSON-safe restart checkpoint.
+
+        The checkpoint includes retained buckets and their provenance together
+        with every cumulative-counter namespace needed to interpret a bounded
+        replay tail without manufacturing volume.
+        """
+        with self._lock:
+            identities: list[dict[str, Any]] = []
+            ordered_identities = list(self._identity_recency)
+            known_identities = (
+                set(self._state)
+                | set(self._last_tick)
+                | set(self._normalised_volume)
+                | set(self._counter_offsets)
+                | set(self._counter_high_watermarks)
+                | set(self._pending_volume_reset)
+                | set(self._last_side)
+                | set(self._last_data_tick)
+            )
+            ordered_identities.extend(sorted(known_identities - set(ordered_identities)))
+            for exchange, symbol in ordered_identities:
+                identity = (exchange, symbol)
+                bins = []
+                for bin_start, bin_state in sorted(self._state.get(identity, {}).items()):
+                    bins.append({
+                        "timestamp_bin": bin_start,
+                        "levels": [
+                            {
+                                "price_level": price_level,
+                                "buy_volume": volumes[0],
+                                "sell_volume": volumes[1],
+                            }
+                            for price_level, volumes in sorted(bin_state.levels.items())
+                        ],
+                        "provenances": sorted(bin_state.provenances),
+                    })
+
+                last_tick = self._last_tick.get(identity)
+                pending_reset = self._pending_volume_reset.get(identity)
+                last_data_tick = self._last_data_tick.get(identity)
+                offsets = self._counter_offsets.get(identity, ())
+                high_watermarks = self._counter_high_watermarks.get(identity, {})
+                identities.append({
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "bins": bins,
+                    "last_tick": (
+                        {
+                            "ltp": last_tick[0],
+                            "volume": last_tick[1],
+                            "session": last_tick[2].isoformat(),
+                            "timestamp": last_tick[3],
+                        }
+                        if last_tick is not None
+                        else None
+                    ),
+                    "normalised_volume": self._normalised_volume.get(identity),
+                    "counter_offsets": list(offsets),
+                    "counter_high_watermarks": [
+                        {"offset": offset, "volume": high_watermarks[offset]}
+                        for offset in offsets
+                        if offset in high_watermarks
+                    ],
+                    "pending_volume_reset": (
+                        {
+                            "ltp": pending_reset[0],
+                            "volume": pending_reset[1],
+                            "session": pending_reset[2].isoformat(),
+                            "timestamp": pending_reset[3],
+                        }
+                        if pending_reset is not None
+                        else None
+                    ),
+                    "last_side": self._last_side.get(identity),
+                    "last_data_tick": (
+                        {
+                            "session": last_data_tick[0].isoformat(),
+                            "timestamp": last_data_tick[1],
+                            "provenance": last_data_tick[2],
+                        }
+                        if last_data_tick is not None
+                        else None
+                    ),
+                })
+
+        return {
+            "version": ORDERFLOW_STATE_VERSION,
+            "config": self._checkpoint_config(),
+            "identities": identities,
+        }
+
+    def restore_state(
+        self,
+        checkpoint: Mapping[str, Any],
+        *,
+        now: float | datetime | None = None,
+    ) -> dict[str, int]:
+        """Atomically restore a checkpoint exported by :meth:`export_state`.
+
+        All structure, bounds, source timestamps, counter namespaces, and
+        represented-data freshness links are validated on a scratch instance
+        before the live state is replaced.
+        """
+        import time as _time
+
+        restore_timestamp = _time.time() if now is None else _persisted_timestamp(now)
+        if restore_timestamp is None:
+            raise ValueError("now must be a finite timestamp or datetime")
+        if not isinstance(checkpoint, Mapping):
+            raise ValueError("checkpoint must be a mapping")
+        if checkpoint.get("version") != ORDERFLOW_STATE_VERSION:
+            raise ValueError("unsupported order-flow checkpoint version")
+        if checkpoint.get("config") != self._checkpoint_config():
+            raise ValueError("checkpoint configuration does not match the aggregator")
+        identity_rows = checkpoint.get("identities")
+        if not isinstance(identity_rows, list):
+            raise ValueError("checkpoint identities must be a list")
+        if len(identity_rows) > self.max_instruments:
+            raise ValueError("checkpoint exceeds max_instruments")
+
+        scratch = OrderFlowAggregator(**self._checkpoint_config())
+        identities_seen: set[_InstrumentIdentity] = set()
+        bin_count = 0
+        price_level_count = 0
+        for identity_row in identity_rows:
+            identity, identity_bins, identity_levels = scratch._restore_checkpoint_identity(
+                identity_row,
+                now=restore_timestamp,
+            )
+            if identity in identities_seen:
+                raise ValueError("checkpoint contains a duplicate identity")
+            identities_seen.add(identity)
+            scratch._identity_recency[identity] = None
+            bin_count += identity_bins
+            price_level_count += identity_levels
+            if price_level_count > _MAX_STATE_PRICE_LEVELS:
+                raise ValueError("checkpoint contains too many price levels")
+
+        with self._lock:
+            self._replace_all_state_locked(scratch)
+        return {
+            "identities": len(identities_seen),
+            "bins": bin_count,
+            "price_levels": price_level_count,
+        }
+
+    def replay_current_session_tail(
+        self,
+        ticks: Iterable[Mapping[str, Any]],
+        *,
+        now: float | datetime | None = None,
+        max_ticks: int = DEFAULT_RESTORE_MAX_TICKS,
+        history_complete: bool = False,
+    ) -> dict[str, int]:
+        """Atomically apply a bounded persisted tail after ``restore_state``.
+
+        Source rows older than the checkpoint watermark are naturally ignored
+        by :meth:`feed_market_tick`. A tail filling the entire caller-provided
+        bound is rejected unless ``history_complete`` attests that the caller
+        queried beyond the bound and proved no omitted rows remain.
+        """
+        if not isinstance(history_complete, bool):
+            raise ValueError("history_complete must be a boolean")
+        bounded_ticks, prepared = self._prepare_replay_ticks(
+            ticks,
+            now=now,
+            max_ticks=max_ticks,
+            reject_full_window=not history_complete,
+        )
+        identities = {
+            _instrument_identity(symbol, exchange)
+            for _, _, symbol, exchange, _, _, _, _ in prepared
+        }
+        if not prepared:
+            return {
+                "input_ticks": len(bounded_ticks),
+                "restored_ticks": 0,
+                "skipped_ticks": len(bounded_ticks),
+                "identities": 0,
+            }
+
+        with self._lock:
+            checkpoint = self.export_state()
+            scratch = OrderFlowAggregator(**self._checkpoint_config())
+            scratch.restore_state(checkpoint, now=now)
+            for timestamp, _, symbol, exchange, ltp, volume, bid, ask in prepared:
+                scratch.feed_market_tick(
+                    symbol,
+                    ltp,
+                    volume,
+                    exchange=exchange,
+                    bid=bid,
+                    ask=ask,
+                    timestamp=timestamp,
+                )
+            self._replace_all_state_locked(scratch)
+
+        return {
+            "input_ticks": len(bounded_ticks),
+            "restored_ticks": len(prepared),
+            "skipped_ticks": len(bounded_ticks) - len(prepared),
+            "identities": len(identities),
         }
 
     def restore_current_session(
@@ -752,74 +1017,32 @@ class OrderFlowAggregator:
         *,
         now: float | datetime | None = None,
         max_ticks: int = DEFAULT_RESTORE_MAX_TICKS,
+        history_complete: bool = False,
     ) -> dict[str, int]:
         """Replace represented identities with replayed current-session ticks.
 
         Persisted rows must use the ``StorageManager.get_ticks`` field names.
         Naive datetimes are interpreted as UTC, matching the DuckDB schema.
-        Input is materialised only up to ``max_ticks + 1``; overflow raises
-        before any live state changes. Invalid and non-current-session rows are
-        skipped. Replay occurs on a scratch aggregator, then swaps into this
-        instance under one lock so a failed replay cannot leave partial state.
+        Input is materialised only up to ``max_ticks + 1``. A full or
+        overflowing window fails closed because the caller has not proved that
+        the session prefix (including any counter resets) is present. Invalid
+        and non-current-session rows are skipped. Replay occurs on a scratch
+        aggregator, then swaps into this instance under one lock so a failed
+        replay cannot leave partial state.
 
         Call this before starting live ingestion. Repeating the same restore is
         idempotent because represented identities are replaced, not appended.
+        Set ``history_complete`` only after querying beyond ``max_ticks`` and
+        proving that the supplied session prefix is complete.
         """
-        if isinstance(max_ticks, bool) or not isinstance(max_ticks, int):
-            raise ValueError("max_ticks must be an integer")
-        if not 0 < max_ticks <= MAX_RESTORE_TICKS:
-            raise ValueError(
-                f"max_ticks must be between 1 and {MAX_RESTORE_TICKS}, got {max_ticks}"
-            )
-
-        bounded_ticks = list(islice(ticks, max_ticks + 1))
-        if len(bounded_ticks) > max_ticks:
-            raise ValueError(f"ticks exceeds max_ticks={max_ticks}; query persisted ticks with a matching limit")
-
-        import time as _time
-
-        restore_timestamp = _time.time() if now is None else _persisted_timestamp(now)
-        if restore_timestamp is None:
-            raise ValueError("now must be a finite timestamp or datetime")
-        current_session = _ist_session_date(restore_timestamp)
-
-        prepared: list[tuple[float, int, str, str, float, int, float | None, float | None]] = []
-        for index, row in enumerate(bounded_ticks):
-            if not isinstance(row, Mapping):
-                continue
-            timestamp = _persisted_timestamp(row.get("ts"))
-            symbol_value = row.get("symbol")
-            exchange_value = row.get("exchange")
-            ltp = _persisted_number(row.get("ltp"), positive=True)
-            volume = _persisted_volume(row.get("volume"))
-            if (
-                timestamp is None
-                or not isinstance(symbol_value, str)
-                or not symbol_value.strip()
-                or not isinstance(exchange_value, str)
-                or not exchange_value.strip()
-                or ltp is None
-                or volume is None
-                or not math.isfinite(ltp / self.tick_size)
-            ):
-                continue
-            try:
-                if _ist_session_date(timestamp) != current_session:
-                    continue
-            except (OSError, OverflowError, ValueError):
-                continue
-            prepared.append(
-                (
-                    timestamp,
-                    index,
-                    symbol_value,
-                    exchange_value,
-                    ltp,
-                    volume,
-                    _persisted_number(row.get("bid"), positive=True),
-                    _persisted_number(row.get("ask"), positive=True),
-                )
-            )
+        if not isinstance(history_complete, bool):
+            raise ValueError("history_complete must be a boolean")
+        bounded_ticks, prepared = self._prepare_replay_ticks(
+            ticks,
+            now=now,
+            max_ticks=max_ticks,
+            reject_full_window=not history_complete,
+        )
 
         identities = {
             _instrument_identity(symbol, exchange)
@@ -861,6 +1084,7 @@ class OrderFlowAggregator:
                         (self._counter_high_watermarks, scratch._counter_high_watermarks),
                         (self._pending_volume_reset, scratch._pending_volume_reset),
                         (self._last_side, scratch._last_side),
+                        (self._last_data_tick, scratch._last_data_tick),
                     ):
                         if identity in source:
                             target[identity] = source[identity]
@@ -888,6 +1112,7 @@ class OrderFlowAggregator:
                 | set(self._counter_high_watermarks)
                 | set(self._pending_volume_reset)
                 | set(self._last_side)
+                | set(self._last_data_tick)
                 | set(self._identity_recency)
             )
             for identity in known - allowed:
@@ -962,6 +1187,7 @@ class OrderFlowAggregator:
                 self._counter_high_watermarks.clear()
                 self._pending_volume_reset.clear()
                 self._last_side.clear()
+                self._last_data_tick.clear()
                 self._identity_recency.clear()
                 return
 
@@ -1123,6 +1349,312 @@ class OrderFlowAggregator:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _checkpoint_config(self) -> dict[str, int | float]:
+        """Return constructor settings that define checkpoint compatibility."""
+        return {
+            "time_bin_seconds": self.time_bin_seconds,
+            "tick_size": self.tick_size,
+            "max_retained_sessions": self.max_retained_sessions,
+            "max_bins_per_session": self.max_bins_per_session,
+            "max_instruments": self.max_instruments,
+        }
+
+    def _restore_checkpoint_identity(
+        self,
+        row: Any,
+        *,
+        now: float,
+    ) -> tuple[_InstrumentIdentity, int, int]:
+        """Validate and load one identity into a scratch aggregator."""
+        if not isinstance(row, Mapping):
+            raise ValueError("checkpoint identity must be a mapping")
+        exchange = row.get("exchange")
+        symbol = row.get("symbol")
+        if not isinstance(exchange, str) or not exchange.strip():
+            raise ValueError("checkpoint identity exchange is invalid")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("checkpoint identity symbol is invalid")
+        identity = _instrument_identity(symbol, exchange)
+
+        bin_rows = row.get("bins")
+        if not isinstance(bin_rows, list):
+            raise ValueError("checkpoint bins must be a list")
+        max_bins = self.max_retained_sessions * self.max_bins_per_session
+        if len(bin_rows) > max_bins:
+            raise ValueError("checkpoint identity exceeds retained bin bounds")
+
+        symbol_state: dict[int, _BinState] = {}
+        bins_by_session: dict[date, int] = {}
+        positive_bins: set[int] = set()
+        price_level_count = 0
+        for bin_row in bin_rows:
+            if not isinstance(bin_row, Mapping):
+                raise ValueError("checkpoint bin must be a mapping")
+            timestamp = _persisted_timestamp(bin_row.get("timestamp_bin"))
+            if timestamp is None or not timestamp.is_integer():
+                raise ValueError("checkpoint bin timestamp is invalid")
+            if timestamp > now + MAX_SOURCE_CLOCK_SKEW_SECONDS:
+                raise ValueError("checkpoint contains a future source timestamp")
+            bin_start = int(timestamp)
+            try:
+                if self.calculate_aligned_time_bin(bin_start, self.time_bin_seconds) != bin_start:
+                    raise ValueError("checkpoint bin is not aligned to the aggregator interval")
+                session = _ist_session_date(bin_start)
+            except (OSError, OverflowError, ValueError) as exc:
+                raise ValueError("checkpoint bin timestamp is invalid") from exc
+            if bin_start in symbol_state:
+                raise ValueError("checkpoint contains a duplicate bin")
+            bins_by_session[session] = bins_by_session.get(session, 0) + 1
+            if bins_by_session[session] > self.max_bins_per_session:
+                raise ValueError("checkpoint session exceeds retained bin bounds")
+            if len(bins_by_session) > self.max_retained_sessions:
+                raise ValueError("checkpoint exceeds retained session bounds")
+
+            provenance_rows = bin_row.get("provenances")
+            if not isinstance(provenance_rows, list) or any(
+                provenance not in {"trade_tick", "cumulative_quote_delta", "mixed"}
+                for provenance in provenance_rows
+            ):
+                raise ValueError("checkpoint bin provenance is invalid")
+            provenances = set(provenance_rows)
+            level_rows = bin_row.get("levels")
+            if not isinstance(level_rows, list):
+                raise ValueError("checkpoint levels must be a list")
+            if level_rows and not provenances:
+                raise ValueError("checkpoint levels are missing provenance")
+
+            levels: dict[float, list[int]] = {}
+            for level_row in level_rows:
+                if not isinstance(level_row, Mapping):
+                    raise ValueError("checkpoint price level must be a mapping")
+                price_level = _persisted_number(level_row.get("price_level"), positive=True)
+                buy_volume = _exact_trade_volume(level_row.get("buy_volume"))
+                sell_volume = _exact_trade_volume(level_row.get("sell_volume"))
+                if (
+                    price_level is None
+                    or buy_volume is None
+                    or sell_volume is None
+                    or not math.isfinite(price_level / self.tick_size)
+                    or self._round_to_tick(price_level) != price_level
+                ):
+                    raise ValueError("checkpoint price level is invalid")
+                if price_level in levels:
+                    raise ValueError("checkpoint contains a duplicate price level")
+                levels[price_level] = [buy_volume, sell_volume]
+                if buy_volume > 0 or sell_volume > 0:
+                    positive_bins.add(bin_start)
+            price_level_count += len(levels)
+            if price_level_count > _MAX_STATE_PRICE_LEVELS:
+                raise ValueError("checkpoint contains too many price levels")
+            symbol_state[bin_start] = _BinState(
+                bin_start=bin_start,
+                levels=levels,
+                provenances=provenances,
+            )
+
+        if symbol_state:
+            self._state[identity] = symbol_state
+
+        last_tick_row = row.get("last_tick")
+        normalised_volume = row.get("normalised_volume")
+        offset_rows = row.get("counter_offsets")
+        high_watermark_rows = row.get("counter_high_watermarks")
+        if last_tick_row is None:
+            if normalised_volume is not None or offset_rows or high_watermark_rows:
+                raise ValueError("checkpoint counter state is incomplete")
+        else:
+            if not isinstance(last_tick_row, Mapping):
+                raise ValueError("checkpoint last_tick must be a mapping")
+            ltp = _persisted_number(last_tick_row.get("ltp"), positive=True)
+            raw_volume = _persisted_volume(last_tick_row.get("volume"))
+            timestamp = _persisted_timestamp(last_tick_row.get("timestamp"))
+            if ltp is None or raw_volume is None or timestamp is None:
+                raise ValueError("checkpoint last_tick is invalid")
+            if timestamp > now + MAX_SOURCE_CLOCK_SKEW_SECONDS:
+                raise ValueError("checkpoint contains a future source timestamp")
+            session = _persisted_session(last_tick_row.get("session"), timestamp)
+            normalised = _persisted_volume(normalised_volume)
+            if session is None or normalised is None or normalised < raw_volume:
+                raise ValueError("checkpoint normalised counter is invalid")
+            if not isinstance(offset_rows, list) or not 0 < len(offset_rows) <= _MAX_COUNTER_EPOCHS:
+                raise ValueError("checkpoint counter offsets are invalid")
+            offsets = tuple(_persisted_volume(offset) for offset in offset_rows)
+            if any(offset is None for offset in offsets) or len(set(offsets)) != len(offsets):
+                raise ValueError("checkpoint counter offsets are invalid")
+            parsed_offsets = tuple(int(offset) for offset in offsets if offset is not None)
+            if not isinstance(high_watermark_rows, list):
+                raise ValueError("checkpoint counter high-water marks are invalid")
+            high_watermarks: dict[int, int] = {}
+            for high_watermark_row in high_watermark_rows:
+                if not isinstance(high_watermark_row, Mapping):
+                    raise ValueError("checkpoint counter high-water mark is invalid")
+                offset = _persisted_volume(high_watermark_row.get("offset"))
+                volume = _persisted_volume(high_watermark_row.get("volume"))
+                if offset is None or volume is None or offset in high_watermarks:
+                    raise ValueError("checkpoint counter high-water mark is invalid")
+                high_watermarks[offset] = volume
+            if set(high_watermarks) != set(parsed_offsets):
+                raise ValueError("checkpoint counter high-water marks do not match offsets")
+            self._last_tick[identity] = (ltp, raw_volume, session, timestamp)
+            self._normalised_volume[identity] = normalised
+            self._counter_offsets[identity] = parsed_offsets
+            self._counter_high_watermarks[identity] = high_watermarks
+
+        pending_row = row.get("pending_volume_reset")
+        if pending_row is not None:
+            if last_tick_row is None or not isinstance(pending_row, Mapping):
+                raise ValueError("checkpoint pending reset is invalid")
+            pending_ltp = _persisted_number(pending_row.get("ltp"), positive=True)
+            pending_volume = _persisted_volume(pending_row.get("volume"))
+            pending_timestamp = _persisted_timestamp(pending_row.get("timestamp"))
+            if pending_ltp is None or pending_volume is None or pending_timestamp is None:
+                raise ValueError("checkpoint pending reset is invalid")
+            pending_session = _persisted_session(pending_row.get("session"), pending_timestamp)
+            last_timestamp = self._last_tick[identity][3]
+            if (
+                pending_session is None
+                or pending_timestamp < last_timestamp
+                or pending_timestamp > now + MAX_SOURCE_CLOCK_SKEW_SECONDS
+            ):
+                raise ValueError("checkpoint pending reset is invalid")
+            self._pending_volume_reset[identity] = (
+                pending_ltp,
+                pending_volume,
+                pending_session,
+                pending_timestamp,
+            )
+
+        last_side = row.get("last_side")
+        if last_side is not None:
+            if last_side not in {"BUY", "SELL"} or last_tick_row is None:
+                raise ValueError("checkpoint last side is invalid")
+            self._last_side[identity] = last_side
+
+        last_data_row = row.get("last_data_tick")
+        if last_data_row is not None:
+            if not isinstance(last_data_row, Mapping):
+                raise ValueError("checkpoint last data tick is invalid")
+            data_timestamp = _persisted_timestamp(last_data_row.get("timestamp"))
+            data_provenance = last_data_row.get("provenance")
+            if (
+                data_timestamp is None
+                or data_timestamp > now + MAX_SOURCE_CLOCK_SKEW_SECONDS
+                or data_provenance not in {"trade_tick", "cumulative_quote_delta", "mixed"}
+            ):
+                raise ValueError("checkpoint last data tick is invalid")
+            data_session = _persisted_session(last_data_row.get("session"), data_timestamp)
+            try:
+                data_bin = self.calculate_aligned_time_bin(data_timestamp, self.time_bin_seconds)
+            except (OSError, OverflowError, TypeError, ValueError) as exc:
+                raise ValueError("checkpoint last data tick is invalid") from exc
+            bin_state = symbol_state.get(data_bin)
+            if data_session is None or data_bin not in positive_bins or bin_state is None:
+                raise ValueError("checkpoint freshness is not linked to returned data")
+            if data_provenance != "mixed" and data_provenance not in bin_state.provenances:
+                raise ValueError("checkpoint freshness provenance is inconsistent")
+            self._last_data_tick[identity] = (
+                data_session,
+                data_timestamp,
+                data_provenance,
+            )
+
+        return identity, len(symbol_state), price_level_count
+
+    def _prepare_replay_ticks(
+        self,
+        ticks: Iterable[Mapping[str, Any]],
+        *,
+        now: float | datetime | None,
+        max_ticks: int,
+        reject_full_window: bool,
+    ) -> tuple[
+        list[Mapping[str, Any]],
+        list[tuple[float, int, str, str, float, int, float | None, float | None]],
+    ]:
+        """Validate, bound, and source-time-sort persisted replay rows."""
+        if isinstance(max_ticks, bool) or not isinstance(max_ticks, int):
+            raise ValueError("max_ticks must be an integer")
+        if not 0 < max_ticks <= MAX_RESTORE_TICKS:
+            raise ValueError(
+                f"max_ticks must be between 1 and {MAX_RESTORE_TICKS}, got {max_ticks}"
+            )
+        bounded_ticks = list(islice(ticks, max_ticks + 1))
+        if len(bounded_ticks) > max_ticks:
+            raise ValueError(
+                f"ticks exceeds max_ticks={max_ticks}; query persisted ticks with a matching limit"
+            )
+        if reject_full_window and len(bounded_ticks) == max_ticks:
+            raise ValueError(
+                "persisted tick window is potentially truncated; restore a checkpoint or prove a complete prefix"
+            )
+
+        import time as _time
+
+        restore_timestamp = _time.time() if now is None else _persisted_timestamp(now)
+        if restore_timestamp is None:
+            raise ValueError("now must be a finite timestamp or datetime")
+        current_session = _ist_session_date(restore_timestamp)
+        prepared: list[tuple[float, int, str, str, float, int, float | None, float | None]] = []
+        for index, row in enumerate(bounded_ticks):
+            if not isinstance(row, Mapping):
+                continue
+            timestamp = _persisted_timestamp(row.get("ts"))
+            symbol = row.get("symbol")
+            exchange = row.get("exchange")
+            ltp = _persisted_number(row.get("ltp"), positive=True)
+            volume = _persisted_volume(row.get("volume"))
+            if (
+                timestamp is None
+                or timestamp > restore_timestamp + MAX_SOURCE_CLOCK_SKEW_SECONDS
+                or row.get("timestamp_provenance") != "source"
+                or not isinstance(symbol, str)
+                or not symbol.strip()
+                or not isinstance(exchange, str)
+                or not exchange.strip()
+                or ltp is None
+                or volume is None
+                or not math.isfinite(ltp / self.tick_size)
+            ):
+                continue
+            try:
+                if _ist_session_date(timestamp) != current_session:
+                    continue
+            except (OSError, OverflowError, ValueError):
+                continue
+            prepared.append((
+                timestamp,
+                index,
+                symbol,
+                exchange,
+                ltp,
+                volume,
+                _persisted_number(row.get("bid"), positive=True),
+                _persisted_number(row.get("ask"), positive=True),
+            ))
+
+        identities = {
+            _instrument_identity(symbol, exchange)
+            for _, _, symbol, exchange, _, _, _, _ in prepared
+        }
+        if len(identities) > self.max_instruments:
+            raise ValueError(
+                f"restore contains {len(identities)} identities, exceeding max_instruments={self.max_instruments}"
+            )
+        prepared.sort(key=lambda item: (item[0], item[1]))
+        return bounded_ticks, prepared
+
+    def _replace_all_state_locked(self, source: OrderFlowAggregator) -> None:
+        """Replace every mutable state map from a validated scratch instance."""
+        self._state = source._state
+        self._last_tick = source._last_tick
+        self._normalised_volume = source._normalised_volume
+        self._counter_offsets = source._counter_offsets
+        self._counter_high_watermarks = source._counter_high_watermarks
+        self._pending_volume_reset = source._pending_volume_reset
+        self._last_side = source._last_side
+        self._last_data_tick = source._last_data_tick
+        self._identity_recency = source._identity_recency
+
     def _drop_identity_locked(self, identity: _InstrumentIdentity) -> None:
         """Remove one identity from every state map while holding ``_lock``."""
         self._state.pop(identity, None)
@@ -1132,7 +1664,23 @@ class OrderFlowAggregator:
         self._counter_high_watermarks.pop(identity, None)
         self._pending_volume_reset.pop(identity, None)
         self._last_side.pop(identity, None)
+        self._last_data_tick.pop(identity, None)
         self._identity_recency.pop(identity, None)
+
+    def _record_data_tick_locked(
+        self,
+        identity: _InstrumentIdentity,
+        timestamp: float,
+        provenance: DataProvenance,
+    ) -> None:
+        """Advance one identity's represented-data clock while holding ``_lock``."""
+        session = _ist_session_date(timestamp)
+        previous = self._last_data_tick.get(identity)
+        if previous is not None and timestamp < previous[1]:
+            return
+        if previous is not None and timestamp == previous[1] and previous[2] != provenance:
+            provenance = "mixed"
+        self._last_data_tick[identity] = (session, timestamp, provenance)
 
     def _touch_identity_locked(self, identity: _InstrumentIdentity) -> None:
         """Mark one identity as recent and enforce the global LRU bound."""
@@ -1147,6 +1695,7 @@ class OrderFlowAggregator:
             self._counter_high_watermarks.pop(oldest, None)
             self._pending_volume_reset.pop(oldest, None)
             self._last_side.pop(oldest, None)
+            self._last_data_tick.pop(oldest, None)
 
     def _evict_retained_state_locked(self, symbol_state: dict[int, _BinState]) -> None:
         """Bound one instrument's bins by newest IST sessions and per-session bins."""

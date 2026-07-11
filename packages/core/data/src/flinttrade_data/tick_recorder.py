@@ -191,7 +191,7 @@ def _frame_timestamp(
     if candidate is _MISSING_TIMESTAMP and payload is not frame:
         candidate = frame.get("timestamp", _MISSING_TIMESTAMP)
     if candidate is _MISSING_TIMESTAMP:
-        return received_at, None
+        return None, "invalid"
 
     parsed = _normalise_frame_timestamp(candidate)
     if parsed is None:
@@ -920,6 +920,7 @@ class TickRecorder:
             _bigint_or_none(payload.get("oi")),
             _finite_float_or_none(payload.get("prev_close")),
             depth_json,
+            "source",
         )
         with self._state_lock:
             self._buffer.append(row)

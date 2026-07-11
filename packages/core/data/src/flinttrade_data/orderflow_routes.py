@@ -13,11 +13,11 @@ Query parameters:
     bins      (int, optional):  Number of recent bins to return.  Default ``50``.
     tick_size (float, optional): Price-level granularity.  Default ``0.05``.
 
-The response includes ``is_live: true`` only when retained buckets have a fresh
-current-session source tick. ``quality`` and ``provenance`` distinguish exact
-trade ticks, estimated cumulative-quote deltas, and synthetic samples. When no
-retained buckets exist, ``is_sample_data`` is true and ``freshness`` separately
-preserves the underlying feed state.
+The response includes ``is_live: true`` only when retained buckets contain a
+fresh current-session source event that contributed positive volume. ``quality``
+and ``provenance`` distinguish exact trade ticks, estimated cumulative-quote
+deltas, and synthetic samples. When no retained buckets exist,
+``is_sample_data`` is true and freshness fails closed as unavailable.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, jsonify, request
 
-from .orderflow_aggregator import OrderFlowAggregator
+from .orderflow_aggregator import OrderFlowAggregator, is_arithmetic_safe_tick_size
 
 logger = logging.getLogger("flinttrade.data.orderflow_routes")
 _IST = ZoneInfo("Asia/Kolkata")
@@ -202,6 +202,7 @@ def _unavailable_market_freshness() -> dict[str, Any]:
         "last_tick_session": None,
         "current_session": datetime.now(tz=_IST).date().isoformat(),
         "age_seconds": None,
+        "provenance": None,
     }
 
 
@@ -230,6 +231,11 @@ def _market_freshness(aggregator: Any, symbol: str, exchange: str) -> dict[str, 
         "last_tick_session": candidate.get("last_tick_session"),
         "current_session": candidate.get("current_session"),
         "age_seconds": candidate.get("age_seconds"),
+        "provenance": (
+            candidate.get("provenance")
+            if candidate.get("provenance") in {"trade_tick", "cumulative_quote_delta", "mixed"}
+            else None
+        ),
     }
 
 
@@ -396,8 +402,11 @@ def orderflow_endpoint() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "interval must be positive"}), 400
     if bins <= 0:
         return jsonify({"status": "error", "message": "bins must be positive"}), 400
-    if tick_size <= 0:
-        return jsonify({"status": "error", "message": "tick_size must be positive"}), 400
+    if not is_arithmetic_safe_tick_size(tick_size):
+        return jsonify({
+            "status": "error",
+            "message": "tick_size must be a finite arithmetic-safe number",
+        }), 400
 
     symbol_upper = symbol
     is_live = False

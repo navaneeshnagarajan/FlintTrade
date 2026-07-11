@@ -64,11 +64,13 @@ class TestStorageManager:
             volume=1000,
             bid=2499.0,
             ask=2501.0,
+            timestamp_provenance="source",
         )
         ticks = storage.get_ticks("RELIANCE", "NSE", "2026-03-16", "2026-03-16")
         assert len(ticks) == 1
         assert ticks[0]["symbol"] == "RELIANCE"
         assert ticks[0]["ltp"] == 2500.0
+        assert ticks[0]["timestamp_provenance"] == "source"
         storage.close()
 
     def test_insert_ticks_batch(self):
@@ -82,6 +84,7 @@ class TestStorageManager:
         storage.insert_ticks_batch(rows)
         ticks = storage.get_ticks_by_date("2026-03-16")
         assert len(ticks) == 3
+        assert {tick["timestamp_provenance"] for tick in ticks} == {"unknown"}
         storage.close()
 
     def test_empty_batch_does_nothing(self):
@@ -223,7 +226,14 @@ class TestStorageManager:
 
         storage = StorageManager(str(db_path))
         storage.initialise()
-        storage.insert_tick(timestamp, "RELIANCE", "NSE", "ltp", ltp=2502.0)
+        storage.insert_tick(
+            timestamp,
+            "RELIANCE",
+            "NSE",
+            "ltp",
+            ltp=2502.0,
+            timestamp_provenance="source",
+        )
 
         columns = {
             row[1]: row
@@ -232,7 +242,9 @@ class TestStorageManager:
         ticks = storage.get_ticks("RELIANCE", "NSE", "2026-03-16", "2026-03-16", limit=2)
 
         assert columns["ingest_seq"][3] is True
+        assert columns["timestamp_provenance"][3] is True
         assert [tick["ltp"] for tick in ticks] == [2501.0, 2502.0]
+        assert [tick["timestamp_provenance"] for tick in ticks] == ["unknown", "source"]
         assert all("ingest_seq" not in tick for tick in ticks)
         storage.close()
 
@@ -1070,6 +1082,10 @@ class TestTradeLogger:
 class TestTickRecorder:
     """Test TickRecorder watchlist management and tick processing."""
 
+    @staticmethod
+    def _source_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
     def _make_recorder(self):
         from flinttrade_data.storage import StorageManager
         from flinttrade_data.tick_recorder import TickRecorder
@@ -1155,7 +1171,13 @@ class TestTickRecorder:
         recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
 
         recorder._process_tick(
-            {"exchange": " nse ", "symbol": " reliance ", "ltp": 2500.0, "volume": 100}
+            {
+                "exchange": " nse ",
+                "symbol": " reliance ",
+                "ltp": 2500.0,
+                "volume": 100,
+                "timestamp": self._source_timestamp(),
+            }
         )
 
         assert recorder._buffer[0][1:3] == ("RELIANCE", "NSE")
@@ -1318,6 +1340,7 @@ class TestTickRecorder:
             "ask": 2501.0,
             "oi": 1200,
             "prev_close": 2485.0,
+            "timestamp": self._source_timestamp(),
         }
         nested_recorder._process_tick(
             {
@@ -1378,6 +1401,7 @@ class TestTickRecorder:
         recorder._process_tick(frame)
 
         assert recorder._buffer[0][0] == expected
+        assert recorder._buffer[0][-1] == "source"
         sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000, expected.timestamp())
         orderflow.feed_market_tick.assert_called_once()
         assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == expected.timestamp()
@@ -1562,11 +1586,21 @@ class TestTickRecorder:
                 "timestamp": (received_at - timedelta(minutes=6)).isoformat(),
             }
         )
-        recorder._process_tick({"exchange": "NSE", "symbol": "TCS", "ltp": 3500.0})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "TCS",
+            "ltp": 3500.0,
+            "timestamp": received_at.isoformat(),
+        })
 
         assert "stale source timestamp" in recorder.status_snapshot()["source_timestamp_error"].lower()
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2501.0})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2501.0,
+            "timestamp": received_at.isoformat(),
+        })
 
         assert recorder.status_snapshot()["source_timestamp_error"] == ""
 
@@ -1691,22 +1725,23 @@ class TestTickRecorder:
         assert recorder.pending_tick_count == 0
         orderflow.feed_market_tick.assert_not_called()
 
-    def test_missing_frame_timestamp_uses_one_receipt_time(self):
+    def test_missing_frame_timestamp_is_rejected_without_receipt_time_substitution(self):
         from flinttrade_data.tick_recorder import TickRecorder
 
+        sink = MagicMock()
         orderflow = MagicMock()
-        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        recorder = TickRecorder(storage=MagicMock(), ltp_sink=sink, orderflow_aggregator=orderflow)
         self._allow(recorder, ("NSE", "RELIANCE"))
-        before = datetime.now(timezone.utc)
 
         recorder._process_tick(
             {"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000}
         )
 
-        after = datetime.now(timezone.utc)
-        stored_timestamp = recorder._buffer[0][0]
-        assert before <= stored_timestamp <= after
-        assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == stored_timestamp.timestamp()
+        assert recorder.tick_count == 0
+        assert recorder.pending_tick_count == 0
+        assert recorder.status_snapshot()["invalid_source_timestamp_rejections"] == 1
+        sink.assert_not_called()
+        orderflow.feed_market_tick.assert_not_called()
 
     def test_numeric_mode_three_persists_as_depth(self):
         _, recorder = self._make_recorder()
@@ -1718,6 +1753,7 @@ class TestTickRecorder:
                 "exchange": "NSE",
                 "symbol": "RELIANCE",
                 "mode": 3,
+                "timestamp": self._source_timestamp(),
                 "data": {"ltp": 2500.0},
             }
         )
@@ -1733,6 +1769,7 @@ class TestTickRecorder:
                 "type": "market_data",
                 "exchange": "NSE",
                 "symbol": "RELIANCE",
+                "timestamp": self._source_timestamp(),
                 "data": {
                     "ltp": 2500.0,
                     "volume": 1000,
@@ -1788,6 +1825,7 @@ class TestTickRecorder:
                 "symbol": "RELIANCE",
                 "ltp": 2500.0,
                 "volume": 1000,
+                "timestamp": self._source_timestamp(),
                 **aliases,
             }
         )
@@ -1806,7 +1844,13 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=storage, ltp_sink=sink)
         self._allow(recorder, ("NSE", "RELIANCE"))
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
 
         assert len(recorder._buffer) == 1
         stored_timestamp = recorder._buffer[0][0]
@@ -1823,7 +1867,13 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=MagicMock(), ltp_sink=legacy_sink)
         self._allow(recorder, ("NSE", "RELIANCE"))
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
 
         assert calls == [("NSE", "RELIANCE", 2500.0, 1000)]
 
@@ -1850,7 +1900,13 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=storage, ltp_sink=sink)
         self._allow(recorder, ("NSE", "RELIANCE"))
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": ltp, "volume": 1000})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": ltp,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
 
         sink.assert_not_called()
 
@@ -1877,6 +1933,7 @@ class TestTickRecorder:
                 "symbol": "RELIANCE",
                 "ltp": ltp,
                 "volume": 1000,
+                "timestamp": self._source_timestamp(),
             }
         )
 
@@ -1897,9 +1954,27 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=aggregator)
         recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": ltp, "volume": 5000})
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2501.0, "volume": 1100})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": ltp,
+            "volume": 5000,
+            "timestamp": self._source_timestamp(),
+        })
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2501.0,
+            "volume": 1100,
+            "timestamp": self._source_timestamp(),
+        })
 
         buckets = aggregator.get_footprint("RELIANCE", exchange="NSE")
         assert sum(bucket.total_volume for bucket in buckets) == 100
@@ -1921,9 +1996,16 @@ class TestTickRecorder:
                 "high": float("inf"),
                 "volume": 10**400,
                 "oi": "not-an-integer",
+                "timestamp": self._source_timestamp(),
             }
         )
-        recorder._process_tick({"exchange": "NSE", "symbol": "TCS", "ltp": 3500.0, "volume": 12})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "TCS",
+            "ltp": 3500.0,
+            "volume": 12,
+            "timestamp": self._source_timestamp(),
+        })
 
         malformed = recorder._buffer[0]
         assert malformed[4] is None
@@ -1943,9 +2025,27 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=aggregator)
         recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2499.0, "volume": -100})
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2501.0, "volume": 1100})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2499.0,
+            "volume": -100,
+            "timestamp": self._source_timestamp(),
+        })
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2501.0,
+            "volume": 1100,
+            "timestamp": self._source_timestamp(),
+        })
 
         assert recorder._buffer[0][9] is None
         buckets = aggregator.get_footprint("RELIANCE", exchange="NSE")
@@ -1962,7 +2062,13 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=storage, ltp_sink=sink)
         self._allow(recorder, ("NSE", "RELIANCE"))
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": volume})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": volume,
+            "timestamp": self._source_timestamp(),
+        })
 
         stored_timestamp = recorder._buffer[0][0]
         sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 0, stored_timestamp.timestamp())
@@ -1981,7 +2087,13 @@ class TestTickRecorder:
         self._allow(recorder, ("NSE", "RELIANCE"))
 
         recorder._process_tick(
-            {"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": volume}
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "volume": volume,
+                "timestamp": self._source_timestamp(),
+            }
         )
 
         stored_timestamp = recorder._buffer[0][0]
@@ -2001,7 +2113,13 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=storage, ltp_sink=failing_sink)
         self._allow(recorder, ("NSE", "RELIANCE"))
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
 
         assert recorder.tick_count == 1
         assert len(recorder._buffer) == 1
@@ -2018,7 +2136,12 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=MagicMock(), api_key=api_key, ltp_sink=failing_sink)
         self._allow(recorder, ("NSE", "RELIANCE"))
 
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "timestamp": self._source_timestamp(),
+        })
 
         assert api_key not in caplog.text
         assert "[redacted]" in caplog.text
@@ -2050,7 +2173,12 @@ class TestTickRecorder:
 
         async def frames():
             yield json.dumps([api_key])
-            yield json.dumps({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+            yield json.dumps({
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "timestamp": self._source_timestamp(),
+            })
 
         recorder = TickRecorder(storage=MagicMock(), api_key=api_key)
         self._allow(recorder, ("NSE", "RELIANCE"))
@@ -2070,7 +2198,12 @@ class TestTickRecorder:
 
         async def frames():
             yield b"\xffconfigured-test-key"
-            yield json.dumps({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+            yield json.dumps({
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "timestamp": self._source_timestamp(),
+            })
 
         recorder = TickRecorder(storage=MagicMock(), api_key=api_key)
         self._allow(recorder, ("NSE", "RELIANCE"))
@@ -2369,7 +2502,12 @@ class TestTickRecorder:
                     ],
                 }
             )
-            yield json.dumps({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+            yield json.dumps({
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "timestamp": self._source_timestamp(),
+            })
 
         recorder = TickRecorder(storage=MagicMock())
         self._allow(recorder, ("NSE", "RELIANCE"))
@@ -2606,7 +2744,13 @@ class TestTickRecorder:
                 if not self.sent_tick:
                     self.sent_tick = True
                     return json.dumps(
-                        {"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000}
+                        {
+                            "exchange": "NSE",
+                            "symbol": "RELIANCE",
+                            "ltp": 2500.0,
+                            "volume": 1000,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
                     )
                 await asyncio.Future()
 
@@ -2643,7 +2787,13 @@ class TestTickRecorder:
             reconnect_delay=1.0,
         )
         recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
         monkeypatch.setattr(module.websockets, "connect", lambda _url: (_ for _ in ()).throw(OSError("offline")))
 
         task = asyncio.create_task(recorder.run())
@@ -2706,7 +2856,12 @@ class TestTickRecorder:
         storage = MagicMock()
         recorder = TickRecorder(storage=storage, api_key="configured-test-key")
         self._allow(recorder, ("NSE", "RELIANCE"))
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "timestamp": self._source_timestamp(),
+        })
         monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
 
         task = asyncio.create_task(recorder.run())
@@ -2749,7 +2904,12 @@ class TestTickRecorder:
         storage.insert_ticks_batch.side_effect = [RuntimeError("duckdb locked"), None]
         recorder = TickRecorder(storage=storage, api_key="configured-test-key")
         self._allow(recorder, ("NSE", "RELIANCE"))
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "timestamp": self._source_timestamp(),
+        })
         recorder._flush()
         monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
 
@@ -2793,7 +2953,12 @@ class TestTickRecorder:
         storage.insert_ticks_batch.side_effect = RuntimeError("disk full")
         recorder = TickRecorder(storage=storage)
         self._allow(recorder, ("NSE", "RELIANCE"))
-        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+        recorder._process_tick({
+            "exchange": "NSE",
+            "symbol": "RELIANCE",
+            "ltp": 2500.0,
+            "timestamp": self._source_timestamp(),
+        })
         monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
 
         with pytest.raises(RuntimeError, match="Tick persistence failed"):
@@ -2978,7 +3143,12 @@ class TestTickRecorder:
     def test_process_tick_ltp(self):
         storage, recorder = self._make_recorder()
         self._allow(recorder, ("NSE", "RELIANCE"))
-        recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2500.0})
+        recorder._process_tick({
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "ltp": 2500.0,
+            "timestamp": self._source_timestamp(),
+        })
         assert recorder.tick_count == 1
         assert len(recorder._buffer) == 1
 
@@ -2993,6 +3163,7 @@ class TestTickRecorder:
                 "bid": 2499.0,
                 "ask": 2501.0,
                 "volume": 1000,
+                "timestamp": self._source_timestamp(),
             }
         )
         assert recorder._buffer[0][3] == "quote"  # mode
@@ -3007,6 +3178,7 @@ class TestTickRecorder:
                 "ltp": 2500.0,
                 "bids": [{"price": 2499, "qty": 100}],
                 "asks": [{"price": 2501, "qty": 50}],
+                "timestamp": self._source_timestamp(),
             }
         )
         assert recorder._buffer[0][3] == "depth"
@@ -3030,8 +3202,20 @@ class TestTickRecorder:
         agg = OrderFlowAggregator()
         recorder = TickRecorder(storage=storage, orderflow_aggregator=agg)
         self._allow(recorder, ("NSE", "RELIANCE"))
-        recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2500.0, "volume": 1000})
-        recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2505.0, "volume": 1300})
+        recorder._process_tick({
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": self._source_timestamp(),
+        })
+        recorder._process_tick({
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "ltp": 2505.0,
+            "volume": 1300,
+            "timestamp": self._source_timestamp(),
+        })
         buckets = agg.get_footprint("RELIANCE", exchange="NSE")
         assert sum(b.buy_volume for b in buckets) == 300
         assert sum(b.sell_volume for b in buckets) == 0
@@ -3039,8 +3223,18 @@ class TestTickRecorder:
     def test_flush_writes_to_duckdb(self):
         storage, recorder = self._make_recorder()
         self._allow(recorder, ("NSE", "TCS"), ("NSE", "INFY"))
-        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
-        recorder._process_tick({"symbol": "INFY", "exchange": "NSE", "ltp": 1500.0})
+        recorder._process_tick({
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "ltp": 3500.0,
+            "timestamp": self._source_timestamp(),
+        })
+        recorder._process_tick({
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "ltp": 1500.0,
+            "timestamp": self._source_timestamp(),
+        })
         assert recorder.tick_count == 2
         assert recorder.persisted_tick_count == 0
         assert recorder.pending_tick_count == 2
@@ -3064,7 +3258,12 @@ class TestTickRecorder:
         storage.insert_ticks_batch.side_effect = RuntimeError("duckdb locked")
         recorder = TickRecorder(storage=storage)
         self._allow(recorder, ("NSE", "TCS"))
-        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+        recorder._process_tick({
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "ltp": 3500.0,
+            "timestamp": self._source_timestamp(),
+        })
         assert len(recorder._buffer) == 1
 
         recorder._flush()  # insert fails
@@ -3086,7 +3285,12 @@ class TestTickRecorder:
         storage.insert_ticks_batch.side_effect = [RuntimeError("duckdb locked"), None]
         recorder = TickRecorder(storage=storage)
         self._allow(recorder, ("NSE", "TCS"))
-        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+        recorder._process_tick({
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "ltp": 3500.0,
+            "timestamp": self._source_timestamp(),
+        })
 
         with pytest.raises(TickPersistenceError, match="Tick persistence failed"):
             recorder.flush_pending()
@@ -3108,7 +3312,12 @@ class TestTickRecorder:
         recorder = TickRecorder(storage=storage, api_key=api_key)
         self._allow(recorder, ("NSE", "TCS"))
         recorder._process_tick({"type": "error", "message": "subscription rejected"})
-        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+        recorder._process_tick({
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "ltp": 3500.0,
+            "timestamp": self._source_timestamp(),
+        })
 
         recorder._flush()
 
@@ -3134,7 +3343,12 @@ class TestTickRecorder:
         lock = MagicMock()
         recorder = TickRecorder(storage=storage, storage_lock=lock)
         self._allow(recorder, ("NSE", "TCS"))
-        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+        recorder._process_tick({
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "ltp": 3500.0,
+            "timestamp": self._source_timestamp(),
+        })
         recorder._flush()
 
         lock.__enter__.assert_called_once()
@@ -3154,7 +3368,12 @@ class TestTickRecorder:
         self._allow(recorder, ("NSE", "TCS"))
         recorder._max_buffer = 3  # tiny cap for a deterministic drop
         for i in range(10):
-            recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": float(i)})
+            recorder._process_tick({
+                "symbol": "TCS",
+                "exchange": "NSE",
+                "ltp": float(i),
+                "timestamp": self._source_timestamp(),
+            })
         assert len(recorder._buffer) == 10
 
         recorder._flush()  # fails, 10 > cap 3 → drop 7 oldest
@@ -3208,11 +3427,21 @@ class TestTickRecorder:
         caplog.set_level("ERROR", logger="flinttrade.data.tick_recorder")
 
         for i in range(4):
-            recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": float(i)})
+            recorder._process_tick({
+                "symbol": "TCS",
+                "exchange": "NSE",
+                "ltp": float(i),
+                "timestamp": self._source_timestamp(),
+            })
         recorder._flush()
 
         for i in range(10):
-            recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": float(i + 10)})
+            recorder._process_tick({
+                "symbol": "TCS",
+                "exchange": "NSE",
+                "ltp": float(i + 10),
+                "timestamp": self._source_timestamp(),
+            })
             recorder._flush()
 
         assert attempt_times == [0.0]
@@ -3259,7 +3488,12 @@ class TestTickRecorder:
         ]
         self._allow(recorder, *((exchange, "TEST") for exchange in exchanges))
         for exch in exchanges:
-            recorder._process_tick({"symbol": "TEST", "exchange": exch, "ltp": 100.0})
+            recorder._process_tick({
+                "symbol": "TEST",
+                "exchange": exch,
+                "ltp": 100.0,
+                "timestamp": self._source_timestamp(),
+            })
         assert recorder.tick_count == len(exchanges)
 
 

@@ -27,6 +27,13 @@ def _normalise_ts(value: Any) -> Any:
     return value
 
 
+def _timestamp_provenance(value: Any) -> str:
+    """Validate whether a stored timestamp is source-authored or untrusted."""
+    if not isinstance(value, str) or value not in {"source", "unknown"}:
+        raise ValueError("timestamp_provenance must be 'source' or 'unknown'")
+    return value
+
+
 def _ist_date_window(start_date: str, end_date: str) -> tuple[datetime, datetime]:
     """Convert inclusive IST date strings to UTC-naive storage bounds."""
     start = datetime.combine(date.fromisoformat(start_date), time.min, tzinfo=IST)
@@ -69,6 +76,7 @@ CREATE TABLE IF NOT EXISTS ticks (
     oi          BIGINT,
     prev_close  DOUBLE,
     depth_json  VARCHAR,
+    timestamp_provenance VARCHAR NOT NULL DEFAULT 'unknown',
     ingest_seq  BIGINT NOT NULL DEFAULT nextval('ticks_ingest_seq')
 );
 """
@@ -80,6 +88,19 @@ ADD COLUMN IF NOT EXISTS ingest_seq BIGINT DEFAULT nextval('ticks_ingest_seq');
 
 _REQUIRE_TICKS_INGEST_SEQUENCE = """
 ALTER TABLE ticks ALTER COLUMN ingest_seq SET NOT NULL;
+"""
+
+_MIGRATE_TICKS_TIMESTAMP_PROVENANCE = """
+ALTER TABLE ticks
+ADD COLUMN IF NOT EXISTS timestamp_provenance VARCHAR DEFAULT 'unknown';
+"""
+
+_REQUIRE_TICKS_TIMESTAMP_PROVENANCE = """
+ALTER TABLE ticks ALTER COLUMN timestamp_provenance SET NOT NULL;
+"""
+
+_BACKFILL_TICKS_TIMESTAMP_PROVENANCE = """
+UPDATE ticks SET timestamp_provenance = 'unknown' WHERE timestamp_provenance IS NULL;
 """
 
 _SCHEMA_TRADES = """
@@ -198,12 +219,16 @@ class StorageManager:
         for ddl in _ALL_SCHEMAS:
             self.connection.execute(ddl)
         self.connection.execute(_MIGRATE_TICKS_INGEST_SEQUENCE)
+        self.connection.execute(_MIGRATE_TICKS_TIMESTAMP_PROVENANCE)
         tick_columns = {
             row[1]: row
             for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()
         }
         if not tick_columns["ingest_seq"][3]:
             self.connection.execute(_REQUIRE_TICKS_INGEST_SEQUENCE)
+        if not tick_columns["timestamp_provenance"][3]:
+            self.connection.execute(_BACKFILL_TICKS_TIMESTAMP_PROVENANCE)
+            self.connection.execute(_REQUIRE_TICKS_TIMESTAMP_PROVENANCE)
         for idx in _INDEXES:
             self.connection.execute(idx)
         logger.info("DuckDB schema initialised (tables + indexes)")
@@ -230,19 +255,24 @@ class StorageManager:
         oi: int | None = None,
         prev_close: float | None = None,
         depth_json: str | None = None,
+        timestamp_provenance: str = "unknown",
     ) -> None:
         """Insert a single tick row (append-only)."""
         self.connection.execute(
             """INSERT INTO ticks
                (ts, symbol, exchange, mode, ltp, open, high, low, close,
-                volume, bid, ask, oi, prev_close, depth_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                volume, bid, ask, oi, prev_close, depth_json, timestamp_provenance)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [_normalise_ts(ts), symbol, exchange, mode, ltp, open_, high, low, close,
-             volume, bid, ask, oi, prev_close, depth_json],
+             volume, bid, ask, oi, prev_close, depth_json, _timestamp_provenance(timestamp_provenance)],
         )
 
     def insert_ticks_batch(self, rows: list[tuple]) -> None:
         """Bulk insert ticks ATOMICALLY. Each tuple matches the ticks column order.
+
+        Provenance-aware rows contain 16 fields and end in ``"source"``.
+        Legacy 15-field rows remain insertable but are marked ``"unknown"``
+        so restart replay cannot treat receipt-substituted history as source time.
 
         The batch runs in an explicit transaction so a mid-batch failure (e.g. a
         bad row, disk-full) rolls the WHOLE batch back rather than leaving a
@@ -254,17 +284,22 @@ class StorageManager:
         if not rows:
             return
         conn = self.connection
-        normalised_rows = [
-            (_normalise_ts(row[0]), *row[1:])
-            for row in rows
-        ]
+        normalised_rows = []
+        for row in rows:
+            if len(row) == 15:
+                row = (*row, "unknown")
+            if len(row) != 16:
+                raise ValueError("tick rows must contain 15 legacy or 16 provenance-aware fields")
+            normalised_rows.append(
+                (_normalise_ts(row[0]), *row[1:15], _timestamp_provenance(row[15]))
+            )
         conn.execute("BEGIN TRANSACTION")
         try:
             conn.executemany(
                 """INSERT INTO ticks
                    (ts, symbol, exchange, mode, ltp, open, high, low, close,
-                    volume, bid, ask, oi, prev_close, depth_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    volume, bid, ask, oi, prev_close, depth_json, timestamp_provenance)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 normalised_rows,
             )
             conn.execute("COMMIT")
@@ -313,7 +348,7 @@ class StorageManager:
             params.append(limit)
         result = self.connection.execute(
             f"""SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
-                       volume, bid, ask, oi, prev_close, depth_json
+                       volume, bid, ask, oi, prev_close, depth_json, timestamp_provenance
                 FROM ticks
                 WHERE symbol = ? AND exchange = ?
                   AND ts >= ? AND ts < ?
@@ -331,7 +366,7 @@ class StorageManager:
         start, end = _ist_date_window(trade_date, trade_date)
         result = self.connection.execute(
             """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
-                      volume, bid, ask, oi, prev_close, depth_json
+                      volume, bid, ask, oi, prev_close, depth_json, timestamp_provenance
                FROM ticks
                WHERE ts >= ? AND ts < ?
                ORDER BY ts, ingest_seq""",

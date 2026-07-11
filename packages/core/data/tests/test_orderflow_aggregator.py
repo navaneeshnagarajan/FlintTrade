@@ -5,6 +5,7 @@ All tests are pure in-memory and require no external connections.
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -56,6 +57,17 @@ class TestConstructorValidation:
 
         with pytest.raises(ValueError, match="tick_size"):
             OrderFlowAggregator(tick_size=-0.05)
+
+    @pytest.mark.parametrize(
+        "tick_size",
+        [float("nan"), float("inf"), float("-inf"), 1e308, 1e-320],
+        ids=["nan", "positive-infinity", "negative-infinity", "overflow-prone", "underflow-prone"],
+    )
+    def test_non_finite_or_arithmetic_unsafe_tick_size_raises(self, tick_size):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        with pytest.raises(ValueError, match="tick_size"):
+            OrderFlowAggregator(tick_size=tick_size)
 
     def test_default_parameters(self):
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
@@ -136,13 +148,33 @@ class TestAddTick:
         with pytest.raises(ValueError, match="side"):
             agg.add_tick("NIFTY", 24500.0, 100, "HOLD", timestamp=_BASE_TS)  # type: ignore[arg-type]
 
-    def test_add_tick_negative_volume_clamped_to_zero(self):
+    @pytest.mark.parametrize(
+        "volume",
+        [True, False, 1.5, float("nan"), float("inf"), -1, 2**53],
+        ids=["true", "false", "fractional", "nan", "infinity", "negative", "unsafe-integer"],
+    )
+    def test_add_tick_rejects_non_exact_or_unsafe_volume(self, volume):
         agg = _make_agg(tick_size=50.0)
-        agg.add_tick("NIFTY", 24500.0, -50, "BUY", timestamp=_BASE_TS)
-        bins = agg.get_footprint("NIFTY")
-        # Volume clamped to 0 → no meaningful bucket data
-        total = sum(b.buy_volume + b.sell_volume for b in bins)
-        assert total == 0
+
+        with pytest.raises(ValueError, match="volume"):
+            agg.add_tick("NIFTY", 24500.0, volume, "BUY", timestamp=_BASE_TS)
+
+        assert agg.get_footprint("NIFTY") == []
+
+    def test_add_tick_accepts_an_exact_integral_float_without_truncation(self):
+        agg = _make_agg(tick_size=50.0)
+
+        agg.add_tick("NIFTY", 24500.0, 10.0, "BUY", timestamp=_BASE_TS)
+
+        assert sum(bucket.total_volume for bucket in agg.get_footprint("NIFTY")) == 10
+
+    def test_zero_volume_exact_tick_does_not_create_data_or_freshness(self):
+        agg = _make_agg(tick_size=50.0)
+
+        agg.add_tick("NIFTY", 24500.0, 0, "BUY", timestamp=_BASE_TS)
+
+        assert agg.get_footprint("NIFTY") == []
+        assert agg.get_market_freshness("NIFTY", now=_BASE_TS + 1)["state"] == "unavailable"
 
     def test_add_tick_defaults_timestamp_to_now(self):
         import time as _time
@@ -575,6 +607,11 @@ class TestFeedMarketTick:
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
         assert agg.get_footprint("NIFTY") == []  # need a baseline first
 
+        freshness = agg.get_market_freshness("NIFTY", now=self._TS + 1)
+        assert freshness["state"] == "unavailable"
+        assert freshness["is_fresh"] is False
+        assert freshness["last_tick_timestamp"] is None
+
     def test_new_session_baseline_hides_prior_session_buckets(self):
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
@@ -586,26 +623,55 @@ class TestFeedMarketTick:
 
         assert agg.get_footprint("NIFTY") == []
 
-    def test_prior_session_last_tick_is_exposed_as_stale(self):
+    def test_prior_session_returned_data_is_exposed_as_stale(self):
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 24501.0, 1100, timestamp=self._TS + 1)
 
         freshness = agg.get_market_freshness("NIFTY", now=self._TS + 24 * 60 * 60)
 
         assert freshness["state"] == "stale"
         assert freshness["is_fresh"] is False
-        assert freshness["last_tick_timestamp"] == self._TS
+        assert freshness["last_tick_timestamp"] == self._TS + 1
         assert freshness["last_tick_session"] != freshness["current_session"]
 
     def test_freshness_accepts_recorder_future_skew_boundary(self):
         agg = self._agg()
-        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS + 5.0)
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS + 4.0)
+        agg.feed_market_tick("NIFTY", 24501.0, 1100, timestamp=self._TS + 5.0)
 
         freshness = agg.get_market_freshness("NIFTY", now=self._TS)
 
         assert freshness["state"] == "live"
         assert freshness["is_fresh"] is True
         assert freshness["age_seconds"] == -5.0
+
+    def test_fresh_zero_volume_snapshot_does_not_refresh_retained_buckets(self):
+        from flinttrade_data.orderflow_aggregator import LIVE_TICK_FRESHNESS_SECONDS
+
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+        fresh_snapshot = self._TS + LIVE_TICK_FRESHNESS_SECONDS + 2
+
+        agg.feed_market_tick("NIFTY", 102.0, 1100, timestamp=fresh_snapshot)
+
+        assert agg.get_footprint("NIFTY")
+        freshness = agg.get_market_freshness("NIFTY", now=fresh_snapshot)
+        assert freshness["state"] == "delayed"
+        assert freshness["is_fresh"] is False
+        assert freshness["last_tick_timestamp"] == self._TS + 1
+
+    def test_exact_trade_tick_establishes_returned_data_freshness(self):
+        agg = self._agg()
+
+        agg.add_tick("NIFTY", 100.0, 25, "BUY", timestamp=self._TS, exchange="NFO")
+
+        freshness = agg.get_market_freshness("NIFTY", exchange="NFO", now=self._TS + 1)
+        assert freshness["state"] == "live"
+        assert freshness["is_fresh"] is True
+        assert freshness["last_tick_timestamp"] == self._TS
+        assert freshness["provenance"] == "trade_tick"
 
     def test_uptick_records_incremental_buy_volume(self):
         agg = self._agg()
@@ -991,6 +1057,7 @@ class TestRestoreCurrentSession:
             "volume": volume,
             "bid": ltp - 0.05,
             "ask": ltp + 0.05,
+            "timestamp_provenance": "source",
         }
 
     def test_restore_replays_current_session_and_restores_the_live_baseline(self):
@@ -1065,6 +1132,21 @@ class TestRestoreCurrentSession:
         buckets = agg.get_footprint("NIFTY", exchange="NFO")
         assert sum(bucket.total_volume for bucket in buckets) == 125
 
+    @pytest.mark.parametrize("provenance", [None, "unknown", "receipt"])
+    def test_restore_skips_rows_without_trusted_source_timestamp_provenance(self, provenance):
+        agg = self._agg()
+        rows = [
+            {**self._row(self._TS, 1000), "timestamp_provenance": provenance},
+            {**self._row(self._TS + 1, 1100), "timestamp_provenance": provenance},
+        ]
+
+        result = agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
+
+        assert result["restored_ticks"] == 0
+        assert result["skipped_ticks"] == 2
+        assert agg.get_footprint("NIFTY", exchange="NFO") == []
+        assert agg.get_market_freshness("NIFTY", exchange="NFO", now=self._TS + 2)["state"] == "unavailable"
+
     def test_restore_rejects_overflow_before_mutating_existing_state(self):
         agg = self._agg()
         agg.add_tick("EXISTING", 100.0, 7, "BUY", timestamp=self._TS, exchange="NSE")
@@ -1076,6 +1158,27 @@ class TestRestoreCurrentSession:
         existing = agg.get_footprint("EXISTING", exchange="NSE")
         assert sum(bucket.total_volume for bucket in existing) == 7
         assert agg.get_footprint("NIFTY", exchange="NFO") == []
+
+    def test_restore_rejects_an_exactly_full_unverified_tail(self):
+        agg = self._agg()
+        rows = [self._row(self._TS + offset, 1000 + offset) for offset in range(2)]
+
+        with pytest.raises(ValueError, match="potentially truncated"):
+            agg.restore_current_session(rows, now=self._TS + 2, max_ticks=2)
+
+    def test_restore_accepts_an_exactly_full_tail_when_the_caller_proves_completeness(self):
+        agg = self._agg()
+        rows = [self._row(self._TS + offset, 1000 + offset) for offset in range(2)]
+
+        result = agg.restore_current_session(
+            rows,
+            now=self._TS + 2,
+            max_ticks=2,
+            history_complete=True,
+        )
+
+        assert result["restored_ticks"] == 2
+        assert sum(bucket.total_volume for bucket in agg.get_footprint("NIFTY", exchange="NFO")) == 1
 
     def test_restore_blocks_a_concurrent_live_writer_until_the_state_swap(self, monkeypatch):
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
@@ -1128,6 +1231,102 @@ class TestRestoreCurrentSession:
         assert writer_done.is_set()
         buckets = agg.get_footprint("NIFTY", exchange="NFO")
         assert sum(bucket.total_volume for bucket in buckets) == 125
+
+
+class TestRestartStateContract:
+    _TS = 1_700_000_000.0
+
+    @staticmethod
+    def _agg():
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        return OrderFlowAggregator()
+
+    @staticmethod
+    def _row(timestamp, volume, *, ltp=100.0):
+        return {
+            "ts": datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(tzinfo=None),
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "ltp": ltp,
+            "volume": volume,
+            "bid": ltp - 0.05,
+            "ask": ltp + 0.05,
+            "timestamp_provenance": "source",
+        }
+
+    def test_checkpoint_restore_preserves_reset_namespaces_across_a_bounded_tail(self):
+        source = self._agg()
+        for offset, volume in enumerate((1000, 1100, 100, 125)):
+            source.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                exchange="NFO",
+                timestamp=self._TS + offset,
+            )
+
+        checkpoint = source.export_state()
+        json.dumps(checkpoint)
+        restarted = self._agg()
+        restore_summary = restarted.restore_state(checkpoint, now=self._TS + 4)
+        tail_summary = restarted.replay_current_session_tail(
+            [
+                self._row(self._TS + 4, 1101, ltp=104.0),
+                self._row(self._TS + 5, 1125, ltp=105.0),
+                self._row(self._TS + 6, 1150, ltp=106.0),
+            ],
+            now=self._TS + 7,
+            max_ticks=10,
+        )
+
+        buckets = restarted.get_footprint("NIFTY", exchange="NFO")
+        assert restore_summary == {"identities": 1, "bins": 1, "price_levels": 2}
+        assert tail_summary["restored_ticks"] == 3
+        assert sum(bucket.total_volume for bucket in buckets) == 150
+        assert {bucket.provenance for bucket in buckets} == {"cumulative_quote_delta"}
+        assert restarted.get_market_freshness(
+            "NIFTY",
+            exchange="NFO",
+            now=self._TS + 7,
+        )["last_tick_timestamp"] == self._TS + 6
+
+    def test_checkpoint_round_trip_preserves_exact_source_time_and_provenance(self):
+        source = self._agg()
+        source.add_tick(
+            "NIFTY",
+            100.0,
+            25,
+            "BUY",
+            exchange="NFO",
+            timestamp=self._TS,
+        )
+
+        restarted = self._agg()
+        restarted.restore_state(source.export_state(), now=self._TS + 1)
+
+        [bucket] = restarted.get_footprint("NIFTY", exchange="NFO")
+        freshness = restarted.get_market_freshness(
+            "NIFTY",
+            exchange="NFO",
+            now=self._TS + 1,
+        )
+        assert bucket.quality == "exact"
+        assert bucket.provenance == "trade_tick"
+        assert freshness["last_tick_timestamp"] == self._TS
+        assert freshness["provenance"] == "trade_tick"
+
+    def test_invalid_checkpoint_does_not_mutate_existing_state(self):
+        agg = self._agg()
+        agg.add_tick("EXISTING", 100.0, 7, "BUY", timestamp=self._TS, exchange="NSE")
+        checkpoint = agg.export_state()
+        checkpoint["config"]["tick_size"] = 1.0
+
+        with pytest.raises(ValueError, match="configuration"):
+            agg.restore_state(checkpoint, now=self._TS + 1)
+
+        buckets = agg.get_footprint("EXISTING", exchange="NSE")
+        assert sum(bucket.total_volume for bucket in buckets) == 7
 
 
 class TestConcurrentAccess:
