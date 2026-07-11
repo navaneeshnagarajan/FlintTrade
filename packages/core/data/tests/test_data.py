@@ -1967,6 +1967,28 @@ class TestTickRecorder:
         stored_timestamp = recorder._buffer[0][0]
         sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 0, stored_timestamp.timestamp())
 
+    @pytest.mark.parametrize("volume", [True, False], ids=["true", "false"])
+    def test_boolean_volume_stays_invalid_for_storage_and_live_consumers(self, volume):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        sink = MagicMock()
+        orderflow = MagicMock()
+        recorder = TickRecorder(
+            storage=MagicMock(),
+            ltp_sink=sink,
+            orderflow_aggregator=orderflow,
+        )
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": volume}
+        )
+
+        stored_timestamp = recorder._buffer[0][0]
+        assert recorder._buffer[0][9] is None
+        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 0, stored_timestamp.timestamp())
+        orderflow.feed_market_tick.assert_not_called()
+
     def test_throwing_ltp_sink_does_not_stop_buffering(self):
         from flinttrade_data.storage import StorageManager
         from flinttrade_data.tick_recorder import TickRecorder

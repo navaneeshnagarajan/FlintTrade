@@ -352,6 +352,7 @@ class OrderFlowAggregator:
         # observed namespace offsets so recovery cannot count volume twice.
         self._normalised_volume: dict[_InstrumentIdentity, int] = {}
         self._counter_offsets: dict[_InstrumentIdentity, tuple[int, ...]] = {}
+        self._counter_high_watermarks: dict[_InstrumentIdentity, dict[int, int]] = {}
         # A lower intraday cumulative counter needs a second monotonic sample
         # before it can replace the last trusted baseline.
         self._pending_volume_reset: dict[
@@ -501,6 +502,8 @@ class OrderFlowAggregator:
         import time as _time
 
         try:
+            if isinstance(cumulative_volume, bool):
+                return
             ltp = float(ltp)
         except (OverflowError, TypeError, ValueError):
             return
@@ -527,6 +530,7 @@ class OrderFlowAggregator:
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
                 self._normalised_volume[identity] = current_volume
                 self._counter_offsets[identity] = (0,)
+                self._counter_high_watermarks[identity] = {0: current_volume}
                 self._pending_volume_reset.pop(identity, None)
                 self._last_side.pop(identity, None)
                 return
@@ -535,6 +539,10 @@ class OrderFlowAggregator:
             offsets = self._counter_offsets.get(
                 identity,
                 (previous_normalised - prev_vol,),
+            )
+            high_watermarks = self._counter_high_watermarks.get(
+                identity,
+                {offsets[0]: prev_vol},
             )
             if current_volume < prev_vol:
                 pending = self._pending_volume_reset.get(identity)
@@ -559,21 +567,30 @@ class OrderFlowAggregator:
                     )
                     return
                 if current_volume == pending_volume:
-                    # Repeated snapshots do not prove that a lower counter is advancing.
+                    self._pending_volume_reset[identity] = (
+                        ltp,
+                        current_volume,
+                        session_date,
+                        tick_timestamp,
+                    )
                     return
 
                 self._pending_volume_reset.pop(identity, None)
                 new_offset = previous_normalised - pending_volume
-                normalised, offsets = self._select_counter_namespace(
+                high_watermarks = dict(high_watermarks)
+                high_watermarks[new_offset] = current_volume
+                normalised, offsets, high_watermarks = self._select_counter_namespace(
                     current_volume,
                     previous_normalised,
                     (new_offset, *offsets),
+                    high_watermarks,
                 )
+                self._counter_offsets[identity] = offsets
+                self._counter_high_watermarks[identity] = high_watermarks
                 if normalised is None:
                     return
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
                 self._normalised_volume[identity] = normalised
-                self._counter_offsets[identity] = offsets
                 inc_volume = normalised - previous_normalised
                 if inc_volume <= 0:
                     return
@@ -596,16 +613,18 @@ class OrderFlowAggregator:
                 )
                 return
             self._pending_volume_reset.pop(identity, None)
-            normalised, offsets = self._select_counter_namespace(
+            normalised, offsets, high_watermarks = self._select_counter_namespace(
                 current_volume,
                 previous_normalised,
                 offsets,
+                high_watermarks,
             )
+            self._counter_offsets[identity] = offsets
+            self._counter_high_watermarks[identity] = high_watermarks
             if normalised is None:
                 return
             self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
             self._normalised_volume[identity] = normalised
-            self._counter_offsets[identity] = offsets
 
             inc_volume = normalised - previous_normalised
             if inc_volume <= 0:
@@ -626,29 +645,62 @@ class OrderFlowAggregator:
         raw_volume: int,
         previous_normalised: int,
         offsets: tuple[int, ...],
-    ) -> tuple[int | None, tuple[int, ...]]:
+        high_watermarks: dict[int, int],
+    ) -> tuple[int | None, tuple[int, ...], dict[int, int]]:
         """Choose the least non-decreasing interpretation of a raw counter.
 
-        A confirmed reset introduces another ``raw + offset`` namespace. If a
-        later raw value is monotonic under more than one namespace, its delta
-        is unknowable. Return ``None`` so the caller can leave every baseline
-        untouched rather than manufacturing volume from an arbitrary choice.
+        A confirmed reset introduces another ``raw + offset`` namespace. While
+        an older namespace is still below the trusted total, no increment is
+        knowable. Once multiple namespaces exceed it, retire to the smallest
+        translated value: that is the conservative lower bound under every
+        valid interpretation and prevents an ambiguity from freezing forever.
         """
         unique_offsets = tuple(dict.fromkeys(offsets))[:_MAX_COUNTER_EPOCHS] or (0,)
-        candidates = [
-            (raw_volume + offset, index, offset)
-            for index, offset in enumerate(unique_offsets)
-            if raw_volume + offset >= previous_normalised
-        ]
-        if len(candidates) > 1:
-            return None, unique_offsets
+        selected_offset = unique_offsets[0]
+        retained_high_watermarks = {
+            offset: high_watermarks.get(offset, -1)
+            for offset in unique_offsets
+        }
+        candidates: list[tuple[int, int, int]] = []
+        catching_up: list[int] = []
+        for index, offset in enumerate(unique_offsets):
+            if raw_volume < retained_high_watermarks[offset]:
+                continue
+            translated = raw_volume + offset
+            if translated < previous_normalised:
+                catching_up.append(offset)
+            else:
+                candidates.append((translated, index, offset))
+
+        exact = next(
+            (candidate for candidate in candidates if candidate[0] == previous_normalised),
+            None,
+        )
+        if exact is not None:
+            _, _, exact_offset = exact
+            if exact_offset != selected_offset:
+                return previous_normalised, (exact_offset,), {exact_offset: raw_volume}
+            retained_high_watermarks[exact_offset] = raw_volume
+            return previous_normalised, unique_offsets, retained_high_watermarks
+
+        if catching_up:
+            for offset in catching_up:
+                retained_high_watermarks[offset] = raw_volume
+            return None, unique_offsets, retained_high_watermarks
         if candidates:
             normalised, _, selected_offset = min(candidates)
         else:
-            selected_offset = unique_offsets[0]
-            normalised = previous_normalised
+            return None, unique_offsets, retained_high_watermarks
+        if len(candidates) > 1:
+            return normalised, (selected_offset,), {selected_offset: raw_volume}
+        retained_high_watermarks[selected_offset] = raw_volume
         reordered = (selected_offset, *(offset for offset in unique_offsets if offset != selected_offset))
-        return normalised, reordered[:_MAX_COUNTER_EPOCHS]
+        reordered = reordered[:_MAX_COUNTER_EPOCHS]
+        return (
+            normalised,
+            reordered,
+            {offset: retained_high_watermarks[offset] for offset in reordered},
+        )
 
     def get_market_freshness(
         self,
@@ -806,6 +858,7 @@ class OrderFlowAggregator:
                         (self._last_tick, scratch._last_tick),
                         (self._normalised_volume, scratch._normalised_volume),
                         (self._counter_offsets, scratch._counter_offsets),
+                        (self._counter_high_watermarks, scratch._counter_high_watermarks),
                         (self._pending_volume_reset, scratch._pending_volume_reset),
                         (self._last_side, scratch._last_side),
                     ):
@@ -832,6 +885,7 @@ class OrderFlowAggregator:
                 | set(self._last_tick)
                 | set(self._normalised_volume)
                 | set(self._counter_offsets)
+                | set(self._counter_high_watermarks)
                 | set(self._pending_volume_reset)
                 | set(self._last_side)
                 | set(self._identity_recency)
@@ -905,6 +959,7 @@ class OrderFlowAggregator:
                 self._last_tick.clear()
                 self._normalised_volume.clear()
                 self._counter_offsets.clear()
+                self._counter_high_watermarks.clear()
                 self._pending_volume_reset.clear()
                 self._last_side.clear()
                 self._identity_recency.clear()
@@ -1074,6 +1129,7 @@ class OrderFlowAggregator:
         self._last_tick.pop(identity, None)
         self._normalised_volume.pop(identity, None)
         self._counter_offsets.pop(identity, None)
+        self._counter_high_watermarks.pop(identity, None)
         self._pending_volume_reset.pop(identity, None)
         self._last_side.pop(identity, None)
         self._identity_recency.pop(identity, None)
@@ -1088,6 +1144,7 @@ class OrderFlowAggregator:
             self._last_tick.pop(oldest, None)
             self._normalised_volume.pop(oldest, None)
             self._counter_offsets.pop(oldest, None)
+            self._counter_high_watermarks.pop(oldest, None)
             self._pending_volume_reset.pop(oldest, None)
             self._last_side.pop(oldest, None)
 

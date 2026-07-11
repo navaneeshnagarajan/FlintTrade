@@ -687,7 +687,62 @@ class TestFeedMarketTick:
         latest = agg.get_footprint("NIFTY")
         assert sum(bucket.total_volume for bucket in latest) == 125
 
-    def test_ambiguous_old_counter_namespace_fails_closed_after_reset(self):
+    def test_partial_old_counter_recovery_does_not_manufacture_volume(self):
+        agg = self._agg()
+
+        for offset, volume in enumerate((1000, 1100, 100, 125, 1101)):
+            agg.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                timestamp=self._TS + offset,
+            )
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 125
+
+    def test_old_counter_catch_up_retires_reset_namespace_and_resumes_volume(self):
+        agg = self._agg()
+
+        for offset, volume in enumerate((1000, 1100, 100, 125, 1101, 1125, 1150)):
+            agg.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                timestamp=self._TS + offset,
+            )
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 150
+
+    def test_old_counter_overshoot_retires_to_conservative_namespace(self):
+        agg = self._agg()
+
+        for offset, volume in enumerate((1000, 1100, 100, 125, 1101, 1130, 1150)):
+            agg.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                timestamp=self._TS + offset,
+            )
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 150
+
+    def test_equal_reset_snapshot_refreshes_pending_price_without_delayed_rewind(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 2)
+        agg.feed_market_tick("NIFTY", 103.0, 100, timestamp=self._TS + 4)
+        agg.feed_market_tick("NIFTY", 90.0, 100, timestamp=self._TS + 3)
+        agg.feed_market_tick("NIFTY", 102.0, 125, timestamp=self._TS + 5)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume for bucket in latest) == 100
+        assert sum(bucket.sell_volume for bucket in latest) == 25
+
+    def test_ambiguous_counter_uses_conservative_lower_bound_after_reset(self):
         agg = self._agg()
 
         for offset, volume in enumerate((1000, 1100, 100, 125, 2000)):
@@ -699,7 +754,7 @@ class TestFeedMarketTick:
             )
 
         latest = agg.get_footprint("NIFTY")
-        assert sum(bucket.total_volume for bucket in latest) == 125
+        assert sum(bucket.total_volume for bucket in latest) == 1000
 
     def test_cumulative_quote_snapshots_are_marked_as_estimated(self):
         agg = self._agg()
@@ -722,6 +777,16 @@ class TestFeedMarketTick:
 
         assert sum(bucket.buy_volume for bucket in latest) == 0
         assert sum(bucket.sell_volume for bucket in latest) == 25
+
+    @pytest.mark.parametrize("volume", [True, False], ids=["true", "false"])
+    def test_boolean_cumulative_volume_does_not_establish_a_baseline(self, volume):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 99.0, volume, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 2)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 100
 
     @pytest.mark.parametrize("next_session_opening_volume", [100, 5000])
     def test_new_ist_session_rebaselines_higher_and_lower_opening_cumulative_volume(

@@ -931,7 +931,7 @@ class TickRecorder:
             exchange,
             symbol,
             normalised_ltp,
-            payload.get("volume"),
+            persisted_volume,
             ts.timestamp(),
         )
 
@@ -976,7 +976,7 @@ class TickRecorder:
         exchange: str,
         symbol: str,
         ltp: float | None,
-        volume: Any,
+        volume: int | None,
         source_timestamp: float,
     ) -> None:
         """Best-effort delivery of a valid LTP and its accepted source time."""
@@ -984,10 +984,7 @@ class TickRecorder:
             return
         if ltp <= 0:
             return
-        try:
-            volume_value = max(0, int(volume)) if volume is not None else 0
-        except (TypeError, ValueError, OverflowError):
-            volume_value = 0
+        volume_value = volume if volume is not None else 0
         try:
             if self._ltp_sink_arity == 5:
                 self._ltp_sink(exchange, symbol, ltp, volume_value, source_timestamp)

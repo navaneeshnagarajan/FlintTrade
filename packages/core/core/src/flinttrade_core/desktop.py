@@ -246,6 +246,22 @@ class _DesktopTickCaptureRuntime:
         if failed:
             raise RuntimeError("Desktop tick capture shutdown failed") from None
 
+    def _retry_retained_flush(self) -> bool:
+        """Retry a recorder finalisation failure while storage is still owned."""
+        flush_pending = getattr(self.recorder, "flush_pending", None)
+        try:
+            pending_tick_count = int(getattr(self.recorder, "pending_tick_count", 0))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if pending_tick_count <= 0 or not callable(flush_pending):
+            return False
+        try:
+            flush_pending()
+        except BaseException as exc:  # noqa: BLE001 - retained for truthful shutdown status
+            self._remember_shutdown_error(exc)
+            return False
+        return True
+
     def _run(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -274,7 +290,8 @@ class _DesktopTickCaptureRuntime:
 
             if failure is not None:
                 if self._is_stopped():
-                    self._remember_shutdown_error(failure)
+                    if not self._retry_retained_flush():
+                        self._remember_shutdown_error(failure)
                 else:
                     self._report_failure(failure)
         finally:

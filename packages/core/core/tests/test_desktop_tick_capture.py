@@ -127,6 +127,30 @@ class _FlushFailureRecorder(_FakeRecorder):
             self.run_finished.set()
 
 
+class _TransientFlushFailureRecorder(_FakeRecorder):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+        self.pending_tick_count = 1
+        self.flush_calls = 0
+
+    async def run(self) -> None:
+        self.run_started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            self.events.append("final-flush-failed")
+            raise RuntimeError("transient final flush failure") from None
+        finally:
+            self.run_finished.set()
+
+    def flush_pending(self) -> bool:
+        self.flush_calls += 1
+        self.events.append("flush-retry")
+        self.pending_tick_count = 0
+        return True
+
+
 @pytest.mark.unit
 def test_runtime_redacts_original_and_hot_reloaded_api_keys() -> None:
     runtime = desktop._DesktopTickCaptureRuntime(
@@ -353,6 +377,31 @@ def test_final_recorder_flush_failure_is_redacted_and_propagated(
     assert api_key not in str(error.value)
     assert api_key not in caplog.text
     assert "final flush rejected [redacted]" in caplog.text
+
+
+@pytest.mark.unit
+def test_transient_final_flush_failure_retries_retained_ticks_before_storage_close() -> None:
+    events: list[str] = []
+    recorder = _TransientFlushFailureRecorder(events)
+    storage = _FakeStorage("unused")
+    original_close = storage.close
+
+    def close_storage() -> None:
+        events.append("storage-close")
+        original_close()
+
+    storage.close = close_storage  # type: ignore[method-assign]
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "")
+    runtime.start()
+    assert recorder.run_started.wait(1)
+
+    runtime.stop(timeout=1)
+
+    assert recorder.run_finished.wait(1)
+    assert recorder.flush_calls == 1
+    assert recorder.pending_tick_count == 0
+    assert storage.closed is True
+    assert events == ["final-flush-failed", "flush-retry", "storage-close"]
 
 
 @pytest.mark.unit
