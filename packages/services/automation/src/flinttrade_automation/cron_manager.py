@@ -558,15 +558,17 @@ class CronManager:
                 ),
                 **DEFAULT_JOBS["db_optimise_job"],
             )
-            # Nightly tick-store pruning — resolves the tick store + retention
-            # window lazily, so it no-ops until they are wired and configured.
-            self.register(
-                "tick_retention_job",
-                handler=make_tick_retention_job(
-                    lambda: (self.tick_storage, self.tick_storage_lock, self.tick_retention_days),
-                ),
-                **DEFAULT_JOBS["tick_retention_job"],
-            )
+
+        # Tick capture owns a separate store and may run without the trade
+        # journal. Resolve it lazily so pruning is always scheduled, then no-ops
+        # until capture publishes a store and positive retention window.
+        self.register(
+            "tick_retention_job",
+            handler=make_tick_retention_job(
+                lambda: (self.tick_storage, self.tick_storage_lock, self.tick_retention_days),
+            ),
+            **DEFAULT_JOBS["tick_retention_job"],
+        )
 
         # Overnight strategy optimisation — only when an optimiser is injected.
         if self.overnight_optimiser is not None:

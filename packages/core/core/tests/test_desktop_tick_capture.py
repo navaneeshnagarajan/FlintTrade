@@ -40,6 +40,19 @@ class _FakeStorage:
         self.closed = True
 
 
+class _RetryingCloseStorage(_FakeStorage):
+    def __init__(self, db_path: str, failures: int) -> None:
+        super().__init__(db_path)
+        self.failures = failures
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls <= self.failures:
+            raise RuntimeError("transient close failure")
+        super().close()
+
+
 class _FakeRecorder:
     def __init__(self) -> None:
         self.run_started = threading.Event()
@@ -159,6 +172,44 @@ def test_enabled_desktop_builds_one_runtime_with_existing_hub_and_settings(
     assert recorder.stop_calls == 1
     assert recorder.run_finished.wait(1)
     assert storage.closed is True
+    assert "DESKTOP_TICK_CAPTURE_RUNTIME" not in flask_app.config
+    assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
+
+
+@pytest.mark.unit
+def test_failed_storage_close_remains_retryable_and_unpublished(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flask_app = Flask("desktop-capture-close-retry")
+    recorder = _FakeRecorder()
+    storage = _RetryingCloseStorage("unused", failures=2)
+    monkeypatch.setattr(desktop, "_tick_capture_enabled", lambda: True)
+
+    runtime = desktop._configure_tick_capture(
+        flask_app,
+        SimpleNamespace(openalgo_api_key=""),
+        storage_factory=lambda _path: storage,
+        recorder_factory=object(),
+        orderflow_factory=object,
+        build_recorder=lambda **_kwargs: recorder,
+    )
+    assert runtime is not None
+    assert recorder.run_started.wait(1)
+
+    runtime.stop(timeout=1)
+
+    assert storage.close_calls == 2
+    assert storage.closed is False
+    assert runtime._storage_closed is False
+    assert flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] is runtime
+    assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
+
+    runtime.stop(timeout=1)
+
+    assert storage.close_calls == 3
+    assert storage.closed is True
+    assert runtime._storage_closed is True
+    assert "DESKTOP_TICK_CAPTURE_RUNTIME" not in flask_app.config
 
 
 @pytest.mark.unit

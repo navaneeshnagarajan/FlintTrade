@@ -102,6 +102,8 @@ class _DesktopTickCaptureRuntime:
         *,
         storage_lock: Any | None = None,
         on_failure: Callable[[str], None] | None = None,
+        on_unpublish: Callable[[], None] | None = None,
+        on_storage_closed: Callable[[], None] | None = None,
     ) -> None:
         self.recorder = recorder
         self.storage = storage
@@ -110,6 +112,8 @@ class _DesktopTickCaptureRuntime:
         self._redaction_lock = threading.Lock()
         self._redaction_keys = {api_key} if api_key else set()
         self._on_failure = on_failure
+        self._on_unpublish = on_unpublish
+        self._on_storage_closed = on_storage_closed
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task[Any] | None = None
         self._started = threading.Event()
@@ -118,6 +122,8 @@ class _DesktopTickCaptureRuntime:
         self._startup_error: BaseException | None = None
         self._storage_close_lock = threading.Lock()
         self._storage_closed = False
+        self._unpublish_lock = threading.Lock()
+        self._unpublished = False
         self._thread = threading.Thread(
             target=self._run,
             name="flinttrade-desktop-tick-capture",
@@ -166,21 +172,46 @@ class _DesktopTickCaptureRuntime:
                 self._startup_error = exc
         self._started.set()
 
-    def _close_storage_once(self) -> None:
-        """Close storage exactly once, and only from a stopped owner thread."""
+    def _unpublish_once(self) -> None:
+        """Remove route-visible handles before recorder or storage teardown."""
+        with self._unpublish_lock:
+            if self._unpublished:
+                return
+            self._unpublished = True
+        if self._on_unpublish is not None:
+            try:
+                self._on_unpublish()
+            except Exception as exc:  # pragma: no cover - teardown must retain storage ownership
+                logger.warning(
+                    "Desktop tick runtime unpublish failed (%s)",
+                    self._sanitise(exc),
+                )
+
+    def _close_storage_once(self) -> bool:
+        """Close storage once successfully; a failed close remains retryable."""
         with self._storage_close_lock:
             if self._storage_closed:
-                return
-            self._storage_closed = True
-        try:
-            if self._storage_lock is None:
-                self.storage.close()
-            else:
-                with self._storage_lock:
+                return True
+            try:
+                if self._storage_lock is None:
                     self.storage.close()
-        except Exception as exc:  # pragma: no cover - defensive shutdown
-            diagnostic = self._sanitise(exc)
-            logger.warning("Desktop tick storage close failed (%s)", diagnostic)
+                else:
+                    with self._storage_lock:
+                        self.storage.close()
+            except Exception as exc:  # pragma: no cover - defensive shutdown
+                diagnostic = self._sanitise(exc)
+                logger.warning("Desktop tick storage close failed (%s)", diagnostic)
+                return False
+            self._storage_closed = True
+        if self._on_storage_closed is not None:
+            try:
+                self._on_storage_closed()
+            except Exception as exc:  # pragma: no cover - closed storage is still safe
+                logger.warning(
+                    "Desktop tick runtime owner cleanup failed (%s)",
+                    self._sanitise(exc),
+                )
+        return True
 
     def _report_failure(self, error: BaseException) -> None:
         diagnostic = self._sanitise(error)
@@ -232,14 +263,20 @@ class _DesktopTickCaptureRuntime:
             self._task = None
             self._loop = None
             loop.close()
+            self._unpublish_once()
             self._close_storage_once()
 
     def stop(self, *, timeout: float = _CAPTURE_THREAD_STOP_TIMEOUT) -> None:
         """Stop capture, wait briefly for recorder cleanup, and close storage."""
         with self._stop_lock:
             if self._stopped:
+                if not self._thread.is_alive():
+                    self._unpublish_once()
+                    self._close_storage_once()
                 return
             self._stopped = True
+
+        self._unpublish_once()
 
         loop = self._loop
         task = self._task
@@ -324,12 +361,26 @@ def _configure_tick_capture(
                     flask_app.config.pop(key, None)
                 flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
 
+        def unpublish_runtime() -> None:
+            with _tick_capture_lifecycle_lock(flask_app):
+                if flask_app.config.get(_CAPTURE_RUNTIME_CONFIG) is not runtime:
+                    return
+                for key in _CAPTURE_CONFIG_KEYS:
+                    flask_app.config.pop(key, None)
+
+        def release_runtime_owner() -> None:
+            with _tick_capture_lifecycle_lock(flask_app):
+                if flask_app.config.get(_CAPTURE_RUNTIME_CONFIG) is runtime:
+                    flask_app.config.pop(_CAPTURE_RUNTIME_CONFIG, None)
+
         runtime = _DesktopTickCaptureRuntime(
             recorder,
             storage,
             api_key,
             storage_lock=storage_lock,
             on_failure=capture_failed,
+            on_unpublish=unpublish_runtime,
+            on_storage_closed=release_runtime_owner,
         )
         flask_app.config.update(
             {

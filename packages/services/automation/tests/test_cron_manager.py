@@ -744,6 +744,16 @@ class TestTickRetentionJob:
         names = {j["name"] for j in with_store.list_jobs()}
         assert "tick_retention_job" in names
 
+    def test_registered_without_trade_storage(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        without_trade_store = CronManager()
+        without_trade_store.register_builtin_jobs()
+
+        names = {job["name"] for job in without_trade_store.list_jobs()}
+        assert "db_optimise_job" not in names
+        assert "tick_retention_job" in names
+
 
 class TestEodSyncJob:
     """eod_sync_job — daily historical-data delta sync (opt-in)."""

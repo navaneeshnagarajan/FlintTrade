@@ -31,11 +31,11 @@ from __future__ import annotations
 import functools
 import html
 import inspect
-import json
 import logging
 import re
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -53,15 +53,13 @@ from flinttrade_gateway.capabilities_routes import _sdk_attestations_by_pin
 from flinttrade_gateway.log_safety import selector_ref
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 from .workspace import workspace_dir
+from .workspace_migrations import update_workspace_config
 
 logger = logging.getLogger("flinttrade.native_accounts")
 
-# Serialises the whole connect transaction. _do_connect snapshots workspace.json,
-# runs a multi-second broker login, then restores the snapshot verbatim on
-# failure — so two connects overlapping in time could let the restore of a
-# FAILED one clobber the workspace a concurrent SUCCEEDED one just wrote. This is
-# a single-operator desktop tool (connects are normally sequential), but the lock
-# closes the window cheaply: connects run one at a time.
+# Serialises vault writes, router rebuilds, and broker login for one operator.
+# Workspace edits also use the process/file-locked migration API because other
+# settings routes and processes can still update workspace.json concurrently.
 _CONNECT_LOCK = threading.Lock()
 
 
@@ -317,47 +315,97 @@ def _redacted_postback_snapshot(payload: Any) -> Any:
     return payload
 
 
+@dataclass(frozen=True, slots=True)
+class _SelectorWorkspaceMutation:
+    """Exact workspace fields introduced or changed by one selector action."""
+
+    selector: str
+    adapter_id: str
+    account_id: str
+    actor_id: str
+    added_registration: bool
+    added_actor: bool
+    prior_default: str
+    changed_default: bool
+
+
 def _register_selector_in_workspace(
     adapter_id: str, account_id: str, actor_id: str, is_primary: bool
-) -> None:
+) -> _SelectorWorkspaceMutation:
     """Add the native selector to brokers.registered + ACL the operator.
 
-    Read-modify-write of ``workspace.json``. Idempotent — re-connecting the same
-    account does not duplicate the selector or the actor. When ``is_primary`` (or
-    no execution default is set yet) the selector becomes ``brokers.execution.default``.
+    The returned receipt permits a failed surrounding transaction to undo only
+    the fields it changed, preserving unrelated concurrent workspace updates.
     """
     selector = f"{adapter_id}:{account_id}"
-    path = workspace_dir() / "workspace.json"
-    if path.exists():
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        # No workspace.json yet — seed from the spec defaults so the existing
-        # brokers block (incl. the openalgo:default registration) is preserved
-        # rather than clobbered by a partial write.
-        from .workspace_migrations import default_workspace_config  # noqa: PLC0415
+    receipt: dict[str, Any] = {}
 
-        data = default_workspace_config()
+    def register(config: dict[str, Any]) -> dict[str, Any]:
+        brokers = config.setdefault("brokers", {})
+        registered = brokers.setdefault("registered", [])
+        added_registration = selector not in registered
+        if added_registration:
+            registered.append(selector)
 
-    brokers = data.setdefault("brokers", {})
-    registered = brokers.setdefault("registered", [])
-    if selector not in registered:
-        registered.append(selector)
+        adapter_acls = brokers.setdefault("account_acls", {}).setdefault(adapter_id, {})
+        actors = adapter_acls.setdefault(account_id, [])
+        added_actor = actor_id not in actors
+        if added_actor:
+            actors.append(actor_id)
 
-    acls = brokers.setdefault("account_acls", {})
-    adapter_acls = acls.setdefault(adapter_id, {})
-    actors = adapter_acls.setdefault(account_id, [])
-    if actor_id not in actors:
-        actors.append(actor_id)
+        execution = brokers.setdefault("execution", {})
+        prior_default = str(execution.get("default") or "")
+        changed_default = (is_primary or not prior_default) and prior_default != selector
+        if changed_default:
+            execution["default"] = selector
 
-    execution = brokers.setdefault("execution", {})
-    if is_primary or not execution.get("default"):
-        execution["default"] = selector
+        receipt.update(
+            added_registration=added_registration,
+            added_actor=added_actor,
+            prior_default=prior_default,
+            changed_default=changed_default,
+        )
+        return config
 
-    tmp = path.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    tmp.replace(path)
+    update_workspace_config(workspace_dir(), register)
+    return _SelectorWorkspaceMutation(
+        selector=selector,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        actor_id=actor_id,
+        added_registration=bool(receipt["added_registration"]),
+        added_actor=bool(receipt["added_actor"]),
+        prior_default=str(receipt["prior_default"]),
+        changed_default=bool(receipt["changed_default"]),
+    )
+
+
+def _rollback_selector_workspace(mutation: _SelectorWorkspaceMutation) -> None:
+    """Undo one selector mutation without replacing newer workspace fields."""
+
+    def rollback(config: dict[str, Any]) -> dict[str, Any]:
+        brokers = config.setdefault("brokers", {})
+        registered = brokers.setdefault("registered", [])
+        if mutation.added_registration and mutation.selector in registered:
+            registered.remove(mutation.selector)
+
+        account_acls = brokers.setdefault("account_acls", {})
+        adapter_acls = account_acls.get(mutation.adapter_id, {})
+        actors = adapter_acls.get(mutation.account_id, [])
+        if mutation.added_actor and mutation.actor_id in actors:
+            actors.remove(mutation.actor_id)
+        if not actors:
+            adapter_acls.pop(mutation.account_id, None)
+        if not adapter_acls:
+            account_acls.pop(mutation.adapter_id, None)
+
+        execution = brokers.setdefault("execution", {})
+        if mutation.changed_default and execution.get("default") == mutation.selector:
+            prior = mutation.prior_default
+            execution["default"] = prior if prior and prior in registered else ""
+        return config
+
+    update_workspace_config(workspace_dir(), rollback)
 
 
 def _openalgo_bridge_configured() -> bool:
@@ -379,7 +427,7 @@ def _demote_selector_as_execution_default(
     adapter_id: str,
     account_id: str,
     *,
-    prior_workspace_snapshot: str | None = None,
+    prior_execution_default: str = "",
 ) -> str | None:
     """Keep a selector registered, but remove it from the write default.
 
@@ -399,93 +447,55 @@ def _demote_selector_as_execution_default(
         changed). The notice deliberately names no selectors/account ids —
         connect responses must never echo operator identifiers.
     """
-    selector = f"{adapter_id}:{account_id}"
     path = workspace_dir() / "workspace.json"
     if not path.exists():
         return None
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+    selector = f"{adapter_id}:{account_id}"
+    notice: str | None = None
+    bridge_configured = _openalgo_bridge_configured()
 
-    brokers = data.setdefault("brokers", {})
-    execution = brokers.setdefault("execution", {})
-    if execution.get("default") != selector:
-        return None
-
-    registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
-    prior_default = ""
-    if prior_workspace_snapshot is not None:
-        try:
-            prior = json.loads(prior_workspace_snapshot)
-            prior_default = str(
-                ((prior.get("brokers") or {}).get("execution") or {}).get("default") or ""
+    def demote(config: dict[str, Any]) -> dict[str, Any]:
+        nonlocal notice
+        brokers = config.setdefault("brokers", {})
+        execution = brokers.setdefault("execution", {})
+        if execution.get("default") != selector:
+            return config
+        registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
+        if (
+            prior_execution_default
+            and prior_execution_default != selector
+            and prior_execution_default in registered
+        ):
+            execution["default"] = prior_execution_default
+            notice = (
+                "This account's session is read-only, so the previous live write "
+                "default was restored."
             )
-        except (TypeError, ValueError, AttributeError):
-            prior_default = ""
+        elif "openalgo:default" in registered and bridge_configured:
+            execution["default"] = "openalgo:default"
+            notice = (
+                "This account's session is read-only, so the live write default "
+                "was moved to the OpenAlgo bridge."
+            )
+        else:
+            execution["default"] = ""
+            notice = (
+                "This account's session is read-only, so it was removed as the "
+                "live write default. No write default is set — choose one in "
+                "Settings → Brokers."
+            )
+        return config
 
-    if prior_default and prior_default != selector and prior_default in registered:
-        replacement = prior_default
-        notice = (
-            "This account's session is read-only, so the previous live write "
-            "default was restored."
-        )
-    elif "openalgo:default" in registered and _openalgo_bridge_configured():
-        replacement = "openalgo:default"
-        notice = (
-            "This account's session is read-only, so the live write default "
-            "was moved to the OpenAlgo bridge."
-        )
-    else:
-        replacement = ""
-        notice = (
-            "This account's session is read-only, so it was removed as the "
-            "live write default. No write default is set — choose one in "
-            "Settings → Brokers."
-        )
-    execution["default"] = replacement
-
-    tmp = path.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    tmp.replace(path)
+    update_workspace_config(workspace_dir(), demote)
     return notice
-
-
-def _snapshot_workspace() -> str | None:
-    """Return the raw workspace.json text (or None if it does not exist yet).
-
-    Paired with :func:`_restore_workspace` for a transactional connect: a failed
-    connect must revert EVERY workspace mutation (registered, account_acls, AND
-    ``execution.default``) to exactly its prior state — surgically blanking the
-    default would brick the order path when a working default already existed.
-    """
-    path = workspace_dir() / "workspace.json"
-    return path.read_text(encoding="utf-8") if path.exists() else None
-
-
-def _restore_workspace(snapshot: str | None) -> None:
-    """Restore workspace.json to a snapshot from :func:`_snapshot_workspace`."""
-    path = workspace_dir() / "workspace.json"
-    if snapshot is None:
-        # There was no workspace.json before the attempt — remove one the
-        # register step may have created so nothing partial is left behind.
-        try:
-            if path.exists():
-                path.unlink()
-        except OSError:
-            pass
-        return
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(snapshot, encoding="utf-8")
-    tmp.replace(path)
 
 
 def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> str | None:
     """Remove the native selector from brokers.registered / account_acls / default.
 
     The inverse of :func:`_register_selector_in_workspace`; used by the remove
-    route to drop a disconnected account (the failed-connect rollback instead
-    restores the whole workspace snapshot via :func:`_restore_workspace`). No-op
-    if there is no workspace.json.
+    route to drop a disconnected account. Failed connects use the more precise
+    :func:`_rollback_selector_workspace`. No-op if there is no workspace.json.
 
     When the removed selector was ``brokers.execution.default``, the
     replacement follows the SAME fail-closed policy as
@@ -508,32 +518,37 @@ def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> str |
     path = workspace_dir() / "workspace.json"
     if not path.exists():
         return None
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    brokers = data.get("brokers", {})
-    if selector in brokers.get("registered", []):
-        brokers["registered"].remove(selector)
-    brokers.get("account_acls", {}).get(adapter_id, {}).pop(account_id, None)
-    execution = brokers.setdefault("execution", {})
-    registered = [str(entry) for entry in brokers.get("registered", []) if str(entry)]
     notice: str | None = None
-    if execution.get("default") == selector:
-        if "openalgo:default" in registered and _openalgo_bridge_configured():
-            execution["default"] = "openalgo:default"
-            notice = (
-                "The removed account was the live write default, so the "
-                "default was moved to the OpenAlgo bridge."
-            )
-        else:
-            execution["default"] = ""
-            notice = (
-                "The removed account was the live write default. No write "
-                "default is set — choose one in Settings → Brokers."
-            )
-    tmp = path.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    tmp.replace(path)
+    bridge_configured = _openalgo_bridge_configured()
+
+    def deregister(config: dict[str, Any]) -> dict[str, Any]:
+        nonlocal notice
+        brokers = config.setdefault("brokers", {})
+        registered = brokers.setdefault("registered", [])
+        if selector in registered:
+            registered.remove(selector)
+        account_acls = brokers.setdefault("account_acls", {})
+        adapter_acls = account_acls.get(adapter_id, {})
+        adapter_acls.pop(account_id, None)
+        if not adapter_acls:
+            account_acls.pop(adapter_id, None)
+        execution = brokers.setdefault("execution", {})
+        if execution.get("default") == selector:
+            if "openalgo:default" in registered and bridge_configured:
+                execution["default"] = "openalgo:default"
+                notice = (
+                    "The removed account was the live write default, so the "
+                    "default was moved to the OpenAlgo bridge."
+                )
+            else:
+                execution["default"] = ""
+                notice = (
+                    "The removed account was the live write default. No write "
+                    "default is set — choose one in Settings → Brokers."
+                )
+        return config
+
+    update_workspace_config(workspace_dir(), deregister)
     return notice
 
 
@@ -666,7 +681,7 @@ def _demote_read_only_connected_account(
     adapter_id: str,
     account_id: str,
     fallback_label: str,
-    prior_workspace_snapshot: str | None = None,
+    prior_execution_default: str = "",
 ) -> str | None:
     """Remove a connected read-only selector from write-default metadata.
 
@@ -684,7 +699,7 @@ def _demote_read_only_connected_account(
         notice = _demote_selector_as_execution_default(
             adapter_id,
             account_id,
-            prior_workspace_snapshot=prior_workspace_snapshot,
+            prior_execution_default=prior_execution_default,
         )
         _demote_read_only_vault_primary(
             store,
@@ -736,12 +751,11 @@ def _do_connect(
     if sdk_not_ready is not None:
         return sdk_not_ready, 503
 
-    # --- Snapshot everything the connect will mutate, for a transactional
-    # rollback on failure. new-vs-existing is decided by PRESENCE via
+    # Track everything the connect will mutate for a transactional rollback on
+    # failure. New-vs-existing is decided by PRESENCE via
     # list_accounts (which never decrypts), so an existing-but-undecryptable row
-    # is not misread as brand-new and destroyed. The workspace snapshot lets a
-    # failed connect revert registered/account_acls/execution.default to EXACTLY
-    # the prior state — a working default must never be blanked by a rollback.
+    # is not misread as brand-new and destroyed. Workspace registration returns
+    # an exact mutation receipt so rollback cannot overwrite unrelated edits.
     prior_meta: dict[str, Any] | None = None
     try:
         for row in store.list_accounts():
@@ -760,8 +774,6 @@ def _do_connect(
             prior_credentials = store.retrieve_for(adapter_id, account_id)
         except Exception:  # noqa: BLE001 - existing but undecryptable: keep the row, can't restore creds
             prior_credentials = None
-    ws_snapshot = _snapshot_workspace()
-
     try:
         store.store(account_id, adapter_id, label, credentials, is_primary=is_primary, adapter_id=adapter_id)
     except Exception:  # noqa: BLE001
@@ -769,13 +781,14 @@ def _do_connect(
 
     actor_id = _operator_actor_id()
     try:
-        _register_selector_in_workspace(adapter_id, account_id, actor_id, is_primary)
+        workspace_mutation = _register_selector_in_workspace(
+            adapter_id,
+            account_id,
+            actor_id,
+            is_primary,
+        )
     except Exception:  # noqa: BLE001
         logger.error("Failed to register native broker selector in workspace")
-        try:
-            _restore_workspace(ws_snapshot)
-        except Exception:  # noqa: BLE001
-            logger.warning("Workspace rollback failed after native selector registration error")
         _restore_vault_after_failed_store(
             store,
             account_id=account_id,
@@ -801,18 +814,17 @@ def _do_connect(
                 account_id=account_id,
                 adapter_id=adapter_id,
                 fallback_label=label,
-                prior_workspace_snapshot=ws_snapshot,
+                prior_execution_default=workspace_mutation.prior_default,
             )
         # G5: give the freshly connected broker a daily 08:05 IST refresh job on
         # the already-running rotator (configure_session_rotation only scheduled
         # brokers present at boot). Idempotent (replace_existing).
         _schedule_refresh_job(adapter_id)
     else:
-        # Failed connect: revert the workspace mutation in full (registered,
-        # ACL, and execution.default all back to their prior values), then fix
-        # up the vault row.
+        # Failed connect: undo only this transaction's selector, ACL, and
+        # execution.default fields, then fix up the vault row.
         try:
-            _restore_workspace(ws_snapshot)
+            _rollback_selector_workspace(workspace_mutation)
         except Exception:  # noqa: BLE001
             logger.warning("Workspace rollback failed for native broker connect")
         if is_new_account:
@@ -1739,9 +1751,14 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
             "message": "Broker account is read-only and cannot be used as the live write default.",
         }), 409
 
-    snapshot = _snapshot_workspace()
+    workspace_mutation: _SelectorWorkspaceMutation | None = None
     try:
-        _register_selector_in_workspace(adapter_id, account_id, _operator_actor_id(), True)
+        workspace_mutation = _register_selector_in_workspace(
+            adapter_id,
+            account_id,
+            _operator_actor_id(),
+            True,
+        )
 
         from .app import configure_broker_router  # noqa: PLC0415
 
@@ -1753,7 +1770,8 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
             raise RuntimeError("Credential store cannot set primary accounts")
         set_primary(account_id)
     except Exception:  # noqa: BLE001
-        _restore_workspace(snapshot)
+        if workspace_mutation is not None:
+            _rollback_selector_workspace(workspace_mutation)
         try:
             from .app import configure_broker_router  # noqa: PLC0415
 

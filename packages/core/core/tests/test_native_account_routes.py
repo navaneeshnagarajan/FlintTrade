@@ -2182,6 +2182,85 @@ def test_failed_new_connect_preserves_a_prior_working_execution_default(client, 
     assert "upstox:BADNEW" not in brokers.get("registered", [])
 
 
+def test_failed_connect_rollback_preserves_unrelated_concurrent_workspace_edit(client, monkeypatch):
+    """Rollback removes only this connect's selector, ACL, and default mutation."""
+    c, _app, tmp_path = client
+    import flinttrade_core.native_account_routes as routes
+    from flinttrade_core.workspace_migrations import update_workspace_config
+
+    def fail_after_concurrent_edit(adapter_id: str, account_id: str):
+        def update_ui(config):
+            config.setdefault("ui", {})["theme"] = "high-contrast"
+            return config
+
+        update_workspace_config(tmp_path, update_ui)
+        return {f"{adapter_id}:{account_id}": "needs_relogin"}
+
+    monkeypatch.setattr(routes, "_activate_after_credentials", fail_after_concurrent_edit)
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "ROLLBACK1",
+            "credentials": {"access_token": "dead"},
+            "is_primary": True,
+        },
+    )
+
+    assert response.status_code == 502
+    config = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
+    assert config["ui"]["theme"] == "high-contrast"
+    assert "upstox:ROLLBACK1" not in config["brokers"]["registered"]
+    assert "ROLLBACK1" not in config["brokers"]["account_acls"].get("upstox", {})
+
+
+def test_set_primary_rollback_preserves_unrelated_concurrent_workspace_edit(client, monkeypatch):
+    """A router rebuild failure must not restore a stale whole-file snapshot."""
+    c, _app, tmp_path = client
+    for account_id, is_primary in (("PRIMARY-A", True), ("PRIMARY-B", False)):
+        response = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": account_id,
+                "credentials": {"access_token": "good"},
+                "is_primary": is_primary,
+            },
+        )
+        assert response.status_code == 200
+
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace_migrations import update_workspace_config
+
+    calls = 0
+
+    def fail_first_rebuild(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            def update_ui(config):
+                config.setdefault("ui", {})["density"] = "compact"
+                return config
+
+            update_workspace_config(tmp_path, update_ui)
+            raise RuntimeError("router rebuild failed")
+
+    monkeypatch.setattr(app_module, "configure_broker_router", fail_first_rebuild)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/PRIMARY-B/set-primary",
+        headers=_h(),
+    )
+
+    assert response.status_code == 500
+    config = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
+    assert config["ui"]["density"] == "compact"
+    assert config["brokers"]["execution"]["default"] == "upstox:PRIMARY-A"
+
+
 def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
     """Re-audit fix: a failed reconnect restores the full prior vault row —
     label and is_primary, not just the credential payload."""
