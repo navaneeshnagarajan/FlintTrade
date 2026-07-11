@@ -41,7 +41,7 @@ _MODE_LABELS = {
 }
 _NUMERIC_MODES = {1: MODE_LTP, 2: MODE_QUOTE, 3: MODE_DEPTH}
 
-LtpSink = Callable[[str, str, float, int], None]
+LtpSink = Callable[[str, str, float, int, float], None]
 
 _RETRYABLE_HANDSHAKE_STATUSES = frozenset({500, 502, 503, 504})
 _BIGINT_MIN = -(2**63)
@@ -50,6 +50,10 @@ _MAX_FRAME_TIMESTAMP_TEXT_LENGTH = 64
 _MIN_FRAME_TIMESTAMP_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
 _MAX_FRAME_TIMESTAMP_EPOCH = datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp()
 _MAX_FRAME_TIMESTAMP_AGE_SECONDS = 5 * 60
+# OpenAlgo and the local host can differ briefly around NTP corrections. Accept
+# up to five seconds of positive source skew; anything beyond it is observable
+# as a rejected future tick rather than being rewritten to receipt time.
+MAX_SOURCE_CLOCK_SKEW_SECONDS = 5.0
 MAX_WATCHLIST_INSTRUMENTS = 512
 _MISSING_TIMESTAMP = object()
 
@@ -165,21 +169,23 @@ def _frame_timestamp(
     frame: dict[str, Any],
     payload: dict[str, Any],
     received_at: datetime,
-) -> datetime | None:
-    """Resolve source time, using receipt time only when source time is absent."""
+) -> tuple[datetime | None, str | None]:
+    """Resolve source time and classify an explicit timestamp rejection."""
     candidate = payload.get("timestamp", _MISSING_TIMESTAMP)
     if candidate is _MISSING_TIMESTAMP and payload is not frame:
         candidate = frame.get("timestamp", _MISSING_TIMESTAMP)
     if candidate is _MISSING_TIMESTAMP:
-        return received_at
+        return received_at, None
 
     parsed = _normalise_frame_timestamp(candidate)
     if parsed is None:
-        return None
+        return None, "invalid"
     age_seconds = (received_at - parsed).total_seconds()
-    if age_seconds < 0 or age_seconds > _MAX_FRAME_TIMESTAMP_AGE_SECONDS:
-        return None
-    return parsed
+    if age_seconds < -MAX_SOURCE_CLOCK_SKEW_SECONDS:
+        return None, "future"
+    if age_seconds > _MAX_FRAME_TIMESTAMP_AGE_SECONDS:
+        return None, "stale"
+    return parsed, None
 
 
 def _first_level_price(levels: Any, *price_keys: str) -> float | None:
@@ -357,9 +363,13 @@ class TickRecorder:
         self._transport_error = ""
         self._persistence_error = ""
         self._persistence_error_cause = ""
+        self._source_timestamp_errors: dict[tuple[str, str], str] = {}
         self._tick_count = 0
         self._persisted_tick_count = 0
         self._dropped_tick_count = 0
+        self._stale_source_timestamp_rejections = 0
+        self._future_source_timestamp_rejections = 0
+        self._invalid_source_timestamp_rejections = 0
         self._persistence_clock: Callable[[], float] = time.monotonic
         self._persistence_retry_delay = 1.0
         self._max_persistence_retry_delay = 30.0
@@ -417,7 +427,13 @@ class TickRecorder:
     def status_snapshot(self) -> dict[str, Any]:
         """Return one atomic snapshot of recorder lifecycle and persistence state."""
         with self._state_lock:
-            last_error = self._persistence_error or self._transport_error
+            latest_rejected_identity = next(reversed(self._source_timestamp_errors), None)
+            source_timestamp_error = (
+                self._source_timestamp_errors[latest_rejected_identity]
+                if latest_rejected_identity is not None
+                else ""
+            )
+            last_error = self._persistence_error or self._transport_error or source_timestamp_error
             return {
                 "running": self._running,
                 "connected": self._connected,
@@ -425,9 +441,13 @@ class TickRecorder:
                 "persisted_tick_count": self._persisted_tick_count,
                 "pending_tick_count": len(self._buffer),
                 "dropped_tick_count": self._dropped_tick_count,
+                "stale_source_timestamp_rejections": self._stale_source_timestamp_rejections,
+                "future_source_timestamp_rejections": self._future_source_timestamp_rejections,
+                "invalid_source_timestamp_rejections": self._invalid_source_timestamp_rejections,
                 "last_error": last_error,
                 "transport_error": self._transport_error,
                 "persistence_error": self._persistence_error,
+                "source_timestamp_error": source_timestamp_error,
             }
 
     # ------------------------------------------------------------------
@@ -517,6 +537,12 @@ class TickRecorder:
             for instrument in instruments
             if (identity := _canonical_identity(instrument.get("exchange"), instrument.get("symbol"))) is not None
         }
+        with self._state_lock:
+            self._source_timestamp_errors = {
+                identity: message
+                for identity, message in self._source_timestamp_errors.items()
+                if identity in self._allowed_identities
+            }
 
     # ------------------------------------------------------------------
     # WebSocket loop with auto-reconnect
@@ -836,9 +862,15 @@ class TickRecorder:
     ) -> bool:
         """Buffer and dispatch one canonical frame admitted by the allowlist."""
         received_at = datetime.now(timezone.utc)
-        ts = _frame_timestamp(data, payload, received_at)
+        ts, timestamp_rejection = _frame_timestamp(data, payload, received_at)
         if ts is None:
+            self._record_source_timestamp_rejection(
+                timestamp_rejection or "invalid",
+                exchange=exchange,
+                symbol=symbol,
+            )
             return False
+        self._clear_source_timestamp_error(exchange=exchange, symbol=symbol)
         mode = self._detect_mode(payload, data.get("mode"))
         cumulative_volume = _bigint_or_none(payload.get("volume"))
         persisted_volume = cumulative_volume if cumulative_volume is None or cumulative_volume >= 0 else None
@@ -873,7 +905,13 @@ class TickRecorder:
             if self._persistence_error:
                 self._drop_excess_buffer_locked()
 
-        self._dispatch_ltp(exchange, symbol, payload.get("ltp"), payload.get("volume"))
+        self._dispatch_ltp(
+            exchange,
+            symbol,
+            payload.get("ltp"),
+            payload.get("volume"),
+            ts.timestamp(),
+        )
 
         # Feed the live order-flow aggregator (best-effort — must never break
         # tick recording). LTP + cumulative volume drive the footprint; bid/ask
@@ -912,8 +950,15 @@ class TickRecorder:
             return MODE_QUOTE
         return MODE_LTP
 
-    def _dispatch_ltp(self, exchange: str, symbol: str, ltp: Any, volume: Any) -> None:
-        """Best-effort synchronous delivery of a valid LTP to the signal sink."""
+    def _dispatch_ltp(
+        self,
+        exchange: str,
+        symbol: str,
+        ltp: Any,
+        volume: Any,
+        source_timestamp: float,
+    ) -> None:
+        """Best-effort delivery of a valid LTP and its accepted source time."""
         if self._ltp_sink is None:
             return
         try:
@@ -927,7 +972,7 @@ class TickRecorder:
         except (TypeError, ValueError, OverflowError):
             volume_value = 0
         try:
-            self._ltp_sink(exchange, symbol, ltp_value, volume_value)
+            self._ltp_sink(exchange, symbol, ltp_value, volume_value, source_timestamp)
         except Exception as exc:  # noqa: BLE001 - callbacks must not interrupt recording
             logger.debug(
                 "LTP sink skipped for %s:%s: %s",
@@ -935,6 +980,41 @@ class TickRecorder:
                 self._sanitise(symbol),
                 self._sanitise(exc),
             )
+
+    def _record_source_timestamp_rejection(
+        self,
+        reason: str,
+        *,
+        exchange: str,
+        symbol: str,
+    ) -> None:
+        """Count and surface a timestamp rejection without replacing source time."""
+        with self._state_lock:
+            if reason == "stale":
+                self._stale_source_timestamp_rejections += 1
+                count = self._stale_source_timestamp_rejections
+                detail = f"older than {_MAX_FRAME_TIMESTAMP_AGE_SECONDS}s"
+            elif reason == "future":
+                self._future_source_timestamp_rejections += 1
+                count = self._future_source_timestamp_rejections
+                detail = f"beyond {MAX_SOURCE_CLOCK_SKEW_SECONDS:g}s clock-skew tolerance"
+            else:
+                reason = "invalid"
+                self._invalid_source_timestamp_rejections += 1
+                count = self._invalid_source_timestamp_rejections
+                detail = "missing a valid timezone-aware or epoch value"
+            message = f"Rejected {reason} source timestamp ({detail}; count={count})"
+            identity = (exchange, symbol)
+            self._source_timestamp_errors.pop(identity, None)
+            self._source_timestamp_errors[identity] = message
+
+        if count == 1 or count & (count - 1) == 0:
+            logger.warning("%s", message)
+
+    def _clear_source_timestamp_error(self, *, exchange: str, symbol: str) -> None:
+        """Clear one instrument's timestamp diagnostic after an accepted tick."""
+        with self._state_lock:
+            self._source_timestamp_errors.pop((exchange, symbol), None)
 
     def _handle_control_message(self, data: dict[str, Any]) -> tuple[bool, bool]:
         """Record OpenAlgo control errors without treating them as market ticks."""

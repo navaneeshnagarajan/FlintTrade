@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -86,6 +87,80 @@ def test_scheduled_pipeline_publishes_completed_cycle() -> None:
 
     assert results["NSE_INDEX:NIFTY"]["method"] == "ema_crossover_fallback"
     sink.assert_called_once_with(results)
+
+
+def test_scheduled_pipeline_emits_once_when_same_source_candle_runs_concurrently() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    source_bars = _bars()
+    both_fetches_started = threading.Barrier(2)
+    sink = MagicMock()
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        signal_sink=sink,
+    )
+    pipeline._generator = MagicMock(is_trained=False)
+
+    def fetch_bars(_symbol: str, _exchange: str) -> list[dict[str, object]]:
+        both_fetches_started.wait(timeout=2.0)
+        return source_bars
+
+    pipeline.fetch_bars = fetch_bars  # type: ignore[method-assign]
+    outcomes: list[dict[str, dict[str, object]]] = []
+    failures: list[BaseException] = []
+
+    def run_cycle() -> None:
+        try:
+            outcomes.append(pipeline.run_cycle())
+        except BaseException as exc:  # pragma: no cover - assertion reports worker failures
+            failures.append(exc)
+
+    workers = [threading.Thread(target=run_cycle) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=3.0)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert failures == []
+    assert sum("NSE_INDEX:NIFTY" in result for result in outcomes) == 1
+    sink.assert_called_once()
+    assert sink.call_args.args[0]["NSE_INDEX:NIFTY"]["timestamp"] == source_bars[-1]["timestamp"]
+
+
+def test_scheduled_candle_claim_survives_temporary_roster_removal() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    sink = MagicMock()
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        signal_sink=sink,
+    )
+    pipeline._generator = MagicMock(is_trained=False)
+    pipeline.fetch_bars = MagicMock(return_value=_bars())
+
+    assert "NSE_INDEX:NIFTY" in pipeline.run_cycle()
+    pipeline.update_instruments([])
+    pipeline.update_instruments(["NSE_INDEX:NIFTY"])
+
+    assert pipeline.run_cycle() == {}
+    sink.assert_called_once()
+
+
+def test_duplicate_candle_does_not_clear_last_accepted_snapshot() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+    )
+    pipeline._generator = MagicMock(is_trained=False)
+    pipeline.fetch_bars = MagicMock(return_value=_bars())
+
+    first = pipeline.run_cycle()
+
+    assert first
+    assert pipeline.run_cycle() == {}
+    assert pipeline.get_latest_signals() == first
 
 
 def test_scheduled_pipeline_skips_each_closed_exchange_independently() -> None:

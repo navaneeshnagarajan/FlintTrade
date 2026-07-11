@@ -17,12 +17,20 @@ from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from queue import Empty, Queue
 from statistics import fmean, pstdev
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .signals import FeatureSet, SignalGenerator, TrainingCancelled, engineer_features
+from .signals import (
+    FeatureSet,
+    SignalGenerator,
+    TrainingCancelled,
+    engineer_features,
+    generate_labels,
+    walk_forward_split_bounds,
+)
 
 try:
     from scipy.stats import ks_2samp as _scipy_ks_2samp
@@ -38,6 +46,7 @@ CancellationCheck = Callable[[], bool]
 _BUNDLE_VERSION = 1
 _BASELINE_VERSION = 1
 _BUNDLE_MEMBERS = frozenset({"metadata.json", "model.joblib", "model.sha256"})
+_FETCH_CANCELLATION_POLL_SECONDS = 0.05
 
 
 def _default_model_dir() -> Path:
@@ -385,6 +394,45 @@ class SignalRetrainer:
     def _is_cancelled(self) -> bool:
         return bool(self._cancel_requested())
 
+    def _fetch_bars_with_cancellation(
+        self,
+        symbol: str,
+        exchange: str,
+    ) -> list[dict[str, Any]] | None:
+        """Fetch on a daemon worker and return ``None`` promptly on cancellation."""
+        outcomes: Queue[tuple[list[dict[str, Any]] | None, Exception | None]] = Queue(maxsize=1)
+
+        def fetch() -> None:
+            try:
+                bars = self._data_fetcher(symbol, exchange, self.config.lookback_days)
+            except Exception as exc:  # noqa: BLE001 - marshalled back to the retraining thread
+                outcomes.put_nowait((None, exc))
+            else:
+                outcomes.put_nowait((bars, None))
+
+        worker = threading.Thread(
+            target=fetch,
+            name="flinttrade-signal-data-fetch",
+            daemon=True,
+        )
+        worker.start()
+        while worker.is_alive():
+            worker.join(timeout=_FETCH_CANCELLATION_POLL_SECONDS)
+            if self._is_cancelled():
+                return None
+        if self._is_cancelled():
+            return None
+
+        try:
+            bars, error = outcomes.get_nowait()
+        except Empty as exc:
+            raise RuntimeError("Signal data fetch worker exited without a result") from exc
+        if error is not None:
+            raise error
+        if bars is None:
+            raise RuntimeError("Signal data fetcher returned no result")
+        return bars
+
     def run_once(self, symbol: str, exchange: str) -> RetrainResult:
         """Fetch, train, validate, and conditionally promote one instrument."""
         started = time.monotonic()
@@ -424,9 +472,11 @@ class SignalRetrainer:
                     return result
 
         try:
-            bars = self._data_fetcher(symbol, exchange, self.config.lookback_days)
+            bars = self._fetch_bars_with_cancellation(symbol, exchange)
         except Exception as exc:  # noqa: BLE001 - one instrument must not stop the roster
             return self._record_failure(started, symbol, exchange, f"Data fetch failed: {exc}")
+        if bars is None:
+            return self._record_failure(started, symbol, exchange, "Cancelled")
         if self._is_cancelled():
             return self._record_failure(started, symbol, exchange, "Cancelled")
 
@@ -463,12 +513,6 @@ class SignalRetrainer:
                 drift_detected=drift_detected,
                 drift_score=drift_score,
             )
-
-        training_split = int(len(features.values) * (1 - self.config.validation_split))
-        training_baseline = FeatureSet(
-            names=list(features.names),
-            values=[list(row) for row in features.values[:training_split]],
-        )
 
         candidate = SignalGenerator()
         try:
@@ -508,6 +552,33 @@ class SignalRetrainer:
                 drift_detected=drift_detected,
                 drift_score=drift_score,
             )
+
+        try:
+            labels = generate_labels(
+                [float(bar["close"]) for bar in bars],
+                lookahead=self.config.lookahead,
+                buy_threshold_pct=self.config.buy_threshold_pct,
+                sell_threshold_pct=self.config.sell_threshold_pct,
+            )
+            sample_count = min(len(features.values), len(labels))
+            training_end, _validation_start = walk_forward_split_bounds(
+                sample_count,
+                test_ratio=self.config.validation_split,
+                lookahead=self.config.lookahead,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._record_failure(
+                started,
+                symbol,
+                exchange,
+                f"Training baseline failed: {exc}",
+                drift_detected=drift_detected,
+                drift_score=drift_score,
+            )
+        training_baseline = FeatureSet(
+            names=list(features.names),
+            values=[list(row) for row in features.values[:training_end]],
+        )
 
         train_accuracy = float(metrics.get("train_accuracy", 0.0))
         test_accuracy = float(metrics.get("test_accuracy", 0.0))

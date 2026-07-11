@@ -80,6 +80,9 @@ def tick_status() -> Any:
             "persisted_tick_count": 0,
             "pending_tick_count": 0,
             "dropped_tick_count": 0,
+            "stale_source_timestamp_rejections": 0,
+            "future_source_timestamp_rejections": 0,
+            "invalid_source_timestamp_rejections": 0,
             "watchlist": {},
         }
         last_error = str(current_app.config.get("TICK_CAPTURE_ERROR", "") or "").strip()
@@ -109,9 +112,22 @@ def tick_status() -> Any:
         "persisted_tick_count": int(snapshot.get("persisted_tick_count", 0)),
         "pending_tick_count": int(snapshot.get("pending_tick_count", 0)),
         "dropped_tick_count": int(snapshot.get("dropped_tick_count", 0)),
+        "stale_source_timestamp_rejections": int(
+            snapshot.get("stale_source_timestamp_rejections", 0)
+        ),
+        "future_source_timestamp_rejections": int(
+            snapshot.get("future_source_timestamp_rejections", 0)
+        ),
+        "invalid_source_timestamp_rejections": int(
+            snapshot.get("invalid_source_timestamp_rejections", 0)
+        ),
         "watchlist": recorder.get_watchlist(),
     }
-    for error_name in ("transport_error", "persistence_error"):
+    for error_name in (
+        "transport_error",
+        "persistence_error",
+        "source_timestamp_error",
+    ):
         error = str(snapshot.get(error_name, "") or "").strip()
         if error:
             data[error_name] = error

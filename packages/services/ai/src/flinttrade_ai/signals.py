@@ -301,6 +301,28 @@ def generate_labels(
     return labels
 
 
+def walk_forward_split_bounds(
+    sample_count: int,
+    *,
+    test_ratio: float,
+    lookahead: int,
+) -> tuple[int, int]:
+    """Return purged training end and validation start indices.
+
+    The final ``lookahead`` candidate training rows are excluded so none of
+    their forward labels can observe a candle at or beyond validation start.
+    """
+    if lookahead < 1:
+        raise ValueError("lookahead must be positive")
+    if not 0.0 < test_ratio < 1.0:
+        raise ValueError("test_ratio must be between 0 and 1")
+    validation_start = int(sample_count * (1 - test_ratio))
+    training_end = validation_start - lookahead
+    if training_end <= 0 or validation_start >= sample_count:
+        raise ValueError("Not enough labelled rows for a purged walk-forward split")
+    return training_end, validation_start
+
+
 # ---------------------------------------------------------------------------
 # Sharpe labels
 # ---------------------------------------------------------------------------
@@ -546,10 +568,15 @@ class SignalGenerator:
 
         self._feature_names = features.names
 
-        # Walk-forward split
-        split = int(len(X) * (1 - test_ratio))
-        X_train, X_test = X[:split], X[split:]
-        y_train, y_test = y[:split], y[split:]
+        # Purge the label horizon before validation. Without this gap, the last
+        # training labels are computed from closes inside the validation window.
+        training_end, validation_start = walk_forward_split_bounds(
+            len(X),
+            test_ratio=test_ratio,
+            lookahead=lookahead,
+        )
+        X_train, X_test = X[:training_end], X[validation_start:]
+        y_train, y_test = y[:training_end], y[validation_start:]
 
         params = {
             "objective": "multiclass",
@@ -594,6 +621,8 @@ class SignalGenerator:
         return {
             "train_accuracy": train_acc,
             "test_accuracy": test_acc,
+            "training_rows": len(X_train),
+            "validation_rows": len(X_test),
             "feature_importances": self._feature_importance(),
         }
 

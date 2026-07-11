@@ -17,6 +17,7 @@ import threading
 from collections import deque
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -57,6 +58,38 @@ def _normalise_event_number(value: object, *, field_name: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"{field_name} must be a finite number")
     return result
+
+
+def _normalise_observation_timestamp(value: object | None) -> datetime | None:
+    """Return one UTC observation timestamp without replacing invalid source time."""
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, bool):
+        return None
+    elif isinstance(value, int | float):
+        try:
+            epoch = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(epoch):
+            return None
+        try:
+            return datetime.fromtimestamp(epoch, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
 
 
 def _normalise_event(signal: SignalEvent) -> SignalEvent:
@@ -164,6 +197,8 @@ class LiveSignalPipeline:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._sequence = 0
+        self._rejected_out_of_order_tick_count = 0
+        self._last_observation_at: dict[tuple[str, str], datetime] = {}
         self._stream_id = _normalise_stream_id(stream_id)
         self._instrument_observer: Callable[[list[str]], Any] | None = None
 
@@ -177,8 +212,9 @@ class LiveSignalPipeline:
         symbol: str,
         ltp: float,
         volume: int = 0,
+        source_timestamp: float | str | datetime | None = None,
     ) -> SignalEvent | None:
-        """Process one exchange-qualified tick under the reconfiguration lock."""
+        """Process one exchange-qualified tick with its immutable source time."""
         if not isinstance(exchange, str) or not isinstance(symbol, str):
             return None
         exchange = exchange.strip().upper()
@@ -189,10 +225,13 @@ class LiveSignalPipeline:
             return None
         if not exchange or not symbol or not math.isfinite(ltp) or ltp <= 0:
             return None
+        observation_at = _normalise_observation_timestamp(source_timestamp)
+        if observation_at is None:
+            return None
         with self._lock:
             if f"{exchange}:{symbol}" not in self._config.instruments:
                 return None
-            return self._process_tick_locked(exchange, symbol, ltp, volume)
+            return self._process_tick_locked(exchange, symbol, ltp, volume, observation_at)
 
     def _process_tick_locked(
         self,
@@ -200,6 +239,7 @@ class LiveSignalPipeline:
         symbol: str,
         ltp: float,
         volume: int = 0,
+        observation_at: datetime | None = None,
     ) -> SignalEvent | None:
         """Process a single tick and return a Signal if a threshold is crossed.
 
@@ -215,7 +255,15 @@ class LiveSignalPipeline:
         Returns:
             A ``Signal`` instance if a threshold was crossed, else ``None``.
         """
+        observation_at = observation_at or datetime.now(timezone.utc)
+        identity = (exchange, symbol)
+        previous_observation = self._last_observation_at.get(identity)
+        if previous_observation is not None and observation_at < previous_observation:
+            self._rejected_out_of_order_tick_count += 1
+            return None
+        self._last_observation_at[identity] = observation_at
         state = self._get_or_create_state(exchange, symbol)
+        event_timestamp = observation_at.isoformat()
         thresholds = self._config.thresholds
         pending_signal: SignalEvent | None = None
 
@@ -236,7 +284,7 @@ class LiveSignalPipeline:
 
                 if entered_zone and zone == "OVERSOLD":
                     pending_signal = SignalEvent(
-                        timestamp=now_iso(),
+                        timestamp=event_timestamp,
                         symbol=symbol,
                         exchange=exchange,
                         signal_type="BUY",
@@ -249,7 +297,7 @@ class LiveSignalPipeline:
                     )
                 elif entered_zone and zone == "OVERBOUGHT":
                     pending_signal = SignalEvent(
-                        timestamp=now_iso(),
+                        timestamp=event_timestamp,
                         symbol=symbol,
                         exchange=exchange,
                         signal_type="SELL",
@@ -283,7 +331,7 @@ class LiveSignalPipeline:
                 if state.ema_armed_direction == "BUY" and spread_pct > bullish_threshold:
                     state.ema_armed_direction = None
                     sig = SignalEvent(
-                        timestamp=now_iso(),
+                        timestamp=event_timestamp,
                         symbol=symbol,
                         exchange=exchange,
                         signal_type="BUY",
@@ -301,7 +349,7 @@ class LiveSignalPipeline:
                 elif state.ema_armed_direction == "SELL" and spread_pct < bearish_threshold:
                     state.ema_armed_direction = None
                     sig = SignalEvent(
-                        timestamp=now_iso(),
+                        timestamp=event_timestamp,
                         symbol=symbol,
                         exchange=exchange,
                         signal_type="SELL",
@@ -345,7 +393,7 @@ class LiveSignalPipeline:
                     if state.macd_armed_direction == "BUY" and macd_hist > bullish_threshold:
                         state.macd_armed_direction = None
                         sig = SignalEvent(
-                            timestamp=now_iso(),
+                            timestamp=event_timestamp,
                             symbol=symbol,
                             exchange=exchange,
                             signal_type="BUY",
@@ -362,7 +410,7 @@ class LiveSignalPipeline:
                     elif state.macd_armed_direction == "SELL" and macd_hist < bearish_threshold:
                         state.macd_armed_direction = None
                         sig = SignalEvent(
-                            timestamp=now_iso(),
+                            timestamp=event_timestamp,
                             symbol=symbol,
                             exchange=exchange,
                             signal_type="SELL",
@@ -406,6 +454,12 @@ class LiveSignalPipeline:
         """Return the newest hub event ID without exposing mutable state."""
         with self._lock:
             return self._sequence
+
+    @property
+    def rejected_out_of_order_tick_count(self) -> int:
+        """Return the number of source-time regressions rejected by this hub."""
+        with self._lock:
+            return self._rejected_out_of_order_tick_count
 
     @property
     def stream_id(self) -> str:

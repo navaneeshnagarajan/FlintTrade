@@ -213,6 +213,48 @@ def test_train_forwards_asymmetric_thresholds_and_returns_booster_importance(
     assert metrics["feature_importances"]["return_1"] == 10.0
 
 
+def test_walk_forward_split_purges_label_lookahead_before_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_ai.signals as signals
+
+    datasets: list[Any] = []
+
+    class _Dataset:
+        def __init__(self, data: Any, **kwargs: Any) -> None:
+            self.data = data
+            self.label = kwargs.get("label")
+            datasets.append(self)
+
+    booster = _CanonicalBooster([0.1, 0.8, 0.1])
+    monkeypatch.setitem(
+        sys.modules,
+        "lightgbm",
+        SimpleNamespace(
+            Dataset=_Dataset,
+            train=lambda *_args, **_kwargs: booster,
+            log_evaluation=lambda **_kwargs: object(),
+        ),
+    )
+    bars = _bars(100)
+    lookahead = 7
+    test_ratio = 0.2
+    features = signals.engineer_features(bars)
+    labels = signals.generate_labels([float(bar["close"]) for bar in bars], lookahead=lookahead)
+    sample_count = min(len(features.values), len(labels))
+    validation_start = int(sample_count * (1 - test_ratio))
+
+    signals.SignalGenerator().train(
+        bars,
+        lookahead=lookahead,
+        test_ratio=test_ratio,
+    )
+
+    assert datasets[0].data == features.values[: validation_start - lookahead]
+    assert datasets[1].data == features.values[validation_start:sample_count]
+    assert len(datasets[0].data) + lookahead == validation_start
+
+
 def test_train_enforces_minimum_rows_before_feature_engineering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

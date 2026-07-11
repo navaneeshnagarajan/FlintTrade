@@ -27,6 +27,10 @@ class _FakeRecorder:
         self.persisted_tick_count = 40
         self.pending_tick_count = 2
         self.dropped_tick_count = 3
+        self.stale_source_timestamp_rejections = 4
+        self.future_source_timestamp_rejections = 5
+        self.invalid_source_timestamp_rejections = 6
+        self.source_timestamp_error = ""
         self.reconnect_requests = 0
         self.max_instruments = 512
         self._subscription_lock = threading.RLock()
@@ -48,9 +52,13 @@ class _FakeRecorder:
             "persisted_tick_count": self.persisted_tick_count,
             "pending_tick_count": self.pending_tick_count,
             "dropped_tick_count": self.dropped_tick_count,
+            "stale_source_timestamp_rejections": self.stale_source_timestamp_rejections,
+            "future_source_timestamp_rejections": self.future_source_timestamp_rejections,
+            "invalid_source_timestamp_rejections": self.invalid_source_timestamp_rejections,
             "last_error": self.last_error,
             "transport_error": self.last_error,
             "persistence_error": "",
+            "source_timestamp_error": self.source_timestamp_error,
         }
 
     def get_watchlist(self) -> dict[str, list[dict[str, str]]]:
@@ -160,8 +168,20 @@ class TestStatus:
         assert data["persisted_tick_count"] == 40
         assert data["pending_tick_count"] == 2
         assert data["dropped_tick_count"] == 3
+        assert data["stale_source_timestamp_rejections"] == 4
+        assert data["future_source_timestamp_rejections"] == 5
+        assert data["invalid_source_timestamp_rejections"] == 6
         assert data["watchlist"]["quote"] == [{"exchange": "NSE_INDEX", "symbol": "NIFTY"}]
         assert "last_error" not in data
+
+    def test_enabled_surfaces_source_timestamp_diagnostic(self, client, wired):
+        wired.source_timestamp_error = "Rejected future source timestamp"
+        wired.last_error = wired.source_timestamp_error
+
+        data = client.get("/api/v1/data/ticks/status").get_json()["data"]
+
+        assert data["source_timestamp_error"] == "Rejected future source timestamp"
+        assert data["last_error"] == "Rejected future source timestamp"
 
     def test_active_recorder_surfaces_hot_reload_integration_failure(self, client, app, wired):
         app.config["TICK_CAPTURE_ERROR"] = "connection reload failed"

@@ -1111,7 +1111,8 @@ class TestTickRecorder:
         )
 
         assert recorder._buffer[0][1:3] == ("RELIANCE", "NSE")
-        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 100)
+        stored_timestamp = recorder._buffer[0][0]
+        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 100, stored_timestamp.timestamp())
 
     def test_conflicting_envelope_and_payload_identities_are_rejected(self):
         from flinttrade_data.tick_recorder import TickRecorder
@@ -1313,8 +1314,9 @@ class TestTickRecorder:
                 return expected if tz is not None else expected.replace(tzinfo=None)
 
         monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        sink = MagicMock()
         orderflow = MagicMock()
-        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        recorder = TickRecorder(storage=MagicMock(), ltp_sink=sink, orderflow_aggregator=orderflow)
         self._allow(recorder, ("NSE", "RELIANCE"))
         payload = {
             "exchange": " nse ",
@@ -1328,8 +1330,43 @@ class TestTickRecorder:
         recorder._process_tick(frame)
 
         assert recorder._buffer[0][0] == expected
+        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000, expected.timestamp())
         orderflow.feed_market_tick.assert_called_once()
         assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == expected.timestamp()
+
+    @pytest.mark.parametrize("skew_seconds", [1.0, 5.0], ids=["one-second", "five-second-boundary"])
+    def test_small_positive_source_clock_skew_is_accepted(self, skew_seconds, monkeypatch):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        received_at = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+        source_time = received_at + timedelta(seconds=skew_seconds)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return received_at if tz is not None else received_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        sink = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), ltp_sink=sink)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "volume": 1000,
+                "timestamp": source_time.isoformat(),
+            }
+        )
+
+        assert recorder._buffer[0][0] == source_time
+        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000, source_time.timestamp())
+        snapshot = recorder.status_snapshot()
+        assert snapshot["future_source_timestamp_rejections"] == 0
+        assert snapshot["stale_source_timestamp_rejections"] == 0
 
     @pytest.mark.parametrize(
         "frame_timestamp",
@@ -1337,7 +1374,7 @@ class TestTickRecorder:
             pytest.param("not-a-timestamp", id="invalid"),
             pytest.param("2026-03-23T03:44:59Z", id="stale"),
             pytest.param("2026-03-25T03:39:59Z", id="older-than-live-window"),
-            pytest.param("2026-03-25T03:45:01Z", id="future"),
+            pytest.param("2026-03-25T03:45:06Z", id="future-beyond-tolerance"),
         ],
     )
     def test_explicit_untrusted_timestamp_is_rejected_without_receipt_rewrite(
@@ -1380,11 +1417,11 @@ class TestTickRecorder:
         "frame_timestamp",
         [
             "2026-03-23T03:44:59Z",
-            "2026-03-25T03:45:01Z",
+            "2026-03-25T03:45:05.001Z",
             "2026-03-25T03:50:00Z",
             "2026-03-25T03:50:01Z",
         ],
-        ids=["too-old", "one-second-future", "five-minutes-future", "too-far-future"],
+        ids=["too-old", "future-beyond-tolerance", "five-minutes-future", "too-far-future"],
     )
     def test_implausibly_skewed_frame_timestamp_is_rejected(
         self,
@@ -1418,6 +1455,100 @@ class TestTickRecorder:
 
         assert recorder.pending_tick_count == 0
         orderflow.feed_market_tick.assert_not_called()
+
+    def test_stale_and_future_timestamp_rejections_are_counted_and_diagnosed(self, monkeypatch):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        received_at = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return received_at if tz is not None else received_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        recorder = TickRecorder(storage=MagicMock())
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        for source_time in (
+            received_at - timedelta(minutes=5, milliseconds=1),
+            received_at + timedelta(seconds=5, milliseconds=1),
+        ):
+            recorder._process_tick(
+                {
+                    "exchange": "NSE",
+                    "symbol": "RELIANCE",
+                    "ltp": 2500.0,
+                    "timestamp": source_time.isoformat(),
+                }
+            )
+
+        snapshot = recorder.status_snapshot()
+        assert snapshot["stale_source_timestamp_rejections"] == 1
+        assert snapshot["future_source_timestamp_rejections"] == 1
+        assert "future source timestamp" in snapshot["source_timestamp_error"].lower()
+        assert snapshot["source_timestamp_error"] == snapshot["last_error"]
+        assert recorder.pending_tick_count == 0
+
+    def test_valid_tick_only_clears_timestamp_diagnostic_for_its_own_instrument(self, monkeypatch):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        received_at = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return received_at if tz is not None else received_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        recorder = TickRecorder(storage=MagicMock())
+        self._allow(recorder, ("NSE", "RELIANCE"), ("NSE", "TCS"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "timestamp": (received_at - timedelta(minutes=6)).isoformat(),
+            }
+        )
+        recorder._process_tick({"exchange": "NSE", "symbol": "TCS", "ltp": 3500.0})
+
+        assert "stale source timestamp" in recorder.status_snapshot()["source_timestamp_error"].lower()
+
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2501.0})
+
+        assert recorder.status_snapshot()["source_timestamp_error"] == ""
+
+    def test_removing_instrument_clears_its_active_timestamp_diagnostic(self, monkeypatch):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        received_at = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return received_at if tz is not None else received_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        recorder = TickRecorder(storage=MagicMock())
+        instrument = {"exchange": "NSE", "symbol": "RELIANCE"}
+        recorder.add_symbols([instrument], mode="quote")
+        recorder._process_tick(
+            {
+                **instrument,
+                "ltp": 2500.0,
+                "timestamp": (received_at - timedelta(minutes=6)).isoformat(),
+            }
+        )
+        assert recorder.status_snapshot()["source_timestamp_error"]
+
+        recorder.remove_symbols([instrument], mode="quote")
+
+        assert recorder.status_snapshot()["source_timestamp_error"] == ""
 
     @pytest.mark.parametrize("stale_volume", [-1, 1050])
     def test_rejected_explicit_timestamp_cannot_mutate_orderflow_baseline(self, stale_volume):
@@ -1630,7 +1761,8 @@ class TestTickRecorder:
         recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
 
         assert len(recorder._buffer) == 1
-        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000)
+        stored_timestamp = recorder._buffer[0][0]
+        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000, stored_timestamp.timestamp())
 
     @pytest.mark.parametrize(
         "ltp",
@@ -1710,7 +1842,8 @@ class TestTickRecorder:
 
         recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": volume})
 
-        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 0)
+        stored_timestamp = recorder._buffer[0][0]
+        sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 0, stored_timestamp.timestamp())
 
     def test_throwing_ltp_sink_does_not_stop_buffering(self):
         from flinttrade_data.storage import StorageManager
@@ -2870,9 +3003,13 @@ class TestTickRecorder:
             "persisted_tick_count": 0,
             "pending_tick_count": 3,
             "dropped_tick_count": 7,
+            "stale_source_timestamp_rejections": 0,
+            "future_source_timestamp_rejections": 0,
+            "invalid_source_timestamp_rejections": 0,
             "last_error": recorder.last_error,
             "transport_error": "",
             "persistence_error": recorder.last_error,
+            "source_timestamp_error": "",
         }
 
         storage.insert_ticks_batch.side_effect = None

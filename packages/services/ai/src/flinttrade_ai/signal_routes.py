@@ -10,9 +10,14 @@ Endpoints:
 from __future__ import annotations
 
 import json as _json
+import hmac
 import logging
+import math
+import os
+import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import Any
 
 from flask import Blueprint, Flask, Response, current_app, jsonify, request
@@ -25,6 +30,131 @@ from .signal_pipeline import LiveSignalPipeline
 logger = logging.getLogger("flinttrade.ai.signal_routes")
 
 signal_bp = Blueprint("signals", __name__, url_prefix="/api/v1/signals")
+
+_PASSWORD_CHANGE_IAT_SKEW_SECONDS = 2.0
+StreamAuthRevalidator = Callable[[], bool]
+
+
+@dataclass(frozen=True)
+class StreamSessionClaims:
+    """Non-secret session claims retained by an active signal stream."""
+
+    jti: str
+    issued_at: float
+    expires_at: float
+
+
+def _build_stream_auth_revalidator(
+    claims: StreamSessionClaims,
+    *,
+    is_jti_revoked: Callable[[str], bool],
+    password_changed_at: Callable[[], float],
+    clock: Callable[[], float] = time.time,
+) -> StreamAuthRevalidator:
+    """Build a request-context-free JWT lifetime and revocation check."""
+
+    def revalidate() -> bool:
+        try:
+            checked_at = float(clock())
+            if (
+                not math.isfinite(checked_at)
+                or not math.isfinite(claims.issued_at)
+                or not math.isfinite(claims.expires_at)
+                or checked_at >= claims.expires_at
+            ):
+                return False
+            if not claims.jti or is_jti_revoked(claims.jti):
+                return False
+            changed_at = float(password_changed_at())
+            if not math.isfinite(changed_at):
+                return False
+            return not (
+                changed_at > 0.0
+                and claims.issued_at + _PASSWORD_CHANGE_IAT_SKEW_SECONDS < changed_at
+            )
+        except Exception as exc:  # noqa: BLE001 - auth-state failure closes the stream
+            logger.warning(
+                "Signal stream authentication revalidation failed; closing stream (%s)",
+                type(exc).__name__,
+            )
+            return False
+
+    return revalidate
+
+
+def _request_stream_auth_revalidator() -> StreamAuthRevalidator | None:
+    """Capture a verified JWT as non-secret claims before request teardown.
+
+    API-key and loopback-authenticated streams have no JWT lifecycle to track.
+    A valid session JWT is decoded once in the live request; the returned
+    callback retains only its JTI/times and context-free auth-state readers.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        return None
+
+    try:
+        from flinttrade_core.auth_routes import _is_jti_revoked, decode_token
+
+        payload = decode_token(token)
+    except Exception:
+        # Preserve only the configured API-key bearer path. A session can be
+        # revoked between Flask admission and this capture, so treating every
+        # decode failure as an API key would leave that stream open.
+        expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get(
+            "OPENALGO_API_KEY", ""
+        )
+        if expected_key and hmac.compare_digest(token, expected_key):
+            return None
+        if not expected_key and (request.remote_addr or "") in {
+            "127.0.0.1",
+            "::1",
+            "localhost",
+        }:
+            return None
+        return lambda: False
+    if payload.get("type") != "session":
+        return lambda: False
+
+    try:
+        jti = str(payload["jti"])
+        issued_at = float(payload["iat"])
+        expires_at = float(payload["exp"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return lambda: False
+    if not jti or not math.isfinite(issued_at) or not math.isfinite(expires_at):
+        return lambda: False
+
+    auth_service = current_app.config.get("AUTH_SERVICE")
+    password_changed_at = getattr(auth_service, "get_password_changed_at", None)
+    if not callable(password_changed_at):
+        return lambda: False
+    return _build_stream_auth_revalidator(
+        StreamSessionClaims(
+            jti=jti,
+            issued_at=issued_at,
+            expires_at=expires_at,
+        ),
+        is_jti_revoked=_is_jti_revoked,
+        password_changed_at=password_changed_at,
+    )
+
+
+def _stream_auth_is_valid(auth_revalidator: StreamAuthRevalidator | None) -> bool:
+    """Fail a stream closed when an injected revalidator raises."""
+    if auth_revalidator is None:
+        return True
+    try:
+        return bool(auth_revalidator())
+    except Exception as exc:  # noqa: BLE001 - auth-state failure closes the stream
+        logger.warning(
+            "Signal stream authentication revalidation failed; closing stream (%s)",
+            type(exc).__name__,
+        )
+        return False
 
 
 def configure_signal_sources(
@@ -125,7 +255,10 @@ def signals_recent() -> tuple[Any, int]:
     return jsonify(
         {
             "status": "success",
-            "data": {"signals": [s.to_dict() for s in signals]},
+            "data": {
+                "stream_id": pipeline.stream_id,
+                "signals": [s.to_dict() for s in signals],
+            },
         }
     ), 200
 
@@ -139,6 +272,7 @@ def _sse_generator(
     pipeline: LiveSignalPipeline,
     last_event_id: int | str | None = None,
     heartbeat_interval: float = 15.0,
+    auth_revalidator: StreamAuthRevalidator | None = None,
 ) -> Generator[str, None, None]:
     """Yield SSE events when new signals arrive.
 
@@ -150,6 +284,8 @@ def _sse_generator(
     reason, requested cursor, and available ID bounds; it is not a
     ``SignalEvent`` payload. A heartbeat comment keeps idle connections alive.
     """
+    if not _stream_auth_is_valid(auth_revalidator):
+        return
     newest, retained = pipeline.get_replay_snapshot()
     cursor = newest
     replay_events = []
@@ -193,15 +329,21 @@ def _sse_generator(
             replay_events = [signal for signal in retained if signal.event_id > cursor]
 
     for signal in replay_events:
+        if not _stream_auth_is_valid(auth_revalidator):
+            return
         payload = _json.dumps(signal.to_dict())
         yield f"id: {pipeline.sse_event_id(signal.event_id)}\ndata: {payload}\n\n"
         cursor = signal.event_id
 
     while True:
+        if not _stream_auth_is_valid(auth_revalidator):
+            return
         newest, retained = pipeline.wait_for_replay_snapshot_after(
             cursor,
             timeout=heartbeat_interval,
         )
+        if not _stream_auth_is_valid(auth_revalidator):
+            return
         events = [signal for signal in retained if signal.event_id > cursor]
         if not events:
             yield ": heartbeat\n\n"
@@ -218,6 +360,8 @@ def _sse_generator(
             events = retained
             cursor = oldest - 1
         for signal in events:
+            if not _stream_auth_is_valid(auth_revalidator):
+                return
             payload = _json.dumps(signal.to_dict())
             yield f"id: {pipeline.sse_event_id(signal.event_id)}\ndata: {payload}\n\n"
             cursor = signal.event_id
@@ -235,11 +379,13 @@ def signals_stream() -> Response:
     """
     pipeline = _get_pipeline()
     raw_last_event_id = request.headers.get("Last-Event-ID")
-    stream = (
-        _sse_generator(pipeline)
-        if raw_last_event_id is None
-        else _sse_generator(pipeline, last_event_id=raw_last_event_id)
-    )
+    auth_revalidator = _request_stream_auth_revalidator()
+    stream_kwargs: dict[str, Any] = {}
+    if raw_last_event_id is not None:
+        stream_kwargs["last_event_id"] = raw_last_event_id
+    if auth_revalidator is not None:
+        stream_kwargs["auth_revalidator"] = auth_revalidator
+    stream = _sse_generator(pipeline, **stream_kwargs)
     return Response(
         stream,
         mimetype="text/event-stream",

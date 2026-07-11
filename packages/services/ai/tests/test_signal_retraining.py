@@ -221,6 +221,48 @@ def test_run_all_cancels_before_training_and_stops_roster(
     train.assert_not_called()
 
 
+def test_run_once_cancels_promptly_while_synchronous_fetch_is_stalled(tmp_path: Path) -> None:
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+
+    fetch_started = threading.Event()
+    release_fetch = threading.Event()
+    cancel_requested = threading.Event()
+    fetch_workers: list[threading.Thread] = []
+    results: list[Any] = []
+
+    def stalled_fetch(*_args: Any) -> list[dict[str, float | str]]:
+        fetch_workers.append(threading.current_thread())
+        fetch_started.set()
+        release_fetch.wait(timeout=5.0)
+        return _bars()
+
+    retrainer = SignalRetrainer(
+        _config(tmp_path, persist_log=False),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        data_fetcher=stalled_fetch,
+        cancel_requested=cancel_requested.is_set,
+    )
+    runner = threading.Thread(
+        target=lambda: results.append(retrainer.run_once("NIFTY", "NSE_INDEX")),
+    )
+    runner.start()
+    assert fetch_started.wait(timeout=1.0)
+
+    try:
+        cancel_requested.set()
+        runner.join(timeout=0.5)
+
+        assert not runner.is_alive()
+        assert results[0].reason == "Cancelled"
+        assert fetch_workers[0].daemon is True
+        assert fetch_workers[0].is_alive()
+    finally:
+        release_fetch.set()
+        runner.join(timeout=1.0)
+        if fetch_workers:
+            fetch_workers[0].join(timeout=1.0)
+
+
 def test_feature_drift_uses_mean_score_and_has_deterministic_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     import flinttrade_ai.signal_retraining as retraining
     from flinttrade_ai.signals import FeatureSet
@@ -331,7 +373,9 @@ def test_accepted_candidate_uses_canonical_train_metrics_and_promotes_per_instru
     from flinttrade_ai.signals import engineer_features
 
     expected_features = engineer_features(_bars())
-    expected_split = int(len(expected_features.values) * 0.8)
+    labelled_rows = len(expected_features.values) - retrainer.config.lookahead
+    validation_start = int(labelled_rows * 0.8)
+    expected_split = validation_start - retrainer.config.lookahead
     assert metadata["baseline"]["feature_names"] == expected_features.names
     assert metadata["baseline"]["values"] == expected_features.values[:expected_split]
     assert model_bytes

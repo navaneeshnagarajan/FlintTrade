@@ -237,6 +237,8 @@ class SignalPipeline:
         self._turbulence_window: int = turbulence_window
         self._signal_sink = signal_sink
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._emission_lock = threading.Lock()
+        self._last_emitted_candles: dict[tuple[str, str], datetime] = {}
 
     @property
     def instruments(self) -> list[dict[str, str]]:
@@ -255,11 +257,18 @@ class SignalPipeline:
             self._instruments = candidate
             snapshot = [dict(instrument) for instrument in candidate]
         allowed = {(instrument["exchange"], instrument["symbol"]) for instrument in snapshot}
+        allowed_keys = {f"{exchange}:{symbol}" for exchange, symbol in allowed}
         with self._generator_lock:
             self._symbol_generators = {
                 identity: generator
                 for identity, generator in self._symbol_generators.items()
                 if identity in allowed
+            }
+        with self._emission_lock:
+            self.latest_signals = {
+                key: signal
+                for key, signal in self.latest_signals.items()
+                if key in allowed_keys
             }
         return snapshot
 
@@ -461,7 +470,7 @@ class SignalPipeline:
                         raw_signal = "HOLD"
                         method = f"{method}+turbulence_override"
 
-                results[key] = {
+                result = {
                     "symbol": inst["symbol"],
                     "exchange": inst["exchange"],
                     "signal": raw_signal,
@@ -471,11 +480,21 @@ class SignalPipeline:
                     "method": method,
                     "turbulence_score": turbulence_score,
                 }
+                if not self._claim_source_candle(
+                    inst["symbol"],
+                    inst["exchange"],
+                    latest_bar_timestamp,
+                ):
+                    logger.debug("Skipping duplicate or regressed source candle for %s at %s", key, latest_bar_timestamp)
+                    continue
+                results[key] = result
             except Exception:
                 logger.exception("Signal cycle error for %s", key)
 
-        self.latest_signals = results
-        if self._signal_sink is not None:
+        if results:
+            with self._emission_lock:
+                self.latest_signals.update(results)
+        if self._signal_sink is not None and results:
             try:
                 self._signal_sink(results)
             except Exception:  # noqa: BLE001 - a feed sink cannot discard ML state
@@ -512,6 +531,19 @@ class SignalPipeline:
             )
             return None
         return parsed.isoformat()
+
+    def _claim_source_candle(self, symbol: str, exchange: str, timestamp: str) -> bool:
+        """Atomically claim a strictly newer source candle for one instrument."""
+        parsed = _parse_bar_timestamp(timestamp)
+        if parsed is None:
+            return False
+        identity = (exchange, symbol)
+        with self._emission_lock:
+            previous = self._last_emitted_candles.get(identity)
+            if previous is not None and parsed <= previous:
+                return False
+            self._last_emitted_candles[identity] = parsed
+            return True
 
     @classmethod
     def _ema_crossover_signal(cls, closes: list[float]) -> str:
@@ -593,4 +625,8 @@ class SignalPipeline:
 
     def get_latest_signals(self) -> dict[str, dict[str, Any]]:
         """Return the most recent signal results."""
-        return self.latest_signals
+        with self._emission_lock:
+            return {
+                key: dict(signal)
+                for key, signal in self.latest_signals.items()
+            }

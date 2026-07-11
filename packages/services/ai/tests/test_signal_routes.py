@@ -32,6 +32,7 @@ def _make_pipeline() -> MagicMock:
     """
     p = MagicMock()
     p.signals = []  # deque-like empty list
+    p.stream_id = "test-stream-id"
 
     mock_signal = MagicMock()
     mock_signal.to_dict.return_value = {
@@ -128,6 +129,17 @@ class TestSignalsRecent:
         assert data["status"] == "success"
         assert len(data["data"]["signals"]) == 1
         assert data["data"]["signals"][0]["symbol"] == "NIFTY"
+
+    def test_returns_pipeline_stream_id_for_sse_cursor_namespacing(
+        self,
+        client: MagicMock,
+        pipeline: MagicMock,
+    ) -> None:
+        with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=pipeline):
+            response = client.get("/api/v1/signals/recent")
+
+        assert response.status_code == 200
+        assert response.get_json()["data"]["stream_id"] == "test-stream-id"
 
     def test_default_limit_is_20(self, client: MagicMock, pipeline: MagicMock) -> None:
         """Calling without limit parameter passes limit=20 to the pipeline.

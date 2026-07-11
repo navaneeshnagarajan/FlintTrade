@@ -7,6 +7,7 @@ ordering, ring buffer max size, configuration updates, and edge cases.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 
 import pytest
 
@@ -730,6 +731,41 @@ class TestLiveSignalPipeline:
 
         assert pipeline.process_tick("NSE_INDEX", "NIFTY", ltp) is None
         assert pipeline._states == {}
+
+    def test_source_timestamp_is_preserved_and_out_of_order_tick_is_rejected(self) -> None:
+        pipeline = self._make_pipeline(instruments=["NSE:TEST"])
+        state = pipeline._get_or_create_state("NSE", "TEST")
+        state.rsi = _SequenceIndicator([50.0, 20.0, 80.0])  # type: ignore[assignment]
+        first_timestamp = datetime(2026, 7, 11, 3, 44, tzinfo=timezone.utc)
+        signal_timestamp = datetime(2026, 7, 11, 3, 45, tzinfo=timezone.utc)
+
+        assert pipeline.process_tick("NSE", "TEST", 100.0, 0, first_timestamp.timestamp()) is None
+        signal = pipeline.process_tick("NSE", "TEST", 99.0, 0, signal_timestamp.timestamp())
+        rejected = pipeline.process_tick(
+            "NSE",
+            "TEST",
+            101.0,
+            0,
+            (signal_timestamp.timestamp() - 30.0),
+        )
+
+        assert signal is not None
+        assert signal.timestamp == signal_timestamp.isoformat()
+        assert rejected is None
+        assert state.rsi.update_count == 2  # type: ignore[union-attr]
+        assert pipeline.rejected_out_of_order_tick_count == 1
+
+    def test_source_timestamp_ordering_survives_indicator_config_reset(self) -> None:
+        pipeline = self._make_pipeline(instruments=["NSE:TEST"])
+        accepted_at = datetime(2026, 7, 11, 3, 45, tzinfo=timezone.utc)
+
+        assert pipeline.process_tick("NSE", "TEST", 100.0, 0, accepted_at.timestamp()) is None
+        pipeline.update_config(thresholds={"rsi_oversold": 25.0, "rsi_overbought": 75.0})
+        assert pipeline._states == {}
+
+        assert pipeline.process_tick("NSE", "TEST", 99.0, 0, accepted_at.timestamp() - 1.0) is None
+        assert pipeline._states == {}
+        assert pipeline.rejected_out_of_order_tick_count == 1
 
     def test_ml_numeric_overflow_is_normalised_before_publication(self) -> None:
         pipeline = self._make_pipeline()
