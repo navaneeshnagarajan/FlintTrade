@@ -116,7 +116,7 @@ def test_batch_preserves_valid_extraction_order_and_results(batch_runner: BatchR
 
 
 @pytest.mark.parametrize("premium", [float("nan"), float("inf"), float("-inf"), -0.01])
-def test_batch_rejects_invalid_premium_before_parallel_work(
+def test_batch_rejects_invalid_premium_in_parallel_preflight(
     configured_batch_runner: ConfiguredBatchRunner,
     premium: float,
 ) -> None:
@@ -140,7 +140,7 @@ def test_batch_rejects_invalid_premium_before_parallel_work(
         ({}, {"lot_size": 0}, True, r"config\.legs\[0\] lot_size must be positive"),
     ],
 )
-def test_batch_rejects_invalid_financial_config_before_parallel_work(
+def test_batch_rejects_invalid_financial_config_before_simulation(
     configured_batch_runner: ConfiguredBatchRunner,
     config_kwargs: dict[str, float],
     leg_kwargs: dict[str, float | int],

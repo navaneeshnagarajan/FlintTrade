@@ -659,6 +659,20 @@ class TestFeedMarketTick:
         assert sum(bucket.buy_volume for bucket in latest) == 100
         assert sum(bucket.sell_volume for bucket in latest) == 25
 
+    def test_equal_reset_candidates_resume_original_counter_without_manufacturing_volume(self):
+        agg = self._agg()
+
+        for offset, volume in enumerate((1000, 1100, 100, 100, 1200, 1300)):
+            agg.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                timestamp=self._TS + offset,
+            )
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 300
+
     def test_confirmed_reset_then_counter_recovery_does_not_double_count_volume(self):
         agg = self._agg()
 

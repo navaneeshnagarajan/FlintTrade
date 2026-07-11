@@ -558,6 +558,9 @@ class OrderFlowAggregator:
                         tick_timestamp,
                     )
                     return
+                if current_volume == pending_volume:
+                    # Repeated snapshots do not prove that a lower counter is advancing.
+                    return
 
                 self._pending_volume_reset.pop(identity, None)
                 new_offset = previous_normalised - pending_volume

@@ -14,6 +14,10 @@ pub enum EngineError {
     #[error("invalid parameter: {message}")]
     InvalidParameter { message: String },
 
+    /// Invalid configuration or aligned input for a spread simulation.
+    #[error("{message}")]
+    InvalidSpreadInput { message: String },
+
     #[error("insufficient data: need at least {required} bars, got {got}")]
     InsufficientData { required: usize, got: usize },
 

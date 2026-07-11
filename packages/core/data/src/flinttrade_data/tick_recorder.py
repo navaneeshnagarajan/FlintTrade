@@ -652,6 +652,10 @@ class TickRecorder:
         if stop_event is not None:
             stop_event.set()
 
+    def flush_pending(self) -> bool:
+        """Force one retained-buffer flush and raise if persistence still fails."""
+        return self._flush(force=True, raise_on_error=True)
+
     def reconfigure_connection(self, *, ws_url: str, api_key: str) -> bool:
         """Atomically replace connection credentials and retire any stale attempt."""
         if not isinstance(ws_url, str) or not ws_url.strip():
@@ -889,6 +893,7 @@ class TickRecorder:
             return False
         self._clear_source_timestamp_error(exchange=exchange, symbol=symbol)
         mode = self._detect_mode(payload, data.get("mode"))
+        normalised_ltp = _finite_float_or_none(payload.get("ltp"))
         cumulative_volume = _bigint_or_none(payload.get("volume"))
         persisted_volume = cumulative_volume if cumulative_volume is None or cumulative_volume >= 0 else None
         bid, ask = _payload_bbo(payload)
@@ -904,7 +909,7 @@ class TickRecorder:
             symbol,
             exchange,
             mode,
-            _finite_float_or_none(payload.get("ltp")),
+            normalised_ltp,
             _finite_float_or_none(payload.get("open")),
             _finite_float_or_none(payload.get("high")),
             _finite_float_or_none(payload.get("low")),
@@ -925,7 +930,7 @@ class TickRecorder:
         self._dispatch_ltp(
             exchange,
             symbol,
-            payload.get("ltp"),
+            normalised_ltp,
             payload.get("volume"),
             ts.timestamp(),
         )
@@ -934,12 +939,11 @@ class TickRecorder:
         # tick recording). LTP + cumulative volume drive the footprint; bid/ask
         # sharpen the aggressor classification when present.
         if self._orderflow is not None:
-            ltp = payload.get("ltp")
-            if ltp is not None and cumulative_volume is not None:
+            if normalised_ltp is not None and cumulative_volume is not None:
                 try:
                     self._orderflow.feed_market_tick(
                         symbol,
-                        float(ltp),
+                        normalised_ltp,
                         cumulative_volume,
                         exchange=exchange,
                         bid=bid,
@@ -971,18 +975,14 @@ class TickRecorder:
         self,
         exchange: str,
         symbol: str,
-        ltp: Any,
+        ltp: float | None,
         volume: Any,
         source_timestamp: float,
     ) -> None:
         """Best-effort delivery of a valid LTP and its accepted source time."""
-        if self._ltp_sink is None:
+        if self._ltp_sink is None or ltp is None:
             return
-        try:
-            ltp_value = float(ltp)
-        except (TypeError, ValueError, OverflowError):
-            return
-        if not math.isfinite(ltp_value) or ltp_value <= 0:
+        if ltp <= 0:
             return
         try:
             volume_value = max(0, int(volume)) if volume is not None else 0
@@ -990,9 +990,9 @@ class TickRecorder:
             volume_value = 0
         try:
             if self._ltp_sink_arity == 5:
-                self._ltp_sink(exchange, symbol, ltp_value, volume_value, source_timestamp)
+                self._ltp_sink(exchange, symbol, ltp, volume_value, source_timestamp)
             else:
-                self._ltp_sink(exchange, symbol, ltp_value, volume_value)
+                self._ltp_sink(exchange, symbol, ltp, volume_value)
         except Exception as exc:  # noqa: BLE001 - callbacks must not interrupt recording
             logger.debug(
                 "LTP sink skipped for %s:%s: %s",

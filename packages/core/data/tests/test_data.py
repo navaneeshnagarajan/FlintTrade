@@ -1854,6 +1854,40 @@ class TestTickRecorder:
 
         sink.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("ltp", "expected_ltp"),
+        [(True, None), (False, None), ("2500.5", 2500.5)],
+        ids=["json-true", "json-false", "numeric-string"],
+    )
+    def test_storage_and_live_consumers_share_one_normalised_ltp(self, ltp, expected_ltp):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        sink = MagicMock()
+        orderflow = MagicMock()
+        recorder = TickRecorder(
+            storage=MagicMock(),
+            ltp_sink=sink,
+            orderflow_aggregator=orderflow,
+        )
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": ltp,
+                "volume": 1000,
+            }
+        )
+
+        assert recorder._buffer[0][4] == expected_ltp
+        if expected_ltp is None:
+            sink.assert_not_called()
+            orderflow.feed_market_tick.assert_not_called()
+        else:
+            assert sink.call_args.args[2] == expected_ltp
+            assert orderflow.feed_market_tick.call_args.args[1] == expected_ltp
+
     @pytest.mark.parametrize("ltp", [0.0, -1.0, float("nan"), float("inf")])
     def test_invalid_ltp_cannot_advance_orderflow_volume_baseline(self, ltp):
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
@@ -3022,6 +3056,26 @@ class TestTickRecorder:
         assert len(recorder._buffer) == 0  # persisted then cleared
         assert recorder.persisted_tick_count == 1
         assert recorder.pending_tick_count == 0
+
+    def test_flush_pending_raises_then_force_retries_the_retained_batch(self):
+        from flinttrade_data.tick_recorder import TickPersistenceError, TickRecorder
+
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = [RuntimeError("duckdb locked"), None]
+        recorder = TickRecorder(storage=storage)
+        self._allow(recorder, ("NSE", "TCS"))
+        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+
+        with pytest.raises(TickPersistenceError, match="Tick persistence failed"):
+            recorder.flush_pending()
+
+        assert recorder.pending_tick_count == 1
+        assert recorder.persisted_tick_count == 0
+        assert recorder.flush_pending() is True
+        assert storage.insert_ticks_batch.call_count == 2
+        assert recorder.pending_tick_count == 0
+        assert recorder.persisted_tick_count == 1
+        assert recorder.last_error == ""
 
     def test_successful_retry_clears_only_persistence_error(self):
         from flinttrade_data.tick_recorder import TickRecorder
