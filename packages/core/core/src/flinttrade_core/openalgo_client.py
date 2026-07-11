@@ -105,8 +105,9 @@ class OpenAlgoClient:
         # points must marshal onto this single persistent loop instead.
         self._owner_loop: asyncio.AbstractEventLoop | None = None
         self._owner_thread: threading.Thread | None = None
-        self._owner_guard = threading.Lock()
+        self._owner_guard = threading.RLock()
         self._config_guard = threading.RLock()
+        self._closing = False
 
     def reconfigure(self, settings: Settings) -> OpenAlgoClient:
         """Atomically update endpoint and credentials without replacing this client.
@@ -126,6 +127,8 @@ class OpenAlgoClient:
     def _ensure_owner_loop(self) -> asyncio.AbstractEventLoop:
         """Start (once) and return the client's dedicated event loop."""
         with self._owner_guard:
+            if self._closing:
+                raise RuntimeError("OpenAlgo client is shutting down")
             if self._owner_loop is None or self._owner_loop.is_closed():
                 loop = asyncio.new_event_loop()
                 thread = threading.Thread(
@@ -157,39 +160,124 @@ class OpenAlgoClient:
             TimeoutError: When the call does not finish within ``timeout``
                 (the underlying task is cancelled).
         """
-        future = asyncio.run_coroutine_threadsafe(coro, self._ensure_owner_loop())
+        try:
+            with self._owner_guard:
+                owner_loop = self._ensure_owner_loop()
+                future = asyncio.run_coroutine_threadsafe(coro, owner_loop)
+        except Exception:
+            close_coro = getattr(coro, "close", None)
+            if callable(close_coro):
+                close_coro()
+            raise
         try:
             return future.result(timeout)
         except FuturesTimeoutError as exc:
             future.cancel()
             raise TimeoutError(f"OpenAlgo call timed out after {timeout:.0f}s") from exc
 
-    async def close(self) -> None:
-        """Close the underlying HTTP client."""
+    async def _run_on_owner(self, coro: Any) -> Any:
+        """Await one HTTP operation on this client's dedicated owner loop."""
+        current_loop = asyncio.get_running_loop()
+        run_directly = False
+        future: Any | None = None
+        try:
+            with self._owner_guard:
+                owner_loop = self._owner_loop
+                owner_active = owner_loop is not None and not owner_loop.is_closed()
+                if owner_active and current_loop is owner_loop:
+                    run_directly = True
+                else:
+                    owner_loop = self._ensure_owner_loop()
+                    future = asyncio.run_coroutine_threadsafe(coro, owner_loop)
+        except Exception:
+            close_coro = getattr(coro, "close", None)
+            if callable(close_coro):
+                close_coro()
+            raise
+        if run_directly:
+            return await coro
+        assert future is not None
+        try:
+            return await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
+
+    async def _drain_owner_and_close(self, drain_timeout: float) -> None:
+        """Finish active owner work, cancel overdue tasks, then close HTTP."""
+        current = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, drain_timeout)
+        while True:
+            pending = [
+                task
+                for task in asyncio.all_tasks(loop)
+                if task is not current and not task.done()
+            ]
+            if not pending:
+                break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                break
+            await asyncio.wait(pending, timeout=remaining)
         await self._http.aclose()
 
-    def close_sync(self, timeout: float = 10.0) -> None:
+    async def close(self) -> None:
+        """Close the client on its HTTP owner loop."""
+        await self.shutdown()
+
+    async def shutdown(self) -> None:
+        """Close on the loop that owns active connections and stop sync ownership."""
+        with self._owner_guard:
+            self._closing = True
+            owner_loop = self._owner_loop
+            owner_loop_active = owner_loop is not None and not owner_loop.is_closed()
+        if owner_loop_active:
+            if asyncio.get_running_loop() is owner_loop:
+                raise RuntimeError("OpenAlgo owner-loop shutdown must be initiated externally")
+            await asyncio.to_thread(self.close_sync)
+            return
+        await self._http.aclose()
+
+    def close_sync(self, timeout: float = 50.0) -> None:
         """Close from synchronous code, tearing down the owner loop if any.
 
         Short-lived clients used by sync callers (``resolve_openalgo_client``
         fallbacks) must close on the SAME loop that served their requests —
         closing on a second fresh loop is the same cross-loop bug in reverse.
         """
-        if self._owner_loop is not None and not self._owner_loop.is_closed():
+        with self._owner_guard:
+            self._closing = True
             loop = self._owner_loop
+            thread = self._owner_thread
+        if loop is not None and not loop.is_closed():
+            if threading.current_thread() is thread:
+                raise RuntimeError("close_sync cannot run on the OpenAlgo owner thread")
+            future = asyncio.run_coroutine_threadsafe(
+                self._drain_owner_and_close(max(0.0, timeout - 5.0)),
+                loop,
+            )
             try:
-                asyncio.run_coroutine_threadsafe(self.close(), loop).result(timeout)
-            except Exception:  # pragma: no cover - best-effort shutdown
-                logger.debug("OpenAlgo client close on owner loop failed", exc_info=True)
+                future.result(timeout)
+            except Exception:
+                future.cancel()
+                raise
             loop.call_soon_threadsafe(loop.stop)
-            if self._owner_thread is not None:
-                self._owner_thread.join(timeout=5)
+            if thread is not None:
+                thread.join(timeout=5)
+                if thread.is_alive():
+                    raise RuntimeError("OpenAlgo owner loop did not stop")
             loop.close()
-            self._owner_loop = None
-            self._owner_thread = None
+            with self._owner_guard:
+                if self._owner_loop is loop:
+                    self._owner_loop = None
+                    self._owner_thread = None
         else:
-            # Never used from sync code — no owner loop, close on a fresh one.
-            asyncio.run(self.close())
+            # No HTTP operation has claimed an owner loop yet.
+            asyncio.run(self._http.aclose())
 
     async def __aenter__(self) -> OpenAlgoClient:
         return self
@@ -230,6 +318,24 @@ class OpenAlgoClient:
         max_retries: int = 3,
     ) -> dict[str, Any]:
         """POST with retry + exponential backoff."""
+        return await self._run_on_owner(
+            self._post_on_owner(
+                endpoint,
+                payload,
+                limiter=limiter,
+                max_retries=max_retries,
+            )
+        )
+
+    async def _post_on_owner(
+        self,
+        endpoint: str,
+        payload: dict[str, Any],
+        *,
+        limiter: _RateLimiter | None = None,
+        max_retries: int = 3,
+    ) -> dict[str, Any]:
+        """Execute one POST on the dedicated HTTP owner loop."""
         with self._config_guard:
             url = f"{self._base}/{endpoint}"
             request_payload = dict(payload)
@@ -281,7 +387,19 @@ class OpenAlgoClient:
         raise APIError(0, f"Failed after {max_retries} retries: {last_exc}", endpoint)
 
     async def _get(self, endpoint: str, *, params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Any:
-        """GET with retry."""
+        """Marshal one GET onto the dedicated HTTP owner loop."""
+        return await self._run_on_owner(
+            self._get_on_owner(endpoint, params=params, headers=headers)
+        )
+
+    async def _get_on_owner(
+        self,
+        endpoint: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """Execute one GET with retry on the dedicated HTTP owner loop."""
         with self._config_guard:
             url = f"{self._base}/{endpoint}"
             request_headers = dict(headers or {})

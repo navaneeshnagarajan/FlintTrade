@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -169,6 +171,17 @@ class TestCronManagerRegistration:
 
 
 class TestCronManagerControl:
+    def test_stop_waits_for_inflight_jobs(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        cron = CronManager()
+        cron._scheduler = MagicMock()
+        cron._running = True
+
+        cron.stop()
+
+        cron._scheduler.shutdown.assert_called_once_with(wait=True)
+
     def _cron_with_job(self, name: str = "test_job"):
         from flinttrade_automation.cron_manager import CronManager
         cron = CronManager()
@@ -227,6 +240,54 @@ class TestCronManagerControl:
         from flinttrade_automation.cron_manager import CronManager
         cron = CronManager()
         assert not cron.running
+
+
+@pytest.mark.unit
+def test_tick_retention_revalidates_provider_after_acquiring_lock() -> None:
+    from flinttrade_automation.cron_manager import make_tick_retention_job
+
+    state: dict[str, object | None] = {"storage": MagicMock()}
+
+    class UnpublishingLock:
+        def __enter__(self):
+            state["storage"] = None
+
+        def __exit__(self, *_args):
+            return False
+
+    lock = UnpublishingLock()
+    storage = state["storage"]
+    job = make_tick_retention_job(lambda: (state["storage"], lock, 90))
+
+    job()
+
+    storage.prune_ticks.assert_not_called()
+
+
+@pytest.mark.unit
+def test_db_optimise_revalidates_extra_store_after_acquiring_lock() -> None:
+    from flinttrade_automation.cron_manager import make_db_optimise_job
+
+    storage = MagicMock()
+    state: dict[str, object | None] = {"storage": storage}
+
+    class UnpublishingLock:
+        def __enter__(self):
+            state["storage"] = None
+
+        def __exit__(self, *_args):
+            return False
+
+    lock = UnpublishingLock()
+    job = make_db_optimise_job(
+        extra_stores=lambda: [(state["storage"], lock, "tick")]
+        if state["storage"] is not None
+        else [],
+    )
+
+    job()
+
+    assert storage.connection.execute.call_count == 0
 
 
 # ---------------------------------------------------------------------------

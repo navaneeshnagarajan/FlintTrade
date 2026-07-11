@@ -253,6 +253,15 @@ def test_start_sets_capture_intent_before_starting_flask_server() -> None:
 
 
 @pytest.mark.unit
+def test_start_uses_precise_live_market_orderflow_factory() -> None:
+    tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
+    start = _find_method(tree, "FlintTradeApp", "start")
+    assert start is not None
+
+    assert _calls_named(start, "create_live_market_orderflow_aggregator")
+
+
+@pytest.mark.unit
 def test_capture_failure_redacts_api_key_from_status_and_log(caplog) -> None:
     from flinttrade_core.app import _record_tick_capture_failure
 
@@ -313,6 +322,9 @@ async def test_stop_awaits_cancelled_tick_recorder_cleanup() -> None:
     app._tick_recorder = MagicMock()
     task = CancelledTask()
     app._tick_recorder_task = task
+    tick_storage = MagicMock()
+    app._tick_storage = tick_storage
+    app._tick_storage_lock = __import__("threading").Lock()
     app._reconciliation_runner = None
     app._reconciliation_task = None
     app.audit = MagicMock()
@@ -325,6 +337,127 @@ async def test_stop_awaits_cancelled_tick_recorder_cleanup() -> None:
     app._tick_recorder.stop.assert_called_once_with()
     assert task.cancelled is True
     assert task.awaited is True
+    tick_storage.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_unpublishes_tick_handles_before_closing_storage() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    flask_app = Flask("shutdown-tick-capture")
+    recorder = MagicMock()
+    tick_storage = MagicMock()
+    tick_storage_lock = __import__("threading").Lock()
+    flask_app.config.update(
+        TICK_CAPTURE_LIFECYCLE_LOCK=__import__("threading").RLock(),
+        TICK_CAPTURE_ENABLED=True,
+        TICK_CAPTURE_ERROR="",
+        TICK_RECORDER=recorder,
+        TICK_STORAGE=tick_storage,
+        TICK_STORAGE_LOCK=tick_storage_lock,
+        ORDERFLOW_AGGREGATOR=object(),
+    )
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = None
+    app._flask_app = flask_app
+    app._tick_recorder = recorder
+    app._tick_recorder_task = None
+    app._tick_storage = tick_storage
+    app._tick_storage_lock = tick_storage_lock
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    await app.stop()
+
+    assert "TICK_RECORDER" not in flask_app.config
+    assert "TICK_STORAGE" not in flask_app.config
+    assert "TICK_STORAGE_LOCK" not in flask_app.config
+    assert "ORDERFLOW_AGGREGATOR" not in flask_app.config
+    tick_storage.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_awaits_reconciliation_cleanup_before_closing_dependencies() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    cleanup_finished = asyncio.Event()
+
+    async def run_reconciliation() -> None:
+        try:
+            await asyncio.Future()
+        finally:
+            await asyncio.sleep(0)
+            cleanup_finished.set()
+
+    reconciliation_task = asyncio.create_task(run_reconciliation())
+    await asyncio.sleep(0)
+
+    async def close_client() -> None:
+        assert cleanup_finished.is_set()
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = None
+    app._tick_recorder = None
+    app._tick_recorder_task = None
+    app._reconciliation_runner = MagicMock()
+    app._reconciliation_task = reconciliation_task
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock(side_effect=close_client))
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    await app.stop()
+
+    app._reconciliation_runner.stop.assert_called_once_with()
+    assert reconciliation_task.cancelled()
+    assert cleanup_finished.is_set()
+    app.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_failed_reconciliation_task_is_cleared_before_shutdown_retry() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    class FailedTask:
+        def cancel(self) -> None:
+            return None
+
+        def __await__(self):
+            async def wait() -> None:
+                raise RuntimeError("reconciliation cleanup failed")
+
+            return wait().__await__()
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = None
+    app._tick_recorder = None
+    app._tick_recorder_task = None
+    app._reconciliation_runner = MagicMock()
+    app._reconciliation_task = FailedTask()
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    with pytest.raises(RuntimeError, match="reconciliation task"):
+        await app.stop()
+
+    assert app._reconciliation_task is None
+    await app.stop()
 
 
 @pytest.mark.unit
@@ -446,11 +579,12 @@ def test_failed_recorder_completion_is_unpublished_and_redacted() -> None:
 
     flask_app = Flask("failed-recorder")
     recorder = Recorder()
+    storage = MagicMock()
     flask_app.config.update(
         TICK_CAPTURE_LIFECYCLE_LOCK=__import__("threading").RLock(),
         TICK_RECORDER=recorder,
-        TICK_STORAGE=object(),
-        TICK_STORAGE_LOCK=object(),
+        TICK_STORAGE=storage,
+        TICK_STORAGE_LOCK=__import__("threading").Lock(),
         ORDERFLOW_AGGREGATOR=object(),
     )
 
@@ -468,6 +602,47 @@ def test_failed_recorder_completion_is_unpublished_and_redacted() -> None:
     assert "ORDERFLOW_AGGREGATOR" not in flask_app.config
     assert flask_app.config["TICK_CAPTURE_ERROR"] == "fatal recorder error with [redacted] and [redacted]"
     assert unpublished is True
+    storage.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_failed_recorder_completion_retains_storage_owner_when_close_fails() -> None:
+    from flinttrade_core.app import _handle_tick_recorder_completion
+
+    class FailedTask:
+        @staticmethod
+        def cancelled() -> bool:
+            return False
+
+        @staticmethod
+        def exception() -> BaseException:
+            return RuntimeError("recorder failed")
+
+    storage = MagicMock()
+    storage.close.side_effect = RuntimeError("close failed")
+    owner = {"recorder": object(), "storage": storage}
+    flask_app = Flask("failed-storage-close")
+    flask_app.config.update(
+        TICK_CAPTURE_LIFECYCLE_LOCK=__import__("threading").RLock(),
+        TICK_RECORDER=owner["recorder"],
+        TICK_STORAGE=storage,
+        TICK_STORAGE_LOCK=__import__("threading").Lock(),
+        ORDERFLOW_AGGREGATOR=object(),
+    )
+
+    handled = _handle_tick_recorder_completion(
+        flask_app,
+        owner["recorder"],
+        FailedTask(),
+        api_key="",
+        on_unpublished=lambda: owner.__setitem__("recorder", None),
+        on_storage_closed=lambda: owner.__setitem__("storage", None),
+    )
+
+    assert handled is True
+    assert owner["recorder"] is None
+    assert owner["storage"] is storage
+    assert "TICK_STORAGE" not in flask_app.config
 
 
 @pytest.mark.unit

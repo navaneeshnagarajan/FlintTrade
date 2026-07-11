@@ -215,6 +215,17 @@ def _record_tick_capture_failure(flask_app: Flask, error: Any, api_key: str) -> 
     logger.warning("Tick capture failed to start (%s); not recording ticks", diagnostic)
 
 
+def _close_tick_storage(storage: Any, storage_lock: Any | None = None) -> None:
+    """Close tick storage after serialising with any in-flight maintenance."""
+    if storage is None:
+        return
+    if storage_lock is None:
+        storage.close()
+        return
+    with storage_lock:
+        storage.close()
+
+
 def _handle_tick_recorder_completion(
     flask_app: Flask,
     recorder: Any,
@@ -222,6 +233,8 @@ def _handle_tick_recorder_completion(
     *,
     api_key: str,
     is_shutting_down: Callable[[], bool] | None = None,
+    on_unpublished: Callable[[], None] | None = None,
+    on_storage_closed: Callable[[], None] | None = None,
 ) -> bool:
     """Unpublish a full-app recorder that terminated outside normal shutdown."""
     if task.cancelled():
@@ -242,12 +255,31 @@ def _handle_tick_recorder_completion(
     except Exception:
         diagnostic_source = failure
     diagnostic = _sanitise_tick_capture_error(diagnostic_source, api_key)
+    storage: Any | None = None
+    storage_lock: Any | None = None
     with _tick_capture_lifecycle_lock(flask_app):
         if flask_app.config.get("TICK_RECORDER") is not recorder:
             return False
-        for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
-            flask_app.config.pop(key, None)
+        flask_app.config.pop("TICK_RECORDER", None)
+        storage = flask_app.config.pop("TICK_STORAGE", None)
+        storage_lock = flask_app.config.pop("TICK_STORAGE_LOCK", None)
+        flask_app.config.pop("ORDERFLOW_AGGREGATOR", None)
         flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
+        if on_unpublished is not None:
+            try:
+                on_unpublished()
+            except Exception as exc:  # noqa: BLE001 - done callbacks must not escape
+                logger.warning("Tick runtime unpublish callback failed (%s)", type(exc).__name__)
+    try:
+        _close_tick_storage(storage, storage_lock)
+    except Exception as exc:  # noqa: BLE001 - done callbacks must not escape
+        logger.warning("Tick storage close failed after recorder exit (%s)", type(exc).__name__)
+    else:
+        if on_storage_closed is not None:
+            try:
+                on_storage_closed()
+            except Exception as exc:  # noqa: BLE001 - done callbacks must not escape
+                logger.warning("Tick storage close callback failed (%s)", type(exc).__name__)
     logger.warning("Tick capture stopped unexpectedly (%s); not recording ticks", diagnostic)
     return True
 
@@ -1374,6 +1406,7 @@ def _wire_ml_signal_runtime(
             instruments=pipeline.instruments,
             data_fetcher=pipeline.fetch_bars,
             pipeline=pipeline,
+            instrument_provider=lambda: pipeline.instruments,
         )
 
         def _run_signal_retrain() -> list[Any]:
@@ -3263,6 +3296,9 @@ class FlintTradeApp:
         # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
         self._tick_recorder: Any | None = None
         self._tick_recorder_task: Any | None = None
+        self._tick_storage: Any | None = None
+        self._tick_storage_lock: Any | None = None
+        self._flask_app: Flask | None = None
         self._stop_started = False
         self._stop_completed = False
         self._shutdown_task: asyncio.Task[Any] | None = None
@@ -3290,6 +3326,7 @@ class FlintTradeApp:
             contract_manager=self.contract_manager,
             rag=self.rag,
         )
+        self._flask_app = flask_app
         tick_capture_enabled = _tick_capture_enabled()
         _set_tick_capture_intent(flask_app, tick_capture_enabled)
         _run_flask_server(flask_app, port=_resolve_backend_port())
@@ -3426,8 +3463,11 @@ class FlintTradeApp:
                 # Live order-flow aggregator: fed from each tick and exposed to
                 # the orderflow route so the footprint widget shows REAL buy/sell
                 # delta (not synthetic) while tick capture is running.
-                from flinttrade_data.orderflow_aggregator import OrderFlowAggregator  # noqa: PLC0415
-                orderflow = OrderFlowAggregator()
+                from flinttrade_data.orderflow_aggregator import (  # noqa: PLC0415
+                    create_live_market_orderflow_aggregator,
+                )
+
+                orderflow = create_live_market_orderflow_aggregator()
                 with _tick_capture_lifecycle_lock(flask_app):
                     # The Flask server is already accepting local setup requests.
                     # Refresh inside the lifecycle lock so a concurrent config save
@@ -3448,6 +3488,8 @@ class FlintTradeApp:
                     recorder_task = asyncio.create_task(recorder.run())
                     self._tick_recorder = recorder
                     self._tick_recorder_task = recorder_task
+                    self._tick_storage = tick_storage
+                    self._tick_storage_lock = tick_lock
                     # Hand the tick store to the cron so nightly maintenance keeps the
                     # highest-volume DuckDB file from growing unbounded. register_
                     # builtin_jobs already ran, but the job resolves this lazily.
@@ -3468,18 +3510,25 @@ class FlintTradeApp:
                         active: Any = recorder,
                         key: str = capture_settings.openalgo_api_key,
                     ) -> None:
-                        unpublished = _handle_tick_recorder_completion(
+                        def unpublish_runtime_handles() -> None:
+                            self._tick_recorder = None
+                            self._tick_recorder_task = None
+                            self.cron.tick_storage = None
+                            self.cron.tick_storage_lock = None
+
+                        def clear_closed_storage() -> None:
+                            self._tick_storage = None
+                            self._tick_storage_lock = None
+
+                        _handle_tick_recorder_completion(
                             flask_app,
                             active,
                             completed,
                             api_key=key,
                             is_shutting_down=lambda: self._stop_started,
+                            on_unpublished=unpublish_runtime_handles,
+                            on_storage_closed=clear_closed_storage,
                         )
-                        if unpublished:
-                            self._tick_recorder = None
-                            self._tick_recorder_task = None
-                            self.cron.tick_storage = None
-                            self.cron.tick_storage_lock = None
 
                     recorder_task.add_done_callback(handle_recorder_completion)
                 logger.info("Live tick capture started → %s", tick_db)
@@ -3500,6 +3549,8 @@ class FlintTradeApp:
                     self.cron.tick_storage_lock = None
                     self._tick_recorder = None
                     self._tick_recorder_task = None
+                    self._tick_storage = None
+                    self._tick_storage_lock = None
                     for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
                         flask_app.config.pop(key, None)
                     flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
@@ -3631,11 +3682,13 @@ class FlintTradeApp:
         logger.info("FlintTrade shutting down...")
         errors: list[tuple[str, str]] = []
 
-        def attempt(label: str, callback: Callable[[], Any]) -> None:
+        def attempt(label: str, callback: Callable[[], Any]) -> bool:
             try:
                 callback()
+                return True
             except Exception as exc:  # noqa: BLE001 - shutdown must continue
                 errors.append((label, type(exc).__name__))
+                return False
 
         async def attempt_async(label: str, callback: Callable[[], Any]) -> None:
             try:
@@ -3660,6 +3713,8 @@ class FlintTradeApp:
             # Stop tick capture (signal the loop to exit, then cancel the task).
             tick_recorder = self._tick_recorder
             tick_task = self._tick_recorder_task
+            tick_storage = getattr(self, "_tick_storage", None)
+            tick_storage_lock = getattr(self, "_tick_storage_lock", None)
             if tick_recorder is not None:
                 attempt("tick recorder", tick_recorder.stop)
             if tick_task is not None:
@@ -3682,6 +3737,29 @@ class FlintTradeApp:
                         "Tick recorder task ended with an error during shutdown (%s)",
                         diagnostic,
                     )
+            flask_app = getattr(self, "_flask_app", None)
+            if flask_app is not None:
+                with _tick_capture_lifecycle_lock(flask_app):
+                    published_recorder = flask_app.config.get("TICK_RECORDER")
+                    published_storage = flask_app.config.get("TICK_STORAGE")
+                    if published_recorder is tick_recorder or published_storage is tick_storage:
+                        for key in (
+                            "TICK_RECORDER",
+                            "TICK_STORAGE",
+                            "TICK_STORAGE_LOCK",
+                            "ORDERFLOW_AGGREGATOR",
+                        ):
+                            flask_app.config.pop(key, None)
+                        flask_app.config["TICK_CAPTURE_ERROR"] = "Application is shutting down"
+            if tick_storage is not None:
+                self.cron.tick_storage = None
+                self.cron.tick_storage_lock = None
+                if attempt(
+                    "tick storage",
+                    lambda: _close_tick_storage(tick_storage, tick_storage_lock),
+                ):
+                    self._tick_storage = None
+                    self._tick_storage_lock = None
 
             # Stop the reconciliation runner (signal the loop, then cancel the task).
             reconciliation_runner = self._reconciliation_runner
@@ -3690,12 +3768,27 @@ class FlintTradeApp:
                 attempt("reconciliation runner", reconciliation_runner.stop)
             if reconciliation_task is not None:
                 attempt("reconciliation task", reconciliation_task.cancel)
+                try:
+                    await reconciliation_task
+                except asyncio.CancelledError:
+                    self._reconciliation_task = None
+                except Exception as exc:  # noqa: BLE001 - shutdown must continue
+                    errors.append(("reconciliation task", type(exc).__name__))
+                    self._reconciliation_task = None
+                else:
+                    self._reconciliation_task = None
 
             # Log shutdown to audit before closing.
             attempt("audit event", lambda: self.audit.log_event("APP_STOP", version=self.version))
 
             # Close API client and audit logger independently.
-            await attempt_async("OpenAlgo client", self.client.close)
+            async def close_openalgo_client() -> None:
+                if isinstance(self.client, OpenAlgoClient):
+                    await self.client.shutdown()
+                    return
+                await self.client.close()
+
+            await attempt_async("OpenAlgo client", close_openalgo_client)
             attempt("audit logger", self.audit.close)
         finally:
             self._stop_event.set()

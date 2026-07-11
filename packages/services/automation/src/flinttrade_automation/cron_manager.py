@@ -246,13 +246,13 @@ def make_db_optimise_job(
     """
 
     def db_optimise_job() -> None:
-        targets: list[tuple[Any, Any, str]] = []
+        targets: list[tuple[Any, Any, str, bool]] = []
         if storage is not None:
-            targets.append((storage, storage_lock, "trade"))
+            targets.append((storage, storage_lock, "trade", False))
         if extra_stores is not None:
             try:
                 targets.extend(
-                    (s, lk, lbl) for s, lk, lbl in extra_stores() if s is not None
+                    (s, lk, lbl, True) for s, lk, lbl in extra_stores() if s is not None
                 )
             except Exception as exc:  # a bad provider must not abort maintenance
                 logger.error("db_optimise_job: extra-store provider failed — %s", exc)
@@ -261,13 +261,31 @@ def make_db_optimise_job(
             logger.warning("db_optimise_job: no store configured; skipping")
             return
 
-        for store, lock, label in targets:
+        def dynamic_store_is_current(store: Any, lock: Any, label: str) -> bool:
+            if extra_stores is None:
+                return False
+            try:
+                return any(
+                    current_store is store
+                    and current_lock is lock
+                    and current_label == label
+                    for current_store, current_lock, current_label in extra_stores()
+                )
+            except Exception as exc:
+                logger.error("db_optimise_job: extra-store revalidation failed — %s", exc)
+                return False
+
+        for store, lock, label, dynamic in targets:
             try:
                 if lock is not None:
                     with lock:
+                        if dynamic and not dynamic_store_is_current(store, lock, label):
+                            continue
                         store.connection.execute("CHECKPOINT")
                         store.connection.execute("ANALYZE")
                 else:
+                    if dynamic and not dynamic_store_is_current(store, lock, label):
+                        continue
                     store.connection.execute("CHECKPOINT")
                     store.connection.execute("ANALYZE")
                 logger.info("db_optimise_job: %s store CHECKPOINT + ANALYZE complete", label)
@@ -295,13 +313,30 @@ def make_tick_retention_job(provider: Callable[[], Any]) -> Callable[[], None]:
             return
         if storage is None or days <= 0:
             return
+
+        def current_retention_days() -> int | None:
+            try:
+                current_storage, current_lock, current_days = provider()
+            except Exception as exc:
+                logger.error("tick_retention_job: provider revalidation failed — %s", exc)
+                return None
+            if current_storage is not storage or current_lock is not lock:
+                return None
+            return int(current_days) if current_days > 0 else None
+
         try:
             if lock is not None:
                 with lock:
-                    removed = storage.prune_ticks(days)
+                    active_days = current_retention_days()
+                    if active_days is None:
+                        return
+                    removed = storage.prune_ticks(active_days)
             else:
-                removed = storage.prune_ticks(days)
-            logger.info("tick_retention_job: pruned %d ticks older than %d days", removed, days)
+                active_days = current_retention_days()
+                if active_days is None:
+                    return
+                removed = storage.prune_ticks(active_days)
+            logger.info("tick_retention_job: pruned %d ticks older than %d days", removed, active_days)
         except Exception as exc:
             logger.error("tick_retention_job: prune failed — %s", exc)
 
@@ -745,9 +780,9 @@ class CronManager:
         logger.info("CronManager started with %d jobs", len(self._jobs))
 
     def stop(self) -> None:
-        """Stop the scheduler."""
+        """Stop the scheduler after every in-flight maintenance job finishes."""
         if self._scheduler and self._running:
-            self._scheduler.shutdown(wait=False)
+            self._scheduler.shutdown(wait=True)
             self._running = False
             logger.info("CronManager stopped")
 
