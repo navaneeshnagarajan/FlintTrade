@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 import logging
+import math
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -43,47 +44,183 @@ from .models import (
 
 logger = logging.getLogger("flinttrade.core")
 
+_CALENDAR_EXCHANGE_ALIASES = {
+    "NSE_INDEX": "NSE",
+    "BSE_INDEX": "BSE",
+    "MCX_INDEX": "MCX",
+}
 
-def normalise_holiday_dates(payload: Any, exchange: str = "NSE") -> list[str]:
-    """Return sorted ISO holiday dates from supported OpenAlgo envelopes.
 
-    OpenAlgo versions and native adapters expose holidays as a bare list,
-    ``{"holidays": [...]}``, ``{"data": ...}``, or an exchange-keyed map.
-    Rows may be ISO strings or objects carrying a date field. Invalid values are
-    ignored so callers never mistake status metadata for a trading holiday.
-    """
+def _normalise_history_timestamp(value: Any) -> str:
+    """Convert OpenAlgo epoch seconds/milliseconds to an aware UTC ISO value."""
+    if isinstance(value, bool):
+        raise ValueError("history timestamp must be an ISO string or numeric epoch")
+    if isinstance(value, int | float):
+        epoch = float(value)
+        if not math.isfinite(epoch):
+            raise ValueError("history timestamp must be finite")
+        if abs(epoch) >= 100_000_000_000:
+            epoch /= 1000.0
+        try:
+            return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+        except (OSError, OverflowError, ValueError) as exc:
+            raise ValueError("history timestamp is outside the supported range") from exc
+    if isinstance(value, str):
+        return value
+    raise ValueError("history timestamp must be an ISO string or numeric epoch")
+
+
+def _normalise_calendar_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()[:10]
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
+
+
+def _normalise_open_exchange(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    exchange = str(value.get("exchange") or "").strip().upper()
+    if not exchange:
+        return None
+    session: dict[str, Any] = {"exchange": exchange}
+    for field_name in ("start_time", "end_time"):
+        if field_name in value:
+            session[field_name] = value[field_name]
+    symbol = str(value.get("symbol") or "").strip().upper()
+    if symbol:
+        session["symbol"] = symbol
+    raw_symbols = value.get("symbols")
+    if isinstance(raw_symbols, list | tuple | set):
+        symbols = sorted(
+            {
+                str(candidate).strip().upper()
+                for candidate in raw_symbols
+                if str(candidate).strip()
+            }
+        )
+        if symbols:
+            session["symbols"] = symbols
+    return session
+
+
+def normalise_market_calendar(payload: Any) -> list[dict[str, Any]]:
+    """Return validated calendar rows without discarding exchange semantics."""
     data = payload
     for _ in range(3):
         if not isinstance(data, dict) or "data" not in data:
             break
         data = data["data"]
 
-    candidates: Any = []
-    if isinstance(data, list):
-        candidates = data
-    elif isinstance(data, dict):
-        exchange_key = str(exchange or "NSE").strip().upper() or "NSE"
-        candidates = data.get(exchange_key, data.get("holidays", []))
-        if isinstance(candidates, dict):
-            candidates = candidates.get("holidays", [])
+    records: dict[str, dict[str, Any]] = {}
 
-    dates: set[str] = set()
-    if not isinstance(candidates, list | tuple | set):
-        return []
-    for entry in candidates:
-        raw = entry
+    def add_entry(entry: Any, *, default_exchange: str = "*") -> None:
         if isinstance(entry, dict):
-            raw = entry.get("date") or entry.get("holiday_date") or entry.get("trading_date")
-        if raw is None:
-            continue
-        value = str(raw).strip()
-        if len(value) >= 10:
-            value = value[:10]
-        try:
-            dates.add(date.fromisoformat(value).isoformat())
-        except ValueError:
-            continue
-    return sorted(dates)
+            raw_date = entry.get("date") or entry.get("holiday_date") or entry.get(
+                "trading_date"
+            )
+        else:
+            raw_date = entry
+        holiday_date = _normalise_calendar_date(raw_date)
+        if holiday_date is None:
+            return
+
+        current_contract = isinstance(entry, dict) and any(
+            field_name in entry
+            for field_name in ("holiday_type", "closed_exchanges", "open_exchanges")
+        )
+        description = str(entry.get("description") or "") if isinstance(entry, dict) else ""
+        holiday_type = (
+            str(entry.get("holiday_type") or "TRADING_HOLIDAY").strip().upper()
+            if isinstance(entry, dict)
+            else "TRADING_HOLIDAY"
+        )
+        closed_exchanges: set[str]
+        open_exchanges: list[dict[str, Any]] = []
+        if current_contract:
+            raw_closed = entry.get("closed_exchanges", [])
+            closed_exchanges = (
+                {
+                    str(candidate).strip().upper()
+                    for candidate in raw_closed
+                    if str(candidate).strip()
+                }
+                if isinstance(raw_closed, list | tuple | set)
+                else set()
+            )
+            raw_open = entry.get("open_exchanges", [])
+            if isinstance(raw_open, list | tuple):
+                open_exchanges = [
+                    session
+                    for candidate in raw_open
+                    if (session := _normalise_open_exchange(candidate)) is not None
+                ]
+        else:
+            closed_exchanges = {default_exchange}
+
+        record = records.setdefault(
+            holiday_date,
+            {
+                "date": holiday_date,
+                "description": description,
+                "holiday_type": holiday_type,
+                "closed_exchanges": set(),
+                "open_exchanges": [],
+            },
+        )
+        if description and not record["description"]:
+            record["description"] = description
+        if holiday_type == "SPECIAL_SESSION" or record["holiday_type"] == "SETTLEMENT_HOLIDAY":
+            record["holiday_type"] = holiday_type
+        record["closed_exchanges"].update(closed_exchanges)
+        for session in open_exchanges:
+            if session not in record["open_exchanges"]:
+                record["open_exchanges"].append(session)
+
+    if isinstance(data, dict) and "holidays" in data:
+        data = data["holidays"]
+
+    if isinstance(data, list | tuple | set):
+        for candidate in data:
+            add_entry(candidate)
+    elif isinstance(data, dict):
+        for exchange, candidates in data.items():
+            exchange_key = str(exchange).strip().upper()
+            if not exchange_key or not isinstance(candidates, list | tuple | set):
+                continue
+            for candidate in candidates:
+                add_entry(candidate, default_exchange=exchange_key)
+
+    normalised: list[dict[str, Any]] = []
+    for holiday_date in sorted(records):
+        record = records[holiday_date]
+        normalised.append(
+            {
+                **record,
+                "closed_exchanges": sorted(record["closed_exchanges"]),
+                "open_exchanges": list(record["open_exchanges"]),
+            }
+        )
+    return normalised
+
+
+def normalise_holiday_dates(payload: Any, exchange: str = "NSE") -> list[str]:
+    """Return full-closure dates for one exchange from old/current envelopes."""
+    exchange_key = str(exchange or "NSE").strip().upper() or "NSE"
+    calendar_exchange = _CALENDAR_EXCHANGE_ALIASES.get(exchange_key, exchange_key)
+    dates: list[str] = []
+    for row in normalise_market_calendar(payload):
+        closed = set(row["closed_exchanges"])
+        has_open_session = any(
+            session.get("exchange") == calendar_exchange
+            for session in row["open_exchanges"]
+        )
+        if not has_open_session and ("*" in closed or calendar_exchange in closed):
+            dates.append(row["date"])
+    return dates
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +839,16 @@ class OpenAlgoClient:
         })
         data = self._unwrap(await self._post("history", payload))
         if isinstance(data, list):
-            return [OHLCV(**bar) for bar in data]
+            bars: list[OHLCV] = []
+            for bar in data:
+                if not isinstance(bar, dict):
+                    continue
+                normalised = dict(bar)
+                normalised["timestamp"] = _normalise_history_timestamp(
+                    normalised.get("timestamp")
+                )
+                bars.append(OHLCV(**normalised))
+            return bars
         return []
 
     async def intervals(self) -> list[str]:
@@ -889,10 +1035,40 @@ class OpenAlgoClient:
         """POST /api/v1/ping — health check."""
         return await self._post("ping", self._body())
 
-    async def holidays(self, year: str = "2026") -> dict[str, Any]:
-        """GET /api/v1/holidays"""
-        params: dict[str, str] = {"year": year}
-        return await self._get("holidays", params=params)
+    async def holidays(
+        self,
+        year: str = "2026",
+        *,
+        allow_legacy_fallback: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch the authenticated market calendar, optionally probing legacy GET."""
+        if isinstance(year, bool):
+            raise ValueError("holiday year must be between 2020 and 2050")
+        try:
+            numeric_year = int(year)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("holiday year must be between 2020 and 2050") from exc
+        if not 2020 <= numeric_year <= 2050:
+            raise ValueError("holiday year must be between 2020 and 2050")
+
+        try:
+            return await self._post(
+                "market/holidays",
+                self._body({"year": numeric_year}),
+            )
+        except APIError as exc:
+            if not allow_legacy_fallback or exc.status_code not in {404, 405}:
+                raise
+            with self._config_guard:
+                api_key = self._api_key
+            if not api_key:
+                raise
+            logger.warning("OpenAlgo market calendar route missing; trying authenticated legacy endpoint")
+            return await self._get(
+                "holidays",
+                params={"year": str(numeric_year)},
+                headers={"X-API-KEY": api_key},
+            )
 
     async def timings(self, date: str = "") -> dict[str, Any]:
         """GET /api/v1/timings"""

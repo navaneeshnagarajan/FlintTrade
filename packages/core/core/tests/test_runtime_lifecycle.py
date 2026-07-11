@@ -336,13 +336,34 @@ async def test_start_applies_cron_holidays_to_time_scheduler(
 
     app = _runtime_app()
     holidays = {"2026-01-26", "2026-08-15"}
+    calendar_payload = {
+        "data": {
+            "holidays": [
+                {
+                    "date": "2026-08-15",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": ["NSE"],
+                    "open_exchanges": [
+                        {
+                            "exchange": "NSE",
+                            "start_time": "18:00:00",
+                            "end_time": "19:00:00",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
     app.cron.load_holidays = AsyncMock(return_value=holidays)
+    app.cron.holiday_payload = calendar_payload
     flask_app = Flask("holiday-runtime-wiring")
 
-    def apply_holidays(values: set[str]) -> None:
-        assert values == holidays
-        app._stop_started = True
-        app._stop_event.set()
+    def apply_holidays(values: object) -> None:
+        try:
+            assert values == calendar_payload
+        finally:
+            app._stop_started = True
+            app._stop_event.set()
 
     app.time_scheduler.set_holidays = MagicMock(side_effect=apply_holidays)
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
@@ -352,4 +373,4 @@ async def test_start_applies_cron_holidays_to_time_scheduler(
 
     await app.start()
 
-    app.time_scheduler.set_holidays.assert_called_once_with(holidays)
+    app.time_scheduler.set_holidays.assert_called_once_with(calendar_payload)

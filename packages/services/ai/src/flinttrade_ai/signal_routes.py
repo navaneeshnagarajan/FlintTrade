@@ -14,6 +14,7 @@ import hmac
 import logging
 import math
 import os
+import threading
 import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import nullcontext
@@ -94,7 +95,7 @@ def _request_stream_auth_revalidator() -> StreamAuthRevalidator | None:
         return None
     token = auth_header.removeprefix("Bearer ").strip()
     if not token:
-        return None
+        return lambda: False
 
     try:
         from flinttrade_core.auth_routes import _is_jti_revoked, decode_token
@@ -108,12 +109,6 @@ def _request_stream_auth_revalidator() -> StreamAuthRevalidator | None:
             "OPENALGO_API_KEY", ""
         )
         if expected_key and hmac.compare_digest(token, expected_key):
-            return None
-        if not expected_key and (request.remote_addr or "") in {
-            "127.0.0.1",
-            "::1",
-            "localhost",
-        }:
             return None
         return lambda: False
     if payload.get("type") != "session":
@@ -157,11 +152,25 @@ def _stream_auth_is_valid(auth_revalidator: StreamAuthRevalidator | None) -> boo
         return False
 
 
+def _signal_stream_shutdown_event(app: Flask) -> threading.Event:
+    """Return the application-scoped event used to drain signal streams."""
+    configured = app.config.get("SIGNAL_STREAM_SHUTDOWN_EVENT")
+    if configured is None:
+        configured = app.config.setdefault(
+            "SIGNAL_STREAM_SHUTDOWN_EVENT",
+            threading.Event(),
+        )
+    if not isinstance(configured, threading.Event):
+        raise TypeError("SIGNAL_STREAM_SHUTDOWN_EVENT must be a threading.Event")
+    return configured
+
+
 def configure_signal_sources(
     app: Flask,
     openalgo_client: Any | None = None,
 ) -> tuple[LiveSignalPipeline, SignalPipeline | None]:
     """Install one application signal hub and, when possible, its ML producer."""
+    _signal_stream_shutdown_event(app)
     pipeline: LiveSignalPipeline | None = app.config.get("SIGNAL_HUB")
     if pipeline is None:
         pipeline = getattr(app, "_live_signal_pipeline", None)
@@ -278,6 +287,7 @@ def _sse_generator(
     last_event_id: int | str | None = None,
     heartbeat_interval: float = 15.0,
     auth_revalidator: StreamAuthRevalidator | None = None,
+    shutdown_event: threading.Event | None = None,
 ) -> Generator[str, None, None]:
     """Yield SSE events when new signals arrive.
 
@@ -289,7 +299,9 @@ def _sse_generator(
     reason, requested cursor, and available ID bounds; it is not a
     ``SignalEvent`` payload. A heartbeat comment keeps idle connections alive.
     """
-    if not _stream_auth_is_valid(auth_revalidator):
+    if (shutdown_event is not None and shutdown_event.is_set()) or not _stream_auth_is_valid(
+        auth_revalidator
+    ):
         return
     newest, retained = pipeline.get_replay_snapshot()
     cursor = newest
@@ -334,20 +346,27 @@ def _sse_generator(
             replay_events = [signal for signal in retained if signal.event_id > cursor]
 
     for signal in replay_events:
-        if not _stream_auth_is_valid(auth_revalidator):
+        if (shutdown_event is not None and shutdown_event.is_set()) or not _stream_auth_is_valid(
+            auth_revalidator
+        ):
             return
         payload = _json.dumps(signal.to_dict())
         yield f"id: {pipeline.sse_event_id(signal.event_id)}\ndata: {payload}\n\n"
         cursor = signal.event_id
 
     while True:
-        if not _stream_auth_is_valid(auth_revalidator):
+        if (shutdown_event is not None and shutdown_event.is_set()) or not _stream_auth_is_valid(
+            auth_revalidator
+        ):
             return
         newest, retained = pipeline.wait_for_replay_snapshot_after(
             cursor,
             timeout=heartbeat_interval,
+            stop_requested=shutdown_event.is_set if shutdown_event is not None else None,
         )
-        if not _stream_auth_is_valid(auth_revalidator):
+        if (shutdown_event is not None and shutdown_event.is_set()) or not _stream_auth_is_valid(
+            auth_revalidator
+        ):
             return
         events = [signal for signal in retained if signal.event_id > cursor]
         if not events:
@@ -365,7 +384,9 @@ def _sse_generator(
             events = retained
             cursor = oldest - 1
         for signal in events:
-            if not _stream_auth_is_valid(auth_revalidator):
+            if (shutdown_event is not None and shutdown_event.is_set()) or not _stream_auth_is_valid(
+                auth_revalidator
+            ):
                 return
             payload = _json.dumps(signal.to_dict())
             yield f"id: {pipeline.sse_event_id(signal.event_id)}\ndata: {payload}\n\n"
@@ -373,7 +394,7 @@ def _sse_generator(
 
 
 @signal_bp.route("/stream", methods=["GET"])
-def signals_stream() -> Response:
+def signals_stream() -> Response | tuple[Any, int]:
     """SSE endpoint that streams live signals as they are generated.
 
     Connect with ``EventSource("/api/v1/signals/stream")``.
@@ -382,10 +403,22 @@ def signals_stream() -> Response:
     the requested cursor belongs to discarded history or an earlier process;
     retained current-process signal messages follow immediately.
     """
+    shutdown_event = _signal_stream_shutdown_event(current_app)  # type: ignore[arg-type]
+    if shutdown_event.is_set():
+        return jsonify({"status": "error", "message": "Signal streaming is shutting down."}), 503
+
+    auth_revalidator = _request_stream_auth_revalidator()
+    if auth_revalidator is not None and not _stream_auth_is_valid(auth_revalidator):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Signal stream authentication is no longer valid.",
+            }
+        ), 401
+
     pipeline = _get_pipeline()
     raw_last_event_id = request.headers.get("Last-Event-ID")
-    auth_revalidator = _request_stream_auth_revalidator()
-    stream_kwargs: dict[str, Any] = {}
+    stream_kwargs: dict[str, Any] = {"shutdown_event": shutdown_event}
     if raw_last_event_id is not None:
         stream_kwargs["last_event_id"] = raw_last_event_id
     if auth_revalidator is not None:

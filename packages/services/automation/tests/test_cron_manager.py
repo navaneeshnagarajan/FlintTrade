@@ -591,6 +591,38 @@ class TestLoadHolidays:
         result = asyncio.run(cron.load_holidays())
         assert result == set()
 
+    def test_cron_retains_raw_calendar_payload_for_exchange_sessions(self):
+        import asyncio
+        from flinttrade_automation.cron_manager import CronManager
+
+        payload = {
+            "data": {
+                "holidays": [
+                    {
+                        "date": "2026-08-15",
+                        "holiday_type": "SPECIAL_SESSION",
+                        "closed_exchanges": ["NSE"],
+                        "open_exchanges": [
+                            {
+                                "exchange": "NSE",
+                                "start_time": "18:00:00",
+                                "end_time": "19:00:00",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+        async def holidays():
+            return payload
+
+        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+
+        asyncio.run(cron.load_holidays())
+
+        assert cron.holiday_payload == payload
+
 
 # ---------------------------------------------------------------------------
 # DEFAULT_JOBS constant

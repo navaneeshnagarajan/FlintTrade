@@ -15,11 +15,11 @@ import time
 import zipfile
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as wall_time, timedelta, timezone
 from pathlib import Path
 from queue import Empty, Queue
 from statistics import fmean, pstdev
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,62 @@ _BUNDLE_VERSION = 1
 _BASELINE_VERSION = 1
 _BUNDLE_MEMBERS = frozenset({"metadata.json", "model.joblib", "model.sha256"})
 _FETCH_CANCELLATION_POLL_SECONDS = 0.05
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+RetrainRoster = Literal["regular", "late"]
+SessionLookup = Callable[[str, str, date], tuple[wall_time, wall_time] | None]
+ContinuousLookup = Callable[[str], bool]
+
+
+def select_retraining_roster(
+    instruments: list[dict[str, str]],
+    *,
+    roster: RetrainRoster,
+    session_date: date,
+    run_at: wall_time,
+    is_continuous: ContinuousLookup,
+    session_for: SessionLookup,
+    regular_cutoff: wall_time = wall_time(16, 0),
+) -> list[dict[str, str]]:
+    """Select one non-overlapping regular or late/continuous training roster."""
+    if roster not in {"regular", "late"}:
+        raise ValueError("roster must be 'regular' or 'late'")
+    run_time = run_at.replace(tzinfo=None)
+    cutoff = regular_cutoff.replace(tzinfo=None)
+    selected: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for instrument in instruments:
+        exchange = str(instrument.get("exchange") or "").strip().upper()
+        symbol = str(instrument.get("symbol") or "").strip().upper()
+        identity = (exchange, symbol)
+        if not exchange or not symbol or identity in seen:
+            continue
+        try:
+            continuous = bool(is_continuous(exchange))
+        except Exception:  # noqa: BLE001 - unknown calendar state fails closed
+            logger.exception("Retraining continuity lookup failed for %s:%s", exchange, symbol)
+            continue
+        if continuous:
+            if roster == "late":
+                selected.append({"symbol": symbol, "exchange": exchange})
+                seen.add(identity)
+            continue
+        try:
+            session = session_for(exchange, symbol, session_date)
+        except Exception:  # noqa: BLE001 - unknown session state fails closed
+            logger.exception("Retraining session lookup failed for %s:%s", exchange, symbol)
+            continue
+        if session is None:
+            continue
+        _session_open, session_close = session
+        close_time = session_close.replace(tzinfo=None)
+        intended_roster: RetrainRoster = "regular" if close_time <= cutoff else "late"
+        if intended_roster != roster or run_time < close_time:
+            continue
+        selected.append({"symbol": symbol, "exchange": exchange})
+        seen.add(identity)
+    return selected
 
 
 def _default_model_dir() -> Path:
@@ -278,12 +334,30 @@ def _read_verified_bundle(
         if accepted_at.tzinfo is None:
             raise ValueError("Signal model bundle accepted timestamp must include a timezone")
         accepted_at = accepted_at.astimezone(timezone.utc)
+        raw_session_date = metadata.get("session_date")
+        if raw_session_date is not None:
+            if not isinstance(raw_session_date, str):
+                raise ValueError("Signal model bundle has an invalid session date")
+            try:
+                date.fromisoformat(raw_session_date)
+            except ValueError as exc:
+                raise ValueError("Signal model bundle has an invalid session date") from exc
 
         model_bytes = bundle.read("model.joblib")
     actual_digest = hashlib.sha256(model_bytes).hexdigest()
     if not hmac.compare_digest(actual_digest, metadata_digest):
         raise RuntimeError(f"Refusing to load {path.name}: SHA-256 checksum mismatch")
     return model_bytes, metadata_digest, baseline, accepted_at
+
+
+def _bundle_session_date(path: Path, accepted_at: datetime) -> date:
+    """Read an explicit session date or infer it for pre-cadence bundles."""
+    with zipfile.ZipFile(path) as bundle:
+        metadata = json.loads(bundle.read("metadata.json").decode("utf-8"))
+    raw_session_date = metadata.get("session_date") if isinstance(metadata, dict) else None
+    if raw_session_date is None:
+        return accepted_at.astimezone(_IST).date()
+    return date.fromisoformat(raw_session_date)
 
 
 def _write_model_bundle(
@@ -294,6 +368,7 @@ def _write_model_bundle(
     symbol: str,
     exchange: str,
     accepted_at: datetime | None = None,
+    session_date: date | None = None,
 ) -> None:
     """Write one complete guarded model bundle to ``path`` without publishing it."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -325,6 +400,10 @@ def _write_model_bundle(
             "model_sha256": actual_digest,
             "baseline": baseline_payload,
         }
+        if session_date is not None:
+            if isinstance(session_date, datetime) or not isinstance(session_date, date):
+                raise ValueError("session_date must be a date")
+            metadata["session_date"] = session_date.isoformat()
         metadata_bytes = json.dumps(
             metadata,
             allow_nan=False,
@@ -433,8 +512,18 @@ class SignalRetrainer:
             raise RuntimeError("Signal data fetcher returned no result")
         return bars
 
-    def run_once(self, symbol: str, exchange: str) -> RetrainResult:
+    def run_once(
+        self,
+        symbol: str,
+        exchange: str,
+        *,
+        session_date: date | None = None,
+    ) -> RetrainResult:
         """Fetch, train, validate, and conditionally promote one instrument."""
+        if isinstance(session_date, datetime) or (
+            session_date is not None and not isinstance(session_date, date)
+        ):
+            raise ValueError("session_date must be a date")
         started = time.monotonic()
         if self._is_cancelled():
             return self._record_failure(started, symbol, exchange, "Cancelled")
@@ -451,9 +540,24 @@ class SignalRetrainer:
             except Exception as exc:  # noqa: BLE001 - corrupt incumbents should be replaced, not trusted
                 logger.warning("Could not verify incumbent model for %s:%s: %s", exchange, symbol, exc)
             else:
+                accepted_session_date = _bundle_session_date(target, accepted_at)
                 age = self._now() - accepted_at
                 interval = timedelta(hours=self.config.retrain_interval_hours)
-                if timedelta(0) <= age < interval:
+                same_session = (
+                    session_date is not None and accepted_session_date == session_date
+                )
+                within_interval = (
+                    session_date is None and timedelta(0) <= age < interval
+                )
+                if same_session or within_interval:
+                    reason = (
+                        f"Skipped: model already accepted for session {session_date.isoformat()}"
+                        if same_session
+                        else (
+                            f"Skipped: accepted model is {age.total_seconds() / 3600:.2f}h old; "
+                            f"retrain interval is {self.config.retrain_interval_hours}h"
+                        )
+                    )
                     result = self._result(
                         started,
                         symbol,
@@ -461,10 +565,7 @@ class SignalRetrainer:
                         train_accuracy=0.0,
                         test_accuracy=0.0,
                         accepted=False,
-                        reason=(
-                            f"Skipped: accepted model is {age.total_seconds() / 3600:.2f}h old; "
-                            f"retrain interval is {self.config.retrain_interval_hours}h"
-                        ),
+                        reason=reason,
                         drift_detected=False,
                         drift_score=0.0,
                     )
@@ -598,7 +699,13 @@ class SignalRetrainer:
             return result
 
         try:
-            self._promote(symbol, exchange, candidate, training_baseline)
+            self._promote(
+                symbol,
+                exchange,
+                candidate,
+                training_baseline,
+                session_date=session_date,
+            )
         except TrainingCancelled:
             return self._record_failure(
                 started,
@@ -640,6 +747,7 @@ class SignalRetrainer:
         self,
         *,
         instruments: list[dict[str, str]] | None = None,
+        session_date: date | None = None,
     ) -> list[RetrainResult]:
         """Retrain every pipeline instrument, continuing after any failure."""
         results: list[RetrainResult] = []
@@ -660,7 +768,14 @@ class SignalRetrainer:
             symbol = str(instrument.get("symbol", ""))
             exchange = str(instrument.get("exchange", ""))
             try:
-                result = self.run_once(symbol, exchange)
+                if session_date is None:
+                    result = self.run_once(symbol, exchange)
+                else:
+                    result = self.run_once(
+                        symbol,
+                        exchange,
+                        session_date=session_date,
+                    )
             except Exception as exc:  # pragma: no cover - final containment guard
                 result = self._record_failure(
                     time.monotonic(),
@@ -689,6 +804,8 @@ class SignalRetrainer:
         exchange: str,
         candidate: SignalGenerator,
         training_baseline: FeatureSet,
+        *,
+        session_date: date | None = None,
     ) -> None:
         target = self.model_path(symbol, exchange)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -696,13 +813,18 @@ class SignalRetrainer:
         with self._promotion_lock:
             temp_bundle = _temporary_path(target, "candidate")
             try:
+                bundle_kwargs: dict[str, Any] = {
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "accepted_at": self._now(),
+                }
+                if session_date is not None:
+                    bundle_kwargs["session_date"] = session_date
                 _write_model_bundle(
                     temp_bundle,
                     candidate,
                     training_baseline,
-                    symbol=symbol,
-                    exchange=exchange,
-                    accepted_at=self._now(),
+                    **bundle_kwargs,
                 )
                 if self._is_cancelled():
                     raise TrainingCancelled("Signal model promotion cancelled")

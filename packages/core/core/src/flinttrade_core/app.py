@@ -1626,6 +1626,7 @@ def _wire_ml_signal_runtime(
         from flinttrade_ai.signal_retraining import (  # noqa: PLC0415
             RetrainConfig,
             SignalRetrainer,
+            select_retraining_roster,
         )
 
         configured_retrain = app.config.get("ML_SIGNAL_RETRAIN_CONFIG")
@@ -1650,64 +1651,37 @@ def _wire_ml_signal_runtime(
             cancel_requested=retrain_cancel_event.is_set,
         )
 
-        def _closed_retrain_instruments(
-            *,
-            include_continuous: bool,
-        ) -> list[dict[str, str]]:
-            eligible: list[dict[str, str]] = []
-            for instrument in pipeline.instruments:
-                exchange = str(instrument.get("exchange") or "")
-                symbol = str(instrument.get("symbol") or "")
-                if not exchange or not symbol:
-                    continue
-                try:
-                    schedule = time_scheduler.get_schedule(exchange)
-                except Exception:  # noqa: BLE001 - an unknown calendar must fail closed
-                    logger.exception(
-                        "Signal retraining calendar lookup failed for %s:%s",
-                        exchange,
-                        symbol,
-                    )
-                    continue
-                if schedule is None:
-                    logger.warning(
-                        "Signal retraining skipped unknown market calendar %s:%s",
-                        exchange,
-                        symbol,
-                    )
-                    continue
-                if schedule.is_24x7:
-                    if include_continuous:
-                        eligible.append(dict(instrument))
-                    continue
-                try:
-                    is_open = bool(
-                        time_scheduler.is_market_open(exchange, symbol=symbol)
-                    )
-                except Exception:  # noqa: BLE001 - a calendar failure must fail closed
-                    logger.exception(
-                        "Signal retraining market-hours lookup failed for %s:%s",
-                        exchange,
-                        symbol,
-                    )
-                    continue
-                if not is_open:
-                    eligible.append(dict(instrument))
-            return eligible
-
-        def _run_signal_retrain(*, include_continuous: bool = False) -> list[Any]:
+        def _run_signal_retrain(*, roster: str = "regular") -> list[Any]:
             try:
+                now = time_scheduler.now_ist()
+                session_date = now.date()
+                instruments = select_retraining_roster(
+                    pipeline.instruments,
+                    roster=roster,
+                    session_date=session_date,
+                    run_at=now.time(),
+                    is_continuous=lambda exchange: bool(
+                        (schedule := time_scheduler.get_schedule(exchange))
+                        and schedule.is_24x7
+                    ),
+                    session_for=lambda exchange, symbol, on: (
+                        time_scheduler.get_market_session(
+                            exchange,
+                            on=on,
+                            symbol=symbol,
+                        )
+                    ),
+                )
                 return retrainer.run_all(
-                    instruments=_closed_retrain_instruments(
-                        include_continuous=include_continuous
-                    )
+                    instruments=instruments,
+                    session_date=session_date,
                 )
             except Exception as exc:  # noqa: BLE001 - scheduler and app must remain available
                 logger.warning("Scheduled signal retraining failed: %s", exc)
                 return []
 
         def _run_late_signal_retrain() -> list[Any]:
-            return _run_signal_retrain(include_continuous=True)
+            return _run_signal_retrain(roster="late")
 
         cron.register(
             "ml_signal_retrain",
@@ -3666,7 +3640,10 @@ class FlintTradeApp:
             return
 
         try:
-            self.time_scheduler.set_holidays(loaded_holidays)
+            calendar_payload = getattr(self.cron, "holiday_payload", None)
+            if not isinstance(calendar_payload, dict | list | tuple | set):
+                calendar_payload = loaded_holidays
+            self.time_scheduler.set_holidays(calendar_payload)
         except Exception as exc:
             logger.warning("Could not apply loaded market holidays: %s", exc)
 

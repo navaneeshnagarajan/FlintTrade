@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +118,7 @@ def _save_bundle(
     symbol: str,
     exchange: str,
     accepted_at: datetime | None = None,
+    session_date: date | None = None,
 ) -> Any:
     from flinttrade_ai.signal_retraining import _write_model_bundle
     from flinttrade_ai.signals import FeatureSet, SignalGenerator, engineer_features
@@ -128,14 +129,14 @@ def _save_bundle(
     generator._feature_names = features.names
     split = int(len(features.values) * 0.8)
     baseline = FeatureSet(names=features.names, values=features.values[:split])
-    _write_model_bundle(
-        path,
-        generator,
-        baseline,
-        symbol=symbol,
-        exchange=exchange,
-        accepted_at=accepted_at or datetime(2000, 1, 1, tzinfo=timezone.utc),
-    )
+    bundle_kwargs: dict[str, Any] = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "accepted_at": accepted_at or datetime(2000, 1, 1, tzinfo=timezone.utc),
+    }
+    if session_date is not None:
+        bundle_kwargs["session_date"] = session_date
+    _write_model_bundle(path, generator, baseline, **bundle_kwargs)
     return generator
 
 
@@ -184,6 +185,77 @@ def test_run_once_skips_bundle_newer_than_retrain_interval(tmp_path: Path) -> No
     assert result.reason.startswith("Skipped:")
     assert "168" in result.reason
     fetcher.assert_not_called()
+
+
+def test_same_session_date_skips_even_after_hour_interval_elapsed(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+
+    now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+    target_session = date(2026, 7, 11)
+    fetcher = MagicMock(return_value=_bars())
+    retrainer = SignalRetrainer(
+        _config(tmp_path, retrain_interval_hours=1),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        data_fetcher=fetcher,
+        clock=lambda: now,
+    )
+    _save_bundle(
+        retrainer.model_path("NIFTY", "NSE_INDEX"),
+        _PredictableModel(),
+        symbol="NIFTY",
+        exchange="NSE_INDEX",
+        accepted_at=now - timedelta(hours=2),
+        session_date=target_session,
+    )
+
+    result = retrainer.run_once(
+        "NIFTY",
+        "NSE_INDEX",
+        session_date=target_session,
+    )
+
+    assert result.accepted is False
+    assert result.reason == "Skipped: model already accepted for session 2026-07-11"
+    fetcher.assert_not_called()
+
+
+def test_next_session_date_retrains_even_within_elapsed_interval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+
+    _install_train_stub(monkeypatch, test_accuracy=0.8)
+    now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+    fetcher = MagicMock(return_value=_bars(120))
+    retrainer = SignalRetrainer(
+        _config(tmp_path, retrain_interval_hours=24),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        data_fetcher=fetcher,
+        pipeline=_RecordingPipeline(),
+        clock=lambda: now,
+    )
+    _save_bundle(
+        retrainer.model_path("NIFTY", "NSE_INDEX"),
+        _PredictableModel(),
+        symbol="NIFTY",
+        exchange="NSE_INDEX",
+        accepted_at=now - timedelta(hours=23),
+        session_date=date(2026, 7, 10),
+    )
+
+    result = retrainer.run_once(
+        "NIFTY",
+        "NSE_INDEX",
+        session_date=date(2026, 7, 11),
+    )
+
+    assert result.accepted is True
+    fetcher.assert_called_once()
 
 
 def test_run_all_cancels_before_training_and_stops_roster(
@@ -885,6 +957,21 @@ def test_shared_training_replaces_fallback_for_previously_seen_symbols(
     assert current.is_trained is True
 
 
+def test_compatibility_training_refuses_ambiguous_instrument_histories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    train_calls = _install_train_stub(monkeypatch, test_accuracy=0.8)
+    pipeline = SignalPipeline(model_path=str(tmp_path / "shared.joblib"))
+
+    assert pipeline.train_model(
+        [_bars(120), _bars(120, price_shift=10_000.0)],
+    ) is False
+    assert train_calls == []
+
+
 def test_shared_training_keeps_previous_model_visible_until_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -950,7 +1037,13 @@ def test_canonical_retraining_types_are_exported() -> None:
     assert flinttrade_ai.SignalRetrainer is not None
     assert flinttrade_ai.RetrainConfig is not None
     assert flinttrade_ai.RetrainResult is not None
-    assert {"SignalRetrainer", "RetrainConfig", "RetrainResult"} <= set(flinttrade_ai.__all__)
+    assert flinttrade_ai.select_retraining_roster is not None
+    assert {
+        "SignalRetrainer",
+        "RetrainConfig",
+        "RetrainResult",
+        "select_retraining_roster",
+    } <= set(flinttrade_ai.__all__)
 
 
 def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(tmp_path: Path) -> None:
@@ -1050,9 +1143,102 @@ def test_retrainer_explicit_roster_overrides_the_default_provider(tmp_path: Path
     retrainer.run_once.assert_called_once_with("GOLDM", "MCX")
 
 
+def test_run_all_forwards_session_date_to_each_instrument(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.signal_retraining import RetrainConfig, SignalRetrainer
+
+    retrainer = SignalRetrainer(
+        RetrainConfig(model_dir=tmp_path),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        data_fetcher=MagicMock(),
+    )
+    retrainer.run_once = MagicMock(return_value=MagicMock(reason="Accepted"))
+    session_date = date(2026, 7, 11)
+
+    retrainer.run_all(session_date=session_date)
+
+    retrainer.run_once.assert_called_once_with(
+        "NIFTY",
+        "NSE_INDEX",
+        session_date=session_date,
+    )
+
+
+def test_retraining_rosters_separate_regular_from_late_and_continuous() -> None:
+    from flinttrade_ai.signal_retraining import select_retraining_roster
+
+    instruments = [
+        {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+        {"symbol": "GOLDM", "exchange": "MCX"},
+        {"symbol": "EURUSD29JUL26FUT", "exchange": "CDS"},
+        {"symbol": "BTCUSD", "exchange": "DELTA"},
+    ]
+    sessions = {
+        ("NSE_INDEX", "NIFTY"): (time(9, 15), time(15, 30)),
+        ("MCX", "GOLDM"): (time(9, 0), time(23, 55)),
+        ("CDS", "EURUSD29JUL26FUT"): (time(9, 0), time(19, 30)),
+    }
+
+    regular = select_retraining_roster(
+        instruments,
+        roster="regular",
+        session_date=date(2026, 7, 10),
+        run_at=time(16, 0),
+        is_continuous=lambda exchange: exchange == "DELTA",
+        session_for=lambda exchange, symbol, _on: sessions.get((exchange, symbol)),
+    )
+    late = select_retraining_roster(
+        instruments,
+        roster="late",
+        session_date=date(2026, 7, 10),
+        run_at=time(23, 59),
+        is_continuous=lambda exchange: exchange == "DELTA",
+        session_for=lambda exchange, symbol, _on: sessions.get((exchange, symbol)),
+    )
+
+    assert regular == [instruments[0]]
+    assert late == instruments[1:]
+
+
+def test_special_session_moves_equity_to_late_roster_and_closed_day_is_skipped() -> None:
+    from flinttrade_ai.signal_retraining import select_retraining_roster
+
+    instruments = [
+        {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+        {"symbol": "RELIANCE", "exchange": "NSE"},
+    ]
+
+    def session_for(exchange: str, _symbol: str, _on: date):
+        if exchange == "NSE_INDEX":
+            return time(18, 0), time(19, 0)
+        return None
+
+    regular = select_retraining_roster(
+        instruments,
+        roster="regular",
+        session_date=date(2026, 11, 8),
+        run_at=time(16, 0),
+        is_continuous=lambda _exchange: False,
+        session_for=session_for,
+    )
+    late = select_retraining_roster(
+        instruments,
+        roster="late",
+        session_date=date(2026, 11, 8),
+        run_at=time(23, 59),
+        is_continuous=lambda _exchange: False,
+        session_for=session_for,
+    )
+
+    assert regular == []
+    assert late == [instruments[0]]
+
+
 def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuous_markets(
     tmp_path: Path,
 ) -> None:
+    from datetime import date, datetime, time, timedelta, timezone
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
@@ -1076,10 +1262,18 @@ def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuou
     time_scheduler.get_schedule.side_effect = lambda exchange: SimpleNamespace(
         is_24x7=exchange == "DELTA"
     )
-    open_now = {("MCX", "GOLDM"), ("CDS", "EURUSD29JUL26FUT")}
-    time_scheduler.is_market_open.side_effect = (
-        lambda exchange, *, symbol: (exchange, symbol) in open_now
+    sessions = {
+        "NSE_INDEX": (time(9, 15), time(15, 30)),
+        "MCX": (time(9, 0), time(23, 55)),
+        "CDS": (time(9, 0), time(19, 30)),
+    }
+    time_scheduler.get_market_session.side_effect = (
+        lambda exchange, *, on, symbol: sessions.get(exchange)
     )
+    ist = timezone(timedelta(hours=5, minutes=30))
+    regular_now = datetime(2026, 7, 10, 16, 0, tzinfo=ist)
+    late_now = datetime(2026, 7, 10, 23, 59, tzinfo=ist)
+    time_scheduler.now_ist.side_effect = [regular_now, late_now]
 
     assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
     retrainer = app.config["ML_SIGNAL_RETRAINER"]
@@ -1087,12 +1281,17 @@ def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuou
     calls = {call.args[0]: call for call in cron.register.call_args_list}
 
     calls["ml_signal_retrain"].kwargs["handler"]()
-    retrainer.run_all.assert_called_once_with(instruments=[instruments[0]])
+    retrainer.run_all.assert_called_once_with(
+        instruments=[instruments[0]],
+        session_date=date(2026, 7, 10),
+    )
 
     retrainer.run_all.reset_mock()
-    open_now.clear()
     calls["ml_signal_retrain_late"].kwargs["handler"]()
-    retrainer.run_all.assert_called_once_with(instruments=instruments)
+    retrainer.run_all.assert_called_once_with(
+        instruments=instruments[1:],
+        session_date=date(2026, 7, 10),
+    )
 
 
 def test_runtime_threads_configurable_label_policy_into_scheduled_retrainer(tmp_path: Path) -> None:

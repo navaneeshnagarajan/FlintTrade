@@ -12,6 +12,7 @@ All pipeline interactions are mocked — no live signal feed is required.
 from __future__ import annotations
 
 import json
+import threading
 from collections import deque
 from typing import Callable, Generator
 from unittest.mock import MagicMock, patch
@@ -92,7 +93,7 @@ def _finite_sse_generator(events: list[str]):
         A callable matching the signature of ``_sse_generator(pipeline)``.
     """
 
-    def _gen(_pipeline) -> Generator[str, None, None]:  # noqa: ANN001
+    def _gen(_pipeline, **_kwargs) -> Generator[str, None, None]:  # noqa: ANN001
         yield from events
 
     return _gen
@@ -226,8 +227,10 @@ class TestSignalsStream:
             _pipeline: object,
             *,
             auth_revalidator: object,
+            shutdown_event: object,
         ) -> Generator[str, None, None]:
             captured["auth_revalidator"] = auth_revalidator
+            captured["shutdown_event"] = shutdown_event
             yield ": heartbeat\n\n"
 
         with app.test_client() as client:
@@ -241,6 +244,105 @@ class TestSignalsStream:
 
         assert response.status_code == 200
         assert captured["auth_revalidator"] is auth_revalidator
+        assert captured["shutdown_event"] is app.config["SIGNAL_STREAM_SHUTDOWN_EVENT"]
+
+    def test_invalid_stream_auth_is_rejected_before_streaming_response(self, app: Flask) -> None:
+        stream_factory = MagicMock()
+
+        with app.test_client() as client:
+            with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=_make_pipeline([])):
+                with patch(
+                    "flinttrade_ai.signal_routes._request_stream_auth_revalidator",
+                    return_value=lambda: False,
+                ):
+                    with patch("flinttrade_ai.signal_routes._sse_generator", stream_factory):
+                        response = client.get("/api/v1/signals/stream", buffered=False)
+
+        assert response.status_code == 401
+        assert response.get_json() == {
+            "status": "error",
+            "message": "Signal stream authentication is no longer valid.",
+        }
+        stream_factory.assert_not_called()
+
+    def test_explicit_empty_bearer_is_rejected_before_streaming_response(self, app: Flask) -> None:
+        stream_factory = MagicMock()
+
+        with app.test_client() as client:
+            with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=_make_pipeline([])):
+                with patch("flinttrade_ai.signal_routes._sse_generator", stream_factory):
+                    response = client.get(
+                        "/api/v1/signals/stream",
+                        headers={"Authorization": "Bearer "},
+                        buffered=False,
+                    )
+
+        assert response.status_code == 401
+        stream_factory.assert_not_called()
+
+    def test_stream_shutdown_event_is_created_once_per_app(self, app: Flask) -> None:
+        from flinttrade_ai.signal_routes import _signal_stream_shutdown_event
+
+        first = _signal_stream_shutdown_event(app)
+        second = _signal_stream_shutdown_event(app)
+
+        assert isinstance(first, threading.Event)
+        assert second is first
+        assert app.config["SIGNAL_STREAM_SHUTDOWN_EVENT"] is first
+
+    def test_set_shutdown_event_rejects_new_stream_before_response(self, app: Flask) -> None:
+        shutdown_event = threading.Event()
+        shutdown_event.set()
+        app.config["SIGNAL_STREAM_SHUTDOWN_EVENT"] = shutdown_event
+        stream_factory = MagicMock()
+
+        with app.test_client() as client:
+            with patch("flinttrade_ai.signal_routes._get_pipeline", return_value=_make_pipeline([])):
+                with patch("flinttrade_ai.signal_routes._sse_generator", stream_factory):
+                    response = client.get("/api/v1/signals/stream", buffered=False)
+
+        assert response.status_code == 503
+        assert response.get_json() == {
+            "status": "error",
+            "message": "Signal streaming is shutting down.",
+        }
+        stream_factory.assert_not_called()
+
+    def test_injected_shutdown_event_wakes_blocked_stream_promptly(self) -> None:
+        from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+        from flinttrade_ai.signal_routes import _sse_generator
+
+        pipeline = LiveSignalPipeline(instruments=[])
+        shutdown_event = threading.Event()
+        wait_started = threading.Event()
+        finished = threading.Event()
+        outcome: list[str | None] = []
+        original_wait = pipeline.wait_for_replay_snapshot_after
+
+        def observed_wait(event_id: int, timeout: float, **kwargs: object):
+            wait_started.set()
+            return original_wait(event_id, timeout, **kwargs)
+
+        pipeline.wait_for_replay_snapshot_after = observed_wait  # type: ignore[method-assign]
+        stream = _sse_generator(
+            pipeline,
+            heartbeat_interval=10.0,
+            shutdown_event=shutdown_event,
+        )
+
+        def consume() -> None:
+            outcome.append(next(stream, None))
+            finished.set()
+
+        consumer = threading.Thread(target=consume)
+        consumer.start()
+        assert wait_started.wait(timeout=1.0)
+        shutdown_event.set()
+        consumer.join(timeout=0.5)
+
+        assert finished.is_set()
+        assert not consumer.is_alive()
+        assert outcome == [None]
 
     def test_active_stream_stops_when_auth_revalidation_fails(self) -> None:
         from flinttrade_ai.signal_pipeline import LiveSignalPipeline
@@ -357,6 +459,29 @@ class TestSignalsStream:
         assert revoked_session is not None
         assert revoked_session() is False
         assert api_key is None
+
+    def test_decode_failure_does_not_downgrade_an_explicit_bearer_to_loopback(
+        self,
+        app: Flask,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from flinttrade_ai.signal_routes import _request_stream_auth_revalidator
+
+        monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+        monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+        with patch(
+            "flinttrade_core.auth_routes.decode_token",
+            side_effect=ValueError("JWT secret is not configured"),
+        ):
+            with app.test_request_context(
+                "/api/v1/signals/stream",
+                headers={"Authorization": "Bearer invalid-session-token"},
+                environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            ):
+                revalidator = _request_stream_auth_revalidator()
+
+        assert revalidator is not None
+        assert revalidator() is False
 
     def test_multiple_signals_order_preserved(self, app: Flask) -> None:
         """Events arrive in the order they are emitted by the generator.

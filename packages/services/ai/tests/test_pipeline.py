@@ -66,6 +66,27 @@ class TestSignalPipeline:
         openalgo_client.history.assert_awaited_once()
         openalgo_client.close.assert_not_awaited()
 
+    def test_fetch_bars_sorts_and_deduplicates_for_all_scheduled_consumers(self):
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        openalgo_client = MagicMock()
+        openalgo_client.history = AsyncMock(
+            return_value=[
+                {"timestamp": "2026-07-10T09:20:00+00:00", "close": 102.0},
+                {"timestamp": "2026-07-10T09:15:00+00:00", "close": 100.0},
+                {"timestamp": "2026-07-10T09:15:00+00:00", "close": 101.0},
+            ]
+        )
+        openalgo_client.close = AsyncMock()
+        pipeline = SignalPipeline(openalgo_client=openalgo_client)
+
+        rows = pipeline.fetch_bars("RELIANCE", "NSE")
+
+        assert rows == [
+            {"timestamp": "2026-07-10T09:15:00+00:00", "close": 101.0},
+            {"timestamp": "2026-07-10T09:20:00+00:00", "close": 102.0},
+        ]
+
     def test_ema_basic(self):
         from flinttrade_ai.pipeline import SignalPipeline
 

@@ -200,6 +200,98 @@ def test_sink_failure_does_not_discard_latest_ml_results() -> None:
     assert results["NSE_INDEX:NIFTY"]["signal"] == "HOLD"
 
 
+def test_sink_failure_releases_candle_for_retry() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    sink = MagicMock(side_effect=[RuntimeError("hub unavailable"), None])
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        signal_sink=sink,
+    )
+    pipeline._generator = MagicMock(is_trained=False)
+    pipeline.fetch_bars = MagicMock(return_value=_bars())
+
+    first = pipeline.run_cycle()
+    second = pipeline.run_cycle()
+
+    assert first == second
+    assert "NSE_INDEX:NIFTY" in second
+    assert pipeline.run_cycle() == {}
+    assert sink.call_count == 2
+
+
+def test_scheduled_pipeline_sorts_and_deduplicates_bars_before_prediction() -> None:
+    from types import SimpleNamespace
+
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    now = datetime(2026, 7, 10, 10, 0, tzinfo=timezone.utc)
+    chronological = _bars(end=now - timedelta(minutes=5))
+    replacement = dict(chronological[20])
+    replacement["close"] = 99_999.0
+    unordered = list(reversed(chronological)) + [replacement]
+    generator = MagicMock(is_trained=True)
+    generator.predict.return_value = SimpleNamespace(
+        error="",
+        action="HOLD",
+        confidence=0.75,
+    )
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        clock=lambda: now,
+    )
+    pipeline.fetch_bars = MagicMock(return_value=unordered)
+    pipeline._generator_for = MagicMock(return_value=generator)
+
+    result = pipeline.run_cycle()["NSE_INDEX:NIFTY"]
+
+    prepared = generator.predict.call_args.args[0]
+    assert len(prepared) == len(chronological)
+    assert [row["timestamp"] for row in prepared] == sorted(
+        row["timestamp"] for row in chronological
+    )
+    assert prepared[20]["close"] == 99_999.0
+    assert result["timestamp"] == chronological[-1]["timestamp"]
+
+
+def test_scheduled_pipeline_waits_for_latest_interval_to_close() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    candle_start = datetime(2026, 7, 10, 10, 0, tzinfo=timezone.utc)
+    now = [candle_start + timedelta(minutes=4, seconds=59)]
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        interval="5m",
+        clock=lambda: now[0],
+    )
+    pipeline.fetch_bars = MagicMock(return_value=_bars(end=candle_start))
+    pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
+
+    assert pipeline.run_cycle() == {}
+
+    now[0] = candle_start + timedelta(minutes=5)
+    assert "NSE_INDEX:NIFTY" in pipeline.run_cycle()
+
+
+def test_scheduled_pipeline_rejects_future_candle_start_within_one_interval() -> None:
+    from flinttrade_ai.pipeline import SignalPipeline
+
+    now = datetime(2026, 7, 10, 10, 0, tzinfo=timezone.utc)
+    pipeline = SignalPipeline(
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        interval="5m",
+        clock=lambda: now,
+    )
+    pipeline.fetch_bars = MagicMock(
+        return_value=_bars(end=now + timedelta(minutes=4)),
+    )
+    generator = MagicMock(is_trained=True)
+    pipeline._generator_for = MagicMock(return_value=generator)
+
+    assert pipeline.run_cycle() == {}
+    generator.predict.assert_not_called()
+
+
 def test_scheduled_pipeline_rejects_stale_bar_batch() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 

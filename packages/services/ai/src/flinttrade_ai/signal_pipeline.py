@@ -14,6 +14,7 @@ import logging
 import math
 import re
 import threading
+import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -29,6 +30,7 @@ logger = logging.getLogger("flinttrade.ai.signal_pipeline")
 # Maximum number of signals retained in the ring buffer per pipeline instance.
 _MAX_SIGNALS = 100
 _STREAM_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_STREAM_SHUTDOWN_POLL_SECONDS = 0.05
 
 
 def _normalise_stream_id(value: str | None) -> str:
@@ -491,13 +493,22 @@ class LiveSignalPipeline:
         self,
         event_id: int,
         timeout: float,
+        *,
+        stop_requested: Callable[[], bool] | None = None,
     ) -> tuple[int, list[SignalEvent]]:
         """Wait for newer data and atomically snapshot the retained replay window."""
         with self._condition:
-            self._condition.wait_for(
-                lambda: any(signal.event_id > event_id for signal in self._signals),
-                timeout=timeout,
-            )
+            deadline = time.monotonic() + max(0.0, timeout)
+            while not any(signal.event_id > event_id for signal in self._signals):
+                if stop_requested is not None and stop_requested():
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                wait_for = remaining
+                if stop_requested is not None:
+                    wait_for = min(wait_for, _STREAM_SHUTDOWN_POLL_SECONDS)
+                self._condition.wait(timeout=wait_for)
             retained = sorted(
                 (deepcopy(signal) for signal in self._signals),
                 key=lambda signal: signal.event_id,

@@ -398,7 +398,11 @@ def make_overnight_optimise_job(optimiser: Callable[[], Any]) -> Callable[[], No
     return overnight_optimise_job
 
 
-async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
+async def load_holidays_from_client(
+    openalgo_client: Any,
+    *,
+    payload_sink: Callable[[Any], None] | None = None,
+) -> set[str]:
     """Load market holidays from OpenAlgo API. Must be awaited.
 
     OpenAlgo's /holidays endpoint can return an HTTP 200 with an empty body
@@ -411,6 +415,8 @@ async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
 
     try:
         data = await openalgo_client.holidays()
+        if payload_sink is not None:
+            payload_sink(data)
         from flinttrade_core.openalgo_client import normalise_holiday_dates  # noqa: PLC0415
 
         result = set(normalise_holiday_dates(data, exchange="NSE"))
@@ -489,6 +495,7 @@ class CronManager:
         # when workspace.json data.auto_sync.enabled is true.
         self.eod_sync_starter: Callable[[], Any] | None = None
         self._holidays: set[str] = set()
+        self._holiday_payload: Any | None = None
 
     @property
     def running(self) -> bool:
@@ -497,6 +504,11 @@ class CronManager:
     @property
     def holidays(self) -> set[str]:
         return self._holidays
+
+    @property
+    def holiday_payload(self) -> Any | None:
+        """Return the last raw calendar envelope for exchange-aware consumers."""
+        return self._holiday_payload
 
     def _get_scheduler(self) -> Any:
         """Lazy-initialise APScheduler."""
@@ -517,7 +529,10 @@ class CronManager:
     async def load_holidays(self) -> set[str]:
         """Load holidays from OpenAlgo and cache them. Must be awaited."""
         if self.openalgo_client:
-            self._holidays = await load_holidays_from_client(self.openalgo_client)
+            self._holidays = await load_holidays_from_client(
+                self.openalgo_client,
+                payload_sink=lambda payload: setattr(self, "_holiday_payload", payload),
+            )
         return self._holidays
 
     def register_builtin_jobs(self) -> None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Callable
@@ -86,10 +87,84 @@ _EXCHANGE_TO_SEGMENT: dict[str, str] = {
 
 _CDS_CROSS_CURRENCY_UNDERLYINGS = ("EURUSD", "GBPUSD", "USDJPY")
 
+_CALENDAR_EXCHANGE_ALIASES = {
+    "NSE_INDEX": "NSE",
+    "BSE_INDEX": "BSE",
+    "MCX_INDEX": "MCX",
+}
+
 
 def _is_cds_cross_currency(symbol: str | None) -> bool:
     value = str(symbol or "").strip().upper()
     return any(value.startswith(underlying) for underlying in _CDS_CROSS_CURRENCY_UNDERLYINGS)
+
+
+def _as_ist(value: datetime) -> datetime:
+    """Interpret naive scheduler values as IST and convert aware values to IST."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=IST)
+    return value.astimezone(IST)
+
+
+def _calendar_exchange(exchange: str) -> str:
+    value = exchange.strip().upper()
+    return _CALENDAR_EXCHANGE_ALIASES.get(value, value)
+
+
+def _calendar_time(value: Any) -> time | None:
+    if isinstance(value, time):
+        return value.replace(tzinfo=None)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        epoch = float(value)
+        if not math.isfinite(epoch):
+            return None
+        if abs(epoch) >= 100_000_000_000:
+            epoch /= 1000.0
+        try:
+            return datetime.fromtimestamp(epoch, tz=IST).time().replace(tzinfo=None)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        numeric = float(text)
+    except ValueError:
+        numeric = None
+    if numeric is not None:
+        return _calendar_time(numeric)
+    try:
+        return time.fromisoformat(text).replace(tzinfo=None)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(
+                text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text
+            )
+        except ValueError:
+            return None
+        return _as_ist(parsed).time().replace(tzinfo=None)
+
+
+@dataclass(frozen=True)
+class _SpecialMarketSession:
+    exchange: str
+    start: time
+    end: time
+    symbols: tuple[str, ...] = ()
+
+    def matches(self, symbol: str | None) -> bool:
+        if not self.symbols:
+            return True
+        candidate = str(symbol or "").strip().upper()
+        return bool(candidate) and any(candidate.startswith(prefix) for prefix in self.symbols)
+
+
+@dataclass
+class _CalendarDay:
+    closed_exchanges: set[str] = field(default_factory=set)
+    open_sessions: list[_SpecialMarketSession] = field(default_factory=list)
 
 
 class TimeScheduler:
@@ -107,6 +182,7 @@ class TimeScheduler:
     def __init__(self, client: OpenAlgoClient | None = None) -> None:
         self._client = client
         self._holidays: dict[str, list[str]] = {}  # year -> list of "YYYY-MM-DD"
+        self._calendar_days: dict[date, _CalendarDay] = {}
 
     def now_ist(self) -> datetime:
         """Current datetime in IST."""
@@ -134,35 +210,74 @@ class TimeScheduler:
         if sched.is_24x7:
             return True
 
-        current = at or self.now_ist()
-        if not self.is_trading_day(exchange, on=current.date()):
+        current = _as_ist(at) if at is not None else self.now_ist()
+        session = self.get_market_session(
+            exchange,
+            on=current.date(),
+            symbol=symbol,
+        )
+        if session is None:
             return False
         current_time = current.time().replace(tzinfo=None)
+        market_open, market_close = session
+        return market_open <= current_time <= market_close
+
+    def get_market_session(
+        self,
+        exchange: str,
+        *,
+        on: date | None = None,
+        symbol: str | None = None,
+    ) -> tuple[time, time] | None:
+        """Return effective IST hours after exchange and special-session rules."""
+        exchange_key = exchange.strip().upper()
+        sched = EXCHANGE_SCHEDULES.get(exchange_key)
+        if sched is None:
+            return None
+        if sched.is_24x7:
+            return sched.market_open, sched.market_close
+
+        session_date = on or self.now_ist().date()
+        calendar_key = _calendar_exchange(exchange_key)
+        calendar_day = self._calendar_days.get(session_date)
+        if calendar_day is not None:
+            exchange_sessions = [
+                session
+                for session in calendar_day.open_sessions
+                if session.exchange == calendar_key
+            ]
+            matching_sessions = [
+                session for session in exchange_sessions if session.matches(symbol)
+            ]
+            if matching_sessions:
+                selected = min(matching_sessions, key=lambda session: session.start)
+                return selected.start, selected.end
+            if (
+                "*" in calendar_day.closed_exchanges
+                or calendar_key in calendar_day.closed_exchanges
+                or exchange_sessions
+            ):
+                return None
+        elif session_date.isoformat() in self._holidays.get(str(session_date.year), []):
+            return None
+
+        if session_date.weekday() >= 5:
+            return None
         market_close = (
             time(19, 30)
-            if exchange == "CDS" and _is_cds_cross_currency(symbol)
+            if exchange_key == "CDS" and _is_cds_cross_currency(symbol)
             else sched.market_close
         )
-        return sched.market_open <= current_time <= market_close
+        return sched.market_open, market_close
 
-    def is_trading_day(self, exchange: str, on: date | None = None) -> bool:
+    def is_trading_day(
+        self,
+        exchange: str,
+        on: date | None = None,
+        symbol: str | None = None,
+    ) -> bool:
         """Check if the given date is a trading day (not weekend, not holiday)."""
-        d = on or self.now_ist().date()
-
-        # Weekends — crypto trades 24/7
-        sched = EXCHANGE_SCHEDULES.get(exchange)
-        if sched and sched.is_24x7:
-            return True
-
-        if d.weekday() >= 5:  # Saturday=5, Sunday=6
-            return False
-
-        # Check cached holidays
-        year_key = str(d.year)
-        if year_key in self._holidays:
-            return d.isoformat() not in self._holidays[year_key]
-
-        return True  # Assume trading day if holidays not loaded
+        return self.get_market_session(exchange, on=on, symbol=symbol) is not None
 
     def time_to_square_off(self, exchange: str, at: datetime | None = None) -> timedelta | None:
         """Time remaining until auto square-off. None if market closed or 24/7."""
@@ -170,7 +285,7 @@ class TimeScheduler:
         if sched is None or sched.is_24x7:
             return None
 
-        now = at or self.now_ist()
+        now = _as_ist(at) if at is not None else self.now_ist()
         now_t = now.time().replace(tzinfo=None)
         if not (sched.market_open <= now_t <= sched.market_close):
             return None
@@ -191,7 +306,8 @@ class TimeScheduler:
         if sched is None or sched.is_24x7:
             return False
 
-        now_t = (at or self.now_ist()).time().replace(tzinfo=None)
+        now = _as_ist(at) if at is not None else self.now_ist()
+        now_t = now.time().replace(tzinfo=None)
         return now_t >= sched.square_off
 
     # ------------------------------------------------------------------
@@ -203,7 +319,8 @@ class TimeScheduler:
 
         If no exchanges given, checks the equity window (NSE) as the default.
         """
-        now_t = (at or self.now_ist()).time().replace(tzinfo=None)
+        now = _as_ist(at) if at is not None else self.now_ist()
+        now_t = now.time().replace(tzinfo=None)
         target_exchanges = exchanges or ["NSE"]
 
         for exch in target_exchanges:
@@ -234,7 +351,54 @@ class TimeScheduler:
         exchange: str = "NSE",
     ) -> list[str]:
         """Cache a normalised holiday payload already fetched by another owner."""
-        from flinttrade_core.openalgo_client import normalise_holiday_dates  # noqa: PLC0415
+        from flinttrade_core.openalgo_client import (  # noqa: PLC0415
+            normalise_holiday_dates,
+            normalise_market_calendar,
+        )
+
+        calendar_rows = normalise_market_calendar(holidays)
+        replacement_years = (
+            {int(year)}
+            if year is not None
+            else {date.fromisoformat(row["date"]).year for row in calendar_rows}
+        )
+        for holiday_date in tuple(self._calendar_days):
+            if holiday_date.year in replacement_years:
+                self._calendar_days.pop(holiday_date, None)
+        for row in calendar_rows:
+            holiday_date = date.fromisoformat(row["date"])
+            calendar_day = self._calendar_days.setdefault(holiday_date, _CalendarDay())
+            calendar_day.closed_exchanges.update(
+                _calendar_exchange(exchange_name)
+                for exchange_name in row["closed_exchanges"]
+            )
+            for raw_session in row["open_exchanges"]:
+                session_exchange = _calendar_exchange(
+                    str(raw_session.get("exchange") or "")
+                )
+                start = _calendar_time(raw_session.get("start_time"))
+                end = _calendar_time(raw_session.get("end_time"))
+                if start is None or end is None or end < start:
+                    if session_exchange:
+                        calendar_day.closed_exchanges.add(session_exchange)
+                    continue
+                symbols = {
+                    str(raw_session.get("symbol") or "").strip().upper()
+                }
+                raw_symbols = raw_session.get("symbols", [])
+                if isinstance(raw_symbols, list | tuple | set):
+                    symbols.update(
+                        str(symbol).strip().upper() for symbol in raw_symbols
+                    )
+                symbols.discard("")
+                session = _SpecialMarketSession(
+                    exchange=session_exchange,
+                    start=start,
+                    end=end,
+                    symbols=tuple(sorted(symbols)),
+                )
+                if session.exchange and session not in calendar_day.open_sessions:
+                    calendar_day.open_sessions.append(session)
 
         values = normalise_holiday_dates(holidays, exchange=exchange)
         grouped: dict[str, list[str]] = {}
@@ -280,7 +444,13 @@ class TimeScheduler:
                 # One-owner-loop rule for the shared client's pooled connections.
                 from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
 
-                data = client_call_sync(self._client, self._client.holidays(year=y))  # type: ignore[union-attr]
+                data = client_call_sync(
+                    self._client,
+                    self._client.holidays(  # type: ignore[union-attr]
+                        year=y,
+                        allow_legacy_fallback=True,
+                    ),
+                )
 
             holidays = self.set_holidays(data, year=y)
             logger.info("Loaded %d holidays for %s", len(holidays), y)

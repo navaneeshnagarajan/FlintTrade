@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import re
 import shutil
@@ -27,6 +28,18 @@ _INTERVAL_PATTERN = re.compile(r"(?P<count>[1-9][0-9]*)(?P<unit>[mhd])", re.IGNO
 def _parse_bar_timestamp(value: object) -> datetime | None:
     if isinstance(value, datetime):
         parsed = value
+    elif isinstance(value, bool):
+        return None
+    elif isinstance(value, int | float):
+        epoch = float(value)
+        if not math.isfinite(epoch):
+            return None
+        if abs(epoch) >= 100_000_000_000:
+            epoch /= 1000.0
+        try:
+            return datetime.fromtimestamp(epoch, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
     elif isinstance(value, str) and value.strip():
         text = value.strip()
         try:
@@ -172,7 +185,28 @@ def _normalise_history_rows(rows: Any) -> list[dict[str, Any]]:
             normalised.append(row.model_dump())
         elif hasattr(row, "__dict__"):
             normalised.append(dict(row.__dict__))
-    return normalised
+    ordered: dict[datetime, dict[str, Any]] = {}
+    for row in normalised:
+        parsed = _parse_bar_timestamp(row.get("timestamp"))
+        if parsed is None:
+            return []
+        ordered[parsed] = row
+    return [ordered[timestamp] for timestamp in sorted(ordered)]
+
+
+def _prepare_scheduled_bars(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return timestamp-valid candles ordered oldest-first and deduplicated."""
+    by_timestamp: dict[datetime, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return []
+        parsed = _parse_bar_timestamp(row.get("timestamp"))
+        if parsed is None:
+            return []
+        normalised = dict(row)
+        normalised["timestamp"] = parsed.isoformat()
+        by_timestamp[parsed] = normalised
+    return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
 
 
 class SignalPipeline:
@@ -239,6 +273,7 @@ class SignalPipeline:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._emission_lock = threading.Lock()
         self._last_emitted_candles: dict[tuple[str, str], datetime] = {}
+        self._pending_emission_candles: dict[tuple[str, str], datetime] = {}
 
     @property
     def instruments(self) -> list[dict[str, str]]:
@@ -421,11 +456,14 @@ class SignalPipeline:
 
         self._ensure_generator()
         results: dict[str, dict[str, Any]] = {}
+        reservations: list[tuple[str, str, str]] = []
 
         for inst in instruments:
             key = f"{inst['exchange']}:{inst['symbol']}"
             try:
-                bars = self.fetch_bars(inst["symbol"], inst["exchange"])
+                bars = _prepare_scheduled_bars(
+                    self.fetch_bars(inst["symbol"], inst["exchange"])
+                )
                 if len(bars) < 50:
                     logger.warning("Not enough bars for %s (%d)", key, len(bars))
                     continue
@@ -494,17 +532,23 @@ class SignalPipeline:
                     logger.debug("Skipping duplicate or regressed source candle for %s at %s", key, latest_bar_timestamp)
                     continue
                 results[key] = result
+                reservations.append(
+                    (inst["symbol"], inst["exchange"], latest_bar_timestamp)
+                )
             except Exception:
                 logger.exception("Signal cycle error for %s", key)
 
         if results:
             with self._emission_lock:
                 self.latest_signals.update(results)
+        delivered = True
         if self._signal_sink is not None and results:
             try:
                 self._signal_sink(results)
             except Exception:  # noqa: BLE001 - a feed sink cannot discard ML state
+                delivered = False
                 logger.exception("Could not publish scheduled signals to the canonical hub")
+        self._settle_source_candles(reservations, delivered=delivered)
         return results
 
     def _validated_latest_bar_timestamp(
@@ -527,9 +571,23 @@ class SignalPipeline:
         if interval is None:
             logger.warning("Skipping %s: unsupported bar interval %r", instrument, self.interval)
             return None
+        if parsed > now_utc:
+            logger.warning(
+                "Skipping %s: latest bar timestamp %s is in the future",
+                instrument,
+                parsed.isoformat(),
+            )
+            return None
+        if parsed + interval > now_utc:
+            logger.debug(
+                "Skipping %s: latest bar interval at %s has not closed",
+                instrument,
+                parsed.isoformat(),
+            )
+            return None
         max_age = interval * (4 if interval >= timedelta(days=1) else 2) + timedelta(minutes=1)
         age = now_utc - parsed
-        if age > max_age or age < -interval:
+        if age > max_age:
             logger.warning(
                 "Skipping %s: latest bar timestamp %s is outside the freshness window",
                 instrument,
@@ -539,7 +597,7 @@ class SignalPipeline:
         return parsed.isoformat()
 
     def _claim_source_candle(self, symbol: str, exchange: str, timestamp: str) -> bool:
-        """Atomically claim a strictly newer source candle for one instrument."""
+        """Reserve a strictly newer source candle until sink delivery settles."""
         parsed = _parse_bar_timestamp(timestamp)
         if parsed is None:
             return False
@@ -548,8 +606,31 @@ class SignalPipeline:
             previous = self._last_emitted_candles.get(identity)
             if previous is not None and parsed <= previous:
                 return False
-            self._last_emitted_candles[identity] = parsed
+            if identity in self._pending_emission_candles:
+                return False
+            self._pending_emission_candles[identity] = parsed
             return True
+
+    def _settle_source_candles(
+        self,
+        reservations: list[tuple[str, str, str]],
+        *,
+        delivered: bool,
+    ) -> None:
+        """Commit delivered reservations or release them for a later retry."""
+        with self._emission_lock:
+            for symbol, exchange, timestamp in reservations:
+                parsed = _parse_bar_timestamp(timestamp)
+                if parsed is None:
+                    continue
+                identity = (exchange, symbol)
+                if self._pending_emission_candles.get(identity) != parsed:
+                    continue
+                self._pending_emission_candles.pop(identity, None)
+                if delivered:
+                    previous = self._last_emitted_candles.get(identity)
+                    if previous is None or parsed > previous:
+                        self._last_emitted_candles[identity] = parsed
 
     @classmethod
     def _ema_crossover_signal(cls, closes: list[float]) -> str:
@@ -576,22 +657,29 @@ class SignalPipeline:
         return ema
 
     def train_model(self, bars_list: list[list[dict]], lookahead: int = 5) -> bool:
-        """Train the signal model on multiple sets of historical bars.
+        """Train the legacy shared model from one unambiguous history.
 
-        Each element in *bars_list* is a list of OHLCV bar dicts for one
-        instrument / date range.  After training the model is persisted to
-        ``self.model_path``.
+        The compatibility surface has no instrument identity parameter, so it
+        refuses multiple histories instead of joining unrelated price series.
+        Canonical multi-instrument training uses :class:`SignalRetrainer`.
         """
         try:
             from .signals import SignalGenerator
 
             gen = SignalGenerator()
 
-            # Concatenate all bars for training
-            all_bars: list[dict[str, Any]] = []
-            for bars in bars_list:
-                if len(bars) >= 100:
-                    all_bars.extend(bars)
+            eligible_histories = [bars for bars in bars_list if len(bars) >= 100]
+            if len(eligible_histories) > 1:
+                logger.warning(
+                    "Refusing shared signal training from %d unidentified histories",
+                    len(eligible_histories),
+                )
+                return False
+            all_bars = (
+                _prepare_scheduled_bars(eligible_histories[0])
+                if eligible_histories
+                else []
+            )
 
             if len(all_bars) < 100:
                 logger.warning("Not enough training data (%d bars, need 100+)", len(all_bars))
