@@ -942,34 +942,27 @@ pub fn run() {
                             eprintln!("[flinttrade] backend terminated: {payload:?}");
                             match process_tree_liveness(&sidecar_record) {
                                 ProcessLiveness::Dead => {
-                                    clear_terminated_backend(&handle, &sidecar_record);
-                                    // Remove only this launch's exact record.
-                                    // The instance lock prevents a successor
-                                    // shell from replacing it meanwhile.
-                                    remove_sidecar_record(&sidecar_record);
-                                    if should_show_backend_recovery(quit_was_requested(&handle)) {
-                                        mark_backend_failed(&handle);
-                                        let h = handle.clone();
-                                        let _ = handle.run_on_main_thread(move || {
-                                            show_backend_recovery(&h)
-                                        });
-                                    }
+                                    finalise_terminated_backend(&handle, &sidecar_record);
                                 }
                                 ProcessLiveness::Alive => {
                                     eprintln!(
-                                        "[flinttrade] sidecar launcher exited while the Python application remains alive; retaining ownership"
+                                        "[flinttrade] sidecar launcher exited while the Python application remains alive; continuing supervision"
+                                    );
+                                    supervise_terminated_application(
+                                        &handle,
+                                        &sidecar_record,
                                     );
                                 }
                                 ProcessLiveness::Unknown => {
                                     eprintln!(
                                         "[flinttrade] sidecar launcher exited with unresolved process-tree ownership; retaining recovery state"
                                     );
-                                    if should_show_backend_recovery(quit_was_requested(&handle)) {
-                                        mark_backend_failed(&handle);
-                                        let h = handle.clone();
-                                        let _ = handle.run_on_main_thread(move || {
-                                            show_backend_recovery(&h)
-                                        });
+                                    surface_backend_recovery(&handle);
+                                    if sidecar_record.application_pid.is_some() {
+                                        supervise_terminated_application(
+                                            &handle,
+                                            &sidecar_record,
+                                        );
                                     }
                                 }
                             }
@@ -1356,6 +1349,50 @@ fn clear_terminated_backend(app: &AppHandle, record: &SidecarRecord) {
         .is_some_and(|active_record| active_record == record)
     {
         active.take();
+    }
+}
+
+fn surface_backend_recovery(app: &AppHandle) {
+    if should_show_backend_recovery(quit_was_requested(app)) && !backend_has_failed(app) {
+        mark_backend_failed(app);
+        let handle = app.clone();
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if should_show_backend_recovery(quit_was_requested(&h)) {
+                show_backend_recovery(&h);
+            }
+        });
+    }
+}
+
+fn finalise_terminated_backend(app: &AppHandle, record: &SidecarRecord) {
+    clear_terminated_backend(app, record);
+    // Remove only this launch's exact record. The instance lock prevents a
+    // successor shell from replacing it while this process remains alive.
+    remove_sidecar_record(record);
+    surface_backend_recovery(app);
+}
+
+fn supervise_terminated_application(app: &AppHandle, record: &SidecarRecord) {
+    let monitor_app = app.clone();
+    let monitor_record = record.clone();
+    if let Err(error) = std::thread::Builder::new()
+        .name("flinttrade-backend-supervisor".to_string())
+        .spawn(move || {
+            if wait_for_recorded_application_exit(&monitor_record) {
+                finalise_terminated_backend(&monitor_app, &monitor_record);
+            } else {
+                eprintln!(
+                    "[flinttrade] backend launcher exited before the application PID was recorded; retaining recovery state"
+                );
+                surface_backend_recovery(&monitor_app);
+            }
+        })
+    {
+        eprintln!(
+            "[flinttrade] could not start backend application supervision: {error}; retaining recovery state"
+        );
+        surface_backend_recovery(app);
     }
 }
 
@@ -1807,6 +1844,32 @@ fn wait_for_process_tree_exit(record: &SidecarRecord, polls: usize) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     process_tree_liveness(record) == ProcessLiveness::Dead
+}
+
+fn wait_for_recorded_application_exit_with<L, W>(
+    record: &SidecarRecord,
+    mut liveness: L,
+    mut wait: W,
+) -> bool
+where
+    L: FnMut(u32) -> ProcessLiveness,
+    W: FnMut(),
+{
+    let Some(application_pid) = record.application_pid else {
+        return false;
+    };
+    loop {
+        match liveness(application_pid) {
+            ProcessLiveness::Dead => return true,
+            ProcessLiveness::Alive | ProcessLiveness::Unknown => wait(),
+        }
+    }
+}
+
+fn wait_for_recorded_application_exit(record: &SidecarRecord) -> bool {
+    wait_for_recorded_application_exit_with(record, process_liveness, || {
+        std::thread::sleep(std::time::Duration::from_millis(100))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3280,6 +3343,54 @@ mod tests {
     fn exit_confirmation_never_claims_the_current_process_is_dead() {
         assert_eq!(process_liveness(std::process::id()), ProcessLiveness::Alive);
         assert!(!wait_for_process_exit(std::process::id(), 0));
+    }
+
+    #[test]
+    fn terminated_launcher_polls_recorded_application_until_confirmed_dead() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let states = std::cell::RefCell::new(std::collections::VecDeque::from([
+            ProcessLiveness::Alive,
+            ProcessLiveness::Unknown,
+            ProcessLiveness::Alive,
+            ProcessLiveness::Dead,
+        ]));
+        let probed = std::cell::RefCell::new(Vec::new());
+        let waits = std::cell::Cell::new(0);
+
+        assert!(wait_for_recorded_application_exit_with(
+            &record,
+            |pid| {
+                probed.borrow_mut().push(pid);
+                states
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("test liveness sequence exhausted")
+            },
+            || waits.set(waits.get() + 1),
+        ));
+        assert_eq!(probed.into_inner(), vec![5678, 5678, 5678, 5678]);
+        assert_eq!(waits.get(), 3);
+    }
+
+    #[test]
+    fn terminated_launcher_with_pending_application_pid_fails_closed() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+
+        assert!(!wait_for_recorded_application_exit_with(
+            &record,
+            |_| panic!("pending application PID must not be probed"),
+            || panic!("pending application PID must not be polled"),
+        ));
     }
 
     #[cfg(unix)]
