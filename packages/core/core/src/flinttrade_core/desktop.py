@@ -126,6 +126,7 @@ class _DesktopTickCaptureRuntime:
         self._startup_error: BaseException | None = None
         self._shutdown_error_lock = threading.Lock()
         self._shutdown_error: BaseException | None = None
+        self._shutdown_error_retryable = False
         self._storage_close_lock = threading.Lock()
         self._storage_closed = False
         self._unpublish_lock = threading.Lock()
@@ -231,11 +232,17 @@ class _DesktopTickCaptureRuntime:
                     self._sanitise(exc),
                 )
 
-    def _remember_shutdown_error(self, error: BaseException) -> None:
+    def _remember_shutdown_error(
+        self,
+        error: BaseException,
+        *,
+        retryable: bool = False,
+    ) -> None:
         """Retain the first recorder cleanup error without exposing its payload."""
         with self._shutdown_error_lock:
             if self._shutdown_error is None:
                 self._shutdown_error = error
+                self._shutdown_error_retryable = retryable
         logger.warning(
             "Desktop tick recorder cleanup failed (%s)",
             self._sanitise(error),
@@ -246,6 +253,16 @@ class _DesktopTickCaptureRuntime:
             failed = self._shutdown_error is not None
         if failed:
             raise RuntimeError("Desktop tick capture shutdown failed") from None
+
+    def _has_retryable_shutdown_error(self) -> bool:
+        with self._shutdown_error_lock:
+            return self._shutdown_error is not None and self._shutdown_error_retryable
+
+    def _clear_retryable_shutdown_error(self) -> None:
+        with self._shutdown_error_lock:
+            if self._shutdown_error_retryable:
+                self._shutdown_error = None
+                self._shutdown_error_retryable = False
 
     def _retry_retained_flush(self) -> bool:
         """Retry a recorder finalisation failure while storage is still owned."""
@@ -259,8 +276,9 @@ class _DesktopTickCaptureRuntime:
         try:
             flush_pending()
         except BaseException as exc:  # noqa: BLE001 - retained for truthful shutdown status
-            self._remember_shutdown_error(exc)
+            self._remember_shutdown_error(exc, retryable=True)
             return False
+        self._clear_retryable_shutdown_error()
         return True
 
     def _run(self) -> None:
@@ -306,7 +324,8 @@ class _DesktopTickCaptureRuntime:
             self._loop = None
             loop.close()
             self._unpublish_once()
-            self._close_storage_once()
+            if not self._has_retryable_shutdown_error():
+                self._close_storage_once()
 
     def stop(self, *, timeout: float = _CAPTURE_THREAD_STOP_TIMEOUT) -> None:
         """Stop capture and fail truthfully if cleanup cannot complete."""
@@ -343,8 +362,10 @@ class _DesktopTickCaptureRuntime:
             logger.warning("Desktop tick recorder did not stop within %.1fs", timeout)
             raise RuntimeError("Desktop tick capture shutdown timed out") from None
 
-        storage_closed = self._close_storage_once()
+        if self._has_retryable_shutdown_error():
+            self._retry_retained_flush()
         self._raise_if_shutdown_failed()
+        storage_closed = self._close_storage_once()
         if not storage_closed:
             raise RuntimeError("Desktop tick storage shutdown failed") from None
 

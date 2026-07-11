@@ -151,6 +151,20 @@ class _TransientFlushFailureRecorder(_FakeRecorder):
         return True
 
 
+class _RetainedFlushFailureRecorder(_TransientFlushFailureRecorder):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(events)
+        self.allow_flush = False
+
+    def flush_pending(self) -> bool:
+        self.flush_calls += 1
+        self.events.append("flush-retry")
+        if not self.allow_flush:
+            raise RuntimeError("retained flush is still unavailable")
+        self.pending_tick_count = 0
+        return True
+
+
 @pytest.mark.unit
 def test_runtime_redacts_original_and_hot_reloaded_api_keys() -> None:
     runtime = desktop._DesktopTickCaptureRuntime(
@@ -402,6 +416,37 @@ def test_transient_final_flush_failure_retries_retained_ticks_before_storage_clo
     assert recorder.pending_tick_count == 0
     assert storage.closed is True
     assert events == ["final-flush-failed", "flush-retry", "storage-close"]
+
+
+@pytest.mark.unit
+def test_failed_retained_flush_keeps_storage_open_for_later_stop_retry() -> None:
+    events: list[str] = []
+    recorder = _RetainedFlushFailureRecorder(events)
+    storage = _FakeStorage("unused")
+    original_close = storage.close
+
+    def close_storage() -> None:
+        events.append("storage-close")
+        original_close()
+
+    storage.close = close_storage  # type: ignore[method-assign]
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "")
+    runtime.start()
+    assert recorder.run_started.wait(1)
+
+    with pytest.raises(RuntimeError, match="tick capture shutdown failed"):
+        runtime.stop(timeout=1)
+
+    assert recorder.pending_tick_count == 1
+    assert storage.closed is False
+    assert "storage-close" not in events
+
+    recorder.allow_flush = True
+    runtime.stop(timeout=1)
+
+    assert recorder.pending_tick_count == 0
+    assert storage.closed is True
+    assert events[-2:] == ["flush-retry", "storage-close"]
 
 
 @pytest.mark.unit
