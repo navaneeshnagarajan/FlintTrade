@@ -32,12 +32,23 @@ class _FakeStorage:
         self.db_path = db_path
         self.initialised = False
         self.closed = False
+        self.pruned_days: list[int] = []
+        self.tick_queries: list[tuple[object, ...]] = []
+        self.tick_rows: list[dict[str, object]] = []
 
     def initialise(self) -> None:
         self.initialised = True
 
     def close(self) -> None:
         self.closed = True
+
+    def prune_ticks(self, days: int) -> int:
+        self.pruned_days.append(days)
+        return 0
+
+    def get_ticks(self, *args: object, **kwargs: object) -> list[dict[str, object]]:
+        self.tick_queries.append((*args, kwargs))
+        return list(self.tick_rows)
 
 
 class _RetryingCloseStorage(_FakeStorage):
@@ -141,7 +152,11 @@ def test_enabled_desktop_builds_one_runtime_with_existing_hub_and_settings(
     storage = _FakeStorage("unused")
     storage_paths: list[str] = []
     recorder = _FakeRecorder()
-    orderflow = object()
+    orderflow = MagicMock()
+    orderflow.restore_current_session.return_value = {
+        "restored_ticks": 0,
+        "skipped_ticks": 0,
+    }
     watchlist = [{"exchange": "NSE_INDEX", "symbol": "NIFTY"}]
     build_calls: list[dict[str, object]] = []
 
@@ -177,6 +192,9 @@ def test_enabled_desktop_builds_one_runtime_with_existing_hub_and_settings(
     assert storage.db_path == "unused"
     assert storage_paths == [str(tmp_path / "ticks.duckdb")]
     assert storage.initialised is True
+    assert storage.pruned_days == [90]
+    assert len(storage.tick_queries) == 1
+    orderflow.restore_current_session.assert_called_once()
     assert flask_app.config["TICK_CAPTURE_ENABLED"] is True
     assert flask_app.config["TICK_CAPTURE_ERROR"] == ""
     assert flask_app.config["TICK_RECORDER"] is recorder

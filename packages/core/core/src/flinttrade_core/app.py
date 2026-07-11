@@ -35,7 +35,7 @@ import secrets
 import signal
 import threading
 from collections.abc import Callable, Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -332,6 +332,86 @@ def _close_tick_storage(storage: Any, storage_lock: Any | None = None) -> None:
         return
     with storage_lock:
         storage.close()
+
+
+def _prepare_tick_orderflow_state(
+    storage: Any,
+    orderflow: Any,
+    watchlist: list[dict[str, str]],
+    *,
+    storage_lock: Any | None = None,
+    retention_days: int = 90,
+    now: float | None = None,
+) -> dict[str, int]:
+    """Prune persisted ticks and restore current-session order-flow baselines."""
+    from datetime import datetime  # noqa: PLC0415
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from flinttrade_data.orderflow_aggregator import (  # noqa: PLC0415
+        DEFAULT_RESTORE_MAX_TICKS,
+    )
+
+    now_timestamp = time.time() if now is None else float(now)
+    session = datetime.fromtimestamp(
+        now_timestamp,
+        tz=ZoneInfo("Asia/Kolkata"),
+    ).date().isoformat()
+    summary = {
+        "pruned_ticks": 0,
+        "restored_ticks": 0,
+        "skipped_ticks": 0,
+        "restore_failures": 0,
+    }
+
+    lock_context = nullcontext() if storage_lock is None else storage_lock
+    with lock_context:
+        prune_ticks = getattr(storage, "prune_ticks", None)
+        if callable(prune_ticks) and retention_days > 0:
+            summary["pruned_ticks"] = int(prune_ticks(retention_days))
+
+        get_ticks = getattr(storage, "get_ticks", None)
+        restore = getattr(orderflow, "restore_current_session", None)
+        if not callable(get_ticks) or not callable(restore):
+            return summary
+
+        identities = {
+            (
+                str(instrument.get("exchange") or "").strip().upper(),
+                str(instrument.get("symbol") or "").strip().upper(),
+            )
+            for instrument in watchlist
+            if isinstance(instrument, dict)
+        }
+        for exchange, symbol in sorted(identities):
+            if not exchange or not symbol:
+                summary["skipped_ticks"] += 1
+                continue
+            try:
+                ticks = get_ticks(
+                    symbol,
+                    exchange,
+                    session,
+                    session,
+                    limit=DEFAULT_RESTORE_MAX_TICKS,
+                )
+                result = restore(
+                    ticks,
+                    now=now_timestamp,
+                    max_ticks=DEFAULT_RESTORE_MAX_TICKS,
+                )
+            except Exception as exc:  # noqa: BLE001 - one instrument must not block capture
+                summary["restore_failures"] += 1
+                logger.warning(
+                    "Order-flow restore skipped for %s:%s (%s)",
+                    exchange,
+                    symbol,
+                    type(exc).__name__,
+                )
+                continue
+            summary["restored_ticks"] += int(result.get("restored_ticks", 0))
+            summary["skipped_ticks"] += int(result.get("skipped_ticks", 0))
+
+    return summary
 
 
 def _handle_tick_recorder_completion(
@@ -3599,6 +3679,13 @@ class FlintTradeApp:
                     capture_settings = Settings.from_env()
                     watchlist = _tick_capture_watchlist()
                     signal_hub = flask_app.config.get("SIGNAL_HUB")
+                    restore_summary = _prepare_tick_orderflow_state(
+                        tick_storage,
+                        orderflow,
+                        watchlist,
+                        storage_lock=tick_lock,
+                        retention_days=90,
+                    )
                     recorder = _build_tick_recorder(
                         recorder_factory=TickRecorder,
                         signal_hub=signal_hub,
@@ -3655,7 +3742,13 @@ class FlintTradeApp:
                         )
 
                     recorder_task.add_done_callback(handle_recorder_completion)
-                logger.info("Live tick capture started → %s", tick_db)
+                logger.info(
+                    "Live tick capture started → %s (pruned=%d restored=%d restore_failures=%d)",
+                    tick_db,
+                    restore_summary["pruned_ticks"],
+                    restore_summary["restored_ticks"],
+                    restore_summary["restore_failures"],
+                )
             except Exception as exc:
                 sanitise_error = getattr(recorder, "sanitise_error", None)
 

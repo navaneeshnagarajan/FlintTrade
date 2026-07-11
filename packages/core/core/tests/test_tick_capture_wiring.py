@@ -21,6 +21,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -118,9 +119,75 @@ def test_start_launches_gated_tick_recorder() -> None:
     start_source = "\n".join(source_lines[start.lineno - 1 : start.end_lineno])
     lifecycle = start_source.index("with _tick_capture_lifecycle_lock(flask_app):")
     refreshed = start_source.index("capture_settings = Settings.from_env()")
+    restored = start_source.index("_prepare_tick_orderflow_state(")
     built = start_source.index("settings=capture_settings")
     published = start_source.index('flask_app.config["TICK_RECORDER"] = recorder')
-    assert lifecycle < refreshed < built < published
+    assert lifecycle < refreshed < restored < built < published
+
+
+@pytest.mark.unit
+def test_tick_boot_prunes_and_restores_each_watchlist_identity_under_storage_lock() -> None:
+    from flinttrade_core.app import _prepare_tick_orderflow_state
+    from flinttrade_data.orderflow_aggregator import DEFAULT_RESTORE_MAX_TICKS
+
+    events: list[tuple] = []
+    storage_lock = threading.Lock()
+
+    class Storage:
+        def prune_ticks(self, days: int) -> int:
+            assert storage_lock.locked()
+            events.append(("prune", days))
+            return 7
+
+        def get_ticks(
+            self,
+            symbol: str,
+            exchange: str,
+            start: str,
+            end: str,
+            *,
+            limit: int,
+        ) -> list[dict[str, object]]:
+            assert storage_lock.locked()
+            events.append(("get", exchange, symbol, start, end, limit))
+            return [{"symbol": symbol, "exchange": exchange}]
+
+    class OrderFlow:
+        def restore_current_session(
+            self,
+            ticks: list[dict[str, object]],
+            *,
+            now: float,
+            max_ticks: int,
+        ) -> dict[str, int]:
+            assert storage_lock.locked()
+            events.append(("restore", ticks[0]["exchange"], ticks[0]["symbol"], now, max_ticks))
+            return {"restored_ticks": 1, "skipped_ticks": 0}
+
+    summary = _prepare_tick_orderflow_state(
+        Storage(),
+        OrderFlow(),
+        [
+            {"exchange": "NFO", "symbol": "NIFTY"},
+            {"exchange": "nfo", "symbol": "nifty"},
+            {"exchange": "MCX", "symbol": "GOLDM"},
+            {"exchange": "", "symbol": "INVALID"},
+        ],
+        storage_lock=storage_lock,
+        retention_days=90,
+        now=1_700_000_000.0,
+    )
+
+    assert summary == {
+        "pruned_ticks": 7,
+        "restored_ticks": 2,
+        "skipped_ticks": 1,
+        "restore_failures": 0,
+    }
+    assert events[0] == ("prune", 90)
+    gets = [event for event in events if event[0] == "get"]
+    assert [(event[1], event[2]) for event in gets] == [("MCX", "GOLDM"), ("NFO", "NIFTY")]
+    assert all(event[-1] == DEFAULT_RESTORE_MAX_TICKS for event in gets)
 
 
 @pytest.mark.unit

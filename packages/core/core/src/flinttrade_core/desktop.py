@@ -50,6 +50,7 @@ from typing import Any, Protocol
 # frozen-mode sys.path / dist-path wiring (see ``flinttrade_core.app``).
 from .app import (
     _build_tick_recorder,
+    _prepare_tick_orderflow_state,
     _record_tick_capture_failure,
     _sanitise_tick_capture_error,
     _set_tick_capture_intent,
@@ -367,6 +368,14 @@ def _configure_tick_capture(
         storage.initialise()
         storage_lock = threading.Lock()
         orderflow = orderflow_factory()
+        watchlist = _tick_capture_watchlist()
+        restore_summary = _prepare_tick_orderflow_state(
+            storage,
+            orderflow,
+            watchlist,
+            storage_lock=storage_lock,
+            retention_days=90,
+        )
         recorder = build_recorder(
             recorder_factory=recorder_factory,
             signal_hub=flask_app.config.get("SIGNAL_HUB"),
@@ -374,7 +383,7 @@ def _configure_tick_capture(
             storage=storage,
             storage_lock=storage_lock,
             orderflow=orderflow,
-            watchlist=_tick_capture_watchlist(),
+            watchlist=watchlist,
             mode=_tick_capture_mode(),
         )
 
@@ -417,6 +426,12 @@ def _configure_tick_capture(
             }
         )
         runtime.start()
+        logger.info(
+            "Desktop tick capture prepared (pruned=%d restored=%d restore_failures=%d)",
+            restore_summary["pruned_ticks"],
+            restore_summary["restored_ticks"],
+            restore_summary["restore_failures"],
+        )
         return runtime
     except Exception as exc:
         if runtime is not None:
