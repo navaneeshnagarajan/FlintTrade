@@ -45,8 +45,13 @@ class _RecordingPipeline:
         self.install_generator(symbol, exchange, generator)
 
 
-def _bars(count: int = 80, *, price_shift: float = 0.0) -> list[dict[str, float | str]]:
-    final_stamp = datetime.now(timezone.utc) - timedelta(minutes=5)
+def _bars(
+    count: int = 80,
+    *,
+    price_shift: float = 0.0,
+    end_at: datetime | None = None,
+) -> list[dict[str, float | str]]:
+    final_stamp = (end_at or datetime.now(timezone.utc)) - timedelta(minutes=5)
     first_stamp = final_stamp - timedelta(minutes=5 * (count - 1))
     return [
         {
@@ -61,14 +66,20 @@ def _bars(count: int = 80, *, price_shift: float = 0.0) -> list[dict[str, float 
     ]
 
 
-def _distribution_shifted_bars(count: int = 120) -> list[dict[str, float | str]]:
+def _distribution_shifted_bars(
+    count: int = 120,
+    *,
+    end_at: datetime | None = None,
+) -> list[dict[str, float | str]]:
+    final_stamp = (end_at or datetime.now(timezone.utc)) - timedelta(minutes=5)
+    first_stamp = final_stamp - timedelta(minutes=5 * (count - 1))
     rows: list[dict[str, float | str]] = []
     for index in range(count):
         close = 100.0 if index % 2 == 0 else 1000.0
         open_price = close * (1.3 if index % 3 == 0 else 0.7)
         rows.append(
             {
-                "timestamp": f"2026-02-{index + 1:03d}",
+                "timestamp": (first_stamp + timedelta(minutes=5 * index)).isoformat(),
                 "open": open_price,
                 "high": max(open_price, close) * 1.5,
                 "low": min(open_price, close) * 0.5,
@@ -453,6 +464,47 @@ def test_accepted_candidate_uses_canonical_train_metrics_and_promotes_per_instru
     assert model_bytes
 
 
+def test_retraining_trains_on_sorted_unique_closed_bars_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_ai.signal_retraining import SignalRetrainer
+
+    now = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
+    first_stamp = now - timedelta(minutes=5 * 40)
+    closed_bars = [
+        {
+            "timestamp": (first_stamp + timedelta(minutes=5 * index)).isoformat(),
+            "open": 100.0 + index,
+            "high": 102.0 + index,
+            "low": 99.0 + index,
+            "close": 101.0 + index,
+            "volume": 10_000.0 + index,
+        }
+        for index in range(40)
+    ]
+    duplicate = {**closed_bars[12], "close": 999.0}
+    forming = {**closed_bars[-1], "timestamp": (now - timedelta(minutes=2)).isoformat()}
+    future = {**closed_bars[-1], "timestamp": (now + timedelta(minutes=5)).isoformat()}
+    source_bars = [future, forming, *reversed(closed_bars), duplicate]
+    train_calls = _install_train_stub(monkeypatch, test_accuracy=0.8)
+    retrainer = SignalRetrainer(
+        _config(tmp_path),
+        instruments=[],
+        data_fetcher=lambda *_args: source_bars,
+        clock=lambda: now,
+    )
+
+    result = retrainer.run_once("NIFTY", "NSE_INDEX")
+
+    trained_bars = train_calls[0]["bars"]
+    trained_timestamps = [datetime.fromisoformat(str(bar["timestamp"])) for bar in trained_bars]
+    assert result.accepted is True
+    assert len(trained_bars) == 40
+    assert trained_timestamps == sorted(set(trained_timestamps))
+    assert all(timestamp + timedelta(minutes=5) <= now for timestamp in trained_timestamps)
+
+
 def test_retraining_compares_recent_features_with_verified_incumbent_training_baseline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -461,8 +513,13 @@ def test_retraining_compares_recent_features_with_verified_incumbent_training_ba
 
     monkeypatch.setattr(retraining, "_scipy_ks_2samp", None)
     _install_train_stub(monkeypatch, test_accuracy=0.8)
-    fetched = iter([_bars(120), _distribution_shifted_bars()])
     now = [datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)]
+    fetched = iter(
+        [
+            _bars(120, end_at=now[0]),
+            _distribution_shifted_bars(end_at=now[0] + timedelta(hours=24)),
+        ]
+    )
     retrainer = retraining.SignalRetrainer(
         _config(tmp_path, drift_threshold=0.3),
         instruments=[],
@@ -1079,8 +1136,8 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     late_retrain_call = calls["ml_signal_retrain_late"]
     assert late_retrain_call.kwargs["trigger_type"] == "cron"
     assert late_retrain_call.kwargs["trigger_args"] == {
-        "hour": 23,
-        "minute": 59,
+        "hour": 0,
+        "minute": 30,
         "timezone": "Asia/Kolkata",
     }
     assert isinstance(app.config["ML_SIGNAL_RETRAINER"], SignalRetrainer)
@@ -1200,6 +1257,33 @@ def test_retraining_rosters_separate_regular_from_late_and_continuous() -> None:
     assert late == instruments[1:]
 
 
+def test_cross_midnight_retraining_uses_dated_close_and_waits_for_session_end() -> None:
+    from flinttrade_ai.signal_retraining import select_retraining_roster
+
+    instrument = {"symbol": "GOLDM", "exchange": "MCX"}
+    session_date = date(2026, 4, 17)
+    ist = timezone(timedelta(hours=5, minutes=30))
+
+    def select(roster: str, run_at: datetime):
+        return select_retraining_roster(
+            [instrument],
+            roster=roster,
+            session_date=session_date,
+            run_at=run_at,
+            is_continuous=lambda _exchange: False,
+            session_for=lambda _exchange, _symbol, _on: (
+                time(18, 0, 30),
+                time(0, 15, 45),
+            ),
+        )
+
+    assert select("regular", datetime(2026, 4, 17, 16, 0, tzinfo=ist)) == []
+    assert select("late", datetime(2026, 4, 17, 23, 59, tzinfo=ist)) == []
+    assert select("late", datetime(2026, 4, 18, 0, 15, 45, tzinfo=ist)) == [
+        instrument
+    ]
+
+
 def test_special_session_moves_equity_to_late_roster_and_closed_day_is_skipped() -> None:
     from flinttrade_ai.signal_retraining import select_retraining_roster
 
@@ -1291,6 +1375,45 @@ def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuou
     retrainer.run_all.assert_called_once_with(
         instruments=instruments[1:],
         session_date=date(2026, 7, 11),
+    )
+
+
+def test_runtime_late_job_uses_previous_session_date_after_midnight(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from flask import Flask
+
+    from flinttrade_core.app import _wire_ml_signal_runtime
+
+    instrument = {"symbol": "GOLDM", "exchange": "MCX"}
+    app = Flask(__name__)
+    pipeline = MagicMock()
+    pipeline.model_path = str(tmp_path / "signal_model.joblib")
+    pipeline.instruments = [instrument]
+    app.config["ML_SIGNAL_PIPELINE"] = pipeline
+    cron = MagicMock()
+    time_scheduler = MagicMock()
+    time_scheduler.get_schedule.return_value = SimpleNamespace(is_24x7=False)
+    time_scheduler.get_market_session.return_value = (
+        time(18, 0),
+        time(0, 15),
+    )
+    ist = timezone(timedelta(hours=5, minutes=30))
+    time_scheduler.now_ist.return_value = datetime(2026, 4, 18, 0, 30, tzinfo=ist)
+
+    assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
+    retrainer = app.config["ML_SIGNAL_RETRAINER"]
+    retrainer.run_all = MagicMock(return_value=[])
+    calls = {call.args[0]: call for call in cron.register.call_args_list}
+
+    calls["ml_signal_retrain_late"].kwargs["handler"]()
+
+    retrainer.run_all.assert_called_once_with(
+        instruments=[instrument],
+        session_date=date(2026, 4, 17),
     )
 
 

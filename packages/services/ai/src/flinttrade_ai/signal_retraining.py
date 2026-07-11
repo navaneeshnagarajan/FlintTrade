@@ -31,6 +31,11 @@ from .signals import (
     generate_labels,
     walk_forward_split_bounds,
 )
+from .pipeline import (
+    MarketSessionProvider,
+    _filter_closed_bars,
+    _prepare_scheduled_bars,
+)
 
 try:
     from scipy.stats import ks_2samp as _scipy_ks_2samp
@@ -59,7 +64,7 @@ def select_retraining_roster(
     *,
     roster: RetrainRoster,
     session_date: date,
-    run_at: wall_time,
+    run_at: datetime | wall_time,
     is_continuous: ContinuousLookup,
     session_for: SessionLookup,
     regular_cutoff: wall_time = wall_time(16, 0),
@@ -67,7 +72,6 @@ def select_retraining_roster(
     """Select one non-overlapping regular or late/continuous training roster."""
     if roster not in {"regular", "late"}:
         raise ValueError("roster must be 'regular' or 'late'")
-    run_time = run_at.replace(tzinfo=None)
     cutoff = regular_cutoff.replace(tzinfo=None)
     selected: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -95,10 +99,30 @@ def select_retraining_roster(
             continue
         if session is None:
             continue
-        _session_open, session_close = session
-        close_time = session_close.replace(tzinfo=None)
-        intended_roster: RetrainRoster = "regular" if close_time <= cutoff else "late"
-        if intended_roster != roster or run_time < close_time:
+        session_open, session_close = (
+            value.replace(tzinfo=None) for value in session
+        )
+        if session_open == session_close:
+            continue
+        closes_at = datetime.combine(session_date, session_close, tzinfo=_IST)
+        cross_midnight = session_close < session_open
+        if cross_midnight:
+            closes_at += timedelta(days=1)
+        cutoff_at = datetime.combine(session_date, cutoff, tzinfo=_IST)
+        intended_roster: RetrainRoster = "regular" if closes_at <= cutoff_at else "late"
+
+        if isinstance(run_at, datetime):
+            run_datetime = (
+                run_at.replace(tzinfo=_IST)
+                if run_at.tzinfo is None or run_at.utcoffset() is None
+                else run_at.astimezone(_IST)
+            )
+        else:
+            run_time = run_at.replace(tzinfo=None)
+            run_datetime = datetime.combine(session_date, run_time, tzinfo=_IST)
+            if cross_midnight and run_time < cutoff:
+                run_datetime += timedelta(days=1)
+        if intended_roster != roster or run_datetime < closes_at:
             continue
         selected.append({"symbol": symbol, "exchange": exchange})
         seen.add(identity)
@@ -123,6 +147,7 @@ class RetrainConfig(BaseModel):
     sell_threshold_pct: float = Field(default=-0.5, lt=0.0, allow_inf_nan=False)
     validation_split: float = Field(default=0.2, gt=0.0, lt=1.0)
     drift_threshold: float = Field(default=0.1, gt=0.0, le=1.0)
+    bar_interval: str = Field(default="5m", min_length=1)
     model_dir: Path = Field(default_factory=_default_model_dir)
     persist_log: bool = True
     max_history: int = Field(default=1000, ge=1)
@@ -446,6 +471,7 @@ class SignalRetrainer:
         instrument_provider: Callable[[], list[dict[str, str]]] | None = None,
         clock: Clock | None = None,
         cancel_requested: CancellationCheck | None = None,
+        market_session_provider: MarketSessionProvider | None = None,
     ) -> None:
         self.config = config
         self.instruments = [dict(instrument) for instrument in instruments]
@@ -454,6 +480,26 @@ class SignalRetrainer:
         self._instrument_provider = instrument_provider
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._cancel_requested = cancel_requested or (lambda: False)
+        pipeline_interval = getattr(pipeline, "interval", None)
+        self._bar_interval = (
+            pipeline_interval
+            if isinstance(pipeline_interval, str) and pipeline_interval.strip()
+            else config.bar_interval
+        )
+        pipeline_session_provider = getattr(
+            pipeline,
+            "market_session_provider",
+            None,
+        )
+        self._market_session_provider = (
+            market_session_provider
+            if market_session_provider is not None
+            else (
+                pipeline_session_provider
+                if callable(pipeline_session_provider)
+                else None
+            )
+        )
         self._history: deque[RetrainResult] = deque(maxlen=config.max_history)
         self._history_lock = threading.Lock()
         self._promotion_lock = threading.Lock()
@@ -580,6 +626,15 @@ class SignalRetrainer:
             return self._record_failure(started, symbol, exchange, "Cancelled")
         if self._is_cancelled():
             return self._record_failure(started, symbol, exchange, "Cancelled")
+
+        bars = _filter_closed_bars(
+            _prepare_scheduled_bars(bars),
+            interval=self._bar_interval,
+            now=self._now(),
+            exchange=exchange,
+            symbol=symbol,
+            market_session_provider=self._market_session_provider,
+        )
 
         if len(bars) < self.config.min_training_rows:
             return self._record_failure(

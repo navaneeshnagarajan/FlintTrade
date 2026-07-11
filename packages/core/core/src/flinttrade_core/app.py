@@ -1653,6 +1653,25 @@ def _wire_ml_signal_runtime(
 
     from flinttrade_ai.signal_routes import make_ml_signal_job  # noqa: PLC0415
 
+    def market_session_for(
+        exchange: str,
+        symbol: str,
+        session_date: Any,
+    ) -> Any:
+        return time_scheduler.get_market_session(
+            exchange,
+            on=session_date,
+            symbol=symbol,
+        )
+
+    set_market_session_provider = getattr(
+        pipeline,
+        "set_market_session_provider",
+        None,
+    )
+    if callable(set_market_session_provider):
+        set_market_session_provider(market_session_for)
+
     cron.register(
         "ml_signal_cycle",
         handler=make_ml_signal_job(
@@ -1694,28 +1713,28 @@ def _wire_ml_signal_runtime(
             pipeline=pipeline,
             instrument_provider=lambda: pipeline.instruments,
             cancel_requested=retrain_cancel_event.is_set,
+            market_session_provider=market_session_for,
         )
 
         def _run_signal_retrain(*, roster: str = "regular") -> list[Any]:
             try:
+                from datetime import time as _wall_time  # noqa: PLC0415
+                from datetime import timedelta as _timedelta  # noqa: PLC0415
+
                 now = time_scheduler.now_ist()
                 session_date = now.date()
+                if roster == "late" and now.time().replace(tzinfo=None) < _wall_time(12):
+                    session_date -= _timedelta(days=1)
                 instruments = select_retraining_roster(
                     pipeline.instruments,
                     roster=roster,
                     session_date=session_date,
-                    run_at=now.time(),
+                    run_at=now,
                     is_continuous=lambda exchange: bool(
                         (schedule := time_scheduler.get_schedule(exchange))
                         and schedule.is_24x7
                     ),
-                    session_for=lambda exchange, symbol, on: (
-                        time_scheduler.get_market_session(
-                            exchange,
-                            on=on,
-                            symbol=symbol,
-                        )
-                    ),
+                    session_for=market_session_for,
                 )
                 return retrainer.run_all(
                     instruments=instruments,
@@ -1745,8 +1764,8 @@ def _wire_ml_signal_runtime(
             description="Retrain late-closing and continuous-market signal models",
             trigger_type="cron",
             trigger_args={
-                "hour": 23,
-                "minute": 59,
+                "hour": 0,
+                "minute": 30,
                 "timezone": "Asia/Kolkata",
             },
         )

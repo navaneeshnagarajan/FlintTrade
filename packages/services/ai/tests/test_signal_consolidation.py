@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from flask import Flask
@@ -788,6 +788,19 @@ def test_runtime_registers_five_minute_per_exchange_market_hours_ml_job(tmp_path
     )
 
     assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
+
+    pipeline.set_market_session_provider.assert_called_once()
+    session_provider = pipeline.set_market_session_provider.call_args.args[0]
+    time_scheduler.get_market_session.return_value = (time(9, 15), time(15, 30))
+    assert session_provider("NSE", "RELIANCE", date(2026, 7, 10)) == (
+        time(9, 15),
+        time(15, 30),
+    )
+    time_scheduler.get_market_session.assert_called_with(
+        "NSE",
+        on=date(2026, 7, 10),
+        symbol="RELIANCE",
+    )
 
     calls = {call.args[0]: call for call in cron.register.call_args_list}
     call = calls["ml_signal_cycle"]

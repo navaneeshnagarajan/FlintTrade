@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -86,6 +87,38 @@ class TestSignalPipeline:
             {"timestamp": "2026-07-10T09:15:00+00:00", "close": 101.0},
             {"timestamp": "2026-07-10T09:20:00+00:00", "close": 102.0},
         ]
+
+    def test_daily_bar_closes_at_effective_market_session_close(self):
+        from flinttrade_ai.pipeline import SignalPipeline
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime(2026, 7, 10, 16, 0, tzinfo=ist)
+        session_calls: list[tuple[str, str, date]] = []
+
+        def session_for(exchange: str, symbol: str, on: date):
+            session_calls.append((exchange, symbol, on))
+            return time(9, 15), time(15, 30)
+
+        pipeline = SignalPipeline(interval="1d", clock=lambda: now)
+        pipeline.set_market_session_provider(session_for)
+        bars = [
+            {
+                "timestamp": "2026-07-10T09:15:00+05:30",
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 10_000.0,
+            }
+        ]
+
+        assert pipeline._closed_scheduled_bars(
+            bars,
+            instrument="NSE:RELIANCE",
+            exchange="NSE",
+            symbol="RELIANCE",
+        ) == bars
+        assert session_calls == [("NSE", "RELIANCE", date(2026, 7, 10))]
 
     def test_ema_basic(self):
         from flinttrade_ai.pipeline import SignalPipeline

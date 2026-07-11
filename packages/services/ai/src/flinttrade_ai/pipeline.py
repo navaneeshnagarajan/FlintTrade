@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import threading
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as wall_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,11 @@ logger = logging.getLogger("flinttrade.ai.pipeline")
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 _INTERVAL_PATTERN = re.compile(r"(?P<count>[1-9][0-9]*)(?P<unit>[mhd])", re.IGNORECASE)
+
+MarketSessionProvider = Callable[
+    [str, str, date],
+    tuple[wall_time, wall_time] | None,
+]
 
 
 def _parse_bar_timestamp(value: object) -> datetime | None:
@@ -209,6 +214,79 @@ def _prepare_scheduled_bars(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
 
 
+def _bar_closes_at(
+    timestamp: datetime,
+    *,
+    interval: timedelta,
+    exchange: str,
+    symbol: str,
+    market_session_provider: MarketSessionProvider | None,
+) -> datetime | None:
+    """Return a source bar's effective UTC close, or ``None`` if unknown."""
+    if interval != timedelta(days=1) or market_session_provider is None:
+        return timestamp + interval
+
+    session_date = timestamp.astimezone(_IST).date()
+    try:
+        session = market_session_provider(exchange, symbol, session_date)
+    except Exception:  # noqa: BLE001 - calendar failures must fail closed
+        logger.exception(
+            "Could not resolve effective session for %s:%s on %s",
+            exchange,
+            symbol,
+            session_date,
+        )
+        return None
+    if session is None:
+        return None
+
+    session_open, session_close = (
+        value.replace(tzinfo=None) for value in session
+    )
+    if session_open == session_close:
+        return None
+    opens_at = datetime.combine(session_date, session_open, tzinfo=_IST)
+    closes_at = datetime.combine(session_date, session_close, tzinfo=_IST)
+    if session_close < session_open:
+        closes_at += timedelta(days=1)
+    if closes_at <= opens_at:
+        return None
+    return closes_at.astimezone(timezone.utc)
+
+
+def _filter_closed_bars(
+    bars: list[dict[str, Any]],
+    *,
+    interval: str,
+    now: datetime,
+    exchange: str,
+    symbol: str,
+    market_session_provider: MarketSessionProvider | None = None,
+) -> list[dict[str, Any]]:
+    """Keep only source bars whose effective interval has fully closed."""
+    duration = _interval_duration(interval)
+    if duration is None:
+        return []
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now_utc = now.astimezone(timezone.utc)
+    closed: list[dict[str, Any]] = []
+    for bar in bars:
+        timestamp = _parse_bar_timestamp(bar.get("timestamp"))
+        if timestamp is None or timestamp > now_utc:
+            continue
+        closes_at = _bar_closes_at(
+            timestamp,
+            interval=duration,
+            exchange=exchange,
+            symbol=symbol,
+            market_session_provider=market_session_provider,
+        )
+        if closes_at is not None and closes_at <= now_utc:
+            closed.append(bar)
+    return closed
+
+
 class SignalPipeline:
     """Orchestrates: fetch bars -> compute indicators -> predict signal -> emit."""
 
@@ -225,6 +303,7 @@ class SignalPipeline:
         turbulence_window: int = 60,
         signal_sink: Callable[[dict[str, dict[str, Any]]], Any] | None = None,
         clock: Callable[[], datetime] | None = None,
+        market_session_provider: MarketSessionProvider | None = None,
     ) -> None:
         from flinttrade_core.config import Settings
         from flinttrade_core.workspace import workspace_dir
@@ -271,6 +350,7 @@ class SignalPipeline:
         self._turbulence_window: int = turbulence_window
         self._signal_sink = signal_sink
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._market_session_provider = market_session_provider
         self._emission_lock = threading.Lock()
         self._last_emitted_candles: dict[tuple[str, str], datetime] = {}
         self._pending_emission_candles: dict[tuple[str, str], datetime] = {}
@@ -306,6 +386,18 @@ class SignalPipeline:
                 if key in allowed_keys
             }
         return snapshot
+
+    @property
+    def market_session_provider(self) -> MarketSessionProvider | None:
+        """Return the effective-session lookup shared with scheduled consumers."""
+        return self._market_session_provider
+
+    def set_market_session_provider(
+        self,
+        provider: MarketSessionProvider | None,
+    ) -> None:
+        """Replace the effective-session lookup used for daily candle closure."""
+        self._market_session_provider = provider
 
     def _ensure_generator(self) -> None:
         """Lazy-load signal generator with trained model."""
@@ -464,11 +556,21 @@ class SignalPipeline:
                 bars = _prepare_scheduled_bars(
                     self.fetch_bars(inst["symbol"], inst["exchange"])
                 )
-                bars = self._closed_scheduled_bars(bars, instrument=key)
+                bars = self._closed_scheduled_bars(
+                    bars,
+                    instrument=key,
+                    exchange=inst["exchange"],
+                    symbol=inst["symbol"],
+                )
                 if len(bars) < 50:
                     logger.warning("Not enough bars for %s (%d)", key, len(bars))
                     continue
-                latest_bar_timestamp = self._validated_latest_bar_timestamp(bars, instrument=key)
+                latest_bar_timestamp = self._validated_latest_bar_timestamp(
+                    bars,
+                    instrument=key,
+                    exchange=inst["exchange"],
+                    symbol=inst["symbol"],
+                )
                 if latest_bar_timestamp is None:
                     continue
 
@@ -557,45 +659,44 @@ class SignalPipeline:
         bars: list[dict[str, Any]],
         *,
         instrument: str,
+        exchange: str = "",
+        symbol: str = "",
     ) -> list[dict[str, Any]]:
         """Return bars through the newest interval that has fully closed."""
         if not bars:
             return []
+        if _interval_duration(self.interval) is None:
+            logger.warning("Skipping %s: unsupported bar interval %r", instrument, self.interval)
+            return []
         now = self._clock()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
-        now_utc = now.astimezone(timezone.utc)
-        interval = _interval_duration(self.interval)
-        if interval is None:
-            logger.warning("Skipping %s: unsupported bar interval %r", instrument, self.interval)
-            return []
-
         newest = _parse_bar_timestamp(bars[-1].get("timestamp"))
         if newest is None:
             return []
-        if newest > now_utc:
+        if newest > now.astimezone(timezone.utc):
             logger.warning(
                 "Skipping %s: latest bar timestamp %s is in the future",
                 instrument,
                 newest.isoformat(),
             )
             return []
-
-        closed_count = len(bars)
-        while closed_count:
-            timestamp = _parse_bar_timestamp(bars[closed_count - 1].get("timestamp"))
-            if timestamp is None:
-                return []
-            if timestamp + interval <= now_utc:
-                break
-            closed_count -= 1
-        return bars[:closed_count]
+        return _filter_closed_bars(
+            bars,
+            interval=self.interval,
+            now=now,
+            exchange=exchange,
+            symbol=symbol,
+            market_session_provider=self._market_session_provider,
+        )
 
     def _validated_latest_bar_timestamp(
         self,
         bars: list[dict[str, Any]],
         *,
         instrument: str,
+        exchange: str = "",
+        symbol: str = "",
     ) -> str | None:
         raw_timestamp = bars[-1].get("timestamp") if bars else None
         parsed = _parse_bar_timestamp(raw_timestamp)
@@ -618,7 +719,14 @@ class SignalPipeline:
                 parsed.isoformat(),
             )
             return None
-        if parsed + interval > now_utc:
+        closes_at = _bar_closes_at(
+            parsed,
+            interval=interval,
+            exchange=exchange,
+            symbol=symbol,
+            market_session_provider=self._market_session_provider,
+        )
+        if closes_at is None or closes_at > now_utc:
             logger.debug(
                 "Skipping %s: latest bar interval at %s has not closed",
                 instrument,
