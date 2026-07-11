@@ -80,7 +80,7 @@ const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
 const DESKTOP_INSTANCE_LOCK_FILE: &str = "desktop_instance.lock";
 
 /// Substring that must appear in a process's command line / image name before
-/// the reaper will treat it as our backend sidecar and terminate it.
+/// the reaper will treat it as a still-live backend sidecar.
 const SIDECAR_PROCESS_MARKER: &str = "flinttrade-backend";
 
 /// Stdin command understood by ``packaging/desktop_backend.py``. The sidecar
@@ -90,8 +90,10 @@ const SIDECAR_SHUTDOWN_COMMAND: &[u8] = b"FLINTTRADE_SHUTDOWN\n";
 /// Maximum wait for graceful sidecar cleanup before the hard-kill fallback.
 const SIDECAR_SHUTDOWN_POLLS: usize = 100;
 
-/// Short TERM grace used when reaping a stale sidecar during application boot.
-const SIDECAR_TERM_POLLS: usize = 20;
+/// Initial grace before stale-sidecar recovery fails closed. The Python
+/// watchdog may take almost 2s to observe parent death, then tick capture may
+/// use its full 3s flush timeout. Six seconds preserves that path plus margin.
+const SIDECAR_WATCHDOG_GRACE_POLLS: usize = 60;
 
 /// Brief confirmation window after a hard kill before retaining recovery data.
 const SIDECAR_KILL_CONFIRM_POLLS: usize = 10;
@@ -143,12 +145,22 @@ struct DesktopInstanceLock {
     launch_token: String,
 }
 
-/// Exact identity of the sidecar spawned by one desktop launch.
+/// Exact recovery record for the sidecar spawned by one desktop launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SidecarRecord {
     sidecar_pid: u32,
     shell_pid: u32,
     launch_token: String,
+}
+
+/// PID ownership fields shared by current tokenised records and the legacy
+/// two-line format. Legacy records are accepted only by startup reaping; all
+/// newly published and runtime-owned records remain tokenised
+/// [`SidecarRecord`]s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReapRecord {
+    sidecar_pid: u32,
+    shell_pid: u32,
 }
 
 struct ManagedSidecar {
@@ -774,8 +786,9 @@ pub fn run() {
             // First-run secret provisioning (best-effort; never blocks launch).
             provision_master_password();
 
-            // Terminate an identity-checked stale sidecar left behind by a
-            // crashed or force-quit previous run.
+            // Give a stale sidecar time to finish its own watchdog shutdown.
+            // Recovery never signals a PID loaded from disk: if the process
+            // remains live, startup fails closed instead of risking PID reuse.
             reap_stale_sidecar().map_err(|error| {
                 std::io::Error::other(format!(
                     "refusing to spawn a backend while stale sidecar state is unresolved: {error}"
@@ -1280,7 +1293,7 @@ fn kill_backend(app: &AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidecar orphan protection (PID file + identity-checked reaping).
+// Sidecar orphan protection (PID file + fail-closed startup recovery).
 // ---------------------------------------------------------------------------
 
 /// Path of the sidecar PID file inside the workspace dir.
@@ -1395,6 +1408,38 @@ fn parse_sidecar_record(contents: &str) -> Option<SidecarRecord> {
     })
 }
 
+fn parse_legacy_sidecar_record(contents: &str) -> Option<ReapRecord> {
+    let mut lines = contents.lines();
+    let sidecar_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let shell_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    if lines.next().is_some() {
+        return None;
+    }
+    Some(ReapRecord {
+        sidecar_pid,
+        shell_pid,
+    })
+}
+
+fn parse_reap_record(contents: &str) -> Option<ReapRecord> {
+    parse_sidecar_record(contents)
+        .map(|record| ReapRecord {
+            sidecar_pid: record.sidecar_pid,
+            shell_pid: record.shell_pid,
+        })
+        .or_else(|| parse_legacy_sidecar_record(contents))
+}
+
 /// True when a process command line / image name identifies our sidecar.
 fn looks_like_backend_sidecar(command_line: &str) -> bool {
     command_line.contains(SIDECAR_PROCESS_MARKER)
@@ -1422,12 +1467,41 @@ fn looks_like_desktop_shell(command_line: &str) -> bool {
     )
 }
 
-/// Return the command line (unix `ps`) for a PID, or ``None`` when no such
-/// process exists. Tool execution failures stay distinct from absence.
+#[cfg(any(unix, test))]
+fn parse_unix_ps_identity(text: &str, expected_pid: u32) -> Option<String> {
+    let mut fields = text.split_whitespace();
+    let pid = fields.next()?.parse::<u32>().ok()?;
+    let started_at = [
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+    ]
+    .join(" ");
+    let command = fields.collect::<Vec<_>>().join(" ");
+    if pid != expected_pid || command.is_empty() {
+        return None;
+    }
+    Some(format!("{command}\t{pid}\t{started_at}"))
+}
+
+/// Return a stable command + PID + process-start identity from unix `ps`, or
+/// ``None`` when no such process exists. Tool failures stay distinct from
+/// absence so startup remains fail closed.
 #[cfg(unix)]
 fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
     let out = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "args="])
+        .args([
+            "-p",
+            &pid.to_string(),
+            "-o",
+            "pid=",
+            "-o",
+            "lstart=",
+            "-o",
+            "args=",
+        ])
         .output()?;
     if !out.status.success() {
         return Err(std::io::Error::other(format!(
@@ -1435,34 +1509,50 @@ fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
             out.status
         )));
     }
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if text.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(text))
-    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(parse_unix_ps_identity(&text, pid))
 }
 
-/// Return the `tasklist` CSV row (image name + PID) for a PID, or ``None``
-/// when no such process exists.
+#[cfg(any(windows, test))]
+fn parse_windows_process_identity(text: &str, expected_pid: u32) -> Option<String> {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())?
+        .trim_start_matches('\u{feff}')
+        .trim();
+    let mut fields = line.split('\t');
+    let image_name = fields.next()?.trim();
+    let pid = fields.next()?.trim().parse::<u32>().ok()?;
+    let started_at = fields.next()?.trim().parse::<u64>().ok()?;
+    if fields.next().is_some() || image_name.is_empty() || pid != expected_pid || started_at == 0 {
+        return None;
+    }
+    Some(format!(
+        "{}\t{pid}\t{started_at}",
+        image_name.to_ascii_lowercase()
+    ))
+}
+
+/// Return a stable image + PID + creation-time identity for a Windows process,
+/// or ``None`` when no such process exists.
 #[cfg(windows)]
 fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
-    let out = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+    let query = format!(
+        "$ErrorActionPreference = 'Stop'; $process = Get-Process -Id {pid}; \
+         [Console]::Out.WriteLine($process.ProcessName + [char]9 + $process.Id + \
+         [char]9 + $process.StartTime.ToFileTimeUtc())"
+    );
+    let out = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &query])
         .output()?;
     if !out.status.success() {
         return Err(std::io::Error::other(format!(
-            "tasklist exited with status {}",
+            "PowerShell process identity query exited with status {}",
             out.status
         )));
     }
-    let text = String::from_utf8_lossy(&out.stdout).to_string();
-    // A match prints a quoted CSV row; a miss prints an ``INFO:`` line.
-    let needle = format!("\"{pid}\"");
-    Ok(text
-        .lines()
-        .find(|line| line.contains(&needle))
-        .map(str::to_string))
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(parse_windows_process_identity(&text, pid))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1526,38 +1616,18 @@ fn wait_for_process_exit(pid: u32, polls: usize) -> bool {
     process_liveness(pid) == ProcessLiveness::Dead
 }
 
-/// Terminate a process: graceful TERM first, escalating to a hard kill only
-/// if it lingers past a short grace window.
-#[cfg(unix)]
-fn terminate_process(pid: u32) -> bool {
-    let pid_s = pid.to_string();
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", &pid_s])
-        .status();
-    if wait_for_process_exit(pid, SIDECAR_TERM_POLLS) {
-        return true;
-    }
-    let _ = std::process::Command::new("kill")
-        .args(["-KILL", &pid_s])
-        .status();
-    wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS)
-}
-
-/// Terminate a process (Windows `taskkill`, including its child tree).
-#[cfg(windows)]
-fn terminate_process(pid: u32) -> bool {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .status();
-    wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReapOutcome {
     NoRecord,
     RemovedConfirmedDead,
     RemovedConfirmedReused,
-    TerminatedAndRemoved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LiveSidecarIdentity {
+    Backend(String),
+    Reused,
+    Dead,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1572,7 +1642,7 @@ enum ReapError {
     SidecarLivenessUnknown { pid: u32 },
     SidecarIdentityLookupFailed { pid: u32 },
     SidecarIdentityUnconfirmed { pid: u32 },
-    TerminationFailed { pid: u32 },
+    SidecarStillAlive { pid: u32 },
     RecordChanged,
     RecordRemoval { message: String },
 }
@@ -1621,12 +1691,10 @@ impl std::fmt::Display for ReapError {
                     "sidecar pid {pid} identity could not be confirmed"
                 )
             }
-            Self::TerminationFailed { pid } => {
-                write!(
-                    formatter,
-                    "sidecar pid {pid} termination could not be confirmed"
-                )
-            }
+            Self::SidecarStillAlive { pid } => write!(
+                formatter,
+                "sidecar pid {pid} is still a FlintTrade backend after watchdog grace"
+            ),
             Self::RecordChanged => write!(formatter, "sidecar recovery record changed during reap"),
             Self::RecordRemoval { message } => {
                 write!(
@@ -1642,31 +1710,66 @@ impl std::error::Error for ReapError {}
 
 fn remove_reaped_record(
     path: &Path,
-    record: &SidecarRecord,
+    expected_contents: &str,
     outcome: ReapOutcome,
 ) -> Result<ReapOutcome, ReapError> {
-    match remove_sidecar_record_at(path, record) {
-        Ok(true) => Ok(outcome),
-        Ok(false) => Err(ReapError::RecordChanged),
-        Err(error) => Err(ReapError::RecordRemoval {
+    match std::fs::read_to_string(path) {
+        Ok(contents) if contents == expected_contents => {}
+        Ok(_) => return Err(ReapError::RecordChanged),
+        Err(error) => {
+            return Err(ReapError::RecordRemoval {
+                message: error.to_string(),
+            });
+        }
+    }
+    std::fs::remove_file(path)
+        .map(|()| outcome)
+        .map_err(|error| ReapError::RecordRemoval {
             message: error.to_string(),
-        }),
+        })
+}
+
+fn inspect_live_sidecar<L, I>(
+    pid: u32,
+    liveness: &L,
+    identity: &I,
+) -> Result<LiveSidecarIdentity, ReapError>
+where
+    L: Fn(u32) -> ProcessLiveness,
+    I: Fn(u32) -> std::io::Result<Option<String>>,
+{
+    match identity(pid) {
+        Ok(Some(command)) if looks_like_backend_sidecar(&command) => {
+            Ok(LiveSidecarIdentity::Backend(command))
+        }
+        Ok(Some(_)) => Ok(LiveSidecarIdentity::Reused),
+        Ok(None) => match liveness(pid) {
+            ProcessLiveness::Dead => Ok(LiveSidecarIdentity::Dead),
+            ProcessLiveness::Unknown => Err(ReapError::SidecarLivenessUnknown { pid }),
+            ProcessLiveness::Alive => Err(ReapError::SidecarIdentityUnconfirmed { pid }),
+        },
+        Err(_) => match liveness(pid) {
+            ProcessLiveness::Dead => Ok(LiveSidecarIdentity::Dead),
+            ProcessLiveness::Alive | ProcessLiveness::Unknown => {
+                Err(ReapError::SidecarIdentityLookupFailed { pid })
+            }
+        },
     }
 }
 
 /// Startup layer of orphan protection. Every ambiguous process state is an
 /// error so setup cannot overwrite an unresolved record and spawn a duplicate.
-fn reap_stale_sidecar_at<L, I, T>(
+fn reap_stale_sidecar_at_with_grace<L, I, G>(
     path: &Path,
     current_shell_pid: u32,
     liveness: L,
     identity: I,
-    terminate: T,
+    await_watchdog_exit: G,
 ) -> Result<ReapOutcome, ReapError>
 where
     L: Fn(u32) -> ProcessLiveness,
     I: Fn(u32) -> std::io::Result<Option<String>>,
-    T: Fn(u32) -> bool,
+    G: Fn(u32) -> bool,
 {
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
@@ -1679,7 +1782,7 @@ where
             });
         }
     };
-    let record = parse_sidecar_record(&contents).ok_or(ReapError::InvalidRecord)?;
+    let record = parse_reap_record(&contents).ok_or(ReapError::InvalidRecord)?;
 
     // If the OS reused the previous shell PID for this process, the held
     // kernel lock proves the old owner is gone. Otherwise a live process must
@@ -1731,63 +1834,77 @@ where
                 pid: record.sidecar_pid,
             });
         }
-        ProcessLiveness::Alive => match identity(record.sidecar_pid) {
-            Ok(Some(command)) if looks_like_backend_sidecar(&command) => {
-                eprintln!(
-                    "[flinttrade] terminating stale backend sidecar (pid {}) from a previous run",
+        ProcessLiveness::Alive => {
+            match inspect_live_sidecar(record.sidecar_pid, &liveness, &identity)? {
+                LiveSidecarIdentity::Backend(_) => {
+                    eprintln!(
+                    "[flinttrade] waiting for stale backend sidecar pid {} to finish watchdog shutdown",
                     record.sidecar_pid
                 );
-                if !terminate(record.sidecar_pid)
-                    || liveness(record.sidecar_pid) != ProcessLiveness::Dead
-                {
-                    return Err(ReapError::TerminationFailed {
-                        pid: record.sidecar_pid,
-                    });
+                    let _ = await_watchdog_exit(record.sidecar_pid);
+                    match liveness(record.sidecar_pid) {
+                        ProcessLiveness::Dead => ReapOutcome::RemovedConfirmedDead,
+                        ProcessLiveness::Unknown => {
+                            return Err(ReapError::SidecarLivenessUnknown {
+                                pid: record.sidecar_pid,
+                            });
+                        }
+                        ProcessLiveness::Alive => {
+                            match inspect_live_sidecar(record.sidecar_pid, &liveness, &identity)? {
+                                LiveSidecarIdentity::Dead => ReapOutcome::RemovedConfirmedDead,
+                                LiveSidecarIdentity::Reused => {
+                                    eprintln!(
+                                "[flinttrade] sidecar pid {} was reused during watchdog grace; leaving the process alone",
+                                record.sidecar_pid
+                            );
+                                    ReapOutcome::RemovedConfirmedReused
+                                }
+                                LiveSidecarIdentity::Backend(_) => {
+                                    return Err(ReapError::SidecarStillAlive {
+                                        pid: record.sidecar_pid,
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
-                ReapOutcome::TerminatedAndRemoved
-            }
-            Ok(Some(_)) => {
-                eprintln!(
+                LiveSidecarIdentity::Reused => {
+                    eprintln!(
                     "[flinttrade] sidecar pid {} was reused by another process; leaving the process alone",
                     record.sidecar_pid
                 );
-                ReapOutcome::RemovedConfirmedReused
+                    ReapOutcome::RemovedConfirmedReused
+                }
+                LiveSidecarIdentity::Dead => ReapOutcome::RemovedConfirmedDead,
             }
-            Ok(None) => match liveness(record.sidecar_pid) {
-                ProcessLiveness::Dead => ReapOutcome::RemovedConfirmedDead,
-                ProcessLiveness::Unknown => {
-                    return Err(ReapError::SidecarLivenessUnknown {
-                        pid: record.sidecar_pid,
-                    });
-                }
-                ProcessLiveness::Alive => {
-                    return Err(ReapError::SidecarIdentityUnconfirmed {
-                        pid: record.sidecar_pid,
-                    });
-                }
-            },
-            Err(_) => match liveness(record.sidecar_pid) {
-                ProcessLiveness::Dead => ReapOutcome::RemovedConfirmedDead,
-                ProcessLiveness::Alive | ProcessLiveness::Unknown => {
-                    return Err(ReapError::SidecarIdentityLookupFailed {
-                        pid: record.sidecar_pid,
-                    });
-                }
-            },
-        },
+        }
     };
 
-    remove_reaped_record(path, &record, outcome)
+    remove_reaped_record(path, &contents, outcome)
+}
+
+#[cfg(test)]
+fn reap_stale_sidecar_at<L, I>(
+    path: &Path,
+    current_shell_pid: u32,
+    liveness: L,
+    identity: I,
+) -> Result<ReapOutcome, ReapError>
+where
+    L: Fn(u32) -> ProcessLiveness,
+    I: Fn(u32) -> std::io::Result<Option<String>>,
+{
+    reap_stale_sidecar_at_with_grace(path, current_shell_pid, liveness, identity, |_| false)
 }
 
 fn reap_stale_sidecar() -> Result<ReapOutcome, ReapError> {
     let path = sidecar_pid_file().ok_or(ReapError::WorkspaceUnavailable)?;
-    reap_stale_sidecar_at(
+    reap_stale_sidecar_at_with_grace(
         &path,
         std::process::id(),
         process_liveness,
         process_command_line,
-        terminate_process,
+        |pid| wait_for_process_exit(pid, SIDECAR_WATCHDOG_GRACE_POLLS),
     )
 }
 
@@ -2083,6 +2200,124 @@ mod tests {
     }
 
     #[test]
+    fn legacy_two_line_record_is_reaped_after_confirmed_death() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-legacy-dead-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        std::fs::write(&path, "1234\n77\n").unwrap();
+
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |_| ProcessLiveness::Dead,
+                |_| panic!("identity lookup must not run for dead processes"),
+            ),
+            Ok(ReapOutcome::RemovedConfirmedDead)
+        );
+        assert!(!path.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn live_legacy_backend_after_grace_is_retained_as_ambiguous() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-legacy-ambiguous-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let legacy_contents = "1234\n77\n";
+        std::fs::write(&path, legacy_contents).unwrap();
+        let grace_elapsed = std::cell::Cell::new(false);
+
+        assert_eq!(
+            reap_stale_sidecar_at_with_grace(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| {
+                    let started_at = if grace_elapsed.get() {
+                        "Fri Jul 11 10:11:13 2026"
+                    } else {
+                        "Fri Jul 11 10:11:12 2026"
+                    };
+                    Ok(Some(format!(
+                        "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0\t1234\t{started_at}"
+                    )))
+                },
+                |_| {
+                    grace_elapsed.set(true);
+                    false
+                },
+            ),
+            Err(ReapError::SidecarStillAlive { pid: 1234 })
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy_contents);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_record_is_removed_for_pid_reuse_during_grace() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-legacy-reused-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        std::fs::write(&path, "1234\n77\n").unwrap();
+        let pid_reused = std::cell::Cell::new(false);
+
+        assert_eq!(
+            reap_stale_sidecar_at_with_grace(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| {
+                    if pid_reused.get() {
+                        Ok(Some("/usr/bin/python3 unrelated.py".to_string()))
+                    } else {
+                        Ok(Some(
+                            "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0"
+                                .to_string(),
+                        ))
+                    }
+                },
+                |_| {
+                    pid_reused.set(true);
+                    false
+                },
+            ),
+            Ok(ReapOutcome::RemovedConfirmedReused)
+        );
+        assert!(!path.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn competing_kernel_lock_claimants_block_until_owner_drops() {
         let root = std::env::temp_dir().join(format!(
             "flinttrade-instance-compete-{}",
@@ -2163,7 +2398,6 @@ mod tests {
             99,
             |_| ProcessLiveness::Unknown,
             |_| panic!("identity lookup must not run for unknown liveness"),
-            |_| panic!("termination must not run for unknown liveness"),
         );
 
         assert_eq!(result, Err(ReapError::ShellLivenessUnknown { pid: 77 }));
@@ -2176,9 +2410,9 @@ mod tests {
     }
 
     #[test]
-    fn failed_sidecar_termination_refuses_reap_and_retains_record() {
+    fn live_tokenised_sidecar_refuses_reap_and_retains_record() {
         let root = std::env::temp_dir().join(format!(
-            "flinttrade-reap-failed-termination-{}",
+            "flinttrade-reap-live-sidecar-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -2208,13 +2442,163 @@ mod tests {
                         .to_string(),
                 ))
             },
-            |pid| {
-                assert_eq!(pid, 1234);
-                false
-            },
         );
 
-        assert_eq!(result, Err(ReapError::TerminationFailed { pid: 1234 }));
+        assert_eq!(result, Err(ReapError::SidecarStillAlive { pid: 1234 }));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn immediate_relaunch_allows_watchdog_and_tick_flush_to_finish() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-watchdog-grace-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+        let graceful_exit_finished = std::cell::Cell::new(false);
+
+        assert_eq!(
+            reap_stale_sidecar_at_with_grace(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 if graceful_exit_finished.get() => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |pid| {
+                    assert_eq!(pid, 1234);
+                    Ok(Some(
+                        "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0"
+                            .to_string(),
+                    ))
+                },
+                |pid| {
+                    assert_eq!(pid, 1234);
+                    graceful_exit_finished.set(true);
+                    true
+                },
+            ),
+            Ok(ReapOutcome::RemovedConfirmedDead)
+        );
+        assert!(!path.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn live_sidecar_waits_full_grace_then_fails_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-force-order-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+        let order = std::cell::RefCell::new(Vec::new());
+
+        assert_eq!(
+            reap_stale_sidecar_at_with_grace(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |pid| {
+                    assert_eq!(pid, 1234);
+                    order.borrow_mut().push("identity");
+                    Ok(Some(
+                        "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0"
+                            .to_string(),
+                    ))
+                },
+                |pid| {
+                    assert_eq!(pid, 1234);
+                    order.borrow_mut().push("grace");
+                    false
+                },
+            ),
+            Err(ReapError::SidecarStillAlive { pid: 1234 })
+        );
+        assert_eq!(order.into_inner(), vec!["identity", "grace", "identity"]);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn same_name_pid_reuse_during_grace_fails_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-grace-pid-reuse-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+        let pid_reused = std::cell::Cell::new(false);
+
+        assert_eq!(
+            reap_stale_sidecar_at_with_grace(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |pid| {
+                    assert_eq!(pid, 1234);
+                    if pid_reused.get() {
+                        Ok(Some("/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0\t1234\tFri Jul 11 10:11:13 2026".to_string()))
+                    } else {
+                        Ok(Some("/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0\t1234\tFri Jul 11 10:11:12 2026".to_string()))
+                    }
+                },
+                |pid| {
+                    assert_eq!(pid, 1234);
+                    pid_reused.set(true);
+                    false
+                },
+            ),
+            Err(ReapError::SidecarStillAlive { pid: 1234 })
+        );
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             format_sidecar_record(&record)
@@ -2251,7 +2635,6 @@ mod tests {
                     _ => panic!("unexpected pid {pid}"),
                 },
                 |_| panic!("identity lookup must not run for unknown liveness"),
-                |_| panic!("termination must not run for unknown liveness"),
             ),
             Err(ReapError::SidecarLivenessUnknown { pid: 1234 })
         );
@@ -2265,7 +2648,6 @@ mod tests {
                     _ => panic!("unexpected pid {pid}"),
                 },
                 |_| Err(std::io::Error::other("lookup failed")),
-                |_| panic!("termination must not run after failed owner lookup"),
             ),
             Err(ReapError::ShellIdentityLookupFailed { pid: 77 })
         );
@@ -2280,7 +2662,6 @@ mod tests {
                     _ => panic!("unexpected pid {pid}"),
                 },
                 |_| Err(std::io::Error::other("lookup failed")),
-                |_| panic!("termination must not run after failed sidecar lookup"),
             ),
             Err(ReapError::SidecarIdentityLookupFailed { pid: 1234 })
         );
@@ -2295,7 +2676,6 @@ mod tests {
                     _ => panic!("unexpected pid {pid}"),
                 },
                 |_| Ok(None),
-                |_| panic!("termination must not run for unconfirmed identity"),
             ),
             Err(ReapError::SidecarIdentityUnconfirmed { pid: 1234 })
         );
@@ -2430,7 +2810,6 @@ mod tests {
                 99,
                 |_| ProcessLiveness::Dead,
                 |_| panic!("identity lookup must not run for a dead process"),
-                |_| panic!("termination must not run for a dead process"),
             ),
             Ok(ReapOutcome::RemovedConfirmedDead)
         );
@@ -2447,7 +2826,6 @@ mod tests {
                     _ => panic!("unexpected pid {pid}"),
                 },
                 |_| Ok(Some("/usr/bin/python3 unrelated.py".to_string())),
-                |_| panic!("termination must not run for a reused pid"),
             ),
             Ok(ReapOutcome::RemovedConfirmedReused)
         );
@@ -2595,6 +2973,36 @@ mod tests {
         assert!(!looks_like_backend_sidecar(
             "\"notepad.exe\",\"1234\",\"Console\",\"1\",\"9,000 K\""
         ));
+    }
+
+    #[test]
+    fn unix_ps_identity_includes_process_start_time() {
+        let before = "1234 Fri Jul 11 10:11:12 2026 /Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0";
+        let after = "1234 Fri Jul 11 10:11:13 2026 /Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0";
+
+        assert_eq!(
+            parse_unix_ps_identity(before, 1234),
+            Some("/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0\t1234\tFri Jul 11 10:11:12 2026".to_string())
+        );
+        assert_ne!(
+            parse_unix_ps_identity(after, 1234),
+            parse_unix_ps_identity(before, 1234)
+        );
+    }
+
+    #[test]
+    fn windows_process_identity_includes_creation_time() {
+        let before = "flinttrade-backend\t1234\t134126574720000000";
+        let after = "flinttrade-backend\t1234\t134126574730000000";
+
+        assert_eq!(
+            parse_windows_process_identity(before, 1234),
+            Some(before.to_string())
+        );
+        assert_ne!(
+            parse_windows_process_identity(after, 1234),
+            parse_windows_process_identity(before, 1234)
+        );
     }
 
     #[test]

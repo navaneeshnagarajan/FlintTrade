@@ -39,6 +39,9 @@ SHUTDOWN_COMMAND = "FLINTTRADE_SHUTDOWN"
 #: Last-resort orphan timeout if graceful unwinding is unable to stop Waitress.
 ORPHAN_GRACE_SECONDS = 12.0
 
+#: Poll interval for forwarding a lock-free SIGTERM flag outside the handler.
+SIGNAL_RELAY_POLL_SECONDS = 0.05
+
 
 class _ShutdownCoordinator:
     """Hold an early shutdown request until the backend installs its callback."""
@@ -71,6 +74,47 @@ class _ShutdownCoordinator:
         with self._lock:
             if self._callback is callback:
                 self._callback = None
+
+
+class _SignalShutdownRelay:
+    """Forward SIGTERM to the coordinator without taking locks in the handler."""
+
+    def __init__(
+        self,
+        request_shutdown: Callable[[], object],
+        *,
+        poll_interval: float = SIGNAL_RELAY_POLL_SECONDS,
+    ) -> None:
+        self._request_shutdown = request_shutdown
+        self._poll_interval = poll_interval
+        self._requested = False
+
+    def handle(self, _signum: int, _frame: object) -> None:
+        """Record SIGTERM using one lock-free assignment on Python's main thread."""
+        self._requested = True
+
+    def _run(self) -> None:
+        while not self._requested:
+            time.sleep(self._poll_interval)
+        self._request_shutdown()
+
+    def start(self) -> threading.Thread:
+        thread = threading.Thread(
+            target=self._run,
+            name="flinttrade-sigterm-shutdown-relay",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+
+def start_sigterm_shutdown_relay(
+    request_shutdown: Callable[[], object],
+) -> threading.Thread:
+    """Install a lock-free SIGTERM handler and relay shutdown from a thread."""
+    relay = _SignalShutdownRelay(request_shutdown)
+    signal.signal(signal.SIGTERM, relay.handle)
+    return relay.start()
 
 
 def _parent_pid_from_env(environ: dict[str, str] | None = None) -> int | None:
@@ -152,6 +196,7 @@ def _watch_parent_posix(
         time.sleep(POLL_INTERVAL_SECONDS)
         if not _posix_parent_alive(parent_pid, track_reparent=track_reparent):
             _exit_orphaned(request_shutdown)
+            return
 
 
 def _watch_parent_windows(
@@ -270,7 +315,7 @@ if __name__ == "__main__":
     # dies during boot still gets its sidecar cleaned up promptly.
     start_parent_watchdog(shutdown.request)
     start_stdin_shutdown_listener(shutdown.request)
-    signal.signal(signal.SIGTERM, lambda _signum, _frame: shutdown.request())
+    start_sigterm_shutdown_relay(shutdown.request)
 
     from flinttrade_core.desktop import main  # noqa: PLC0415 - after watchdog start, see above
 

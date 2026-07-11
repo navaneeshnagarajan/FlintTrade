@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -58,9 +59,7 @@ def test_import_has_no_side_effects() -> None:
     before = {t.ident for t in threading.enumerate()}
     module = _load_entry_module()
     started_by_load = [
-        t
-        for t in threading.enumerate()
-        if t.ident not in before and t.name == "flinttrade-parent-watchdog"
+        t for t in threading.enumerate() if t.ident not in before and t.name == "flinttrade-parent-watchdog"
     ]
     assert started_by_load == []
     assert module.PARENT_PID_ENV == "FLINTTRADE_PARENT_PID"
@@ -126,6 +125,37 @@ def test_shutdown_coordinator_delivers_requests_before_and_after_install(entry: 
 
 
 @pytest.mark.unit
+def test_sigterm_relay_handler_never_takes_coordinator_lock(entry: ModuleType) -> None:
+    coordinator = entry._ShutdownCoordinator()
+    callback_called = threading.Event()
+    forwarding_started = threading.Event()
+
+    coordinator.install(callback_called.set)
+
+    def forward_request() -> bool:
+        forwarding_started.set()
+        return coordinator.request()
+
+    relay = entry._SignalShutdownRelay(forward_request, poll_interval=0.001)
+    relay_thread = relay.start()
+
+    coordinator._lock.acquire()
+    try:
+        # Model SIGTERM interrupting the main thread while install/uninstall is
+        # inside the coordinator's non-reentrant critical section. The handler
+        # itself must return without touching that lock.
+        relay.handle(signal.SIGTERM, None)
+        assert forwarding_started.wait(timeout=1)
+        assert callback_called.is_set() is False
+    finally:
+        coordinator._lock.release()
+
+    relay_thread.join(timeout=1)
+    assert relay_thread.is_alive() is False
+    assert callback_called.is_set() is True
+
+
+@pytest.mark.unit
 def test_stdin_shutdown_command_requests_graceful_exit(entry: ModuleType) -> None:
     requested = threading.Event()
     thread = entry.start_stdin_shutdown_listener(
@@ -158,6 +188,29 @@ def test_posix_parent_alive_probes(entry: ModuleType) -> None:
     # Reparent tracking: our real parent matches; an unrelated PID does not.
     assert entry._posix_parent_alive(os.getppid(), track_reparent=True) is True
     assert entry._posix_parent_alive(os.getpid(), track_reparent=True) is False
+
+
+@pytest.mark.unit
+def test_posix_watcher_returns_after_first_orphan_request(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+    request_shutdown = object()
+
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(entry, "_posix_parent_alive", lambda *_args, **_kwargs: False)
+
+    def exit_once(request: object) -> None:
+        calls.append(request)
+        if len(calls) > 1:
+            raise AssertionError("watcher requested orphan shutdown more than once")
+
+    monkeypatch.setattr(entry, "_exit_orphaned", exit_once)
+
+    entry._watch_parent_posix(1234, request_shutdown)
+
+    assert calls == [request_shutdown]
 
 
 @pytest.mark.integration
