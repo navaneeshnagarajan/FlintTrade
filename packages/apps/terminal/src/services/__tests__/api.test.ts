@@ -580,8 +580,13 @@ describe("OpenAlgo API client (api.ts)", () => {
           data: [{
             date: "2026-08-15",
             description: "Independence Day",
-            holiday_type: "TRADING_HOLIDAY",
+            holiday_type: "SPECIAL_SESSION",
             closed_exchanges: ["NSE", "BSE"],
+            open_exchanges: [{
+              exchange: "NSE",
+              start_time: "1786811400000",
+              end_time: "1786815000000",
+            }],
           }],
         }),
       )
@@ -608,9 +613,13 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(holidays).toEqual([{
       date: "2026-08-15",
       description: "Independence Day",
-      holiday_type: "TRADING_HOLIDAY",
+      holiday_type: "SPECIAL_SESSION",
       closed_exchanges: ["NSE", "BSE"],
-      open_exchanges: [],
+      open_exchanges: [{
+        exchange: "NSE",
+        start_time: 1786811400000,
+        end_time: 1786815000000,
+      }],
     }]);
     expect(timings).toEqual([
       { exchange: "NSE", start_time: 1718595000000, end_time: 1718618400000 },

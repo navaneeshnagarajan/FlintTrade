@@ -144,12 +144,13 @@ describe("FootprintWidget", () => {
     expect(screen.getByText("5m")).toBeInTheDocument();
   });
 
-  it("shows legend items (Buy, Sell, POC, LTP, Cum. Δ)", () => {
+  it("labels the bucket-derived line as Latest POC, never LTP", () => {
     render(<FootprintWidget {...defaultProps} />);
     expect(screen.getByText("Buy")).toBeInTheDocument();
     expect(screen.getByText("Sell")).toBeInTheDocument();
     expect(screen.getByText("POC")).toBeInTheDocument();
-    expect(screen.getByText("LTP")).toBeInTheDocument();
+    expect(screen.getByText("Latest POC")).toBeInTheDocument();
+    expect(screen.queryByText("LTP")).not.toBeInTheDocument();
     expect(screen.getByText("Cum. Δ")).toBeInTheDocument();
   });
 
@@ -186,14 +187,64 @@ describe("FootprintWidget", () => {
     expect(screen.getByText("Live")).toBeInTheDocument();
   });
 
-  it("shows 'Sample' badge when is_live is false", () => {
+  it("renders exact trade-tick quality and provenance", () => {
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: sampleBuckets.map((bucket) => ({
+            ...bucket,
+            quality: "exact",
+            provenance: "trade_tick",
+          })),
+          symbol: "NIFTY",
+          exchange: "NFO",
+          interval: 300,
+          is_live: true,
+          quality: "exact",
+          provenance: "trade_tick",
+        },
+      }),
+    );
+
+    render(<FootprintWidget {...defaultProps} />);
+
+    expect(screen.getByText("Exact trades")).toBeInTheDocument();
+    expect(screen.getByLabelText(/exact order flow.*trade ticks/i)).toBeInTheDocument();
+  });
+
+  it("renders cumulative-quote footprint data as estimated", () => {
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: sampleBuckets.map((bucket) => ({
+            ...bucket,
+            quality: "estimated",
+            provenance: "cumulative_quote_delta",
+          })),
+          symbol: "NIFTY",
+          exchange: "NFO",
+          interval: 300,
+          is_live: true,
+          quality: "estimated",
+          provenance: "cumulative_quote_delta",
+        },
+      }),
+    );
+
+    render(<FootprintWidget {...defaultProps} />);
+
+    expect(screen.getByText("Estimated quote deltas")).toBeInTheDocument();
+    expect(screen.getByLabelText(/estimated order flow.*cumulative quote deltas/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Sample data' badge when is_live is false", () => {
     mockUseOrderFlow.mockReturnValue(
       hookResult({
         data: { buckets: sampleBuckets, symbol: "NIFTY", exchange: "NFO", interval: 300, is_live: false },
       }),
     );
     render(<FootprintWidget {...defaultProps} />);
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
   it("shows 'Delayed' for retained backend data that is no longer live", () => {
@@ -214,7 +265,7 @@ describe("FootprintWidget", () => {
 
     expect(screen.getByText("Delayed")).toBeInTheDocument();
     expect(screen.getByLabelText(/retained footprint data is delayed/i)).toBeInTheDocument();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("shows 'Stale' for retained footprint data from an older session", () => {
@@ -234,7 +285,7 @@ describe("FootprintWidget", () => {
     render(<FootprintWidget {...defaultProps} />);
 
     expect(screen.getByText("Stale")).toBeInTheDocument();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("renders the canvas element", () => {
@@ -301,7 +352,7 @@ describe("FootprintWidget", () => {
 
     expect(screen.getByText(/2 buckets.*NIFTY 1m/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /NIFTY 1m/ })).toBeInTheDocument();
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(mockUseOrderFlow).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", 300, 20);
   });
 

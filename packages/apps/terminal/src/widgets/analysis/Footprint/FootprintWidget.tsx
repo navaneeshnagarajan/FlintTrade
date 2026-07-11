@@ -47,6 +47,7 @@ import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
+import { OrderFlowQualityBadge } from "../OrderFlowQualityBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ const C_POC = "#f59e0b";
 const C_GRID = "#2a2a3a";
 const C_TEXT = "#a1a1aa";
 const C_TEXT_PRICE = "#e4e4e7";
-const C_LTP = "#6366f1";
+const C_LATEST_POC = "#6366f1";
 const C_DELTA_POS = "#22c55e";
 const C_DELTA_NEG = "#ef4444";
 const C_DELTA_LINE = "#818cf8"; // indigo-400
@@ -306,19 +307,19 @@ function drawFootprint(
   }
   ctx.restore();
 
-  // ── LTP dashed line ───────────────────────────────────────────────────────
+  // ── Latest bucket POC dashed line ────────────────────────────────────────
   if (columns.length > 0) {
     const lastCol = columns[columns.length - 1];
-    const ltpIdx = priceIdx.get(lastCol.poc);
-    if (ltpIdx !== undefined) {
-      const ltpY = chartBottom - ltpIdx * rowH - rowH / 2;
+    const latestPocIdx = priceIdx.get(lastCol.poc);
+    if (latestPocIdx !== undefined) {
+      const latestPocY = chartBottom - latestPocIdx * rowH - rowH / 2;
       ctx.save();
-      ctx.strokeStyle = C_LTP;
+      ctx.strokeStyle = C_LATEST_POC;
       ctx.lineWidth = dpr;
       ctx.setLineDash([css(4), css(3)]);
       ctx.beginPath();
-      ctx.moveTo(chartLeft, ltpY);
-      ctx.lineTo(chartRight, ltpY);
+      ctx.moveTo(chartLeft, latestPocY);
+      ctx.lineTo(chartRight, latestPocY);
       ctx.stroke();
       ctx.restore();
     }
@@ -574,7 +575,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
         <span className="sr-only" id="fp-symbol-label">Symbol</span>
         <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
-            className="h-6 w-28 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
+            className="h-6 w-24 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="fp-symbol-label"
           >
             <SelectValue />
@@ -601,7 +602,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
               type="button"
               onClick={() => setIntervalLabel(iv.label)}
               className={cn(
-                "h-6 px-2 text-xs rounded font-mono transition-colors",
+                "h-6 px-1.5 text-xs rounded font-mono transition-colors",
                 intervalLabel === iv.label
                   ? "bg-surface-active text-text-primary"
                   : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
@@ -667,15 +668,8 @@ function FootprintWidget(props: IDockviewPanelProps) {
               Stale
             </Badge>
           )}
-          {!isLoading && !isError && columns.length > 0 && dataState === "sample" && (
-            <Badge
-              variant="outline"
-              className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
-              aria-label="Sample data — live aggregator not active"
-            >
-              <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
-              Sample
-            </Badge>
+          {!isLoading && !isError && columns.length > 0 && data && (
+            <OrderFlowQualityBadge data={data} />
           )}
         </div>
       </div>
@@ -696,7 +690,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <div className="w-3 border-t border-dashed border-indigo-400" aria-hidden="true" />
-          <span>LTP</span>
+          <span>Latest POC</span>
         </div>
         <div className="flex items-center gap-1">
           <div className="w-3 border-t border-indigo-300" aria-hidden="true" />
@@ -712,7 +706,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         role="img"
-        aria-label={`Footprint chart for ${symbol} ${displayIntervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. Cumulative delta line at bottom.`}
+        aria-label={`Footprint chart for ${symbol} ${displayIntervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. The dashed line marks the latest bucket POC. Cumulative delta line at bottom.`}
       >
         <canvas
           ref={canvasRef}

@@ -4,37 +4,44 @@ import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 
-export interface SignalCardModel {
+export interface SignalIdentityFields {
   event_id: number;
+  /** Backend process identity; qualifies event_id across service restarts. */
+  stream_id?: string;
   symbol: string;
   exchange: string;
+  timestamp: string;
+  method: string;
+}
+
+export interface SignalCardModel extends SignalIdentityFields {
   signal_type: "BUY" | "SELL" | "HOLD";
   confidence: number;
-  timestamp: string;
   indicators: Record<string, number>;
   source: "rule" | "ml" | "fallback";
-  method: string;
   message: string;
 }
 
 export type Signal = SignalCardModel;
 
-export interface SignalEvent {
-  event_id: number;
-  /** Backend process identity; qualifies event_id across service restarts. */
-  stream_id?: string;
-  timestamp: string;
-  symbol: string;
-  exchange: string;
+export interface SignalEvent extends SignalIdentityFields {
   signal_type: "BUY" | "SELL" | "HOLD" | "ALERT";
   source: "rule" | "ml" | "fallback";
-  method: string;
   indicator: string;
   value: number;
   threshold: number;
   confidence: number;
   message: string;
   metadata: Record<string, unknown>;
+}
+
+/** Stable event identity shared by reconciliation and React list rendering. */
+export function getSignalIdentity(signal: SignalIdentityFields): string {
+  if (signal.event_id > 0 && signal.stream_id) {
+    return `${signal.stream_id}:${signal.event_id}`;
+  }
+  if (signal.event_id > 0) return `legacy:${signal.event_id}`;
+  return `legacy:${signal.timestamp}:${signal.exchange}:${signal.symbol}:${signal.method}`;
 }
 
 const signalEventPayloadSchema = z.object({

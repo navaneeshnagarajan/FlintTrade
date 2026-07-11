@@ -69,18 +69,26 @@ function getCaptureWatchlist(watchlist?: Record<string, TickInstrument[]>): Tick
 
 // --- Local OHLCV store summary ----------------------------------------------
 
-interface StoreTable {
-  rows: number;
-  symbols: number;
-  first: string | null;
-  last: string | null;
-}
+const storeTableSchema = z.object({
+  rows: z.number().int().nonnegative(),
+  symbols: z.number().int().nonnegative(),
+  first: z.string().min(1).nullable(),
+  last: z.string().min(1).nullable(),
+});
+
+const storeSummarySchema = z.object({
+  tables: z.record(z.string().min(1), storeTableSchema),
+});
+
+type StoreTable = z.infer<typeof storeTableSchema>;
 
 async function fetchStoreSummary(): Promise<Record<string, StoreTable>> {
-  const data = await getV1<{ tables: Record<string, StoreTable> }>(
+  const payload = await getV1<unknown>(
     "historify/bars/summary",
   );
-  return data.tables;
+  const result = storeSummarySchema.safeParse(payload);
+  if (!result.success) throw new Error("OHLCV summary response was malformed.");
+  return result.data.tables;
 }
 
 // --- Bhavcopy download --------------------------------------------------------

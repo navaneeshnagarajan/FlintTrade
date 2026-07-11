@@ -97,12 +97,16 @@ describe("useOrderFlow", () => {
           poc_price: 23500,
           total_volume: 180,
           delta: 20,
+          quality: "estimated",
+          provenance: "cumulative_quote_delta",
         },
       ],
       symbol: "NIFTY",
       exchange: "NFO",
       interval: 300,
       is_live: false,
+      quality: "estimated",
+      provenance: "cumulative_quote_delta",
     };
 
     mockFetch.mockResolvedValue({
@@ -116,6 +120,11 @@ describe("useOrderFlow", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(mockData);
+    expect(result.current.data?.quality).toBe("estimated");
+    expect(result.current.data?.buckets[0]).toMatchObject({
+      quality: "estimated",
+      provenance: "cumulative_quote_delta",
+    });
   });
 
   it("uses default exchange NFO, interval 300, and bins 50", async () => {

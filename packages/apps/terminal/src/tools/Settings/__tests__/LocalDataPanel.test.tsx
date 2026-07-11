@@ -160,6 +160,42 @@ describe("LocalDataPanel", () => {
     expect(screen.queryByText(/Nothing downloaded yet/)).not.toBeInTheDocument();
   });
 
+  it("enters the OHLCV error state for a malformed successful table summary", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: false,
+          running: false,
+          connected: false,
+          tick_count: 0,
+          watchlist: {},
+        },
+      },
+      "/v1/historify/bars/summary": {
+        status: "success",
+        data: {
+          tables: {
+            ohlcv_1d: {
+              rows: "5000",
+              symbols: 12,
+              first: "2025-01-01 00:00:00",
+              last: "2026-07-04 00:00:00",
+            },
+          },
+        },
+      },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "OHLCV summary response was malformed.",
+    );
+    expect(screen.queryByText("ohlcv_1d")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing downloaded yet/)).not.toBeInTheDocument();
+  });
+
   it("shows the off hint when capture is disabled", async () => {
     vi.stubGlobal("fetch", mockFetch({
       "/api/v1/data/ticks/status": {

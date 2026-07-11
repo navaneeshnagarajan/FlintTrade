@@ -53,6 +53,7 @@ import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
+import { OrderFlowQualityBadge } from "../OrderFlowQualityBadge";
 // useOrderFlow includes the backend freshness state used by the status badge.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ const COLOR_POC_BORDER = "#f59e0b"; // amber-400  — POC highlight
 const COLOR_GRID = "#2a2a3a";       // border-default equivalent
 const COLOR_TEXT = "#a1a1aa";       // text-muted equivalent
 const COLOR_TEXT_PRICE = "#e4e4e7"; // text-primary equivalent
-const COLOR_LTP_LINE = "#6366f1";   // indigo-500 — LTP dashed line
+const COLOR_LATEST_POC_LINE = "#6366f1"; // indigo-500 — latest bucket POC dashed line
 const COLOR_CANVAS_BG = "#0a0a0f"; // app background
 
 // ─── Backend → Widget data conversion ────────────────────────────────────────
@@ -131,8 +132,8 @@ function bucketsToColumns(buckets: FootprintBucket[]): FootprintColumn[] {
 
 // ─── Drawing helpers ──────────────────────────────────────────────────────────
 
-/** Returns the current LTP (mid of last column's POC price range). */
-function getLtp(columns: FootprintColumn[]): number {
+/** Returns the Point of Control from the latest returned bucket. */
+function getLatestPoc(columns: FootprintColumn[]): number {
   if (columns.length === 0) return 0;
   return columns[columns.length - 1].poc;
 }
@@ -282,18 +283,18 @@ function drawFootprint(
   });
   ctx.restore();
 
-  // ─── LTP dashed line ───────────────────────────────────────────────────────
-  const ltp = getLtp(columns);
-  const ltpIdx = priceIndex.get(ltp);
-  if (ltpIdx !== undefined) {
-    const ltpY = chartBottom - ltpIdx * rowH - rowH / 2;
+  // ─── Latest bucket POC dashed line ────────────────────────────────────────
+  const latestPoc = getLatestPoc(columns);
+  const latestPocIdx = priceIndex.get(latestPoc);
+  if (latestPocIdx !== undefined) {
+    const latestPocY = chartBottom - latestPocIdx * rowH - rowH / 2;
     ctx.save();
-    ctx.strokeStyle = COLOR_LTP_LINE;
+    ctx.strokeStyle = COLOR_LATEST_POC_LINE;
     ctx.lineWidth = dpr;
     ctx.setLineDash([css(4), css(3)]);
     ctx.beginPath();
-    ctx.moveTo(chartLeft, ltpY);
-    ctx.lineTo(chartRight, ltpY);
+    ctx.moveTo(chartLeft, latestPocY);
+    ctx.lineTo(chartRight, latestPocY);
     ctx.stroke();
     ctx.restore();
   }
@@ -439,18 +440,18 @@ function drawFootprintHeatmap(
   });
   ctx.restore();
 
-  // LTP line
-  const ltp = getLtp(columns);
-  const ltpIdx = priceIndex.get(ltp);
-  if (ltpIdx !== undefined) {
-    const ltpY = chartBottom - ltpIdx * rowH - rowH / 2;
+  // Latest bucket POC line
+  const latestPoc = getLatestPoc(columns);
+  const latestPocIdx = priceIndex.get(latestPoc);
+  if (latestPocIdx !== undefined) {
+    const latestPocY = chartBottom - latestPocIdx * rowH - rowH / 2;
     ctx.save();
-    ctx.strokeStyle = COLOR_LTP_LINE;
+    ctx.strokeStyle = COLOR_LATEST_POC_LINE;
     ctx.lineWidth = dpr;
     ctx.setLineDash([css(4), css(3)]);
     ctx.beginPath();
-    ctx.moveTo(chartLeft, ltpY);
-    ctx.lineTo(chartRight, ltpY);
+    ctx.moveTo(chartLeft, latestPocY);
+    ctx.lineTo(chartRight, latestPocY);
     ctx.stroke();
     ctx.restore();
   }
@@ -533,7 +534,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
     [data],
   );
 
-  const ltp = useMemo(() => getLtp(columns), [columns]);
+  const latestPoc = useMemo(() => getLatestPoc(columns), [columns]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -607,14 +608,14 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full bg-surface-base select-none">
       {/* ─── Toolbar ────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default shrink-0">
+      <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border-default px-3 py-1.5">
         {/* Symbol selector */}
         <span className="sr-only" id="of-symbol-label">
           Symbol
         </span>
         <Select value={symbol} onValueChange={handleSymbolChange}>
           <SelectTrigger
-            className="h-6 w-28 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
+            className="h-6 w-24 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="of-symbol-label"
           >
             <SelectValue />
@@ -643,7 +644,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
               type="button"
               onClick={() => setIntervalLabel(iv.label)}
               className={cn(
-                "h-6 px-2 text-xs rounded font-mono transition-colors",
+                "h-6 px-1.5 text-xs rounded font-mono transition-colors",
                 intervalLabel === iv.label
                   ? "bg-surface-active text-text-primary"
                   : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
@@ -662,103 +663,90 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
             type="button"
             onClick={() => setViewMode("footprint")}
             className={cn(
-              "h-6 px-1.5 rounded transition-colors flex items-center gap-1",
+              "flex h-6 w-6 items-center justify-center rounded transition-colors",
               viewMode === "footprint"
                 ? "bg-surface-active text-text-primary"
                 : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
             )}
             aria-pressed={viewMode === "footprint"}
             aria-label="Footprint view"
+            title="Footprint view"
           >
             <BarChart className="size-3" aria-hidden="true" />
-            <span className="text-xs">Footprint</span>
           </button>
           <button
             type="button"
             onClick={() => setViewMode("heatmap")}
             className={cn(
-              "h-6 px-1.5 rounded transition-colors flex items-center gap-1",
+              "flex h-6 w-6 items-center justify-center rounded transition-colors",
               viewMode === "heatmap"
                 ? "bg-surface-active text-text-primary"
                 : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
             )}
             aria-pressed={viewMode === "heatmap"}
             aria-label="Heatmap view"
+            title="Heatmap view"
           >
             <Grid3x3 className="size-3" aria-hidden="true" />
-            <span className="text-xs">Heatmap</span>
           </button>
         </div>
 
-        {/* LTP display */}
-        <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-xs text-text-muted">LTP</span>
-          <span className="font-mono text-xs font-semibold text-accent tabular-nums">
-            {ltp > 0 ? ltp.toLocaleString("en-IN") : "—"}
-          </span>
+        {/* Freshness and source quality */}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {isLoading && (
+            <Badge
+              variant="outline"
+              className="h-5 whitespace-nowrap border-blue-500/40 bg-blue-500/10 px-1.5 text-xs text-blue-400"
+              aria-label="Loading order flow data"
+            >
+              <Loader2 className="size-2.5 mr-1 animate-spin" aria-hidden="true" />
+              Loading
+            </Badge>
+          )}
+          {isError && (
+            <Badge
+              variant="outline"
+              className="h-5 whitespace-nowrap border-red-500/40 bg-red-500/10 px-1.5 text-xs text-red-400"
+              aria-label={`Error loading data: ${error instanceof Error ? error.message : "Unknown error"}`}
+            >
+              <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
+              Error
+            </Badge>
+          )}
+          {!isLoading && !isError && columns.length > 0 && dataState === "live" && (
+            <Badge
+              variant="outline"
+              className="h-5 whitespace-nowrap border-emerald-500/40 bg-emerald-500/10 px-1.5 text-xs text-emerald-400"
+              aria-label="Live order flow data from the aggregator"
+            >
+              <span className="size-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse inline-block" aria-hidden="true" />
+              Live
+            </Badge>
+          )}
+          {!isLoading && !isError && columns.length > 0 && dataState === "delayed" && (
+            <Badge
+              variant="outline"
+              className="h-5 whitespace-nowrap border-sky-500/40 bg-sky-500/10 px-1.5 text-xs text-sky-400"
+              aria-label="Retained order flow data is delayed and no longer live"
+            >
+              <Clock3 className="size-2.5 mr-1" aria-hidden="true" />
+              Delayed
+            </Badge>
+          )}
+          {!isLoading && !isError && columns.length > 0 && dataState === "stale" && (
+            <Badge
+              variant="outline"
+              className="h-5 whitespace-nowrap border-amber-500/40 bg-amber-500/10 px-1.5 text-xs text-amber-400"
+              aria-label="Retained order flow data is stale from an older session"
+            >
+              <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
+              Stale
+            </Badge>
+          )}
+          {!isLoading && !isError && columns.length > 0 && data && (
+            <OrderFlowQualityBadge data={data} />
+          )}
         </div>
-
-        {/* Status badge */}
-        {isLoading && (
-          <Badge
-            variant="outline"
-            className="text-xs border-blue-500/40 text-blue-400 bg-blue-500/10 h-5 px-1.5"
-            aria-label="Loading order flow data"
-          >
-            <Loader2 className="size-2.5 mr-1 animate-spin" aria-hidden="true" />
-            Loading
-          </Badge>
-        )}
-        {isError && (
-          <Badge
-            variant="outline"
-            className="text-xs border-red-500/40 text-red-400 bg-red-500/10 h-5 px-1.5"
-            aria-label={`Error loading data: ${error instanceof Error ? error.message : "Unknown error"}`}
-          >
-            <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
-            Error
-          </Badge>
-        )}
-        {!isLoading && !isError && columns.length > 0 && dataState === "live" && (
-          <Badge
-            variant="outline"
-            className="text-xs border-emerald-500/40 text-emerald-400 bg-emerald-500/10 h-5 px-1.5"
-            aria-label="Live order flow data from the aggregator"
-          >
-            <span className="size-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse inline-block" aria-hidden="true" />
-            Live
-          </Badge>
-        )}
-        {!isLoading && !isError && columns.length > 0 && dataState === "delayed" && (
-          <Badge
-            variant="outline"
-            className="text-xs border-sky-500/40 text-sky-400 bg-sky-500/10 h-5 px-1.5"
-            aria-label="Retained order flow data is delayed and no longer live"
-          >
-            <Clock3 className="size-2.5 mr-1" aria-hidden="true" />
-            Delayed
-          </Badge>
-        )}
-        {!isLoading && !isError && columns.length > 0 && dataState === "stale" && (
-          <Badge
-            variant="outline"
-            className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
-            aria-label="Retained order flow data is stale from an older session"
-          >
-            <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
-            Stale
-          </Badge>
-        )}
-        {!isLoading && !isError && columns.length > 0 && dataState === "sample" && (
-          <Badge
-            variant="outline"
-            className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
-            aria-label="Sample data — live tick aggregator not yet active"
-          >
-            <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
-            Sample
-          </Badge>
-        )}
       </div>
 
       {/* ─── Legend ─────────────────────────────────────────────────────── */}
@@ -775,12 +763,15 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
           <div className="w-3 h-2 rounded-sm border border-amber-400" aria-hidden="true" />
           <span className="text-xs text-zinc-500">POC</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           <div
             className="w-3 border-t border-dashed border-indigo-400"
             aria-hidden="true"
           />
-          <span className="text-xs text-zinc-500">LTP</span>
+          <span className="text-xs text-zinc-500">Latest POC</span>
+          <span className="font-mono text-xs font-semibold text-accent tabular-nums">
+            {latestPoc > 0 ? latestPoc.toLocaleString("en-IN") : "—"}
+          </span>
         </div>
         <div className="ml-auto text-xs text-text-muted">
           {columns.length} bars &bull; {symbol} {displayIntervalLabel}
@@ -792,7 +783,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         role="img"
-        aria-label={`Order flow footprint chart for ${symbol}, ${displayIntervalLabel} interval. Shows buy volume (green) and sell volume (red) per price level per time bucket. Point of Control (POC) highlighted in amber.`}
+        aria-label={`Order flow footprint chart for ${symbol}, ${displayIntervalLabel} interval. Shows buy volume (green) and sell volume (red) per price level per time bucket. Point of Control (POC) highlighted in amber, with the latest bucket POC marked by a dashed line.`}
       >
         <canvas
           ref={canvasRef}

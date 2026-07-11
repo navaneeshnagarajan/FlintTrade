@@ -131,8 +131,9 @@ vi.mock("@/services/ftApi", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import AIRoute from "../AIRoute";
+import AIRoute, { signalEventToCard } from "../AIRoute";
 import { getRecentSignals, queryKnowledge } from "@/services/ftApi";
+import type { SignalEvent } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -170,6 +171,30 @@ describe("AIRoute", () => {
 
     expect(screen.queryByText("Trading Signals")).not.toBeInTheDocument();
     expect(signalStreamMocks.hook).toHaveBeenCalled();
+  });
+
+  it("keeps the stream-qualified event identity in the signal card model", () => {
+    const event: SignalEvent = {
+      stream_id: "replacement-boot",
+      event_id: 1,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "BUY",
+      source: "rule",
+      method: "RSI",
+      indicator: "RSI",
+      value: 28,
+      threshold: 30,
+      confidence: 0.8,
+      message: "Signal after restart",
+      metadata: {},
+    };
+
+    expect(signalEventToCard(event)).toMatchObject({
+      stream_id: "replacement-boot",
+      event_id: 1,
+    });
   });
 
   it("shows navigation with Chat and Signals buttons", () => {

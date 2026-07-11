@@ -42,11 +42,13 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import {
+  getSignalIdentity,
   getRecentSignals,
   runTeamAnalysisStream,
   startAgent,
   type AgentSnapshot,
   type AgentStartParams,
+  type SignalCardModel,
   type TeamStreamFrame,
 } from "../ftApi.ai";
 
@@ -205,6 +207,32 @@ describe("getRecentSignals", () => {
     const result = await getRecentSignals();
 
     expect(result.signals[0].source).toBe("fallback");
+  });
+});
+
+describe("getSignalIdentity", () => {
+  it("qualifies equal event IDs with the backend stream across restarts", () => {
+    const baseCard: SignalCardModel = {
+      stream_id: "first-boot",
+      event_id: 1,
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      signal_type: "BUY",
+      confidence: 0.8,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      indicators: {},
+      source: "rule",
+      method: "RSI",
+      message: "Signal",
+    };
+    const restartedCard: SignalCardModel = {
+      ...baseCard,
+      stream_id: "second-boot",
+    };
+
+    expect(getSignalIdentity(baseCard)).toBe("first-boot:1");
+    expect(getSignalIdentity(restartedCard)).toBe("second-boot:1");
+    expect(getSignalIdentity(baseCard)).not.toBe(getSignalIdentity(restartedCard));
   });
 });
 

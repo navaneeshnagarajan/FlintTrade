@@ -7,12 +7,23 @@ export interface OrderFlowCell {
   sell_volume: number;
 }
 
+export type OrderFlowQuality = "exact" | "estimated" | "sample" | "unknown";
+
+export type OrderFlowProvenance =
+  | "trade_tick"
+  | "cumulative_quote_delta"
+  | "synthetic"
+  | "mixed"
+  | "unknown";
+
 export interface OrderFlowBucket {
   time_label: string;
   cells: Record<string, OrderFlowCell>;
   poc_price: number;
   total_volume: number;
   delta: number;
+  quality: OrderFlowQuality;
+  provenance: OrderFlowProvenance;
 }
 
 export interface OrderFlowResponse {
@@ -24,6 +35,8 @@ export interface OrderFlowResponse {
   is_live: boolean;
   /** Explicit backend provenance; true always overrides a contradictory live flag. */
   is_sample_data?: boolean;
+  quality: OrderFlowQuality;
+  provenance: OrderFlowProvenance;
   tick_size?: number;
   requested_tick_size?: number;
   source_tick_size?: number;
@@ -41,6 +54,11 @@ export interface OrderFlowResponse {
 
 export type OrderFlowDataState = "live" | "delayed" | "stale" | "sample";
 
+export interface OrderFlowQualitySummary {
+  quality: OrderFlowQuality;
+  provenance: OrderFlowProvenance;
+}
+
 export function getOrderFlowDataState(
   data: Pick<OrderFlowResponse, "is_live" | "is_sample_data" | "live_state"> | undefined,
 ): OrderFlowDataState {
@@ -50,6 +68,44 @@ export function getOrderFlowDataState(
     return data.live_state;
   }
   return "sample";
+}
+
+/** Conservatively reconcile response and per-bucket source metadata for display. */
+export function getOrderFlowQualitySummary(
+  data: OrderFlowResponse | undefined,
+): OrderFlowQualitySummary {
+  if (!data) return { quality: "unknown", provenance: "unknown" };
+
+  const qualities = [data.quality, ...data.buckets.map((bucket) => bucket.quality)]
+    .filter((quality): quality is OrderFlowQuality => Boolean(quality));
+  let quality: OrderFlowQuality;
+  if (data.is_sample_data === true || qualities.includes("sample")) {
+    quality = "sample";
+  } else if (qualities.length === 0 && getOrderFlowDataState(data) === "sample") {
+    // Mixed-version fallback: old synthetic responses only exposed is_live=false.
+    quality = "sample";
+  } else if (qualities.length === 0 || qualities.includes("unknown")) {
+    quality = "unknown";
+  } else if (qualities.includes("estimated")) {
+    quality = "estimated";
+  } else if (qualities.every((candidate) => candidate === "exact")) {
+    quality = "exact";
+  } else {
+    quality = "unknown";
+  }
+
+  const provenances = [data.provenance, ...data.buckets.map((bucket) => bucket.provenance)]
+    .filter((provenance): provenance is OrderFlowProvenance => Boolean(provenance));
+  let provenance: OrderFlowProvenance;
+  if (provenances.length === 0 || provenances.includes("unknown")) {
+    provenance = "unknown";
+  } else if (provenances.includes("mixed") || new Set(provenances).size > 1) {
+    provenance = "mixed";
+  } else {
+    provenance = provenances[0];
+  }
+
+  return { quality, provenance };
 }
 
 export const getOrderFlow = (

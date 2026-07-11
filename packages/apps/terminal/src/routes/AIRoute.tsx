@@ -54,6 +54,7 @@ import {
   type SentimentResult,
   type RAGResult,
 } from "@/services/ftApi";
+import { getSignalIdentity } from "@/services/ftApi.ai";
 import { motionConfig, EASE_ENTER, DURATION } from "@/lib/motion";
 import { AdvisorStatusResponseSchema } from "@/lib/schemas/ftApi";
 import type { AdvisorStatusData } from "@/lib/schemas/ftApi";
@@ -220,13 +221,14 @@ function SignalCard({ signal, index }: { signal: SignalCardModel; index: number 
 
 // Adapt the canonical source-tagged feed to the compact card view while keeping
 // numeric source metadata available as indicator chips.
-function signalEventToCard(event: SignalEvent): SignalCardModel {
+export function signalEventToCard(event: SignalEvent): SignalCardModel {
   const metadataIndicators = Object.fromEntries(
     Object.entries(event.metadata).filter((entry): entry is [string, number] =>
       typeof entry[1] === "number"),
   );
   return {
     event_id: event.event_id,
+    stream_id: event.stream_id,
     symbol: event.symbol,
     exchange: event.exchange,
     signal_type: event.signal_type === "ALERT" ? "HOLD" : event.signal_type,
@@ -337,7 +339,7 @@ function SignalsSection({ stream }: { stream: SignalStreamState }) {
         <div className="space-y-3">
           {signals.map((signal, idx) => (
             <SignalCard
-              key={signal.event_id || `${signal.symbol}-${signal.timestamp}-${idx}`}
+              key={getSignalIdentity(signal)}
               signal={signal}
               index={idx}
             />

@@ -20,7 +20,7 @@ import {
   getSignalConfig,
   updateSignalConfig,
 } from "@/services/ftApi";
-import { signalEventSchema } from "@/services/ftApi.ai";
+import { getSignalIdentity, signalEventSchema } from "@/services/ftApi.ai";
 import type { SignalConfig, SignalEvent } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -109,14 +109,6 @@ function parseConfiguredInstrument(identity: string): MarketHoursInstrument | un
   return { exchange: parts[0], symbol: parts[1] };
 }
 
-function signalIdentity(signal: SignalEvent): string {
-  if (signal.event_id > 0 && signal.stream_id) {
-    return `event:${signal.stream_id}:${signal.event_id}`;
-  }
-  if (signal.event_id > 0) return `event:legacy:${signal.event_id}`;
-  return `legacy:${signal.timestamp}:${signal.exchange}:${signal.symbol}:${signal.method}`;
-}
-
 function signalTimestamp(signal: SignalEvent): number {
   const timestamp = Date.parse(signal.timestamp);
   return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
@@ -149,8 +141,8 @@ export function reconcileSignalEvents(
   limit: number,
 ): SignalEvent[] {
   const byIdentity = new Map<string, SignalEvent>();
-  for (const signal of fallback) byIdentity.set(signalIdentity(signal), signal);
-  for (const signal of preferred) byIdentity.set(signalIdentity(signal), signal);
+  for (const signal of fallback) byIdentity.set(getSignalIdentity(signal), signal);
+  for (const signal of preferred) byIdentity.set(getSignalIdentity(signal), signal);
 
   return [...byIdentity.values()]
     .sort(compareSignalRecency)

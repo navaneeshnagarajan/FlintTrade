@@ -157,20 +157,25 @@ describe("OrderFlowWidget", () => {
     expect(screen.getByText("5m")).toBeInTheDocument();
   });
 
-  it("shows view mode toggles (Footprint, Heatmap)", () => {
+  it("shows labelled icon controls for Footprint and Heatmap modes", () => {
     render(<OrderFlowWidget {...defaultProps} />);
-    expect(screen.getByText("Footprint")).toBeInTheDocument();
-    expect(screen.getByText("Heatmap")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Footprint view" })).toHaveAttribute(
+      "title",
+      "Footprint view",
+    );
+    expect(screen.getByRole("button", { name: "Heatmap view" })).toHaveAttribute(
+      "title",
+      "Heatmap view",
+    );
   });
 
-  it("shows legend items (Buy, Sell, POC, LTP)", () => {
+  it("labels the bucket-derived value and line as Latest POC, never LTP", () => {
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByText("Buy")).toBeInTheDocument();
     expect(screen.getByText("Sell")).toBeInTheDocument();
     expect(screen.getByText("POC")).toBeInTheDocument();
-    // "LTP" appears in both the legend and the toolbar — use getAllByText
-    const ltpElements = screen.getAllByText("LTP");
-    expect(ltpElements.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Latest POC")).toBeInTheDocument();
+    expect(screen.queryByText("LTP")).not.toBeInTheDocument();
   });
 
   it("shows 'No data' when no buckets and not loading", () => {
@@ -200,6 +205,60 @@ describe("OrderFlowWidget", () => {
     expect(screen.getByText("Live")).toBeInTheDocument();
   });
 
+  it("renders exact trade-tick quality and provenance", () => {
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      data: {
+        buckets: [{
+          time_label: "09:15",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+          quality: "exact",
+          provenance: "trade_tick",
+        }],
+        symbol: "NIFTY",
+        exchange: "NFO",
+        interval: 300,
+        is_live: true,
+        quality: "exact",
+        provenance: "trade_tick",
+      },
+    }));
+
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    expect(screen.getByText("Exact trades")).toBeInTheDocument();
+    expect(screen.getByLabelText(/exact order flow.*trade ticks/i)).toBeInTheDocument();
+  });
+
+  it("renders cumulative-quote order flow as estimated", () => {
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      data: {
+        buckets: [{
+          time_label: "09:15",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+          quality: "estimated",
+          provenance: "cumulative_quote_delta",
+        }],
+        symbol: "NIFTY",
+        exchange: "NFO",
+        interval: 300,
+        is_live: true,
+        quality: "estimated",
+        provenance: "cumulative_quote_delta",
+      },
+    }));
+
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    expect(screen.getByText("Estimated quote deltas")).toBeInTheDocument();
+    expect(screen.getByLabelText(/estimated order flow.*cumulative quote deltas/i)).toBeInTheDocument();
+  });
+
   it("uses the backend interval in chart and legend labels", () => {
     const sampleData = {
       buckets: [
@@ -226,7 +285,7 @@ describe("OrderFlowWidget", () => {
     expect(mockUseOrderFlow).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", 300, 20);
   });
 
-  it("shows 'Sample' badge when is_live is false", () => {
+  it("shows 'Sample data' badge when is_live is false", () => {
     const sampleData = {
       buckets: [
         {
@@ -244,7 +303,7 @@ describe("OrderFlowWidget", () => {
     };
     mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
     render(<OrderFlowWidget {...defaultProps} />);
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
   it("keeps explicit sample provenance visible even if is_live is contradictory", () => {
@@ -269,7 +328,7 @@ describe("OrderFlowWidget", () => {
 
     render(<OrderFlowWidget {...defaultProps} />);
 
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
@@ -296,7 +355,7 @@ describe("OrderFlowWidget", () => {
 
     expect(screen.getByText("Delayed")).toBeInTheDocument();
     expect(screen.getByLabelText(/retained order flow data is delayed/i)).toBeInTheDocument();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("shows 'Stale' for retained order flow from an older session", () => {
@@ -320,7 +379,7 @@ describe("OrderFlowWidget", () => {
     render(<OrderFlowWidget {...defaultProps} />);
 
     expect(screen.getByText("Stale")).toBeInTheDocument();
-    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("shows loading skeletons when loading with no data", () => {
