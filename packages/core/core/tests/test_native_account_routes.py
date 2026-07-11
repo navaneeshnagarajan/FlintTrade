@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 
 import pytest
@@ -95,6 +96,15 @@ class _DrainRouter:
         del timeout
         self.calls += 1
         return self.result
+
+
+def _wait_for_candidate_attempt_to_finish() -> None:
+    import flinttrade_core.native_account_routes as routes
+
+    with routes._CANDIDATE_RUNNER_LOCK:  # noqa: SLF001
+        attempt = routes._ACTIVE_CANDIDATE_ATTEMPT  # noqa: SLF001
+    if attempt is not None:
+        assert attempt.done.wait(2.0)
 
 
 def test_connect_upstox_stores_registers_and_establishes_session(client):
@@ -2345,7 +2355,7 @@ def test_failed_connect_rollback_preserves_unrelated_concurrent_workspace_edit(c
 
 
 def test_set_primary_rollback_preserves_unrelated_concurrent_workspace_edit(client, monkeypatch):
-    """A router rebuild failure must not restore a stale whole-file snapshot."""
+    """A newer workspace generation is preserved and routing fails closed."""
     c, _app, tmp_path = client
     for account_id, is_primary in (("PRIMARY-A", True), ("PRIMARY-B", False)):
         response = c.post(
@@ -2386,13 +2396,14 @@ def test_set_primary_rollback_preserves_unrelated_concurrent_workspace_edit(clie
     assert response.status_code == 500
     config = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
     assert config["ui"]["density"] == "compact"
-    assert config["brokers"]["execution"]["default"] == "upstox:PRIMARY-A"
+    assert config["brokers"]["execution"]["default"] == "upstox:PRIMARY-B"
     rows = {
         row["account_id"]: row["is_primary"]
         for row in _app.config["CREDENTIAL_STORE"].list_accounts()
     }
-    assert rows["PRIMARY-A"] is True
-    assert rows["PRIMARY-B"] is False
+    assert rows["PRIMARY-A"] is False
+    assert rows["PRIMARY-B"] is True
+    assert _app.config["BROKER_ROUTER"] is None
 
 
 def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
@@ -2430,7 +2441,7 @@ def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _slow_probe(_self, _session):
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.05)
         return {"available_balance": 0.0}
 
     monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
@@ -2459,6 +2470,90 @@ def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client
 
     assert routes._CONNECT_LOCK.acquire(blocking=False) is True
     routes._CONNECT_LOCK.release()
+    _wait_for_candidate_attempt_to_finish()
+
+
+def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
+    client,
+    monkeypatch,
+):
+    _c, app, _tmp_path = client
+    app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.02
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    request_finished = threading.Event()
+    probe_calls: list[int] = []
+    response_status: list[int] = []
+    baseline_threads = set(threading.enumerate())
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _blocking_probe(_self, _session):
+        def sdk_read() -> dict[str, float]:
+            probe_calls.append(1)
+            probe_started.set()
+            if not release_probe.wait(5.0):
+                raise TimeoutError("test did not release the SDK read")
+            return {"available_balance": 0.0}
+
+        return await asyncio.to_thread(sdk_read)
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _blocking_probe)
+
+    def issue_first_request() -> None:
+        response = app.test_client().post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": "TIMEOUTSDK1",
+                "credentials": {"access_token": "candidate-one"},
+            },
+        )
+        response_status.append(response.status_code)
+        request_finished.set()
+
+    request_thread = threading.Thread(target=issue_first_request, name="test-candidate-request")
+    request_thread.start()
+    assert probe_started.wait(1.0)
+    try:
+        assert request_finished.wait(0.5), "candidate deadline waited for unkillable SDK work"
+        assert response_status == [504]
+
+        second_started = time.monotonic()
+        second = app.test_client().post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": "TIMEOUTSDK2",
+                "credentials": {"access_token": "candidate-two"},
+            },
+        )
+        assert time.monotonic() - second_started < 0.5
+        assert second.status_code == 504
+        assert probe_calls == [1]
+
+        candidate_threads = [
+            thread
+            for thread in threading.enumerate()
+            if thread not in baseline_threads
+            and thread is not request_thread
+            and thread.name.startswith("native-candidate-")
+        ]
+        assert {thread.name for thread in candidate_threads} == {
+            "native-candidate-login",
+            "native-candidate-sdk",
+        }
+        assert all(thread.daemon for thread in candidate_threads), [
+            (thread.name, thread.daemon) for thread in candidate_threads
+        ]
+    finally:
+        release_probe.set()
+        request_thread.join(5.0)
+
+    assert request_thread.is_alive() is False
+    _wait_for_candidate_attempt_to_finish()
 
 
 def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
@@ -2515,7 +2610,7 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
     async def _slow_probe(_self, _session):
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.05)
         return {"available_balance": 0.0}
 
     monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
@@ -2540,6 +2635,7 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
 
     assert routes._CONNECT_LOCK.acquire(blocking=False) is True
     routes._CONNECT_LOCK.release()
+    _wait_for_candidate_attempt_to_finish()
 
 
 def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
@@ -2867,6 +2963,53 @@ def test_relogin_fails_closed_when_final_router_rebuild_returns_false(client, mo
     assert app.config["REGISTRY"].get_session_for("upstox", "REBUILDREL") is prior_session
 
 
+def test_relogin_rollback_does_not_overwrite_newer_credential_aba(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "CREDENTIALABA",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    import flinttrade_core.app as app_module
+    rebuild_calls = 0
+
+    def mutate_then_fail(*_args, **_kwargs):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        if rebuild_calls == 1:
+            store.update_credentials_for(
+                "upstox",
+                "CREDENTIALABA",
+                {"access_token": "external-intermediate"},
+            )
+            store.update_credentials_for(
+                "upstox",
+                "CREDENTIALABA",
+                {"access_token": "candidate"},
+            )
+        return False
+
+    monkeypatch.setattr(app_module, "configure_broker_router", mutate_then_fail)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/CREDENTIALABA/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 500
+    assert store.retrieve_for("upstox", "CREDENTIALABA") == {
+        "access_token": "candidate"
+    }
+    assert app.config["BROKER_ROUTER"] is None
+
+
 def test_read_only_relogin_router_failure_restores_default_primary_and_credentials(
     client,
     monkeypatch,
@@ -2945,9 +3088,18 @@ def test_connect_router_publication_failure_rolls_back_vault_workspace_and_sessi
     brokers = _workspace_brokers(tmp_path)
     assert "upstox:ROLLBACKCONNECT" not in brokers.get("registered", [])
     assert "ROLLBACKCONNECT" not in brokers.get("account_acls", {}).get("upstox", {})
-    assert str(brokers.get("execution", {}).get("default") or "") == prior_default
+    assert str(brokers.get("execution", {}).get("default") or "") == (
+        prior_default or "openalgo:default"
+    )
     with pytest.raises(Exception):
         app.config["REGISTRY"].get_session_for("upstox", "ROLLBACKCONNECT")
+    from flinttrade_core.workspace_migrations import default_workspace_config
+
+    workspace_path = tmp_path / "workspace.json"
+    assert workspace_path.exists()
+    assert json.loads(workspace_path.read_text(encoding="utf-8")) == default_workspace_config(
+        initialized=True
+    )
 
 
 def test_connect_registry_publication_failure_rolls_back_durable_state(client, monkeypatch):
@@ -2979,7 +3131,9 @@ def test_connect_registry_publication_failure_rolls_back_durable_state(client, m
     brokers = _workspace_brokers(tmp_path)
     assert "upstox:ROLLBACKREGISTRY" not in brokers.get("registered", [])
     assert "ROLLBACKREGISTRY" not in brokers.get("account_acls", {}).get("upstox", {})
-    assert str(brokers.get("execution", {}).get("default") or "") == prior_default
+    assert str(brokers.get("execution", {}).get("default") or "") == (
+        prior_default or "openalgo:default"
+    )
 
 
 def test_set_primary_restores_vault_when_router_rebuild_returns_false(client, monkeypatch):
@@ -3013,6 +3167,66 @@ def test_set_primary_restores_vault_when_router_rebuild_returns_false(client, mo
         for row in app.config["CREDENTIAL_STORE"].list_accounts()
     }
     assert rows == {"FALSE-A": True, "FALSE-B": False}
+
+
+def test_set_primary_rollback_does_not_overwrite_newer_default_and_vault_aba(
+    client,
+    monkeypatch,
+):
+    c, app, tmp_path = client
+    for account_id, is_primary in (("ABA-A", True), ("ABA-B", False)):
+        connected = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": account_id,
+                "credentials": {"access_token": "valid"},
+                "is_primary": is_primary,
+            },
+        )
+        assert connected.status_code == 200
+
+    store = app.config["CREDENTIAL_STORE"]
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace_migrations import update_workspace_config
+    rebuild_calls = 0
+
+    def mutate_then_fail(*_args, **_kwargs):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+
+        def set_default(selector: str):
+            def update(config):
+                config.setdefault("brokers", {}).setdefault("execution", {})[
+                    "default"
+                ] = selector
+                return config
+
+            update_workspace_config(tmp_path, update)
+
+        if rebuild_calls == 1:
+            set_default("upstox:ABA-A")
+            set_default("upstox:ABA-B")
+            store.set_primary("ABA-A")
+            store.set_primary("ABA-B")
+        return False
+
+    monkeypatch.setattr(app_module, "configure_broker_router", mutate_then_fail)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/ABA-B/set-primary",
+        headers=_h(),
+    )
+
+    assert response.status_code == 500
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:ABA-B"
+    rows = {
+        row["account_id"]: row["is_primary"]
+        for row in store.list_accounts()
+    }
+    assert rows == {"ABA-A": False, "ABA-B": True}
+    assert app.config["BROKER_ROUTER"] is None
 
 
 def test_router_rebuild_none_requires_a_live_router(client, monkeypatch):

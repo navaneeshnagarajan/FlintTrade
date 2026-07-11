@@ -9,13 +9,18 @@ wires the rotator + admin routes + 08:05 IST jobs into the app factory.
 
 from __future__ import annotations
 
+import asyncio
 import threading
+import time
 from typing import Any
 
 import pytest
 from flask import Flask
 
-from flinttrade_gateway.native_login import SESSION_INVALID_RELOGIN_MESSAGE
+from flinttrade_gateway.native_login import (
+    BROKER_LOGIN_RETRY_MESSAGE,
+    SESSION_INVALID_RELOGIN_MESSAGE,
+)
 
 from flinttrade_core.native_rotation import NativeSessionRefresher
 
@@ -66,6 +71,7 @@ class _Registry:
 class _Store:
     def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
         self.rows = rows
+        self.generations = {selector: 1 for selector in rows}
 
     def list_accounts(self) -> list[dict[str, Any]]:
         return [
@@ -77,7 +83,15 @@ class _Store:
         return dict(self.rows[(adapter_id, account_id)])
 
     def update_credentials_for(self, adapter_id: str, account_id: str, creds: dict[str, Any]) -> None:
-        self.rows[(adapter_id, account_id)] = creds
+        self.replace(adapter_id, account_id, creds)
+
+    def replace(self, adapter_id: str, account_id: str, creds: dict[str, Any]) -> None:
+        selector = (adapter_id, account_id)
+        self.rows[selector] = dict(creds)
+        self.generations[selector] = self.generations.get(selector, 0) + 1
+
+    def selector_generation(self, adapter_id: str, account_id: str) -> int | None:
+        return self.generations.get((adapter_id, account_id))
 
 
 def _app(adapter: _Adapter, registry: _Registry, store: _Store) -> Flask:
@@ -409,3 +423,179 @@ def test_refresh_revalidates_selector_before_shared_publication() -> None:
     assert ("dhan", "111") not in store.rows
     assert ("dhan", "111") not in registry.sessions
     assert "dhan:111" not in app.config["NATIVE_SESSION_STATUS"]
+
+
+def test_refresh_does_not_overwrite_newer_credential_generation() -> None:
+    login_started = threading.Event()
+    release_login = threading.Event()
+
+    class _BlockingRenewableAdapter(_Adapter):
+        def __init__(self) -> None:
+            super().__init__(renewable=True)
+
+        async def login(self, credentials: dict[str, Any]) -> _Session:
+            login_started.set()
+            if not release_login.wait(2.0):
+                raise TimeoutError("test did not release refresh login")
+            return await super().login(credentials)
+
+    adapter = _BlockingRenewableAdapter()
+    registry = _Registry()
+    prior_session = _Session("old-token")
+    registry.sessions[("dhan", "111")] = prior_session
+    store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
+    errors: list[BaseException] = []
+
+    def refresh() -> None:
+        try:
+            NativeSessionRefresher(app).refresh_token("dhan")
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            errors.append(exc)
+
+    thread = threading.Thread(target=refresh)
+    thread.start()
+    assert login_started.wait(1.0)
+    store.replace("dhan", "111", {"access_token": "newer-external-token"})
+    release_login.set()
+    thread.join(2.0)
+
+    assert thread.is_alive() is False
+    assert errors == []
+    assert store.rows[("dhan", "111")] == {"access_token": "newer-external-token"}
+    assert registry.sessions[("dhan", "111")] is prior_session
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
+
+
+def test_refresh_rejects_same_value_selector_aba() -> None:
+    login_started = threading.Event()
+    release_login = threading.Event()
+
+    class _BlockingRenewableAdapter(_Adapter):
+        def __init__(self) -> None:
+            super().__init__(renewable=True)
+
+        async def login(self, credentials: dict[str, Any]) -> _Session:
+            login_started.set()
+            if not release_login.wait(2.0):
+                raise TimeoutError("test did not release refresh login")
+            return await super().login(credentials)
+
+    adapter = _BlockingRenewableAdapter()
+    registry = _Registry()
+    prior_session = _Session("old-token")
+    registry.sessions[("dhan", "111")] = prior_session
+    store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
+
+    thread = threading.Thread(target=NativeSessionRefresher(app).refresh_token, args=("dhan",))
+    thread.start()
+    assert login_started.wait(1.0)
+    store.replace("dhan", "111", {"access_token": "old-token"})
+    release_login.set()
+    thread.join(2.0)
+
+    assert thread.is_alive() is False
+    assert store.rows[("dhan", "111")] == {"access_token": "old-token"}
+    assert registry.sessions[("dhan", "111")] is prior_session
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
+
+
+def test_refresh_does_not_publish_over_newer_read_only_session() -> None:
+    login_started = threading.Event()
+    release_login = threading.Event()
+
+    class _BlockingAdapter(_Adapter):
+        async def login(self, credentials: dict[str, Any]) -> _Session:
+            login_started.set()
+            if not release_login.wait(2.0):
+                raise TimeoutError("test did not release refresh login")
+            return await super().login(credentials)
+
+    adapter = _BlockingAdapter()
+    registry = _Registry()
+    registry.sessions[("dhan", "111")] = _Session("old-token")
+    store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
+
+    thread = threading.Thread(target=NativeSessionRefresher(app).refresh_token, args=("dhan",))
+    thread.start()
+    assert login_started.wait(1.0)
+    read_only_replacement = _Session("external-read-only-token")
+    read_only_replacement.is_read_only = True
+    registry.put_session("dhan", "111", read_only_replacement)
+    release_login.set()
+    thread.join(2.0)
+
+    assert thread.is_alive() is False
+    assert registry.sessions[("dhan", "111")] is read_only_replacement
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
+
+
+def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> None:
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    probe_calls: list[int] = []
+    baseline_threads = set(threading.enumerate())
+
+    class _BlockingProbeAdapter(_Adapter):
+        async def funds(self, _session: Any) -> dict[str, float]:
+            def sdk_read() -> dict[str, float]:
+                probe_calls.append(1)
+                probe_started.set()
+                if not release_probe.wait(5.0):
+                    raise TimeoutError("test did not release rotation SDK read")
+                return {"available_balance": 0.0}
+
+            return await asyncio.to_thread(sdk_read)
+
+    adapter = _BlockingProbeAdapter()
+    registry = _Registry()
+    prior_session = _Session("old-token")
+    registry.sessions[("dhan", "111")] = prior_session
+    store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.02
+    refresher = NativeSessionRefresher(app)
+
+    try:
+        with pytest.raises(RuntimeError, match="retry"):
+            refresher.refresh_token("dhan")
+        assert probe_started.wait(1.0)
+
+        second_started = time.monotonic()
+        with pytest.raises(RuntimeError, match="retry"):
+            refresher.refresh_token("dhan")
+        assert time.monotonic() - second_started < 0.5
+        assert probe_calls == [1]
+
+        candidate_threads = [
+            thread
+            for thread in threading.enumerate()
+            if thread not in baseline_threads
+            and thread.name.startswith("native-candidate-")
+        ]
+        assert {thread.name for thread in candidate_threads} == {
+            "native-candidate-login",
+            "native-candidate-sdk",
+        }
+        assert all(thread.daemon for thread in candidate_threads)
+        assert registry.sessions[("dhan", "111")] is prior_session
+        assert store.rows[("dhan", "111")] == {"access_token": "old-token"}
+        assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == BROKER_LOGIN_RETRY_MESSAGE
+    finally:
+        release_probe.set()
+
+    from flinttrade_core import native_account_routes as routes
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        with routes._CANDIDATE_RUNNER_LOCK:
+            if routes._ACTIVE_CANDIDATE_ATTEMPT is None:
+                break
+        time.sleep(0.01)
+    with routes._CANDIDATE_RUNNER_LOCK:
+        assert routes._ACTIVE_CANDIDATE_ATTEMPT is None

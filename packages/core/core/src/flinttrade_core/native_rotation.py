@@ -32,6 +32,13 @@ from flask import Blueprint, current_app, request
 logger = logging.getLogger("flinttrade.native_rotation")
 
 
+class _RotationAttemptOwner:
+    """No-op cleanup owner for an unpublished rotation candidate."""
+
+    def discard(self) -> None:
+        """The candidate registry and credential copy die with the daemon attempt."""
+
+
 class NativeSessionRefresher:
     """``refresh_token(broker)`` over every stored selector of a native broker.
 
@@ -62,8 +69,6 @@ class NativeSessionRefresher:
 
     def _refresh_token_locked(self, broker: str) -> None:
         """Run one broker refresh while native-account mutations are excluded."""
-        import asyncio  # noqa: PLC0415
-
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
             BROKER_LOGIN_RETRY_MESSAGE,
             SESSION_INVALID_RELOGIN_MESSAGE,
@@ -72,7 +77,18 @@ class NativeSessionRefresher:
         )
         from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
 
-        from .native_account_routes import _stored_native_account  # noqa: PLC0415
+        from .native_account_routes import (  # noqa: PLC0415
+            _MISSING_REGISTRY_SESSION,
+            _compare_and_put_registry_session,
+            _compare_and_remove_registry_session,
+            _compare_and_update_selector_credentials,
+            _candidate_login_timeout_seconds,
+            _registry_session_generation,
+            _registry_session_generation_matches,
+            _run_bounded_candidate_coroutine,
+            _selector_credential_generation,
+            _selector_credential_generation_matches,
+        )
 
         app = self._app
         adapter = (app.config.get("NATIVE_ADAPTERS") or {}).get(broker)
@@ -92,28 +108,46 @@ class NativeSessionRefresher:
         for row in rows:
             account_id = str(row.get("account_id") or "")
             selector = f"{broker}:{account_id}"
-
-            def selector_still_exists() -> bool:
-                try:
-                    return _stored_native_account(store, broker, account_id) is not None
-                except Exception:  # noqa: BLE001 - unreadable state cannot authorise publication
-                    return False
+            credential_generation = None
+            registry_generation = _MISSING_REGISTRY_SESSION
 
             try:
+                credential_generation = _selector_credential_generation(
+                    store,
+                    broker,
+                    account_id,
+                )
                 stored_credentials = store.retrieve_for(broker, account_id)
-                credentials = dict(stored_credentials)
-                # Renew-in-place when the broker supports it (Dhan RenewToken
-                # extends the 24h window without a fresh 2FA) — needs the still-
-                # live session; best-effort, falling back to a plain replay.
-                renew = getattr(adapter, "renew_token", None)
-                if callable(renew):
-                    try:
-                        session = registry.get_session_for(broker, account_id)
-                    except Exception:  # noqa: BLE001 - no live session to renew
-                        session = None
-                    if session is not None:
+                if not _selector_credential_generation_matches(
+                    store,
+                    broker,
+                    account_id,
+                    credential_generation,
+                ):
+                    continue
+                registry_generation = _registry_session_generation(
+                    registry,
+                    broker,
+                    account_id,
+                )
+                # Authenticate and probe against a private registry. No shared
+                # session, status, or vault surface changes until the selector is
+                # revalidated after the broker call completes. The entire broker
+                # call runs behind the daemon candidate boundary so an unkillable
+                # SDK thread cannot hold APScheduler or process shutdown open.
+                candidate_registry = BrokerRegistry()
+                prior_session = (
+                    None
+                    if registry_generation is _MISSING_REGISTRY_SESSION
+                    else registry_generation
+                )
+
+                async def authenticate_candidate() -> tuple[dict[str, Any], Any]:
+                    credentials = dict(stored_credentials)
+                    renew = getattr(adapter, "renew_token", None)
+                    if callable(renew) and prior_session is not None:
                         try:
-                            renewed = asyncio.run(renew(session))
+                            renewed = await renew(prior_session)
                             token = str(
                                 (renewed or {}).get("accessToken")
                                 or (renewed or {}).get("access_token")
@@ -124,14 +158,10 @@ class NativeSessionRefresher:
                         except Exception as exc:  # noqa: BLE001 - fall back to replay
                             logger.info(
                                 "renew_token failed for %s (%s) — replaying vault credentials",
-                                broker, type(exc).__name__,
+                                broker,
+                                type(exc).__name__,
                             )
-                # Authenticate and probe against a private registry. No shared
-                # session, status, or vault surface changes until the selector is
-                # revalidated after the broker call completes.
-                candidate_registry = BrokerRegistry()
-                candidate_session = asyncio.run(
-                    establish_native_session(
+                    candidate_session = await establish_native_session(
                         adapter,
                         candidate_registry,
                         credentials,
@@ -139,6 +169,12 @@ class NativeSessionRefresher:
                         account_id,
                         verify=True,
                     )
+                    return credentials, candidate_session
+
+                credentials, candidate_session = _run_bounded_candidate_coroutine(
+                    authenticate_candidate,
+                    _RotationAttemptOwner(),
+                    timeout=_candidate_login_timeout_seconds(app.config),
                 )
 
                 replayable_credentials = credentials
@@ -155,13 +191,14 @@ class NativeSessionRefresher:
                             type(exc).__name__,
                         )
 
-                if not selector_still_exists():
-                    continue
+                committed_generation = credential_generation
                 if replayable_credentials != stored_credentials:
                     try:
-                        store.update_credentials_for(
+                        committed_generation = _compare_and_update_selector_credentials(
+                            store,
                             broker,
                             account_id,
+                            credential_generation,
                             replayable_credentials,
                         )
                     except Exception as exc:  # noqa: BLE001 - session can remain live
@@ -170,18 +207,45 @@ class NativeSessionRefresher:
                             broker,
                             type(exc).__name__,
                         )
-                        if not selector_still_exists():
-                            continue
+                        continue
+                    if committed_generation is None:
+                        continue
 
-                if not selector_still_exists():
+                if not _selector_credential_generation_matches(
+                    store,
+                    broker,
+                    account_id,
+                    committed_generation,
+                ):
                     continue
-                registry.put_session(broker, account_id, candidate_session)
-
-                if not selector_still_exists():
-                    try:
-                        registry.remove_session_for(broker, account_id)
-                    except Exception:  # noqa: BLE001 - selector is already removed
-                        pass
+                if not _compare_and_put_registry_session(
+                    registry,
+                    broker,
+                    account_id,
+                    registry_generation,
+                    candidate_session,
+                ):
+                    continue
+                if (
+                    not _selector_credential_generation_matches(
+                        store,
+                        broker,
+                        account_id,
+                        committed_generation,
+                    )
+                    or not _registry_session_generation_matches(
+                        registry,
+                        broker,
+                        account_id,
+                        candidate_session,
+                    )
+                ):
+                    _compare_and_remove_registry_session(
+                        registry,
+                        broker,
+                        account_id,
+                        candidate_session,
+                    )
                     continue
                 status: dict[str, Any] = app.config.setdefault("NATIVE_SESSION_STATUS", {})
                 status[selector] = "ok"
@@ -191,14 +255,27 @@ class NativeSessionRefresher:
                     if should_keep_session_after_probe_error(exc)
                     else SESSION_INVALID_RELOGIN_MESSAGE
                 )
-                if not selector_still_exists():
+                if credential_generation is None or not _selector_credential_generation_matches(
+                    store,
+                    broker,
+                    account_id,
+                    credential_generation,
+                ):
                     continue
                 if message == SESSION_INVALID_RELOGIN_MESSAGE:
-                    try:
-                        registry.remove_session_for(broker, account_id)
-                    except Exception:  # noqa: BLE001 - no prior session is fine
-                        pass
-                if not selector_still_exists():
+                    if not _compare_and_remove_registry_session(
+                        registry,
+                        broker,
+                        account_id,
+                        registry_generation,
+                    ):
+                        continue
+                elif not _registry_session_generation_matches(
+                    registry,
+                    broker,
+                    account_id,
+                    registry_generation,
+                ):
                     continue
                 status = app.config.setdefault("NATIVE_SESSION_STATUS", {})
                 status[selector] = message

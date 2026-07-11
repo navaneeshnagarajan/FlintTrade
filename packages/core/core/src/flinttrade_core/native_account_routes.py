@@ -25,12 +25,16 @@ flow is limited to one unambiguous pending ``tokenId`` callback.
 
 from __future__ import annotations
 
+import concurrent.futures
+import copy
 import functools
+import hashlib
 import html
 import inspect
 import json
 import logging
 import math
+import queue
 import re
 import threading
 import time
@@ -329,6 +333,18 @@ def _redacted_postback_snapshot(payload: Any) -> Any:
 
 
 @dataclass(frozen=True, slots=True)
+class _WorkspaceGeneration:
+    """Identity of one atomically replaced workspace.json generation."""
+
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
+    changed_ns: int
+    digest: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class _SelectorWorkspaceMutation:
     """Exact workspace fields introduced or changed by one selector action."""
 
@@ -340,7 +356,7 @@ class _SelectorWorkspaceMutation:
     added_actor: bool
     prior_default: str
     changed_default: bool
-    workspace_was_missing: bool
+    workspace_generation: _WorkspaceGeneration
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,12 +368,108 @@ class _CredentialSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class _SelectorCredentialGeneration:
+    """Opaque selector generation used to reject stale or ABA publication."""
+
+    raw_supported: bool
+    raw_row: tuple[Any, ...] | None
+    metadata: dict[str, Any] | None
+    credentials: dict[str, Any] | None
+    store_token: Any
+
+
+@dataclass(slots=True)
+class _CredentialRollbackReceipt:
+    """Prior and transaction-owned vault generations for one selector."""
+
+    prior_snapshot: _CredentialSnapshot
+    prior_generation: _SelectorCredentialGeneration
+    applied_generation: _SelectorCredentialGeneration | None = None
+
+
+@dataclass(slots=True)
+class _PrimaryRollbackReceipt:
+    """Primary-metadata rollback guarded by one live SQLite data generation."""
+
+    prior_metadata: dict[str, bool]
+    connection: Any | None
+    applied_version: int | None = None
+    applied_metadata: dict[str, bool] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _ExecutionDefaultMutation:
     """Exact execution-default transition introduced by read-only demotion."""
 
     prior_default: str
     applied_default: str
     changed: bool
+    workspace_generation: _WorkspaceGeneration
+
+
+def _workspace_file_generation(path: Any) -> _WorkspaceGeneration:
+    payload = path.read_bytes()
+    stat = path.stat()
+    return _WorkspaceGeneration(
+        device=int(stat.st_dev),
+        inode=int(stat.st_ino),
+        size=int(stat.st_size),
+        modified_ns=int(stat.st_mtime_ns),
+        changed_ns=int(stat.st_ctime_ns),
+        digest=hashlib.sha256(payload).digest(),
+    )
+
+
+def _update_workspace_generation(
+    updater: Any,
+    *,
+    expected: _WorkspaceGeneration | None = None,
+    require_existing: bool = False,
+) -> tuple[dict[str, Any], _WorkspaceGeneration] | None:
+    """Update workspace.json and capture/compare its generation under one lock."""
+    from .workspace_migrations import (  # noqa: PLC0415
+        WORKSPACE_VERSION,
+        _atomic_write,
+        _migration_lock,
+        default_workspace_config,
+    )
+
+    target_dir = workspace_dir().expanduser().resolve()
+    path = target_dir / "workspace.json"
+    with _migration_lock(target_dir, wait=True):
+        existed = path.exists()
+        if require_existing and not existed:
+            return None
+        if expected is not None:
+            if not existed or _workspace_file_generation(path) != expected:
+                return None
+        current = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if existed
+            else default_workspace_config(initialized=True)
+        )
+        if current.get("version") != WORKSPACE_VERSION:
+            raise ValueError(
+                f"workspace update requires version {WORKSPACE_VERSION}; "
+                f"got {current.get('version')!r}"
+            )
+        candidate = copy.deepcopy(current)
+        updated = updater(candidate)
+        if updated is not None:
+            candidate = updated
+        if not isinstance(candidate, dict) or candidate.get("version") != WORKSPACE_VERSION:
+            raise ValueError("workspace updater must return the current-version configuration")
+        _atomic_write(path, json.dumps(candidate, indent=2, sort_keys=True))
+        return candidate, _workspace_file_generation(path)
+
+
+def _workspace_generation_is_current(expected: _WorkspaceGeneration) -> bool:
+    from .workspace_migrations import _migration_lock  # noqa: PLC0415
+
+    target_dir = workspace_dir().expanduser().resolve()
+    path = target_dir / "workspace.json"
+    with _migration_lock(target_dir, wait=True):
+        return path.exists() and _workspace_file_generation(path) == expected
 
 
 def _register_selector_in_workspace(
@@ -370,8 +482,6 @@ def _register_selector_in_workspace(
     """
     selector = f"{adapter_id}:{account_id}"
     receipt: dict[str, Any] = {}
-    target_workspace_dir = workspace_dir()
-    workspace_was_missing = not (target_workspace_dir / "workspace.json").exists()
 
     def register(config: dict[str, Any]) -> dict[str, Any]:
         brokers = config.setdefault("brokers", {})
@@ -400,7 +510,10 @@ def _register_selector_in_workspace(
         )
         return config
 
-    update_workspace_config(target_workspace_dir, register)
+    update_result = _update_workspace_generation(register)
+    if update_result is None:  # pragma: no cover - an unconditional update cannot decline
+        raise RuntimeError("workspace registration did not commit")
+    _config, workspace_generation = update_result
     return _SelectorWorkspaceMutation(
         selector=selector,
         adapter_id=adapter_id,
@@ -410,12 +523,16 @@ def _register_selector_in_workspace(
         added_actor=bool(receipt["added_actor"]),
         prior_default=str(receipt["prior_default"]),
         changed_default=bool(receipt["changed_default"]),
-        workspace_was_missing=workspace_was_missing,
+        workspace_generation=workspace_generation,
     )
 
 
-def _rollback_selector_workspace(mutation: _SelectorWorkspaceMutation) -> None:
-    """Undo one selector mutation without replacing newer workspace fields."""
+def _rollback_selector_workspace(
+    mutation: _SelectorWorkspaceMutation,
+    *,
+    expected: _WorkspaceGeneration | None = None,
+) -> _WorkspaceGeneration | None:
+    """Undo one selector mutation only from its exact workspace generation."""
 
     def rollback(config: dict[str, Any]) -> dict[str, Any]:
         brokers = config.setdefault("brokers", {})
@@ -439,20 +556,17 @@ def _rollback_selector_workspace(mutation: _SelectorWorkspaceMutation) -> None:
             execution["default"] = prior if prior and prior in registered else ""
         return config
 
-    target_workspace_dir = workspace_dir()
-    update_workspace_config(target_workspace_dir, rollback)
-    if mutation.workspace_was_missing:
-        path = target_workspace_dir / "workspace.json"
-        try:
-            current = json.loads(path.read_text(encoding="utf-8"))
-            from .workspace_migrations import default_workspace_config  # noqa: PLC0415
-
-            if current == default_workspace_config(initialized=True):
-                path.unlink()
-        except (OSError, json.JSONDecodeError):
-            # Retaining a valid default file is behaviourally equivalent to the
-            # missing-file fallback and safer than deleting uncertain state.
-            pass
+    result = _update_workspace_generation(
+        rollback,
+        expected=expected or mutation.workspace_generation,
+        require_existing=True,
+    )
+    if result is None:
+        return None
+    _config, generation = result
+    # A fresh workspace keeps the valid default file. Removing it after releasing
+    # the migration lock could unlink a concurrent replacement.
+    return generation
 
 
 def _openalgo_bridge_configured() -> bool:
@@ -494,9 +608,6 @@ def _demote_selector_as_execution_default(
         changed). The notice deliberately names no selectors/account ids —
         connect responses must never echo operator identifiers.
     """
-    path = workspace_dir() / "workspace.json"
-    if not path.exists():
-        return None, None
     selector = f"{adapter_id}:{account_id}"
     notice: str | None = None
     receipt: dict[str, Any] = {}
@@ -545,18 +656,28 @@ def _demote_selector_as_execution_default(
         )
         return config
 
-    update_workspace_config(workspace_dir(), demote)
+    update_result = _update_workspace_generation(demote, require_existing=True)
+    if update_result is None:
+        return None, None
+    _config, workspace_generation = update_result
     return notice, _ExecutionDefaultMutation(
         prior_default=str(receipt.get("prior_default") or ""),
         applied_default=str(receipt.get("applied_default") or ""),
         changed=bool(receipt.get("changed")),
+        workspace_generation=workspace_generation,
     )
 
 
-def _rollback_execution_default(mutation: _ExecutionDefaultMutation) -> None:
-    """Restore a read-only demotion only while its exact value is current."""
+def _rollback_execution_default(
+    mutation: _ExecutionDefaultMutation,
+) -> _WorkspaceGeneration | None:
+    """Restore a read-only demotion only from its exact workspace generation."""
     if not mutation.changed:
-        return
+        return (
+            mutation.workspace_generation
+            if _workspace_generation_is_current(mutation.workspace_generation)
+            else None
+        )
 
     def rollback(config: dict[str, Any]) -> dict[str, Any]:
         execution = config.setdefault("brokers", {}).setdefault("execution", {})
@@ -564,7 +685,15 @@ def _rollback_execution_default(mutation: _ExecutionDefaultMutation) -> None:
             execution["default"] = mutation.prior_default
         return config
 
-    update_workspace_config(workspace_dir(), rollback)
+    result = _update_workspace_generation(
+        rollback,
+        expected=mutation.workspace_generation,
+        require_existing=True,
+    )
+    if result is None:
+        return None
+    _config, generation = result
+    return generation
 
 
 def _deregister_selector_in_workspace(adapter_id: str, account_id: str) -> str | None:
@@ -673,6 +802,264 @@ def _stored_native_account(store: Any, adapter_id: str, account_id: str) -> dict
     return None
 
 
+_NO_SELECTOR_GENERATION = object()
+_MISSING_REGISTRY_SESSION = object()
+_RAW_CREDENTIAL_COLUMNS = (
+    "account_id",
+    "adapter_id",
+    "broker",
+    "label",
+    "salt",
+    "encrypted_creds",
+    "is_primary",
+    "created_at",
+)
+
+
+def _raw_selector_row(connection: Any, adapter_id: str, account_id: str) -> tuple[Any, ...] | None:
+    row = connection.execute(
+        "SELECT account_id, adapter_id, broker, label, salt, encrypted_creds, "
+        "is_primary, created_at FROM accounts WHERE adapter_id = ? AND account_id = ?",
+        (adapter_id, account_id),
+    ).fetchone()
+    if row is None:
+        return None
+    return tuple(row[column] for column in _RAW_CREDENTIAL_COLUMNS)
+
+
+def _raw_selector_generation(
+    store: Any,
+    adapter_id: str,
+    account_id: str,
+) -> tuple[bool, tuple[Any, ...] | None]:
+    get_connection = getattr(store, "_get_connection", None)
+    if not callable(get_connection):
+        return False, None
+    try:
+        with get_connection() as connection:
+            return True, _raw_selector_row(connection, adapter_id, account_id)
+    except Exception as exc:
+        raise RuntimeError("credential row generation is unavailable") from exc
+
+
+def _selector_credential_generation(
+    store: Any,
+    adapter_id: str,
+    account_id: str,
+) -> _SelectorCredentialGeneration:
+    """Capture one exact vault generation without exposing credential values."""
+    raw_supported, raw_row = _raw_selector_generation(store, adapter_id, account_id)
+    if raw_supported:
+        return _SelectorCredentialGeneration(
+            raw_supported=True,
+            raw_row=raw_row,
+            metadata=None,
+            credentials=None,
+            store_token=_NO_SELECTOR_GENERATION,
+        )
+
+    metadata = _stored_native_account(store, adapter_id, account_id)
+    credentials = (
+        dict(store.retrieve_for(adapter_id, account_id))
+        if metadata is not None
+        else None
+    )
+    generation = getattr(store, "selector_generation", None)
+    token = generation(adapter_id, account_id) if callable(generation) else _NO_SELECTOR_GENERATION
+    return _SelectorCredentialGeneration(
+        raw_supported=False,
+        raw_row=None,
+        metadata=dict(metadata) if metadata is not None else None,
+        credentials=credentials,
+        store_token=token,
+    )
+
+
+def _selector_credential_generation_matches(
+    store: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: _SelectorCredentialGeneration,
+) -> bool:
+    try:
+        return _selector_credential_generation(store, adapter_id, account_id) == expected
+    except Exception:  # noqa: BLE001 - unreadable state cannot authorise a commit
+        return False
+
+
+def _compare_and_update_selector_credentials(
+    store: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: _SelectorCredentialGeneration,
+    credentials: dict[str, Any],
+) -> _SelectorCredentialGeneration | None:
+    """Replace credentials only while ``expected`` is the exact current row."""
+    get_connection = getattr(store, "_get_connection", None)
+    derive_key = getattr(store, "_derive_key", None)
+    if expected.raw_supported and callable(get_connection) and callable(derive_key):
+        import os  # noqa: PLC0415
+
+        from flinttrade_gateway.credentials import _SALT_BYTES  # noqa: PLC0415
+
+        payload = json.dumps(credentials).encode("utf-8")
+        salt = os.urandom(_SALT_BYTES)
+        encrypted = derive_key(salt).encrypt(payload)
+        with get_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if _raw_selector_row(connection, adapter_id, account_id) != expected.raw_row:
+                    connection.rollback()
+                    return None
+                cursor = connection.execute(
+                    "UPDATE accounts SET salt = ?, encrypted_creds = ? "
+                    "WHERE adapter_id = ? AND account_id = ?",
+                    (salt, encrypted, adapter_id, account_id),
+                )
+                if cursor.rowcount != 1:
+                    connection.rollback()
+                    return None
+                raw_row = _raw_selector_row(connection, adapter_id, account_id)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return _SelectorCredentialGeneration(
+            raw_supported=True,
+            raw_row=raw_row,
+            metadata=None,
+            credentials=None,
+            store_token=_NO_SELECTOR_GENERATION,
+        )
+
+    if not _selector_credential_generation_matches(store, adapter_id, account_id, expected):
+        return None
+    store.update_credentials_for(adapter_id, account_id, credentials)
+    return _selector_credential_generation(store, adapter_id, account_id)
+
+
+def _compare_and_set_selector_primary(
+    store: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: _SelectorCredentialGeneration,
+    *,
+    is_primary: bool,
+    fallback_label: str,
+) -> _SelectorCredentialGeneration | None:
+    """Change one primary flag only from the exact expected vault generation."""
+    get_connection = getattr(store, "_get_connection", None)
+    if expected.raw_supported and callable(get_connection):
+        with get_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if _raw_selector_row(connection, adapter_id, account_id) != expected.raw_row:
+                    connection.rollback()
+                    return None
+                cursor = connection.execute(
+                    "UPDATE accounts SET is_primary = ? "
+                    "WHERE adapter_id = ? AND account_id = ?",
+                    (int(is_primary), adapter_id, account_id),
+                )
+                if cursor.rowcount != 1:
+                    connection.rollback()
+                    return None
+                raw_row = _raw_selector_row(connection, adapter_id, account_id)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return _SelectorCredentialGeneration(
+            raw_supported=True,
+            raw_row=raw_row,
+            metadata=None,
+            credentials=None,
+            store_token=_NO_SELECTOR_GENERATION,
+        )
+
+    if not _selector_credential_generation_matches(store, adapter_id, account_id, expected):
+        return None
+    credentials = store.retrieve_for(adapter_id, account_id)
+    row = _stored_native_account(store, adapter_id, account_id) or {}
+    store.store(
+        account_id,
+        str(row.get("broker") or adapter_id),
+        str(row.get("label") or fallback_label),
+        credentials,
+        is_primary=is_primary,
+        adapter_id=adapter_id,
+    )
+    return _selector_credential_generation(store, adapter_id, account_id)
+
+
+def _registry_session_generation(registry: Any, adapter_id: str, account_id: str) -> Any:
+    lock = getattr(registry, "_lock", None)
+    sessions = getattr(registry, "_adapter_sessions", None)
+    if lock is not None and isinstance(sessions, dict):
+        with lock:
+            return sessions.get((adapter_id, account_id), _MISSING_REGISTRY_SESSION)
+    try:
+        return registry.get_session_for(adapter_id, account_id)
+    except Exception:  # noqa: BLE001 - absence is an explicit generation
+        return _MISSING_REGISTRY_SESSION
+
+
+def _registry_session_generation_matches(
+    registry: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: Any,
+) -> bool:
+    return _registry_session_generation(registry, adapter_id, account_id) is expected
+
+
+def _compare_and_put_registry_session(
+    registry: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: Any,
+    candidate: Any,
+) -> bool:
+    """Publish a session only while the exact captured registry entry remains."""
+    lock = getattr(registry, "_lock", None)
+    sessions = getattr(registry, "_adapter_sessions", None)
+    put_overridden = "put_session" in getattr(registry, "__dict__", {})
+    if lock is not None and isinstance(sessions, dict) and not put_overridden:
+        with lock:
+            current = sessions.get((adapter_id, account_id), _MISSING_REGISTRY_SESSION)
+            if current is not expected:
+                return False
+            sessions[(adapter_id, account_id)] = candidate
+            return True
+    if not _registry_session_generation_matches(registry, adapter_id, account_id, expected):
+        return False
+    registry.put_session(adapter_id, account_id, candidate)
+    return True
+
+
+def _compare_and_remove_registry_session(
+    registry: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: Any,
+) -> bool:
+    """Remove a session only while it is still the exact expected object."""
+    lock = getattr(registry, "_lock", None)
+    sessions = getattr(registry, "_adapter_sessions", None)
+    remove_overridden = "remove_session_for" in getattr(registry, "__dict__", {})
+    if lock is not None and isinstance(sessions, dict) and not remove_overridden:
+        with lock:
+            current = sessions.get((adapter_id, account_id), _MISSING_REGISTRY_SESSION)
+            if current is not expected:
+                return False
+            sessions.pop((adapter_id, account_id), None)
+            return True
+    if not _registry_session_generation_matches(registry, adapter_id, account_id, expected):
+        return False
+    registry.remove_session_for(adapter_id, account_id)
+    return True
+
+
 def _snapshot_selector_credentials(
     store: Any,
     adapter_id: str,
@@ -688,13 +1075,175 @@ def _snapshot_selector_credentials(
     )
 
 
-def _restore_selector_credentials(
+def _credential_rollback_receipt(
     store: Any,
     adapter_id: str,
     account_id: str,
     snapshot: _CredentialSnapshot,
+) -> _CredentialRollbackReceipt:
+    return _CredentialRollbackReceipt(
+        prior_snapshot=snapshot,
+        prior_generation=_selector_credential_generation(store, adapter_id, account_id),
+    )
+
+
+def _commit_candidate_credentials(
+    store: Any,
+    candidate_store: Any,
+    adapter_id: str,
+    account_id: str,
+    expected: _SelectorCredentialGeneration,
+) -> _SelectorCredentialGeneration | None:
+    """Commit staged material with an exact selector-generation comparison."""
+    candidate = _snapshot_selector_credentials(candidate_store, adapter_id, account_id)
+    if candidate.metadata is None or candidate.credentials is None:
+        raise RuntimeError("staged credential candidate is incomplete")
+
+    get_connection = getattr(store, "_get_connection", None)
+    derive_key = getattr(store, "_derive_key", None)
+    replace_metadata = bool(getattr(candidate_store, "_replace_metadata", False))
+    durable_method = "store" if replace_metadata else "update_credentials_for"
+    method_overridden = (
+        durable_method in getattr(store, "__dict__", {})
+        or "commit" in getattr(candidate_store, "__dict__", {})
+    )
+    if (
+        expected.raw_supported
+        and callable(get_connection)
+        and callable(derive_key)
+        and not method_overridden
+    ):
+        import os  # noqa: PLC0415
+
+        from flinttrade_gateway.credentials import _SALT_BYTES  # noqa: PLC0415
+
+        payload = json.dumps(candidate.credentials).encode("utf-8")
+        salt = os.urandom(_SALT_BYTES)
+        encrypted = derive_key(salt).encrypt(payload)
+        with get_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if _raw_selector_row(connection, adapter_id, account_id) != expected.raw_row:
+                    connection.rollback()
+                    return None
+                account_owner = connection.execute(
+                    "SELECT adapter_id FROM accounts WHERE account_id = ?",
+                    (account_id,),
+                ).fetchone()
+                if account_owner is not None and str(account_owner["adapter_id"]) != adapter_id:
+                    connection.rollback()
+                    return None
+                if replace_metadata:
+                    created_at = str(candidate.metadata.get("created_at") or "")
+                    if not created_at:
+                        created_at = datetime.now(tz=ZoneInfo("UTC")).isoformat()
+                    connection.execute(
+                        "INSERT INTO accounts "
+                        "(account_id, adapter_id, broker, label, salt, encrypted_creds, "
+                        "is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(account_id) DO UPDATE SET "
+                        "adapter_id = excluded.adapter_id, broker = excluded.broker, "
+                        "label = excluded.label, salt = excluded.salt, "
+                        "encrypted_creds = excluded.encrypted_creds, "
+                        "is_primary = excluded.is_primary",
+                        (
+                            account_id,
+                            adapter_id,
+                            str(candidate.metadata.get("broker") or adapter_id),
+                            str(candidate.metadata.get("label") or account_id),
+                            salt,
+                            encrypted,
+                            int(bool(candidate.metadata.get("is_primary"))),
+                            created_at,
+                        ),
+                    )
+                else:
+                    cursor = connection.execute(
+                        "UPDATE accounts SET salt = ?, encrypted_creds = ? "
+                        "WHERE adapter_id = ? AND account_id = ?",
+                        (salt, encrypted, adapter_id, account_id),
+                    )
+                    if cursor.rowcount != 1:
+                        connection.rollback()
+                        return None
+                raw_row = _raw_selector_row(connection, adapter_id, account_id)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        candidate_store.discard()
+        return _SelectorCredentialGeneration(
+            raw_supported=True,
+            raw_row=raw_row,
+            metadata=None,
+            credentials=None,
+            store_token=_NO_SELECTOR_GENERATION,
+        )
+
+    if not _selector_credential_generation_matches(store, adapter_id, account_id, expected):
+        return None
+    candidate_store.commit()
+    return _selector_credential_generation(store, adapter_id, account_id)
+
+
+def _restore_selector_credentials(
+    store: Any,
+    adapter_id: str,
+    account_id: str,
+    receipt: _CredentialRollbackReceipt,
 ) -> bool:
-    """Restore or remove one committed selector from its pre-transaction receipt."""
+    """Compare-and-restore only the exact transaction-owned vault generation."""
+    applied = receipt.applied_generation
+    if applied is None:
+        return _selector_credential_generation_matches(
+            store,
+            adapter_id,
+            account_id,
+            receipt.prior_generation,
+        )
+
+    get_connection = getattr(store, "_get_connection", None)
+    if applied.raw_supported and receipt.prior_generation.raw_supported and callable(get_connection):
+        try:
+            with get_connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if _raw_selector_row(connection, adapter_id, account_id) != applied.raw_row:
+                    connection.rollback()
+                    logger.critical("Refused stale native credential rollback")
+                    return False
+                prior_raw = receipt.prior_generation.raw_row
+                if prior_raw is None:
+                    connection.execute(
+                        "DELETE FROM accounts WHERE adapter_id = ? AND account_id = ?",
+                        (adapter_id, account_id),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE accounts SET broker = ?, label = ?, salt = ?, "
+                        "encrypted_creds = ?, is_primary = ?, created_at = ? "
+                        "WHERE adapter_id = ? AND account_id = ?",
+                        (
+                            prior_raw[2],
+                            prior_raw[3],
+                            prior_raw[4],
+                            prior_raw[5],
+                            prior_raw[6],
+                            prior_raw[7],
+                            adapter_id,
+                            account_id,
+                        ),
+                    )
+                connection.commit()
+            return True
+        except Exception:  # noqa: BLE001 - caller disables routing on rollback loss
+            logger.critical("Could not restore native credential transaction")
+            return False
+
+    if not _selector_credential_generation_matches(store, adapter_id, account_id, applied):
+        logger.critical("Refused stale native credential rollback")
+        return False
+
+    snapshot = receipt.prior_snapshot
     try:
         if snapshot.metadata is None:
             remove_for = getattr(store, "remove_for", None)
@@ -717,6 +1266,136 @@ def _restore_selector_credentials(
     return True
 
 
+def _primary_rollback_receipt(
+    store: Any,
+    prior_metadata: dict[str, bool],
+) -> _PrimaryRollbackReceipt:
+    get_connection = getattr(store, "_get_connection", None)
+    connection = None
+    if callable(get_connection):
+        try:
+            connection = get_connection()
+            connection.execute("PRAGMA data_version").fetchone()
+        except Exception:  # noqa: BLE001 - generic stores use metadata comparison
+            if connection is not None:
+                connection.close()
+            connection = None
+    return _PrimaryRollbackReceipt(dict(prior_metadata), connection)
+
+
+def _bind_primary_rollback_receipt(
+    store: Any,
+    receipt: _PrimaryRollbackReceipt,
+) -> None:
+    snapshot = getattr(store, "snapshot_primary_metadata")
+    receipt.applied_metadata = dict(snapshot())
+    if receipt.connection is not None:
+        receipt.applied_version = int(
+            receipt.connection.execute("PRAGMA data_version").fetchone()[0]
+        )
+
+
+def _apply_primary_metadata(
+    store: Any,
+    account_id: str,
+    receipt: _PrimaryRollbackReceipt,
+) -> None:
+    """Apply primary flags and bind their generation in one SQLite transaction."""
+    connection = receipt.connection
+    set_primary = getattr(store, "set_primary", None)
+    if connection is None or "set_primary" in getattr(store, "__dict__", {}):
+        if not callable(set_primary):
+            raise RuntimeError("Credential store cannot set primary accounts")
+        set_primary(account_id)
+        _bind_primary_rollback_receipt(store, receipt)
+        return
+
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        exists = connection.execute(
+            "SELECT 1 FROM accounts WHERE account_id = ?",
+            (account_id,),
+        ).fetchone()
+        if exists is None:
+            raise RuntimeError("primary account disappeared before commit")
+        receipt.applied_version = int(
+            connection.execute("PRAGMA data_version").fetchone()[0]
+        )
+        connection.execute(
+            "UPDATE accounts SET is_primary = CASE WHEN account_id = ? THEN 1 ELSE 0 END",
+            (account_id,),
+        )
+        rows = connection.execute(
+            "SELECT account_id, is_primary FROM accounts"
+        ).fetchall()
+        receipt.applied_metadata = {
+            str(row["account_id"]): bool(row["is_primary"])
+            for row in rows
+        }
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _close_primary_rollback_receipt(receipt: _PrimaryRollbackReceipt) -> None:
+    if receipt.connection is not None:
+        receipt.connection.close()
+        receipt.connection = None
+
+
+def _restore_primary_metadata(
+    store: Any,
+    receipt: _PrimaryRollbackReceipt,
+) -> bool:
+    """Restore primary flags only while the exact applied generation remains."""
+    if receipt.applied_metadata is None:
+        _close_primary_rollback_receipt(receipt)
+        return True
+    connection = receipt.connection
+    if connection is not None and receipt.applied_version is not None:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current_version = int(connection.execute("PRAGMA data_version").fetchone()[0])
+            current_rows = connection.execute(
+                "SELECT account_id, is_primary FROM accounts"
+            ).fetchall()
+            current_metadata = {
+                str(row["account_id"]): bool(row["is_primary"])
+                for row in current_rows
+            }
+            if (
+                current_version != receipt.applied_version
+                or current_metadata != receipt.applied_metadata
+            ):
+                connection.rollback()
+                logger.critical("Refused stale native primary-metadata rollback")
+                return False
+            connection.executemany(
+                "UPDATE accounts SET is_primary = ? WHERE account_id = ?",
+                [
+                    (int(is_primary), account_id)
+                    for account_id, is_primary in receipt.prior_metadata.items()
+                ],
+            )
+            connection.commit()
+            return True
+        except Exception:  # noqa: BLE001 - caller leaves routing unpublished
+            connection.rollback()
+            logger.critical("Could not restore native primary-metadata transaction")
+            return False
+        finally:
+            _close_primary_rollback_receipt(receipt)
+
+    snapshot = getattr(store, "snapshot_primary_metadata")
+    if dict(snapshot()) != receipt.applied_metadata:
+        logger.critical("Refused stale native primary-metadata rollback")
+        return False
+    restore = getattr(store, "restore_primary_metadata")
+    restore(receipt.prior_metadata)
+    return True
+
+
 class _RouterRebuildError(RuntimeError):
     """Raised when a router generation cannot be built and published safely."""
 
@@ -728,9 +1407,173 @@ class _CandidateLoginTimeoutError(TimeoutError):
 _DEFAULT_CANDIDATE_LOGIN_TIMEOUT_SECONDS = 30.0
 
 
-def _candidate_login_timeout_seconds() -> float:
+class _DaemonBoundedExecutor(concurrent.futures.Executor):
+    """One-worker executor whose unkillable SDK call cannot delay process exit."""
+
+    def __init__(self) -> None:
+        self._work: queue.Queue[
+            tuple[
+                concurrent.futures.Future[Any],
+                Any,
+                tuple[Any, ...],
+                dict[str, Any],
+            ]
+            | None
+        ] = queue.Queue(maxsize=1)
+        self._lock = threading.Lock()
+        self._shutdown = False
+        self._thread: threading.Thread | None = None
+
+    def submit(
+        self,
+        fn: Any,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> concurrent.futures.Future[Any]:
+        with self._lock:
+            if self._shutdown:
+                raise RuntimeError("candidate SDK executor is shut down")
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run,
+                    name="native-candidate-sdk",
+                    daemon=True,
+                )
+                self._thread.start()
+            future: concurrent.futures.Future[Any] = concurrent.futures.Future()
+            try:
+                self._work.put_nowait((future, fn, args, kwargs))
+            except queue.Full as exc:
+                raise RuntimeError("candidate SDK executor capacity exceeded") from exc
+            return future
+
+    def _run(self) -> None:
+        while True:
+            item = self._work.get()
+            if item is None:
+                return
+            future, fn, args, kwargs = item
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn(*args, **kwargs))
+            except BaseException as exc:  # noqa: BLE001 - Future preserves worker failure
+                future.set_exception(exc)
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        with self._lock:
+            if self._shutdown:
+                thread = self._thread
+            else:
+                self._shutdown = True
+                if cancel_futures:
+                    try:
+                        while queued := self._work.get_nowait():
+                            queued[0].cancel()
+                    except queue.Empty:
+                        pass
+                self._work.put(None)
+                thread = self._thread
+        if wait and thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+
+class _CandidateLoginAttempt:
+    """A single isolated attempt that remains owned until real SDK work ends."""
+
+    def __init__(self, coroutine_factory: Any, candidate_store: Any) -> None:
+        self.done = threading.Event()
+        self.result: Any = None
+        self.error: BaseException | None = None
+        self._coroutine_factory = coroutine_factory
+        self._candidate_store = candidate_store
+        self._state_lock = threading.Lock()
+        self._abandoned = False
+        self._finished = False
+        self._thread = threading.Thread(
+            target=self._run,
+            name="native-candidate-login",
+            daemon=True,
+        )
+
+    @property
+    def finished(self) -> bool:
+        with self._state_lock:
+            return self._finished
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def abandon(self) -> bool:
+        """Relinquish the result only if the real attempt has not finished."""
+        with self._state_lock:
+            if self._finished:
+                return False
+            self._abandoned = True
+            return True
+
+    def _run(self) -> None:
+        import asyncio  # noqa: PLC0415
+
+        loop = asyncio.new_event_loop()
+        executor = _DaemonBoundedExecutor()
+        asyncio.set_event_loop(loop)
+        loop._default_executor = executor  # noqa: SLF001 - asyncio.to_thread ownership boundary
+        try:
+            self.result = loop.run_until_complete(self._coroutine_factory())
+        except BaseException as exc:  # noqa: BLE001 - request maps failures to a fixed body
+            self.error = exc
+        finally:
+            executor.shutdown(wait=True)
+            loop._default_executor = None  # noqa: SLF001 - prevent a second shutdown in close()
+            loop.close()
+            with self._state_lock:
+                abandoned = self._abandoned
+                self._finished = True
+            if abandoned:
+                try:
+                    self._candidate_store.discard()
+                except Exception:  # noqa: BLE001 - staged material is already unreachable
+                    pass
+            self.done.set()
+            with _CANDIDATE_RUNNER_LOCK:
+                global _ACTIVE_CANDIDATE_ATTEMPT
+                if _ACTIVE_CANDIDATE_ATTEMPT is self:
+                    _ACTIVE_CANDIDATE_ATTEMPT = None
+
+
+_CANDIDATE_RUNNER_LOCK = threading.Lock()
+_ACTIVE_CANDIDATE_ATTEMPT: _CandidateLoginAttempt | None = None
+
+
+def _start_candidate_login_attempt(
+    coroutine_factory: Any,
+    candidate_store: Any,
+) -> _CandidateLoginAttempt:
+    """Start one process-wide candidate attempt, refusing concurrent retries."""
+    global _ACTIVE_CANDIDATE_ATTEMPT
+
+    with _CANDIDATE_RUNNER_LOCK:
+        active = _ACTIVE_CANDIDATE_ATTEMPT
+        if active is not None and not active.finished:
+            candidate_store.discard()
+            raise _CandidateLoginTimeoutError("A prior candidate login is still running")
+        attempt = _CandidateLoginAttempt(coroutine_factory, candidate_store)
+        _ACTIVE_CANDIDATE_ATTEMPT = attempt
+        try:
+            attempt.start()
+        except Exception:
+            _ACTIVE_CANDIDATE_ATTEMPT = None
+            candidate_store.discard()
+            raise _RouterRebuildError("Candidate native login runner failed") from None
+        return attempt
+
+
+def _candidate_login_timeout_seconds(config: Any | None = None) -> float:
     """Return a finite positive timeout for isolated candidate authentication."""
-    raw = current_app.config.get(
+    source = current_app.config if config is None else config
+    raw = source.get(
         "NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS",
         _DEFAULT_CANDIDATE_LOGIN_TIMEOUT_SECONDS,
     )
@@ -741,6 +1584,23 @@ def _candidate_login_timeout_seconds() -> float:
     if not math.isfinite(timeout) or timeout <= 0:
         return _DEFAULT_CANDIDATE_LOGIN_TIMEOUT_SECONDS
     return timeout
+
+
+def _run_bounded_candidate_coroutine(
+    coroutine_factory: Any,
+    attempt_owner: Any,
+    *,
+    timeout: float,
+) -> Any:
+    """Run one isolated coroutine without spawning unbounded SDK workers."""
+    attempt = _start_candidate_login_attempt(coroutine_factory, attempt_owner)
+    if not attempt.done.wait(timeout):
+        if attempt.abandon():
+            raise _CandidateLoginTimeoutError("Candidate native login timed out")
+        attempt.done.wait()
+    if attempt.error is not None:
+        raise _RouterRebuildError("Candidate native login runner failed") from None
+    return attempt.result
 
 
 def _disable_broker_routing() -> None:
@@ -819,8 +1679,6 @@ def _activate_candidate_credentials(
     account_id: str,
 ) -> tuple[dict[str, Any], Any | None]:
     """Authenticate through an unpublished adapter within a wall-clock bound."""
-    import asyncio  # noqa: PLC0415
-
     from flinttrade_gateway.brokers.native_factory import build_native_adapters  # noqa: PLC0415
     from flinttrade_gateway.native_login import establish_native_sessions  # noqa: PLC0415
     from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
@@ -845,33 +1703,11 @@ def _activate_candidate_credentials(
         )
 
     timeout = _candidate_login_timeout_seconds()
-    box: dict[str, Any] = {}
-    done = threading.Event()
-
-    async def _run_bounded() -> dict[str, Any]:
-        return await asyncio.wait_for(_run(), timeout=timeout)
-
-    def _thread_run() -> None:
-        try:
-            box["results"] = asyncio.run(_run_bounded())
-        except TimeoutError:
-            box["timed_out"] = True
-        except BaseException as exc:  # noqa: BLE001 - re-raised without values
-            box["error"] = exc
-        finally:
-            done.set()
-
-    thread = threading.Thread(
-        target=_thread_run,
-        name="native-candidate-login",
-        daemon=True,
-    )
-    thread.start()
-    if not done.wait(timeout) or box.get("timed_out"):
-        raise _CandidateLoginTimeoutError("Candidate native login timed out")
-    if "error" in box:
-        raise _RouterRebuildError("Candidate native login runner failed") from None
-    results = box.get("results", {})
+    results = _run_bounded_candidate_coroutine(
+        _run,
+        candidate_store,
+        timeout=timeout,
+    ) or {}
 
     try:
         candidate_session = candidate_registry.get_session_for(adapter_id, account_id)
@@ -904,18 +1740,32 @@ def _restore_registry_session(
     adapter_id: str,
     account_id: str,
     prior_session: Any | None,
-) -> None:
-    """Restore a prior shared session, or leave the selector sessionless."""
-    try:
-        if prior_session is None:
-            registry.remove_session_for(adapter_id, account_id)
-        else:
-            registry.put_session(adapter_id, account_id, prior_session)
-    except Exception:  # noqa: BLE001 - routing is disabled by the caller on failure
-        try:
-            registry.remove_session_for(adapter_id, account_id)
-        except Exception:  # noqa: BLE001
-            pass
+    published_session: Any,
+) -> bool:
+    """Restore prior runtime state only while our published session is current."""
+    current = _registry_session_generation(registry, adapter_id, account_id)
+    prior_generation = (
+        _MISSING_REGISTRY_SESSION if prior_session is None else prior_session
+    )
+    if current is prior_generation:
+        return True
+    if current is not published_session:
+        logger.critical("Refused stale native session rollback")
+        return False
+    if prior_session is None:
+        return _compare_and_remove_registry_session(
+            registry,
+            adapter_id,
+            account_id,
+            published_session,
+        )
+    return _compare_and_put_registry_session(
+        registry,
+        adapter_id,
+        account_id,
+        published_session,
+        prior_session,
+    )
 
 
 def _rollback_committed_candidate(
@@ -923,23 +1773,38 @@ def _rollback_committed_candidate(
     registry: Any,
     adapter_id: str,
     account_id: str,
-    credential_snapshot: _CredentialSnapshot,
+    credential_receipt: _CredentialRollbackReceipt,
     prior_session: Any | None,
+    published_session: Any,
     *,
     workspace_mutation: _SelectorWorkspaceMutation | None = None,
     execution_default_mutation: _ExecutionDefaultMutation | None = None,
 ) -> None:
     """Restore every durable/runtime surface changed after candidate commit."""
     rollback_ok = True
+    workspace_generation: _WorkspaceGeneration | None = None
     if execution_default_mutation is not None:
         try:
-            _rollback_execution_default(execution_default_mutation)
+            workspace_generation = _rollback_execution_default(execution_default_mutation)
+            if workspace_generation is None:
+                rollback_ok = False
+                logger.critical("Refused stale native execution-default rollback")
         except Exception:  # noqa: BLE001 - routing remains unpublished below
             rollback_ok = False
             logger.critical("Could not restore native execution-default transaction")
     if workspace_mutation is not None:
         try:
-            _rollback_selector_workspace(workspace_mutation)
+            expected_workspace_generation = (
+                workspace_generation
+                if execution_default_mutation is not None
+                else workspace_mutation.workspace_generation
+            )
+            if expected_workspace_generation is None or _rollback_selector_workspace(
+                workspace_mutation,
+                expected=expected_workspace_generation,
+            ) is None:
+                rollback_ok = False
+                logger.critical("Refused stale native workspace rollback")
         except Exception:  # noqa: BLE001 - routing remains unpublished below
             rollback_ok = False
             logger.critical("Could not restore native workspace transaction")
@@ -947,10 +1812,17 @@ def _rollback_committed_candidate(
         store,
         adapter_id,
         account_id,
-        credential_snapshot,
+        credential_receipt,
     ):
         rollback_ok = False
-    _restore_registry_session(registry, adapter_id, account_id, prior_session)
+    if not _restore_registry_session(
+        registry,
+        adapter_id,
+        account_id,
+        prior_session,
+        published_session,
+    ):
+        rollback_ok = False
     if rollback_ok:
         _restore_router_from_vault(store, registry)
     else:
@@ -963,26 +1835,22 @@ def _demote_read_only_vault_primary(
     account_id: str,
     adapter_id: str,
     fallback_label: str,
-) -> None:
+    expected_generation: _SelectorCredentialGeneration,
+) -> _SelectorCredentialGeneration | None:
     """Clear the primary flag after a connected session proves read-only."""
     try:
-        credentials = store.retrieve_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not retrieve read-only native broker credentials for primary demotion")
-        return
-
-    try:
-        row = _stored_native_account(store, adapter_id, account_id) or {}
-        store.store(
-            account_id,
+        generation = _compare_and_set_selector_primary(
+            store,
             adapter_id,
-            str(row.get("label") or fallback_label),
-            credentials,
+            account_id,
+            expected_generation,
             is_primary=False,
-            adapter_id=adapter_id,
+            fallback_label=fallback_label,
         )
     except Exception:  # noqa: BLE001
         logger.warning("Could not demote read-only native broker vault primary flag")
+        return None
+    return generation
 
 
 def _demote_read_only_connected_account(
@@ -994,6 +1862,7 @@ def _demote_read_only_connected_account(
     fallback_label: str,
     prior_execution_default: str = "",
     mutation_sink: list[_ExecutionDefaultMutation] | None = None,
+    credential_receipt: _CredentialRollbackReceipt | None = None,
 ) -> str | None:
     """Remove a connected read-only selector from write-default metadata.
 
@@ -1015,12 +1884,17 @@ def _demote_read_only_connected_account(
         )
         if mutation_sink is not None and mutation is not None:
             mutation_sink.append(mutation)
-        _demote_read_only_vault_primary(
-            store,
-            account_id=account_id,
-            adapter_id=adapter_id,
-            fallback_label=fallback_label,
-        )
+        if credential_receipt is not None and credential_receipt.applied_generation is not None:
+            demoted_generation = _demote_read_only_vault_primary(
+                store,
+                account_id=account_id,
+                adapter_id=adapter_id,
+                fallback_label=fallback_label,
+                expected_generation=credential_receipt.applied_generation,
+            )
+            if demoted_generation is None:
+                raise RuntimeError("read-only vault generation changed")
+            credential_receipt.applied_generation = demoted_generation
     except Exception:  # noqa: BLE001 - demotion is metadata hygiene, not connect-critical
         logger.warning(
             "Read-only write-default demotion deferred for %s — persistent update failed",
@@ -1059,6 +1933,12 @@ def _do_connect(
             adapter_id,
             account_id,
         )
+        credential_receipt = _credential_rollback_receipt(
+            store,
+            adapter_id,
+            account_id,
+            credential_snapshot,
+        )
         candidate_store = store.stage_credentials_for(
             adapter_id,
             account_id,
@@ -1078,7 +1958,6 @@ def _do_connect(
             account_id,
         )
     except _CandidateLoginTimeoutError:
-        candidate_store.discard()
         return _public_connect_timeout_body(), 504
     except _RouterRebuildError:
         candidate_store.discard()
@@ -1102,6 +1981,28 @@ def _do_connect(
             "message": f"Login did not establish a session ({login_state}); credentials were not kept.",
         }, 502
 
+    if not _selector_credential_generation_matches(
+        store,
+        adapter_id,
+        account_id,
+        credential_receipt.prior_generation,
+    ):
+        candidate_store.discard()
+        _disable_broker_routing()
+        return {"status": "error", "message": "Broker account changed during login"}, 409
+    expected_prior_session = (
+        _MISSING_REGISTRY_SESSION if prior_session is None else prior_session
+    )
+    if not _registry_session_generation_matches(
+        registry,
+        adapter_id,
+        account_id,
+        expected_prior_session,
+    ):
+        candidate_store.discard()
+        _disable_broker_routing()
+        return {"status": "error", "message": "Broker session changed during login"}, 409
+
     actor_id = _operator_actor_id()
     if not _quiesce_current_router():
         candidate_store.discard()
@@ -1121,7 +2022,16 @@ def _do_connect(
         return {"status": "error", "message": "Could not register broker selector"}, 500
 
     try:
-        candidate_store.commit()
+        committed_generation = _commit_candidate_credentials(
+            store,
+            candidate_store,
+            adapter_id,
+            account_id,
+            credential_receipt.prior_generation,
+        )
+        if committed_generation is None:
+            raise RuntimeError("credential generation changed before commit")
+        credential_receipt.applied_generation = committed_generation
     except Exception:  # noqa: BLE001 - candidate values must never reach logs
         candidate_store.discard()
         _rollback_committed_candidate(
@@ -1129,22 +2039,31 @@ def _do_connect(
             registry,
             adapter_id,
             account_id,
-            credential_snapshot,
+            credential_receipt,
             prior_session,
+            candidate_session,
             workspace_mutation=workspace_mutation,
         )
         return {"status": "error", "message": "Could not persist broker auth material"}, 500
 
     try:
-        registry.put_session(adapter_id, account_id, candidate_session)
+        if not _compare_and_put_registry_session(
+            registry,
+            adapter_id,
+            account_id,
+            expected_prior_session,
+            candidate_session,
+        ):
+            raise RuntimeError("registry generation changed before publication")
     except Exception:  # noqa: BLE001
         _rollback_committed_candidate(
             store,
             registry,
             adapter_id,
             account_id,
-            credential_snapshot,
+            credential_receipt,
             prior_session,
+            candidate_session,
             workspace_mutation=workspace_mutation,
         )
         return {"status": "error", "message": "Could not publish broker session"}, 500
@@ -1160,6 +2079,7 @@ def _do_connect(
             fallback_label=label,
             prior_execution_default=workspace_mutation.prior_default,
             mutation_sink=execution_default_mutations,
+            credential_receipt=credential_receipt,
         )
 
     if _workspace_execution_default_is_disabled():
@@ -1173,8 +2093,9 @@ def _do_connect(
                 registry,
                 adapter_id,
                 account_id,
-                credential_snapshot,
+                credential_receipt,
                 prior_session,
+                candidate_session,
                 workspace_mutation=workspace_mutation,
                 execution_default_mutation=(
                     execution_default_mutations[0]
@@ -1560,6 +2481,12 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             adapter_id,
             account_id,
         )
+        credential_receipt = _credential_rollback_receipt(
+            store,
+            adapter_id,
+            account_id,
+            credential_snapshot,
+        )
         credentials = (
             fresh
             if isinstance(fresh, dict) and fresh
@@ -1581,7 +2508,6 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             account_id,
         )
     except _CandidateLoginTimeoutError:
-        candidate_store.discard()
         return jsonify(_public_connect_timeout_body()), 504
     except _RouterRebuildError:
         candidate_store.discard()
@@ -1600,6 +2526,34 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             },
         }), 502
 
+    if not _selector_credential_generation_matches(
+        store,
+        adapter_id,
+        account_id,
+        credential_receipt.prior_generation,
+    ):
+        candidate_store.discard()
+        _disable_broker_routing()
+        return jsonify({
+            "status": "error",
+            "message": "Broker account changed during login.",
+        }), 409
+    expected_prior_session = (
+        _MISSING_REGISTRY_SESSION if prior_session is None else prior_session
+    )
+    if not _registry_session_generation_matches(
+        registry,
+        adapter_id,
+        account_id,
+        expected_prior_session,
+    ):
+        candidate_store.discard()
+        _disable_broker_routing()
+        return jsonify({
+            "status": "error",
+            "message": "Broker session changed during login.",
+        }), 409
+
     if not _quiesce_current_router():
         candidate_store.discard()
         return jsonify({
@@ -1608,7 +2562,16 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
         }), 503
 
     try:
-        candidate_store.commit()
+        committed_generation = _commit_candidate_credentials(
+            store,
+            candidate_store,
+            adapter_id,
+            account_id,
+            credential_receipt.prior_generation,
+        )
+        if committed_generation is None:
+            raise RuntimeError("credential generation changed before commit")
+        credential_receipt.applied_generation = committed_generation
     except Exception:  # noqa: BLE001 - never log candidate credential values
         candidate_store.discard()
         _rollback_committed_candidate(
@@ -1616,22 +2579,31 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             registry,
             adapter_id,
             account_id,
-            credential_snapshot,
+            credential_receipt,
             prior_session,
+            candidate_session,
         )
         logger.warning("Could not persist verified native broker credentials")
         return jsonify({"status": "error", "message": "Could not persist broker credentials."}), 500
 
     try:
-        registry.put_session(adapter_id, account_id, candidate_session)
+        if not _compare_and_put_registry_session(
+            registry,
+            adapter_id,
+            account_id,
+            expected_prior_session,
+            candidate_session,
+        ):
+            raise RuntimeError("registry generation changed before publication")
     except Exception:  # noqa: BLE001
         _rollback_committed_candidate(
             store,
             registry,
             adapter_id,
             account_id,
-            credential_snapshot,
+            credential_receipt,
             prior_session,
+            candidate_session,
         )
         return jsonify({"status": "error", "message": "Could not publish broker session."}), 500
 
@@ -1645,6 +2617,7 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             account_id=account_id,
             fallback_label=str(row.get("label") or adapter_id),
             mutation_sink=execution_default_mutations,
+            credential_receipt=credential_receipt,
         )
 
     if _workspace_execution_default_is_disabled():
@@ -1658,8 +2631,9 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
                 registry,
                 adapter_id,
                 account_id,
-                credential_snapshot,
+                credential_receipt,
                 prior_session,
+                candidate_session,
                 execution_default_mutation=(
                     execution_default_mutations[0]
                     if execution_default_mutations
@@ -2191,6 +3165,7 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
         return jsonify({"status": "error", "message": "Credential store cannot update primary metadata."}), 500
     try:
         prior_primary_metadata = snapshot_primary()
+        primary_receipt = _primary_rollback_receipt(store, prior_primary_metadata)
     except Exception:  # noqa: BLE001
         return jsonify({"status": "error", "message": "Could not snapshot primary metadata."}), 500
 
@@ -2203,32 +3178,36 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
             True,
         )
 
-        set_primary = getattr(store, "set_primary", None)
-        if not callable(set_primary):
-            raise RuntimeError("Credential store cannot set primary accounts")
-        set_primary(account_id)
+        _apply_primary_metadata(store, account_id, primary_receipt)
 
         _configure_broker_router_checked(store, registry)
     except Exception:  # noqa: BLE001
         rollback_ok = True
         if workspace_mutation is not None:
             try:
-                _rollback_selector_workspace(workspace_mutation)
+                if _rollback_selector_workspace(workspace_mutation) is None:
+                    rollback_ok = False
+                    logger.warning("Refused stale workspace primary rollback")
             except Exception:  # noqa: BLE001
                 rollback_ok = False
                 logger.warning("Could not restore workspace primary metadata")
-        try:
-            restore_primary(prior_primary_metadata)
-        except Exception:  # noqa: BLE001
-            rollback_ok = False
-            logger.warning("Could not restore vault primary metadata")
+        if rollback_ok:
+            try:
+                if not _restore_primary_metadata(store, primary_receipt):
+                    rollback_ok = False
+            except Exception:  # noqa: BLE001
+                rollback_ok = False
+                logger.warning("Could not restore vault primary metadata")
+        else:
+            _close_primary_rollback_receipt(primary_receipt)
         if rollback_ok:
             _restore_router_from_vault(store, registry)
         else:
-            current_app.config["BROKER_ROUTER"] = None
+            _disable_broker_routing()
         logger.warning("Could not set native primary broker account")
         return jsonify({"status": "error", "message": "Could not set primary native account."}), 500
 
+    _close_primary_rollback_receipt(primary_receipt)
     return jsonify({
         "status": "success",
         "data": {
