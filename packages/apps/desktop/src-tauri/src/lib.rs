@@ -107,6 +107,10 @@ const SIDECAR_FORCE_EXIT_COMMAND: &[u8] = b"FLINTTRADE_FORCE_EXIT\n";
 /// the hard-kill fallback. Polls are 100ms, so this is a 90-second budget.
 const SIDECAR_SHUTDOWN_POLLS: usize = 900;
 
+/// Short window for Python to promote the exact pending recovery record. A
+/// pending PID must not consume the 90-second confirmed-application budget.
+const SIDECAR_PENDING_HANDSHAKE_POLLS: usize = 30;
+
 /// Initial grace before stale-sidecar recovery fails closed. The Python
 /// watchdog may take almost 2s to observe parent death, then tick capture may
 /// use its full 3s flush timeout. Six seconds preserves that path plus margin.
@@ -1409,17 +1413,29 @@ fn supervise_terminated_application(app: &AppHandle, record: &SidecarRecord) {
 fn kill_backend(app: &AppHandle) {
     if let Some(state) = app.try_state::<BackendState>() {
         if let Some(mut managed) = state.0.lock().unwrap().take() {
+            let record_path = sidecar_pid_file();
             if managed.child.write(SIDECAR_SHUTDOWN_COMMAND).is_ok()
-                && wait_for_process_tree_exit(&managed.record, SIDECAR_SHUTDOWN_POLLS)
+                && wait_for_sidecar_shutdown(
+                    &mut managed.record,
+                    SIDECAR_PENDING_HANDSHAKE_POLLS,
+                    SIDECAR_SHUTDOWN_POLLS,
+                    record_path.as_deref(),
+                )
             {
                 remove_sidecar_record(&managed.record);
                 return;
             }
             match process_tree_liveness(&managed.record) {
                 ProcessLiveness::Alive => {
-                    eprintln!(
-                        "[flinttrade] backend did not stop gracefully within 90s; forcing exit"
-                    );
+                    if managed.record.application_pid.is_some() {
+                        eprintln!(
+                            "[flinttrade] backend did not stop gracefully within 90s; forcing exit"
+                        );
+                    } else {
+                        eprintln!(
+                            "[flinttrade] backend PID handshake did not complete; forcing exact-pipe exit"
+                        );
+                    }
                 }
                 ProcessLiveness::Unknown => {
                     eprintln!(
@@ -1428,9 +1444,13 @@ fn kill_backend(app: &AppHandle) {
                 }
                 ProcessLiveness::Dead => {}
             }
-            if let Err(error) = managed.child.write(SIDECAR_FORCE_EXIT_COMMAND) {
-                eprintln!("[flinttrade] backend force-exit pipe request failed: {error}");
-            }
+            let force_exit_written = match managed.child.write(SIDECAR_FORCE_EXIT_COMMAND) {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("[flinttrade] backend force-exit pipe request failed: {error}");
+                    false
+                }
+            };
             // This handle belongs to the exact launcher spawned in this
             // process. Killing it is safe, but it is not sufficient for a
             // PyInstaller application child; the exact inherited stdin pipe
@@ -1438,7 +1458,21 @@ fn kill_backend(app: &AppHandle) {
             if let Err(error) = managed.child.kill() {
                 eprintln!("[flinttrade] backend launcher hard-kill request failed: {error}");
             }
-            if wait_for_process_tree_exit(&managed.record, SIDECAR_KILL_CONFIRM_POLLS) {
+            if wait_for_sidecar_shutdown(
+                &mut managed.record,
+                SIDECAR_KILL_CONFIRM_POLLS,
+                SIDECAR_KILL_CONFIRM_POLLS,
+                record_path.as_deref(),
+            ) {
+                remove_sidecar_record(&managed.record);
+            } else if pending_record_cleanup_allowed(
+                &managed.record,
+                force_exit_written,
+                process_liveness(managed.record.sidecar_pid),
+            ) {
+                // Python starts its exact-pipe listener before mandatory PID
+                // promotion and refuses backend boot if that record vanishes.
+                // Compare-and-delete prevents touching a concurrent promotion.
                 remove_sidecar_record(&managed.record);
             } else {
                 eprintln!(
@@ -1447,6 +1481,69 @@ fn kill_backend(app: &AppHandle) {
             }
         }
     }
+}
+
+fn wait_for_sidecar_shutdown_with<R, L, W>(
+    record: &mut SidecarRecord,
+    pending_polls: usize,
+    confirmed_polls: usize,
+    mut refresh: R,
+    mut liveness: L,
+    mut wait: W,
+) -> bool
+where
+    R: FnMut(&SidecarRecord) -> Option<SidecarRecord>,
+    L: FnMut(&SidecarRecord) -> ProcessLiveness,
+    W: FnMut(),
+{
+    let mut remaining = if record.application_pid.is_some() {
+        confirmed_polls
+    } else {
+        pending_polls
+    };
+    loop {
+        let was_pending = record.application_pid.is_none();
+        if let Some(refreshed) = refresh(record) {
+            *record = refreshed;
+            if was_pending && record.application_pid.is_some() {
+                remaining = confirmed_polls;
+            }
+        }
+        if liveness(record) == ProcessLiveness::Dead {
+            return true;
+        }
+        if remaining == 0 {
+            return false;
+        }
+        remaining -= 1;
+        wait();
+    }
+}
+
+fn wait_for_sidecar_shutdown(
+    record: &mut SidecarRecord,
+    pending_polls: usize,
+    confirmed_polls: usize,
+    record_path: Option<&Path>,
+) -> bool {
+    wait_for_sidecar_shutdown_with(
+        record,
+        pending_polls,
+        confirmed_polls,
+        |expected| record_path.and_then(|path| refresh_sidecar_record_at(path, expected)),
+        process_tree_liveness,
+        || std::thread::sleep(std::time::Duration::from_millis(100)),
+    )
+}
+
+fn pending_record_cleanup_allowed(
+    record: &SidecarRecord,
+    force_exit_written: bool,
+    launcher_liveness: ProcessLiveness,
+) -> bool {
+    record.application_pid.is_none()
+        && force_exit_written
+        && launcher_liveness == ProcessLiveness::Dead
 }
 
 // ---------------------------------------------------------------------------
@@ -1845,16 +1942,6 @@ fn process_tree_liveness(record: &SidecarRecord) -> ProcessLiveness {
     }
 }
 
-fn wait_for_process_tree_exit(record: &SidecarRecord, polls: usize) -> bool {
-    for _ in 0..polls {
-        if process_tree_liveness(record) == ProcessLiveness::Dead {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    process_tree_liveness(record) == ProcessLiveness::Dead
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordedApplicationExit {
     ConfirmedDead,
@@ -1881,7 +1968,13 @@ where
         Ok(Some(value)) if looks_like_backend_sidecar(&value) => value,
         Ok(Some(_)) => return RecordedApplicationExit::ConfirmedReused,
         Ok(None) => return RecordedApplicationExit::ConfirmedDead,
-        Err(_) => return RecordedApplicationExit::Unresolved,
+        Err(_) => {
+            return if liveness(application_pid) == ProcessLiveness::Dead {
+                RecordedApplicationExit::ConfirmedDead
+            } else {
+                RecordedApplicationExit::Unresolved
+            };
+        }
     };
     let mut unknown_polls = 0;
     loop {
@@ -2382,6 +2475,23 @@ fn promote_sidecar_record(
         )
     })?;
     promote_sidecar_record_at(&path, expected, application_pid)
+}
+
+/// Re-read an exact launch record, accepting only its one-way pending-to-PID
+/// promotion. Any other field change belongs to unrelated or corrupted state.
+fn refresh_sidecar_record_at(path: &Path, expected: &SidecarRecord) -> Option<SidecarRecord> {
+    let current = parse_sidecar_record(&std::fs::read_to_string(path).ok()?)?;
+    if current.sidecar_pid != expected.sidecar_pid
+        || current.shell_pid != expected.shell_pid
+        || current.launch_token != expected.launch_token
+    {
+        return None;
+    }
+    match (expected.application_pid, current.application_pid) {
+        (Some(expected_pid), Some(current_pid)) if expected_pid == current_pid => Some(current),
+        (None, None | Some(_)) => Some(current),
+        _ => None,
+    }
 }
 
 /// Compare every identity field before deleting. The process-lifetime
@@ -3506,6 +3616,138 @@ mod tests {
             RecordedApplicationExit::Unresolved
         );
         assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn terminated_launcher_identity_error_after_exit_is_confirmed_dead() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                |_| ProcessLiveness::Dead,
+                |_| Err(std::io::Error::other(
+                    "process exited during identity lookup"
+                )),
+                || panic!("a confirmed-dead process must not be polled"),
+            ),
+            RecordedApplicationExit::ConfirmedDead
+        );
+    }
+
+    #[test]
+    fn pending_shutdown_uses_short_handshake_budget() {
+        assert!(SIDECAR_PENDING_HANDSHAKE_POLLS < SIDECAR_SHUTDOWN_POLLS);
+    }
+
+    #[test]
+    fn shutdown_refresh_accepts_only_this_launchs_pid_promotion() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-shutdown-refresh-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(SIDECAR_PID_FILE);
+        let pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let promoted = SidecarRecord {
+            application_pid: Some(5678),
+            ..pending.clone()
+        };
+        std::fs::write(&path, format_sidecar_record(&promoted)).unwrap();
+
+        assert_eq!(refresh_sidecar_record_at(&path, &pending), Some(promoted));
+
+        let unrelated = SidecarRecord {
+            launch_token: "b".repeat(64),
+            ..pending.clone()
+        };
+        assert_eq!(refresh_sidecar_record_at(&path, &unrelated), None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn shutdown_wait_extends_from_pending_to_confirmed_budget_after_promotion() {
+        let mut pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let promoted = SidecarRecord {
+            application_pid: Some(5678),
+            ..pending.clone()
+        };
+        let refreshes = std::cell::RefCell::new(std::collections::VecDeque::from([
+            Some(pending.clone()),
+            Some(promoted.clone()),
+            Some(promoted.clone()),
+        ]));
+        let promoted_polls = std::cell::Cell::new(0);
+
+        assert!(wait_for_sidecar_shutdown_with(
+            &mut pending,
+            1,
+            3,
+            |_| refreshes.borrow_mut().pop_front().flatten(),
+            |record| {
+                if record.application_pid.is_none() {
+                    ProcessLiveness::Unknown
+                } else if promoted_polls.replace(promoted_polls.get() + 1) == 0 {
+                    ProcessLiveness::Alive
+                } else {
+                    ProcessLiveness::Dead
+                }
+            },
+            || {},
+        ));
+        assert_eq!(pending, promoted);
+        assert_eq!(promoted_polls.get(), 2);
+    }
+
+    #[test]
+    fn pending_record_cleanup_requires_exact_pipe_stop_and_dead_launcher() {
+        let pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let promoted = SidecarRecord {
+            application_pid: Some(5678),
+            ..pending.clone()
+        };
+
+        assert!(pending_record_cleanup_allowed(
+            &pending,
+            true,
+            ProcessLiveness::Dead
+        ));
+        assert!(!pending_record_cleanup_allowed(
+            &pending,
+            false,
+            ProcessLiveness::Dead
+        ));
+        assert!(!pending_record_cleanup_allowed(
+            &pending,
+            true,
+            ProcessLiveness::Unknown
+        ));
+        assert!(!pending_record_cleanup_allowed(
+            &promoted,
+            true,
+            ProcessLiveness::Dead
+        ));
     }
 
     #[test]

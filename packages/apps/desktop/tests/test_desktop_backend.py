@@ -129,6 +129,17 @@ def test_application_refuses_to_promote_another_launch_record(
 
 
 @pytest.mark.unit
+def test_backend_boot_refuses_untracked_application_pid(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(entry, "promote_application_pid_record", lambda: False)
+
+    with pytest.raises(SystemExit, match="application PID record promotion failed"):
+        entry.require_application_pid_record()
+
+
+@pytest.mark.unit
 def test_watchdog_off_without_env(entry: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(entry.PARENT_PID_ENV, raising=False)
     assert entry.start_parent_watchdog() is None

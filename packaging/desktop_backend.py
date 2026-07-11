@@ -238,6 +238,12 @@ def promote_application_pid_record(
         return True
 
 
+def require_application_pid_record() -> None:
+    """Refuse to start an application process the shell cannot track exactly."""
+    if not promote_application_pid_record():
+        raise SystemExit("application PID record promotion failed; refusing untracked backend boot")
+
+
 def _exit_orphaned(request_shutdown: Callable[[], object] | None = None) -> None:
     """Gracefully unwind the sidecar because the desktop shell is gone."""
     print("[desktop-sidecar] desktop shell exited; shutting down backend", file=sys.stderr, flush=True)
@@ -424,8 +430,7 @@ if __name__ == "__main__":
     # disappear while this Python application remains alive. Publish the real
     # PID directly into the exact tokenised record first, then announce it so
     # Rust can independently confirm the process identity.
-    if not promote_application_pid_record():
-        print("[desktop-sidecar] application PID record promotion deferred to shell", file=sys.stderr)
+    require_application_pid_record()
     announce_application_pid()
 
     from flinttrade_core.desktop import main  # noqa: PLC0415 - after watchdog start, see above
