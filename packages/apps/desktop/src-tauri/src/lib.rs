@@ -103,8 +103,9 @@ const SIDECAR_SHUTDOWN_COMMAND: &[u8] = b"FLINTTRADE_SHUTDOWN\n";
 /// avoids sending a terminating signal to any PID recovered from disk.
 const SIDECAR_FORCE_EXIT_COMMAND: &[u8] = b"FLINTTRADE_FORCE_EXIT\n";
 
-/// Maximum wait for graceful sidecar cleanup before the hard-kill fallback.
-const SIDECAR_SHUTDOWN_POLLS: usize = 100;
+/// Maximum wait for Python's 60s request drain plus background cleanup before
+/// the hard-kill fallback. Polls are 100ms, so this is a 90-second budget.
+const SIDECAR_SHUTDOWN_POLLS: usize = 900;
 
 /// Initial grace before stale-sidecar recovery fails closed. The Python
 /// watchdog may take almost 2s to observe parent death, then tick capture may
@@ -113,6 +114,10 @@ const SIDECAR_WATCHDOG_GRACE_POLLS: usize = 60;
 
 /// Brief confirmation window after a hard kill before retaining recovery data.
 const SIDECAR_KILL_CONFIRM_POLLS: usize = 10;
+
+/// Consecutive inconclusive supervisor probes tolerated before recovery state
+/// is retained for the next explicit startup repair instead of polling forever.
+const SIDECAR_SUPERVISOR_UNKNOWN_POLLS: usize = 50;
 
 /// File name of the platform's bootstrap install/update script. The same file
 /// can live inside a source workspace (``scripts/install/``) or inside the
@@ -1379,13 +1384,17 @@ fn supervise_terminated_application(app: &AppHandle, record: &SidecarRecord) {
     if let Err(error) = std::thread::Builder::new()
         .name("flinttrade-backend-supervisor".to_string())
         .spawn(move || {
-            if wait_for_recorded_application_exit(&monitor_record) {
-                finalise_terminated_backend(&monitor_app, &monitor_record);
-            } else {
-                eprintln!(
-                    "[flinttrade] backend launcher exited before the application PID was recorded; retaining recovery state"
-                );
-                surface_backend_recovery(&monitor_app);
+            match wait_for_recorded_application_exit(&monitor_record) {
+                RecordedApplicationExit::ConfirmedDead
+                | RecordedApplicationExit::ConfirmedReused => {
+                    finalise_terminated_backend(&monitor_app, &monitor_record);
+                }
+                RecordedApplicationExit::Unresolved => {
+                    eprintln!(
+                        "[flinttrade] backend application identity could not be confirmed; retaining recovery state"
+                    );
+                    surface_backend_recovery(&monitor_app);
+                }
             }
         })
     {
@@ -1409,7 +1418,7 @@ fn kill_backend(app: &AppHandle) {
             match process_tree_liveness(&managed.record) {
                 ProcessLiveness::Alive => {
                     eprintln!(
-                        "[flinttrade] backend did not stop gracefully within 10s; forcing exit"
+                        "[flinttrade] backend did not stop gracefully within 90s; forcing exit"
                     );
                 }
                 ProcessLiveness::Unknown => {
@@ -1846,30 +1855,65 @@ fn wait_for_process_tree_exit(record: &SidecarRecord, polls: usize) -> bool {
     process_tree_liveness(record) == ProcessLiveness::Dead
 }
 
-fn wait_for_recorded_application_exit_with<L, W>(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordedApplicationExit {
+    ConfirmedDead,
+    ConfirmedReused,
+    Unresolved,
+}
+
+fn wait_for_recorded_application_exit_with<L, I, W>(
     record: &SidecarRecord,
+    max_unknown_polls: usize,
     mut liveness: L,
+    mut identity: I,
     mut wait: W,
-) -> bool
+) -> RecordedApplicationExit
 where
     L: FnMut(u32) -> ProcessLiveness,
+    I: FnMut(u32) -> std::io::Result<Option<String>>,
     W: FnMut(),
 {
     let Some(application_pid) = record.application_pid else {
-        return false;
+        return RecordedApplicationExit::Unresolved;
     };
+    let initial_identity = match identity(application_pid) {
+        Ok(Some(value)) if looks_like_backend_sidecar(&value) => value,
+        Ok(Some(_)) => return RecordedApplicationExit::ConfirmedReused,
+        Ok(None) => return RecordedApplicationExit::ConfirmedDead,
+        Err(_) => return RecordedApplicationExit::Unresolved,
+    };
+    let mut unknown_polls = 0;
     loop {
         match liveness(application_pid) {
-            ProcessLiveness::Dead => return true,
-            ProcessLiveness::Alive | ProcessLiveness::Unknown => wait(),
+            ProcessLiveness::Dead => return RecordedApplicationExit::ConfirmedDead,
+            ProcessLiveness::Alive | ProcessLiveness::Unknown => {
+                match identity(application_pid) {
+                    Ok(Some(value)) if value == initial_identity => {
+                        unknown_polls = 0;
+                    }
+                    Ok(Some(_)) => return RecordedApplicationExit::ConfirmedReused,
+                    Ok(None) | Err(_) => {
+                        unknown_polls += 1;
+                        if unknown_polls >= max_unknown_polls.max(1) {
+                            return RecordedApplicationExit::Unresolved;
+                        }
+                    }
+                }
+                wait();
+            }
         }
     }
 }
 
-fn wait_for_recorded_application_exit(record: &SidecarRecord) -> bool {
-    wait_for_recorded_application_exit_with(record, process_liveness, || {
-        std::thread::sleep(std::time::Duration::from_millis(100))
-    })
+fn wait_for_recorded_application_exit(record: &SidecarRecord) -> RecordedApplicationExit {
+    wait_for_recorded_application_exit_with(
+        record,
+        SIDECAR_SUPERVISOR_UNKNOWN_POLLS,
+        process_liveness,
+        process_command_line,
+        || std::thread::sleep(std::time::Duration::from_millis(100)),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3362,17 +3406,22 @@ mod tests {
         let probed = std::cell::RefCell::new(Vec::new());
         let waits = std::cell::Cell::new(0);
 
-        assert!(wait_for_recorded_application_exit_with(
-            &record,
-            |pid| {
-                probed.borrow_mut().push(pid);
-                states
-                    .borrow_mut()
-                    .pop_front()
-                    .expect("test liveness sequence exhausted")
-            },
-            || waits.set(waits.get() + 1),
-        ));
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                |pid| {
+                    probed.borrow_mut().push(pid);
+                    states
+                        .borrow_mut()
+                        .pop_front()
+                        .expect("test liveness sequence exhausted")
+                },
+                |_| Ok(Some("flinttrade-backend\t5678\tstable-start".to_string())),
+                || waits.set(waits.get() + 1),
+            ),
+            RecordedApplicationExit::ConfirmedDead
+        );
         assert_eq!(probed.into_inner(), vec![5678, 5678, 5678, 5678]);
         assert_eq!(waits.get(), 3);
     }
@@ -3386,11 +3435,82 @@ mod tests {
             launch_token: "a".repeat(64),
         };
 
-        assert!(!wait_for_recorded_application_exit_with(
-            &record,
-            |_| panic!("pending application PID must not be probed"),
-            || panic!("pending application PID must not be polled"),
-        ));
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                |_| panic!("pending application PID must not be probed"),
+                |_| panic!("pending application identity must not be probed"),
+                || panic!("pending application PID must not be polled"),
+            ),
+            RecordedApplicationExit::Unresolved
+        );
+    }
+
+    #[test]
+    fn terminated_launcher_stops_supervising_when_application_pid_is_reused() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let identities = std::cell::RefCell::new(std::collections::VecDeque::from([
+            Ok(Some("flinttrade-backend\t5678\tfirst-start".to_string())),
+            Ok(Some("flinttrade-backend\t5678\tfirst-start".to_string())),
+            Ok(Some("unrelated-process\t5678\tsecond-start".to_string())),
+        ]));
+        let waits = std::cell::Cell::new(0);
+
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                |_| ProcessLiveness::Alive,
+                |_| identities
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("identity sequence exhausted"),
+                || waits.set(waits.get() + 1),
+            ),
+            RecordedApplicationExit::ConfirmedReused
+        );
+        assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn terminated_launcher_bounds_persistently_unknown_application_identity() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let first = std::cell::Cell::new(true);
+        let waits = std::cell::Cell::new(0);
+
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                2,
+                |_| ProcessLiveness::Unknown,
+                |_| {
+                    if first.replace(false) {
+                        Ok(Some("flinttrade-backend\t5678\tstable-start".to_string()))
+                    } else {
+                        Err(std::io::Error::other("identity unavailable"))
+                    }
+                },
+                || waits.set(waits.get() + 1),
+            ),
+            RecordedApplicationExit::Unresolved
+        );
+        assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn graceful_shutdown_budget_covers_python_drain_and_cleanup() {
+        assert!(SIDECAR_SHUTDOWN_POLLS >= 750);
     }
 
     #[cfg(unix)]
