@@ -619,6 +619,50 @@ class TestLoadHolidays:
 
         assert cron.holiday_payload == payload
 
+    def test_refresh_mutates_the_existing_holiday_set(self):
+        import asyncio
+        from flinttrade_automation.cron_manager import CronManager
+
+        payloads = [
+            {"holidays": ["2026-01-26"]},
+            {"holidays": ["2027-01-26"]},
+        ]
+
+        async def holidays(**_kwargs):
+            return payloads.pop(0)
+
+        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        retained_reference = cron.holidays
+
+        asyncio.run(cron.load_holidays())
+        asyncio.run(cron.load_holidays())
+
+        assert cron.holidays is retained_reference
+        assert retained_reference == {"2027-01-26"}
+
+    def test_failed_refresh_retains_the_last_authoritative_calendar(self):
+        import asyncio
+        from flinttrade_automation.cron_manager import CronManager
+
+        calls = 0
+
+        async def holidays(**_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"holidays": ["2026-01-26"]}
+            raise RuntimeError("calendar unavailable")
+
+        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        asyncio.run(cron.load_holidays())
+        first_payload = cron.holiday_payload
+
+        result = asyncio.run(cron.load_holidays())
+
+        assert result == {"2026-01-26"}
+        assert cron.holidays == {"2026-01-26"}
+        assert cron.holiday_payload is first_payload
+
     def test_requests_active_year_with_guarded_legacy_fallback(self):
         import asyncio
         from flinttrade_automation.cron_manager import load_holidays_from_client

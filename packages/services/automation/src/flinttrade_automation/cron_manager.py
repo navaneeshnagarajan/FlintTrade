@@ -534,10 +534,22 @@ class CronManager:
     async def load_holidays(self) -> set[str]:
         """Load holidays from OpenAlgo and cache them. Must be awaited."""
         if self.openalgo_client:
-            self._holidays = await load_holidays_from_client(
+            missing_payload = object()
+            payload: Any = missing_payload
+
+            def retain_payload(value: Any) -> None:
+                nonlocal payload
+                payload = value
+
+            loaded = await load_holidays_from_client(
                 self.openalgo_client,
-                payload_sink=lambda payload: setattr(self, "_holiday_payload", payload),
+                payload_sink=retain_payload,
             )
+            if payload is missing_payload:
+                return self._holidays
+            self._holiday_payload = payload
+            self._holidays.clear()
+            self._holidays.update(loaded)
         return self._holidays
 
     def register_builtin_jobs(self) -> None:
