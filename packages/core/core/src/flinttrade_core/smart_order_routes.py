@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -237,6 +238,13 @@ class GatedChildExecutor:
             except Exception:
                 logger.debug("portfolio-state provider failed — L2 not enforced this child", exc_info=True)
 
+        # The portfolio read is awaited and can be slow. Cancellation or JTI
+        # revocation during that window must remain a hard order barrier.
+        if self._pre_dispatch_check is not None:
+            reason = self._pre_dispatch_check()
+            if reason:
+                raise SmartRouteAbort(reason)
+
         # --- L1–L5 per child ------------------------------------------------
         try:
             results = self._safety.check_order(
@@ -253,6 +261,12 @@ class GatedChildExecutor:
             return _GatedDecision(
                 False, error=f"Blocked by safety system [{blocked.layer}]: {blocked.reason}"
             )
+
+        # No await occurs between this final brake and gate minting/dispatch.
+        if self._pre_dispatch_check is not None:
+            reason = self._pre_dispatch_check()
+            if reason:
+                raise SmartRouteAbort(reason)
 
         # --- gate + ACL + one-shot dispatch ---------------------------------
         try:
@@ -324,10 +338,12 @@ class _SmartJob:
     error: str = ""
     result: Any = None  # live SmartRouteResult once the router creates it
     cancel_requested: bool = False
+    worker: threading.Thread | None = field(default=None, repr=False, compare=False)
 
 
 _JOBS: dict[str, _SmartJob] = {}
 _JOBS_LOCK = threading.Lock()
+_ACCEPTING_JOBS = True
 
 # Hard cap on SIMULTANEOUSLY RUNNING jobs (not just stored snapshots): each
 # job is a live-order worker thread, and an unbounded number of them is a
@@ -400,8 +416,43 @@ def _snapshot(job: _SmartJob) -> dict[str, Any]:
 
 def _reset_jobs_for_tests() -> None:
     """Clear the job store (test isolation helper)."""
+    global _ACCEPTING_JOBS
     with _JOBS_LOCK:
         _JOBS.clear()
+        _ACCEPTING_JOBS = True
+
+
+def start_smart_order_jobs() -> bool:
+    """Open smart-route admission for a new runtime generation.
+
+    Admission stays closed if an earlier generation still owns a live worker.
+    """
+    global _ACCEPTING_JOBS
+    with _JOBS_LOCK:
+        if any(job.worker is not None and job.worker.is_alive() for job in _JOBS.values()):
+            return False
+        _ACCEPTING_JOBS = True
+        return True
+
+
+def shutdown_smart_order_jobs(*, timeout: float) -> bool:
+    """Close admission, cancel every running job, and join owned workers."""
+    global _ACCEPTING_JOBS
+    deadline = time.monotonic() + max(timeout, 0.0)
+    with _JOBS_LOCK:
+        _ACCEPTING_JOBS = False
+        jobs = [job for job in _JOBS.values() if job.status == "running"]
+        for job in jobs:
+            job.cancel_requested = True
+        workers = [job.worker for job in jobs if job.worker is not None]
+
+    current = threading.current_thread()
+    for worker in workers:
+        if worker is current:
+            continue
+        worker.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    return all(worker is current or not worker.is_alive() for worker in workers)
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +667,11 @@ def start_smart_route() -> tuple[Any, int]:
     # deployment the cap/dup-guard and cancel are per-worker — documented in
     # the module docstring's operational caveat.)
     with _JOBS_LOCK:
+        if not _ACCEPTING_JOBS:
+            return jsonify({
+                "status": "error",
+                "message": "Smart-order routing is shutting down",
+            }), 503
         running = [j for j in _JOBS.values() if j.status == "running"]
         if len(running) >= _MAX_RUNNING_JOBS:
             return jsonify({
@@ -752,7 +808,19 @@ def start_smart_route() -> tuple[Any, int]:
             job.status = "error"
             job.error = "smart route failed"
 
-    threading.Thread(target=_run, name=f"smart-route-{job.job_id}", daemon=True).start()
+    worker = threading.Thread(target=_run, name=f"smart-route-{job.job_id}", daemon=True)
+    with _JOBS_LOCK:
+        if not _ACCEPTING_JOBS or job.cancel_requested:
+            job.status = "cancelled"
+            job.error = "smart-order runtime is shutting down"
+            return jsonify({
+                "status": "error",
+                "message": "Smart-order routing is shutting down",
+            }), 503
+        job.worker = worker
+        # Start while holding the ownership lock so shutdown cannot observe an
+        # assigned-but-not-started worker and return before it begins.
+        worker.start()
 
     logger.info(
         "Smart-route job started | job=%s %s %s qty=%d urgency=%s adapter=%s account=%s",

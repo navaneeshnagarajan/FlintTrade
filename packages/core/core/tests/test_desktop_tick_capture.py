@@ -569,6 +569,7 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import flinttrade_core.agent_routes as agent_routes
+    import flinttrade_core.smart_order_routes as smart_routes
 
     events: list[str] = []
     stream_shutdown = threading.Event()
@@ -579,7 +580,13 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
 
     def wait_for_idle(_timeout: float) -> bool:
         assert stream_shutdown.is_set()
-        assert events == ["agent-stop", "rotation-stop", "capture-stop"]
+        assert events == [
+            "smart-stop",
+            "agent-stop",
+            "router-retire",
+            "rotation-stop",
+            "capture-stop",
+        ]
         return True
 
     tracker.wait_for_idle.side_effect = wait_for_idle
@@ -589,12 +596,24 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
         RUNTIME_REQUEST_TRACKER=tracker,
         SIGNAL_STREAM_SHUTDOWN_EVENT=stream_shutdown,
         ROTATION_SCHEDULER=rotation,
+        BROKER_ROUTER=object(),
     )
     monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
     monkeypatch.setattr(
         agent_routes,
         "shutdown_agent_runtime",
         lambda _app, **_kwargs: events.append("agent-stop") or True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        smart_routes,
+        "shutdown_smart_order_jobs",
+        lambda **_kwargs: events.append("smart-stop") or True,
+    )
+    monkeypatch.setattr(
+        desktop,
+        "retire_broker_router_generation",
+        lambda _app: events.append("router-retire") or True,
         raising=False,
     )
     monkeypatch.setattr(

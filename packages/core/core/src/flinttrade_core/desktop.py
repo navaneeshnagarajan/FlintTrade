@@ -61,6 +61,7 @@ from .app import (
     _tick_capture_watchlist,
     _workspace_dir,
     create_flask_app,
+    retire_broker_router_generation,
 )
 from .openalgo_client import client_close_sync
 from .workspace import Workspace
@@ -535,6 +536,10 @@ def _build_app() -> object:
         print(f"[desktop] safety system unavailable: {exc}", file=sys.stderr)
 
     flask_app = create_flask_app(safety=safety, audit=audit, client=client)
+    from .smart_order_routes import start_smart_order_jobs  # noqa: PLC0415
+
+    if not start_smart_order_jobs():
+        raise RuntimeError("an earlier smart-order runtime still owns a worker")
     if settings is None:
         try:
             from .config import Settings  # noqa: PLC0415
@@ -650,20 +655,54 @@ def serve(
                         type(exc).__name__,
                     )
 
+        live_write_owners_stopped = True
+        try:
+            from .smart_order_routes import shutdown_smart_order_jobs  # noqa: PLC0415
+
+            if not shutdown_smart_order_jobs(timeout=30.0):
+                live_write_owners_stopped = False
+                owner_quiesce_failed = True
+                shutdown_failed = True
+                logger.warning("Desktop smart-order shutdown timed out")
+        except Exception as exc:  # noqa: BLE001 - retain router for recovery
+            live_write_owners_stopped = False
+            owner_quiesce_failed = True
+            shutdown_failed = True
+            logger.warning(
+                "Desktop smart-order shutdown failed (%s)",
+                type(exc).__name__,
+            )
+
         try:
             from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
 
             if not shutdown_agent_runtime(app, timeout=30.0):
+                live_write_owners_stopped = False
                 owner_quiesce_failed = True
                 shutdown_failed = True
                 logger.warning("Desktop autonomous agent shutdown timed out")
         except Exception as exc:  # noqa: BLE001 - live agent ownership must fail closed
+            live_write_owners_stopped = False
             owner_quiesce_failed = True
             shutdown_failed = True
             logger.warning(
                 "Desktop autonomous agent shutdown failed (%s)",
                 type(exc).__name__,
             )
+
+        if live_write_owners_stopped:
+            try:
+                if not retire_broker_router_generation(app):
+                    owner_quiesce_failed = True
+                    shutdown_failed = True
+                    logger.warning("Desktop broker-router retirement timed out")
+            except Exception as exc:  # noqa: BLE001 - retain dependencies for recovery
+                owner_quiesce_failed = True
+                shutdown_failed = True
+                logger.warning(
+                    "Desktop broker-router retirement failed (%s)",
+                    type(exc).__name__,
+                )
 
         try:
             _shutdown_rotation_scheduler(app)

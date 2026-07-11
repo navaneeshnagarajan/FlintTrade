@@ -8,6 +8,8 @@ no-I/O adapter guarded by the module-private router token. No mocked gate.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -700,6 +702,76 @@ async def test_executor_pre_dispatch_check_aborts_before_the_gate():
     )
     with pytest.raises(SmartRouteAbort, match="revoked"):
         await executor.route_order(_child_order())
+    assert adapter.orders == []
+
+
+async def test_executor_rechecks_cancel_after_awaited_portfolio_read():
+    """Cancellation during L2 collection is an order barrier, not a hint."""
+    from flinttrade_engine.smart_router import SmartRouteAbort
+
+    adapter = _NoIoAdapter()
+    provider_started = asyncio.Event()
+    release_provider = asyncio.Event()
+    cancel_reason: list[str] = []
+
+    async def _blocked_portfolio_state():
+        provider_started.set()
+        await release_provider.wait()
+        return [], 0.0, 0.0
+
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=BrokerRouter({"openalgo": adapter}, _session),
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+        pre_dispatch_check=lambda: cancel_reason[0] if cancel_reason else None,
+        portfolio_state_provider=_blocked_portfolio_state,
+    )
+
+    pending = asyncio.create_task(executor.route_order(_child_order()))
+    await provider_started.wait()
+    cancel_reason.append("cancelled by operator")
+    release_provider.set()
+
+    with pytest.raises(SmartRouteAbort, match="cancelled"):
+        await pending
+    assert adapter.orders == []
+
+
+def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth):
+    """Runtime shutdown cancels and joins workers before routing retirement."""
+    app, adapter = _make_app()
+    job = mod._SmartJob(job_id="owned-worker", params={"symbol": "INFY", "action": "BUY"})  # noqa: SLF001
+    worker_started = threading.Event()
+
+    def _worker() -> None:
+        worker_started.set()
+        while not job.cancel_requested:
+            time.sleep(0.001)
+        job.status = "cancelled"
+
+    worker = threading.Thread(target=_worker, name="test-smart-route-owner", daemon=True)
+    job.worker = worker
+    mod._store_job(job)  # noqa: SLF001
+    worker.start()
+    assert worker_started.wait(timeout=1)
+
+    assert mod.shutdown_smart_order_jobs(timeout=1) is True
+    assert worker.is_alive() is False
+    assert job.cancel_requested is True
+
+    response = app.test_client().post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 1,
+            "urgency": "high",
+        },
+    )
+    assert response.status_code == 503
     assert adapter.orders == []
 
 

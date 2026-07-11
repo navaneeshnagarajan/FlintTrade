@@ -3689,6 +3689,14 @@ class FlintTradeApp:
         self._shutdown_task: asyncio.Task[Any] | None = None
         self._shutdown_request_task: asyncio.Task[Any] | None = None
         self._holiday_refresh_task: asyncio.Task[Any] | None = None
+        self._start_claim_lock = threading.Lock()
+        self._start_claimed = False
+        self._calendar_loaded = False
+        self._calendar_runtime_ready = False
+        self._calendar_schedulers_started = False
+        self._strategy_cron_started = False
+        self._cron_jobs_registered = False
+        self._cron_started = False
 
         # Broker reconciliation runner (contract §14.2) — wired in start().
         self._reconciliation_runner: Any | None = None
@@ -3721,7 +3729,29 @@ class FlintTradeApp:
         except Exception as exc:
             logger.warning("Could not apply loaded market holidays: %s", exc)
             return False
+        self._calendar_loaded = True
+        if self._calendar_runtime_ready:
+            self._start_calendar_schedulers()
         return True
+
+    def _start_calendar_schedulers(self) -> None:
+        """Start market-sensitive schedulers after an authoritative calendar."""
+        if self._calendar_schedulers_started or not self._calendar_loaded:
+            return
+        if not self._strategy_cron_started:
+            self.strategy_cron_scheduler.start()
+            self._strategy_cron_started = True
+        if not self._cron_jobs_registered:
+            self.cron.register_builtin_jobs()
+            self._cron_jobs_registered = True
+        if not self._cron_started:
+            self.cron.start()
+            self._cron_started = True
+        self._calendar_schedulers_started = (
+            self._strategy_cron_started
+            and self._cron_jobs_registered
+            and self._cron_started
+        )
 
     async def _market_calendar_refresh_loop(self, *, loaded: bool) -> None:
         """Retry failed loads promptly and refresh successful calendars daily."""
@@ -3735,8 +3765,22 @@ class FlintTradeApp:
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
+        start_claim_lock = getattr(self, "_start_claim_lock", None)
+        if start_claim_lock is None:
+            start_claim_lock = threading.Lock()
+            self._start_claim_lock = start_claim_lock
+        with start_claim_lock:
+            if getattr(self, "_start_claimed", False):
+                raise RuntimeError("FlintTrade runtime already started")
+            self._start_claimed = True
+
         if await self._wait_for_shutdown_if_started():
             return
+
+        from .smart_order_routes import start_smart_order_jobs  # noqa: PLC0415
+
+        if not start_smart_order_jobs():
+            raise RuntimeError("an earlier smart-order runtime still owns a worker")
 
         # Start FlintTrade API server (Flask, configurable loopback port).
         flask_app = create_flask_app(
@@ -3763,13 +3807,6 @@ class FlintTradeApp:
         if await self._wait_for_shutdown_if_started():
             return
 
-        try:
-            self.strategy_cron_scheduler.start()
-        except Exception as exc:
-            logger.warning(
-                "Strategy cron scheduler failed to start (%s); strategy schedules will not run",
-                exc,
-            )
         self._holiday_refresh_task = asyncio.create_task(
             self._market_calendar_refresh_loop(loaded=calendar_loaded)
         )
@@ -3868,13 +3905,18 @@ class FlintTradeApp:
         # warning, EOD logout, and health check were all inert. Wrapped so a
         # missing/broken APScheduler degrades to "no cron" instead of failing
         # the whole boot.
-        self.cron.register_builtin_jobs()
-        try:
-            self.cron.start()
-        except Exception as exc:
+        self._calendar_runtime_ready = True
+        if calendar_loaded:
+            try:
+                self._start_calendar_schedulers()
+            except Exception as exc:
+                logger.warning(
+                    "Calendar-owned schedulers failed to start (%s); scheduled jobs will not run",
+                    exc,
+                )
+        else:
             logger.warning(
-                "Cron scheduler failed to start (%s); scheduled jobs will not run",
-                exc,
+                "Market calendar unavailable; market-sensitive schedulers remain disarmed until retry"
             )
 
         # Live tick capture (opt-in). Uses its OWN StorageManager (a separate
@@ -4213,6 +4255,25 @@ class FlintTradeApp:
                     attempt(label, set_event)
 
             from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
+            from .smart_order_routes import shutdown_smart_order_jobs  # noqa: PLC0415
+
+            live_write_owners_stopped = True
+            raw_smart_timeout = flask_app.config.get(
+                "SMART_ORDER_SHUTDOWN_TIMEOUT_SECONDS", 30.0
+            )
+            try:
+                smart_timeout = max(0.0, float(raw_smart_timeout))
+            except (TypeError, ValueError):
+                smart_timeout = 30.0
+            try:
+                smart_stopped = shutdown_smart_order_jobs(timeout=smart_timeout)
+            except Exception as exc:  # noqa: BLE001 - retain router for a retry
+                live_write_owners_stopped = False
+                errors.append(("smart-order jobs", type(exc).__name__))
+            else:
+                if not smart_stopped:
+                    live_write_owners_stopped = False
+                    errors.append(("smart-order jobs", "TimeoutError"))
 
             raw_agent_timeout = flask_app.config.get(
                 "AUTONOMOUS_AGENT_SHUTDOWN_TIMEOUT_SECONDS", 30.0
@@ -4227,21 +4288,24 @@ class FlintTradeApp:
                     timeout=agent_timeout,
                 )
             except Exception as exc:  # noqa: BLE001 - fail closed on agent ownership loss
+                live_write_owners_stopped = False
                 errors.append(("autonomous agent", type(exc).__name__))
             else:
                 if not agent_stopped:
+                    live_write_owners_stopped = False
                     errors.append(("autonomous agent", "TimeoutError"))
 
-            try:
-                router_retired = await asyncio.to_thread(
-                    retire_broker_router_generation,
-                    flask_app,
-                )
-            except Exception as exc:  # noqa: BLE001 - fail closed on router ownership loss
-                errors.append(("broker router", type(exc).__name__))
-            else:
-                if not router_retired:
-                    errors.append(("broker router", "TimeoutError"))
+            if live_write_owners_stopped:
+                try:
+                    router_retired = await asyncio.to_thread(
+                        retire_broker_router_generation,
+                        flask_app,
+                    )
+                except Exception as exc:  # noqa: BLE001 - fail closed on router ownership loss
+                    errors.append(("broker router", type(exc).__name__))
+                else:
+                    if not router_retired:
+                        errors.append(("broker router", "TimeoutError"))
 
             attempt(
                 "native session rotation scheduler",

@@ -46,6 +46,14 @@ def _runtime_app() -> object:
     app._shutdown_task = None
     app._shutdown_request_task = None
     app._holiday_refresh_task = None
+    app._start_claimed = False
+    app._start_claim_lock = threading.Lock()
+    app._calendar_loaded = False
+    app._calendar_runtime_ready = False
+    app._calendar_schedulers_started = False
+    app._strategy_cron_started = False
+    app._cron_jobs_registered = False
+    app._cron_started = False
     app._stop_event = asyncio.Event()
     app._shutdown_failed_event = asyncio.Event()
     return app
@@ -263,6 +271,38 @@ async def test_shutdown_retires_router_before_dependencies_close() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shutdown_quiesces_smart_jobs_before_router_retirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.smart_order_routes as smart_routes
+
+    runtime = _runtime_app()
+    flask_app = Flask("shutdown-smart-order-owner")
+    events: list[str] = []
+    router = MagicMock()
+
+    def stop_smart_jobs(*, timeout: float) -> bool:
+        assert timeout == 30.0
+        events.append("smart-jobs")
+        return True
+
+    def retire_router(*, timeout: float) -> bool:
+        assert timeout == 10.0
+        assert events == ["smart-jobs"]
+        return True
+
+    router.revoke_and_drain.side_effect = retire_router
+    flask_app.config["BROKER_ROUTER"] = router
+    runtime._flask_app = flask_app
+    monkeypatch.setattr(smart_routes, "shutdown_smart_order_jobs", stop_smart_jobs)
+
+    await runtime.stop()
+
+    assert events == ["smart-jobs"]
+    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+
+
+@pytest.mark.asyncio
 async def test_shutdown_retires_router_published_by_an_admitted_request() -> None:
     """A request that started before shutdown cannot leave a fresh router live."""
     runtime = _runtime_app()
@@ -327,7 +367,11 @@ async def test_agent_shutdown_failure_preserves_dependencies_for_retry(
     runtime = _runtime_app()
     flask_app = Flask("agent-shutdown-failure")
     tracker = MagicMock()
-    flask_app.config["RUNTIME_REQUEST_TRACKER"] = tracker
+    router = MagicMock()
+    flask_app.config.update(
+        RUNTIME_REQUEST_TRACKER=tracker,
+        BROKER_ROUTER=router,
+    )
     runtime._flask_app = flask_app
     monkeypatch.setattr(
         agent_routes,
@@ -340,8 +384,57 @@ async def test_agent_shutdown_failure_preserves_dependencies_for_retry(
         await runtime.stop()
 
     tracker.wait_for_idle.assert_not_called()
+    router.revoke_and_drain.assert_not_called()
+    assert flask_app.config["BROKER_ROUTER"] is router
     runtime.client.close.assert_not_awaited()
     assert runtime._stop_event.is_set() is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    runtime = _runtime_app()
+    holiday_started = asyncio.Event()
+    release_holiday = asyncio.Event()
+    factory_calls = 0
+
+    async def load_holidays() -> set[str]:
+        holiday_started.set()
+        await release_holiday.wait()
+        runtime.cron.holiday_payload = []
+        return set()
+
+    def create_app(**_kwargs: object) -> Flask:
+        nonlocal factory_calls
+        factory_calls += 1
+        return Flask(f"start-generation-{factory_calls}")
+
+    runtime.cron.load_holidays = load_holidays
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module, "create_flask_app", create_app)
+    monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+
+    first = asyncio.create_task(runtime.start())
+    await asyncio.wait_for(holiday_started.wait(), timeout=1.0)
+    second = asyncio.create_task(runtime.start())
+    try:
+        done, _ = await asyncio.wait({second}, timeout=0.05)
+        assert second in done, "a concurrent start waited instead of being rejected"
+        with pytest.raises(RuntimeError, match="already started"):
+            await second
+        assert factory_calls == 1
+    finally:
+        if not second.done():
+            second.cancel()
+            await asyncio.gather(second, return_exceptions=True)
+        await runtime.stop()
+        release_holiday.set()
+        await asyncio.wait_for(first, timeout=1.0)
 
 
 @pytest.mark.asyncio
@@ -414,13 +507,20 @@ async def test_failed_initial_calendar_load_does_not_replace_the_calendar(
     app.cron.holiday_payload = None
     flask_app = Flask("failed-calendar-load")
 
-    app.cron.start.side_effect = app._stop_event.set
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
 
-    await app.start()
+    start_task = asyncio.create_task(app.start())
+    await asyncio.sleep(0.05)
+
+    app.strategy_cron_scheduler.start.assert_not_called()
+    app.cron.register_builtin_jobs.assert_not_called()
+    app.cron.start.assert_not_called()
+
+    await app.stop()
+    await asyncio.wait_for(start_task, timeout=1.0)
 
     app.time_scheduler.set_holidays.assert_not_called()
 
