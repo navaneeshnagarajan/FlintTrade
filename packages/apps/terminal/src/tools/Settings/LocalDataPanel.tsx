@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 import { Activity, Database, Download, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,26 +22,32 @@ import { SectionTitle } from "./shared";
 
 // --- Tick capture status -----------------------------------------------------
 
-interface TickInstrument {
-  exchange: string;
-  symbol: string;
-}
+const tickInstrumentSchema = z.object({
+  exchange: z.string().min(1),
+  symbol: z.string().min(1),
+});
 
-interface TickStatus {
-  enabled: boolean;
-  running: boolean;
-  connected: boolean;
-  tick_count: number;
-  persisted_tick_count?: number;
-  pending_tick_count?: number;
-  dropped_tick_count?: number;
-  watchlist: Record<string, TickInstrument[]>;
-  hint?: string;
-  last_error?: string;
-}
+const tickStatusSchema = z.object({
+  enabled: z.boolean(),
+  running: z.boolean(),
+  connected: z.boolean(),
+  tick_count: z.number().int().nonnegative(),
+  persisted_tick_count: z.number().int().nonnegative().optional(),
+  pending_tick_count: z.number().int().nonnegative().optional(),
+  dropped_tick_count: z.number().int().nonnegative().optional(),
+  watchlist: z.record(z.string(), z.array(tickInstrumentSchema)),
+  hint: z.string().optional(),
+  last_error: z.string().optional(),
+});
+
+type TickInstrument = z.infer<typeof tickInstrumentSchema>;
+type TickStatus = z.infer<typeof tickStatusSchema>;
 
 async function fetchTickStatus(): Promise<TickStatus> {
-  return get<TickStatus>("data/ticks/status");
+  const payload = await get<unknown>("data/ticks/status");
+  const result = tickStatusSchema.safeParse(payload);
+  if (!result.success) throw new Error("Tick capture status response was malformed.");
+  return result.data;
 }
 
 const CAPTURE_WATCHLIST_MODES = ["ltp", "quote", "depth"] as const;
@@ -78,14 +85,19 @@ async function fetchStoreSummary(): Promise<Record<string, StoreTable>> {
 
 // --- Bhavcopy download --------------------------------------------------------
 
-interface BhavcopyResult {
-  saved_count: number;
-  error_count: number;
-  dest_dir: string;
-}
+const bhavcopyResultSchema = z.object({
+  saved_count: z.number().int().nonnegative(),
+  error_count: z.number().int().nonnegative(),
+  dest_dir: z.string().min(1),
+});
+
+type BhavcopyResult = z.infer<typeof bhavcopyResultSchema>;
 
 async function startBhavcopyDownload(start: string, end: string): Promise<BhavcopyResult> {
-  return postV1<BhavcopyResult>("historify/bhavcopy/download", { start, end });
+  const payload = await postV1<unknown>("historify/bhavcopy/download", { start, end });
+  const result = bhavcopyResultSchema.safeParse(payload);
+  if (!result.success) throw new Error("Bhavcopy response was malformed.");
+  return result.data;
 }
 
 function isoDaysAgo(days: number): string {

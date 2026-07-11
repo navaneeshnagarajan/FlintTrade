@@ -21,6 +21,8 @@ export type Signal = SignalCardModel;
 
 export interface SignalEvent {
   event_id: number;
+  /** Backend process identity; qualifies event_id across service restarts. */
+  stream_id?: string;
   timestamp: string;
   symbol: string;
   exchange: string;
@@ -37,6 +39,7 @@ export interface SignalEvent {
 
 const signalEventPayloadSchema = z.object({
   event_id: z.number().int().nonnegative().default(0),
+  stream_id: z.string().trim().min(1).max(256).optional(),
   timestamp: z.string(),
   symbol: z.string(),
   exchange: z.string().default(""),
@@ -62,8 +65,13 @@ export const signalEventSchema = signalEventPayloadSchema.transform((event): Sig
 });
 
 const recentSignalsSchema = z.object({
+  stream_id: z.string().trim().min(1).max(256).optional(),
   signals: z.array(signalEventSchema),
-});
+}).transform(({ stream_id, signals }) => ({
+  signals: stream_id
+    ? signals.map((signal) => ({ ...signal, stream_id }))
+    : signals,
+}));
 
 export type LiveSignal = SignalEvent;
 

@@ -110,8 +110,36 @@ function parseConfiguredInstrument(identity: string): MarketHoursInstrument | un
 }
 
 function signalIdentity(signal: SignalEvent): string {
-  if (signal.event_id > 0) return `event:${signal.event_id}`;
+  if (signal.event_id > 0 && signal.stream_id) {
+    return `event:${signal.stream_id}:${signal.event_id}`;
+  }
+  if (signal.event_id > 0) return `event:legacy:${signal.event_id}`;
   return `legacy:${signal.timestamp}:${signal.exchange}:${signal.symbol}:${signal.method}`;
+}
+
+function signalTimestamp(signal: SignalEvent): number {
+  const timestamp = Date.parse(signal.timestamp);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function compareSignalRecency(left: SignalEvent, right: SignalEvent): number {
+  const sameQualifiedStream = Boolean(
+    left.stream_id
+    && right.stream_id
+    && left.stream_id === right.stream_id,
+  );
+  if (sameQualifiedStream) {
+    return right.event_id - left.event_id
+      || signalTimestamp(right) - signalTimestamp(left);
+  }
+
+  const timestampDelta = signalTimestamp(right) - signalTimestamp(left);
+  if (timestampDelta !== 0) return timestampDelta;
+
+  // Numeric IDs remain comparable for legacy payloads from one unqualified
+  // process, but never take precedence across known process identities.
+  if (!left.stream_id && !right.stream_id) return right.event_id - left.event_id;
+  return 0;
 }
 
 /** Merge signal snapshots without allowing an older source to evict newer events. */
@@ -125,10 +153,7 @@ export function reconcileSignalEvents(
   for (const signal of preferred) byIdentity.set(signalIdentity(signal), signal);
 
   return [...byIdentity.values()]
-    .sort((left, right) => (
-      right.event_id - left.event_id
-      || Date.parse(right.timestamp) - Date.parse(left.timestamp)
-    ))
+    .sort(compareSignalRecency)
     .slice(0, limit);
 }
 
@@ -236,6 +261,7 @@ interface ParsedSseEvent {
 const SIGNAL_STREAM_CURSOR_KEY = "flinttrade:signals:sse-cursor:v1";
 const STREAM_RETRY_BASE_MS = 1_000;
 const STREAM_RETRY_MAX_MS = 30_000;
+const STREAM_STABLE_MS = 1_000;
 
 function readSignalCursor(): string | null {
   try {
@@ -267,7 +293,8 @@ function clearSignalCursor(): void {
 async function consumeSseStream(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-  onEvent: (event: ParsedSseEvent) => void,
+  onEvent: (event: ParsedSseEvent) => boolean,
+  onValidFrame: () => void,
 ): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -283,7 +310,8 @@ async function consumeSseStream(
   };
   const dispatchEvent = () => {
     if (dataLines.length > 0) {
-      onEvent({ type: eventType, data: dataLines.join("\n"), id: eventId });
+      const isValid = onEvent({ type: eventType, data: dataLines.join("\n"), id: eventId });
+      if (isValid) onValidFrame();
     }
     resetEvent();
   };
@@ -340,6 +368,28 @@ export interface SignalStreamState {
   clearReplayLoss: () => void;
 }
 
+function streamIdFromEventCursor(cursor: string, eventId: number): string | null {
+  const separator = cursor.lastIndexOf(":");
+  if (separator <= 0) return null;
+  const streamId = cursor.slice(0, separator).trim();
+  const sequence = Number(cursor.slice(separator + 1));
+  if (
+    !streamId
+    || streamId.length > 256
+    || /[\r\n\0]/.test(streamId)
+    || !Number.isSafeInteger(sequence)
+    || sequence !== eventId
+  ) {
+    return null;
+  }
+  return streamId;
+}
+
+function isEventStreamResponse(response: Response): boolean {
+  const contentType = response.headers.get("Content-Type");
+  return contentType?.split(";", 1)[0]?.trim().toLowerCase() === "text/event-stream";
+}
+
 export function useSignalStream(
   onSignal: (signal: SignalEvent) => void,
   enabled = true,
@@ -373,22 +423,30 @@ export function useSignalStream(
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
 
-    const handleEvent = (event: ParsedSseEvent) => {
-      if (disposed || modeRef.current !== streamMode) return;
+    const handleEvent = (event: ParsedSseEvent): boolean => {
+      if (disposed || modeRef.current !== streamMode) return false;
       if (event.type === "replay-loss") {
         const control = safeParse(event.data, signalReplayLossSchema);
-        if (!control) return;
+        if (!control) return false;
         clearSignalCursor();
         setReplayLoss(control);
         void qc.resetQueries({ queryKey: ["signals", "recent"] });
-        return;
+        return true;
       }
-      if (event.type !== "message") return;
+      if (event.type !== "message") return false;
 
-      const signal = safeParse(event.data, signalEventSchema);
-      if (!signal) return;
+      const parsedSignal = safeParse(event.data, signalEventSchema);
+      if (!parsedSignal) return false;
+      const streamId = event.id
+        ? streamIdFromEventCursor(event.id, parsedSignal.event_id)
+        : parsedSignal.stream_id ?? null;
+      if (event.id && !streamId) return false;
+      const signal = streamId
+        ? { ...parsedSignal, stream_id: streamId }
+        : parsedSignal;
       callbackRef.current(signal);
       if (event.id) persistSignalCursor(event.id);
+      return true;
     };
 
     const scheduleReconnect = () => {
@@ -405,7 +463,8 @@ export function useSignalStream(
     };
 
     async function connect(): Promise<void> {
-      controller = new AbortController();
+      const connectionController = new AbortController();
+      controller = connectionController;
       const cursor = readSignalCursor();
       const headers: Record<string, string> = {
         ...buildHeaders(false),
@@ -416,7 +475,7 @@ export function useSignalStream(
       try {
         const response = await fetch(url, {
           headers,
-          signal: controller.signal,
+          signal: connectionController.signal,
         });
         if (disposed || modeRef.current !== streamMode) return;
         if (response.status === 401 || response.status === 403) {
@@ -427,19 +486,38 @@ export function useSignalStream(
         if (!response.ok) {
           throw new Error(`Signal stream HTTP ${response.status}`);
         }
+        if (!isEventStreamResponse(response)) {
+          void response.body?.cancel().catch(() => undefined);
+          throw new Error("Signal stream response is not an event stream");
+        }
         if (!response.body) {
           throw new Error("Signal stream response has no body");
         }
 
-        retryAttempt = 0;
         setAuthError(false);
-        setConnected(true);
-        await consumeSseStream(response.body, controller.signal, handleEvent);
-        if (disposed || controller.signal.aborted) return;
+        let healthy = false;
+        const markHealthy = () => {
+          if (healthy || disposed || modeRef.current !== streamMode) return;
+          healthy = true;
+          retryAttempt = 0;
+          setConnected(true);
+        };
+        const stableTimer = setTimeout(markHealthy, STREAM_STABLE_MS);
+        try {
+          await consumeSseStream(
+            response.body,
+            connectionController.signal,
+            handleEvent,
+            markHealthy,
+          );
+        } finally {
+          clearTimeout(stableTimer);
+        }
+        if (disposed || connectionController.signal.aborted) return;
         setConnected(false);
         scheduleReconnect();
       } catch {
-        if (disposed || controller.signal.aborted) return;
+        if (disposed || connectionController.signal.aborted) return;
         setConnected(false);
         scheduleReconnect();
       }

@@ -247,6 +247,32 @@ describe("OrderFlowWidget", () => {
     expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 
+  it("keeps explicit sample provenance visible even if is_live is contradictory", () => {
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      data: {
+        buckets: [
+          {
+            time_label: "09:15",
+            cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+            poc_price: 22500,
+            total_volume: 180,
+            delta: 20,
+          },
+        ],
+        symbol: "NIFTY",
+        exchange: "NFO",
+        interval: 300,
+        is_live: true,
+        is_sample_data: true,
+      },
+    }));
+
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
   it("shows 'Delayed' for retained backend data that is no longer live", () => {
     const delayedData = {
       buckets: [

@@ -164,7 +164,14 @@ describe("LocalDataPanel", () => {
     vi.stubGlobal("fetch", mockFetch({
       "/api/v1/data/ticks/status": {
         status: "success",
-        data: { enabled: false, running: false, tick_count: 0, watchlist: {}, hint: "Set FLINTTRADE_TICK_CAPTURE=1" },
+        data: {
+          enabled: false,
+          running: false,
+          connected: false,
+          tick_count: 0,
+          watchlist: {},
+          hint: "Set FLINTTRADE_TICK_CAPTURE=1",
+        },
       },
       "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
     }));
@@ -342,6 +349,54 @@ describe("LocalDataPanel", () => {
     });
     expect(screen.queryByText("off")).not.toBeInTheDocument();
     expect(screen.queryByText(/FLINTTRADE_TICK_CAPTURE=1/)).not.toBeInTheDocument();
+  });
+
+  it("surfaces a malformed successful tick-status envelope as unavailable", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: "false",
+          running: false,
+          connected: false,
+          tick_count: 0,
+          watchlist: {},
+        },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+
+    expect(await screen.findByText("unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Tick capture status unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("off")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a malformed successful bhavcopy envelope instead of claiming success", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "/api/v1/data/ticks/status": {
+        status: "success",
+        data: {
+          enabled: false,
+          running: false,
+          connected: false,
+          tick_count: 0,
+          watchlist: {},
+        },
+      },
+      "/v1/historify/bars/summary": { status: "success", data: { tables: {} } },
+      "/v1/historify/bhavcopy/download": {
+        status: "success",
+        data: { saved_count: "1", error_count: 0, dest_dir: "/tmp/bhavcopy" },
+      },
+    }));
+
+    render(<LocalDataPanel />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: /Fetch bhavcopies/i }));
+
+    expect(await screen.findByText("Bhavcopy response was malformed.")).toBeInTheDocument();
+    expect(screen.queryByText(/Saved 1 file/)).not.toBeInTheDocument();
   });
 
   it("renders the bhavcopy fetch controls", () => {

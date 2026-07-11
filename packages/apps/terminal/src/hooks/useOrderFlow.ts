@@ -11,8 +11,9 @@
  * 60 seconds outside its session so the query can self-activate at open.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isMarketHours } from "@/lib/market";
+import { getSymbol } from "@/services/api";
 import { getOrderFlow } from "@/services/ftApi.data";
 import type { OrderFlowResponse } from "@/services/ftApi.data";
 
@@ -40,9 +41,22 @@ export function useOrderFlow(
   interval = 300,
   bins = 50,
 ) {
+  const queryClient = useQueryClient();
+
   return useQuery<OrderFlowResponse>({
     queryKey: ["orderflow", symbol, exchange, interval, bins],
-    queryFn: () => getOrderFlow(symbol, exchange, bins, interval),
+    queryFn: async () => {
+      const metadata = await queryClient.fetchQuery({
+        queryKey: ["symbol", symbol, exchange],
+        queryFn: () => getSymbol(symbol, exchange),
+        staleTime: 30 * 60_000,
+      });
+      const tickSize = Number(metadata.tick_size);
+      if (!Number.isFinite(tickSize) || tickSize <= 0) {
+        throw new Error(`Instrument tick size unavailable for ${symbol} on ${exchange}.`);
+      }
+      return getOrderFlow(symbol, exchange, bins, interval, tickSize);
+    },
     enabled: !!symbol,
     // Poll every 5 s during market hours; re-check every 60 s otherwise
     // so the widget self-activates when the market opens.

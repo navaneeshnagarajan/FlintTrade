@@ -120,6 +120,7 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import {
+  reconcileSignalEvents,
   signalEventSchema,
   useRecentSignals,
   useSignalConfig,
@@ -392,6 +393,47 @@ describe("useRecentSignals", () => {
     await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
     expect(result.current.data?.signals.map((signal) => signal.event_id)).toEqual([140, 139]);
   });
+
+  it("orders different backend processes by timestamp instead of numeric event ID", () => {
+    const oldProcess = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      stream_id: "old-process",
+      event_id: 900,
+      timestamp: "2026-07-11T09:59:00+05:30",
+      message: "old-process high ID",
+    });
+    const newProcess = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      stream_id: "new-process",
+      event_id: 1,
+      timestamp: "2026-07-11T10:00:00+05:30",
+      message: "new-process low ID",
+    });
+
+    const reconciled = reconcileSignalEvents([oldProcess], [newProcess], 10);
+
+    expect(reconciled.map((signal) => signal.message)).toEqual([
+      "new-process low ID",
+      "old-process high ID",
+    ]);
+  });
+
+  it("keeps identical numeric IDs from different backend processes distinct", () => {
+    const oldProcess = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      stream_id: "old-process",
+      event_id: 1,
+      timestamp: "2026-07-11T09:59:00+05:30",
+    });
+    const newProcess = signalEventSchema.parse({
+      ...mockApiSignals.signals[0],
+      stream_id: "new-process",
+      event_id: 1,
+      timestamp: "2026-07-11T10:00:00+05:30",
+    });
+
+    expect(reconcileSignalEvents([newProcess], [oldProcess], 10)).toHaveLength(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -486,7 +528,10 @@ describe("useSignalStream", () => {
       }),
     );
     expect(helperMocks.buildHeaders).toHaveBeenCalledWith(false);
-    await waitFor(() => expect(onSignal).toHaveBeenCalledWith(signal));
+    await waitFor(() => expect(onSignal).toHaveBeenCalledWith({
+      ...signal,
+      stream_id: "current-boot",
+    }));
     expect(localStorage.getItem(SIGNAL_CURSOR_KEY)).toBe("current-boot:140");
     expect(result.current.connected).toBe(true);
 
@@ -545,9 +590,92 @@ describe("useSignalStream", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["HTML", "text/html", "<html>login</html>"],
+    ["empty event stream", "text/event-stream", ""],
+  ])("backs off repeated short 200 %s responses without reporting Live", async (_name, contentType, body) => {
+    vi.useFakeTimers();
+    currentMode = "live";
+    fetchMock.mockImplementation(async () => new Response(body, {
+      status: 200,
+      headers: { "Content-Type": contentType },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useSignalStream(vi.fn()), {
+      wrapper: createWrapper(),
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.connected).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.connected).toBe(false);
+  });
+
+  it("rejects a long-lived 200 response with a non-SSE content type without flashing Live", async () => {
+    currentMode = "live";
+    const stream = createSseStream();
+    fetchMock.mockResolvedValue({
+      ...stream.response,
+      headers: new Headers({ "Content-Type": "text/html; charset=utf-8" }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(() => useSignalStream(vi.fn()), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(result.current.connected).toBe(false);
+    unmount();
+  });
+
+  it("marks a valid idle SSE response Live only after the connection is stable", async () => {
+    vi.useFakeTimers();
+    currentMode = "live";
+    const stream = createSseStream();
+    fetchMock.mockResolvedValue(stream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useSignalStream(vi.fn()), {
+      wrapper: createWrapper(),
+    });
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(result.current.connected).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(result.current.connected).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(result.current.connected).toBe(true);
+  });
+
   it("drops the connected state while changed credentials establish a replacement stream", async () => {
     currentMode = "live";
-    const firstStream = createSseStream();
+    const firstStream = createSseStream([
+      `id: first-boot:139\ndata: ${JSON.stringify(mockApiSignals.signals[0])}\n\n`,
+    ]);
     let resolveReplacement: ((response: Response) => void) | undefined;
     fetchMock
       .mockResolvedValueOnce(firstStream.response)
@@ -566,7 +694,9 @@ describe("useSignalStream", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(result.current.connected).toBe(false);
 
-    resolveReplacement?.(createSseStream().response);
+    resolveReplacement?.(createSseStream([
+      `id: replacement-boot:139\ndata: ${JSON.stringify(mockApiSignals.signals[0])}\n\n`,
+    ]).response);
     await waitFor(() => expect(result.current.connected).toBe(true));
   });
 });

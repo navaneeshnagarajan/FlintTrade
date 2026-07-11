@@ -95,18 +95,46 @@ function exchangeHolidayAliases(exchange: string): readonly string[] {
   return HOLIDAY_EXCHANGE_ALIASES[exchange] ?? [exchange];
 }
 
+function holidayForDate(holidays: readonly Holiday[], date: Date): Holiday | undefined {
+  const dateKey = date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return holidays.find((candidate) => candidate.date === dateKey);
+}
+
+function epochMilliseconds(value: number): number | null {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  // Calendar providers use epoch seconds or milliseconds. Values below this
+  // threshold cannot be a contemporary millisecond timestamp.
+  return value < 100_000_000_000 ? value * 1_000 : value;
+}
+
+function specialSessionState(
+  exchange: string,
+  holidays: readonly Holiday[],
+  date: Date,
+): boolean | undefined {
+  const holiday = holidayForDate(holidays, date);
+  if (!holiday) return undefined;
+
+  const aliases = exchangeHolidayAliases(exchange);
+  const sessions = holiday.open_exchanges.filter((session) => (
+    aliases.includes(session.exchange.trim().toUpperCase())
+  ));
+  if (sessions.length === 0) return undefined;
+
+  const now = date.getTime();
+  return sessions.some((session) => {
+    const start = epochMilliseconds(session.start_time);
+    const end = epochMilliseconds(session.end_time);
+    return start !== null && end !== null && end >= start && now >= start && now <= end;
+  });
+}
+
 function isClosedByHoliday(exchange: string, holidays: readonly Holiday[], date: Date): boolean {
   if (holidays.length === 0) return false;
 
-  const dateKey = date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const aliases = exchangeHolidayAliases(exchange);
-  const holiday = holidays.find((candidate) => candidate.date === dateKey);
+  const holiday = holidayForDate(holidays, date);
   if (!holiday) return false;
-
-  const hasSpecialSession = holiday.open_exchanges.some((session) => (
-    aliases.includes(session.exchange.trim().toUpperCase())
-  ));
-  if (hasSpecialSession) return false;
 
   return holiday.closed_exchanges.some((closedExchange) => (
     aliases.includes(closedExchange.trim().toUpperCase())
@@ -136,6 +164,9 @@ export function isMarketHours(
   const ist = new Date(
     now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
+  const specialSession = specialSessionState(exchange, holidays, now);
+  if (specialSession !== undefined) return specialSession;
+
   const day = ist.getDay();
   if (day === 0 || day === 6) return false;
   if (isClosedByHoliday(exchange, holidays, now)) return false;

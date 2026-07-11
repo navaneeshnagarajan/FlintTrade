@@ -123,6 +123,39 @@ describe("getRecentSignals", () => {
     });
   });
 
+  it("preserves the process-qualified stream identity on every REST event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      status: "success",
+      data: {
+        stream_id: "boot-2026-07-11",
+        signals: [
+          {
+            event_id: 1,
+            timestamp: "2026-07-11T10:00:00+05:30",
+            symbol: "NIFTY",
+            exchange: "NSE_INDEX",
+            signal_type: "BUY",
+            source: "rule",
+            method: "RSI",
+            indicator: "RSI",
+            value: 28,
+            threshold: 30,
+            confidence: 0.8,
+            message: "New-process signal",
+            metadata: {},
+          },
+        ],
+      },
+    })));
+
+    const result = await getRecentSignals();
+
+    expect(result.signals[0]).toMatchObject({
+      stream_id: "boot-2026-07-11",
+      event_id: 1,
+    });
+  });
+
   it("rejects malformed REST events instead of passing unsafe values to the UI", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
       status: "success",

@@ -22,6 +22,11 @@ export interface OrderFlowResponse {
   interval: number;
   /** True only when aggregator buckets are fresh for the current session. */
   is_live: boolean;
+  /** Explicit backend provenance; true always overrides a contradictory live flag. */
+  is_sample_data?: boolean;
+  tick_size?: number;
+  requested_tick_size?: number;
+  source_tick_size?: number;
   /** Freshness classification for live or retained real buckets. */
   live_state?: "live" | "delayed" | "stale" | "warming" | "unavailable";
   freshness?: {
@@ -37,8 +42,9 @@ export interface OrderFlowResponse {
 export type OrderFlowDataState = "live" | "delayed" | "stale" | "sample";
 
 export function getOrderFlowDataState(
-  data: Pick<OrderFlowResponse, "is_live" | "live_state"> | undefined,
+  data: Pick<OrderFlowResponse, "is_live" | "is_sample_data" | "live_state"> | undefined,
 ): OrderFlowDataState {
+  if (data?.is_sample_data === true) return "sample";
   if (data?.is_live) return "live";
   if (data?.live_state === "delayed" || data?.live_state === "stale") {
     return data.live_state;
@@ -51,12 +57,14 @@ export const getOrderFlow = (
   exchange = "NFO",
   bins = 50,
   interval = 300,
+  tickSize: number,
 ) => {
   const params = new URLSearchParams({
     symbol,
     exchange,
     bins: String(bins),
     interval: String(interval),
+    tick_size: String(tickSize),
   });
   return get<OrderFlowResponse>(`data/orderflow?${params.toString()}`);
 };

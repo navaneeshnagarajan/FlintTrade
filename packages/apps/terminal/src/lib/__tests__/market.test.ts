@@ -239,6 +239,53 @@ describe("exchange holidays", () => {
       holidays,
     )).toBe(true);
   });
+
+  it("uses a special session's supplied epoch window instead of ordinary NSE hours", () => {
+    const holidays: Holiday[] = [{
+      date: "2026-03-24",
+      description: "Muhurat trading",
+      holiday_type: "SPECIAL_SESSION",
+      closed_exchanges: ["NSE"],
+      open_exchanges: [{
+        exchange: "NSE",
+        start_time: istToUtc(TUE.y, TUE.m, TUE.d, 18, 0).getTime(),
+        end_time: istToUtc(TUE.y, TUE.m, TUE.d, 19, 0).getTime(),
+      }],
+    }];
+
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 11, 0));
+    expect(isMarketHoursWithHolidays(
+      { exchange: "NSE_INDEX", symbol: "NIFTY" },
+      holidays,
+    )).toBe(false);
+
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 18, 30));
+    expect(isMarketHoursWithHolidays(
+      { exchange: "NSE_INDEX", symbol: "NIFTY" },
+      holidays,
+    )).toBe(true);
+  });
+
+  it("allows a supplied epoch special session on a weekend", () => {
+    const holidays: Holiday[] = [{
+      date: "2026-03-28",
+      description: "Weekend special session",
+      holiday_type: "SPECIAL_SESSION",
+      closed_exchanges: ["NSE"],
+      open_exchanges: [{
+        exchange: "NSE",
+        start_time: istToUtc(SAT.y, SAT.m, SAT.d, 18, 0).getTime(),
+        end_time: istToUtc(SAT.y, SAT.m, SAT.d, 19, 0).getTime(),
+      }],
+    }];
+
+    vi.setSystemTime(istToUtc(SAT.y, SAT.m, SAT.d, 18, 30));
+
+    expect(isMarketHoursWithHolidays(
+      { exchange: "NSE_INDEX", symbol: "NIFTY" },
+      holidays,
+    )).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

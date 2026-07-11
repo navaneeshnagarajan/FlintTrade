@@ -18,6 +18,14 @@ import type { OrderFlowData } from "../useOrderFlow";
 // ---------------------------------------------------------------------------
 
 const mockFetch = vi.fn();
+const getSymbolMock = vi.hoisted(() => vi.fn((_symbol: string, _exchange: string) => Promise.resolve({
+  symbol: "NIFTY",
+  name: "NIFTY",
+  exchange: "NFO",
+  instrumenttype: "INDEX",
+  lotsize: 1,
+  tick_size: 0.05,
+})));
 type MarketHoursTarget = string | { exchange: string; symbol: string };
 const mockIsMarketHours = vi.hoisted(
   () => vi.fn<(target?: MarketHoursTarget) => boolean>(() => false),
@@ -27,9 +35,21 @@ vi.mock("@/lib/market", () => ({
   isMarketHours: (target?: MarketHoursTarget) => mockIsMarketHours(target),
 }));
 
+vi.mock("@/services/api", () => ({
+  getSymbol: (symbol: string, exchange: string) => getSymbolMock(symbol, exchange),
+}));
+
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch);
   mockIsMarketHours.mockReset().mockReturnValue(false);
+  getSymbolMock.mockReset().mockResolvedValue({
+    symbol: "NIFTY",
+    name: "NIFTY",
+    exchange: "NFO",
+    instrumenttype: "INDEX",
+    lotsize: 1,
+    tick_size: 0.05,
+  });
 });
 
 afterEach(() => {
@@ -122,9 +142,19 @@ describe("useOrderFlow", () => {
     expect(url).toContain("exchange=NFO");
     expect(url).toContain("interval=300");
     expect(url).toContain("bins=50");
+    expect(url).toContain("tick_size=0.05");
+    expect(getSymbolMock).toHaveBeenCalledWith("NIFTY", "NFO");
   });
 
   it("uses provided exchange and interval when overridden", async () => {
+    getSymbolMock.mockResolvedValue({
+      symbol: "BANKNIFTY",
+      name: "BANKNIFTY",
+      exchange: "NSE",
+      instrumenttype: "INDEX",
+      lotsize: 1,
+      tick_size: 0.5,
+    });
     mockFetch.mockResolvedValue({
       ok: true,
       json: () =>
@@ -150,6 +180,26 @@ describe("useOrderFlow", () => {
     expect(url).toContain("exchange=NSE");
     expect(url).toContain("interval=60");
     expect(url).toContain("bins=20");
+    expect(url).toContain("tick_size=0.5");
+  });
+
+  it("fails closed when instrument metadata has no valid tick size", async () => {
+    getSymbolMock.mockResolvedValue({
+      symbol: "GOLD",
+      name: "GOLD",
+      exchange: "MCX",
+      instrumenttype: "FUTCOM",
+      lotsize: 1,
+      tick_size: 0,
+    });
+
+    const { result } = renderHook(() => useOrderFlow("GOLD", "MCX"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/tick size.*GOLD.*MCX/i);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each([
