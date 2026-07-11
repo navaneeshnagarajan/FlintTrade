@@ -19,13 +19,15 @@
 //!
 //! The graceful exit path (4) only runs on a normal quit. A shell crash or
 //! force-quit would otherwise orphan the backend, and repeated launches would
-//! accumulate duplicates. Three layers close that hole:
+//! accumulate duplicates. Four layers close that hole:
 //!
+//! * **Kernel instance lock** — each workspace has one advisory lock file. The
+//!   shell holds the exclusive OS lock for its full process lifetime; the PID
+//!   text inside that file is diagnostic only and never decides ownership.
 //! * **Reap on launch** — the shell records the sidecar PID (plus its own) in
-//!   ``desktop_backend.pid`` under the workspace dir. On startup a stale entry
-//!   from a crashed run is terminated, but only after an identity check that
-//!   the PID still belongs to our ``flinttrade-backend`` binary — a reused PID
-//!   owned by any other process is never killed.
+//!   ``desktop_backend.pid`` under the workspace dir together with a per-launch
+//!   token. On startup a stale entry from a crashed run is terminated, but only
+//!   after identity and liveness checks confirm the recorded processes.
 //! * **Parent-liveness watchdog** — the shell passes its PID via
 //!   ``FLINTTRADE_PARENT_PID``; the sidecar entry script
 //!   (``packaging/desktop_backend.py``) watches that process from a daemon
@@ -46,9 +48,11 @@
 //! turns by printing ``FLINTTRADE_NOTIFY\t<title>\t<body>`` on stdout — so
 //! alerts reach the operator even while the window is hidden.
 
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use fs2::FileExt;
 use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -66,9 +70,14 @@ const NOTIFY_SENTINEL: &str = "FLINTTRADE_NOTIFY";
 /// Global hotkey (parsed cross-platform) that toggles the main window.
 const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+F";
 
-/// Workspace-dir file recording the sidecar PID (line 1) and the owning shell
-/// PID (line 2) so a later launch can reap an orphan from a crashed run.
+/// Workspace-dir file recording the sidecar PID, owning shell PID, and
+/// per-launch token so a later launch can reap an orphan from a crashed run.
 const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
+
+/// File carrying the process-lifetime kernel lock that prevents two desktop
+/// instances from spawning sidecars into the same workspace. Its text is only
+/// diagnostic; ownership is established exclusively by the OS lock.
+const DESKTOP_INSTANCE_LOCK_FILE: &str = "desktop_instance.lock";
 
 /// Substring that must appear in a process's command line / image name before
 /// the reaper will treat it as our backend sidecar and terminate it.
@@ -119,8 +128,37 @@ const SELF_UPDATE_LOG: &str = "self_update.log";
 /// close handler performs a real exit instead of hiding to tray.
 struct QuitRequested(std::sync::atomic::AtomicBool);
 
-/// Holds the spawned backend child so it can be killed on exit.
-struct BackendState(Mutex<Option<CommandChild>>);
+/// Set only after an unexpected sidecar termination. It keeps the recovery
+/// command unavailable during normal operation and changes window-close from
+/// hide-to-tray into a real app exit.
+struct BackendFailed(std::sync::atomic::AtomicBool);
+
+/// Open kernel-lock handle retained in managed app state for the process
+/// lifetime. Dropping the handle is the only release operation; the lock file
+/// is deliberately never unlinked.
+#[derive(Debug)]
+struct DesktopInstanceLock {
+    _file: std::fs::File,
+    shell_pid: u32,
+    launch_token: String,
+}
+
+/// Exact identity of the sidecar spawned by one desktop launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SidecarRecord {
+    sidecar_pid: u32,
+    shell_pid: u32,
+    launch_token: String,
+}
+
+struct ManagedSidecar {
+    child: CommandChild,
+    record: SidecarRecord,
+}
+
+/// Holds the spawned backend child and its exact recovery record so cleanup
+/// cannot remove a replacement process's record.
+struct BackendState(Mutex<Option<ManagedSidecar>>);
 
 // ---------------------------------------------------------------------------
 // In-app updater.
@@ -317,9 +355,7 @@ fn schedule_update_exit(app: &AppHandle) {
     // exit shortly so the updater can replace the bundle underneath us. Used by
     // the source-rebuild path and the Windows binary path, whose installers own
     // the relaunch and do not signal a verified download back to us.
-    if let Some(q) = app.try_state::<QuitRequested>() {
-        q.0.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
+    mark_quit_requested(app);
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(2));
@@ -330,12 +366,46 @@ fn schedule_update_exit(app: &AppHandle) {
 /// Mark the quit as deliberate (so the close-to-tray handler steps aside) and
 /// exit on the main thread.
 fn do_deliberate_exit(app: &AppHandle) {
-    if let Some(q) = app.try_state::<QuitRequested>() {
-        q.0.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
+    mark_quit_requested(app);
     let handle = app.clone();
     let h = handle.clone();
     let _ = handle.run_on_main_thread(move || h.exit(0));
+}
+
+fn mark_quit_requested(app: &AppHandle) {
+    if let Some(q) = app.try_state::<QuitRequested>() {
+        q.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn quit_was_requested(app: &AppHandle) -> bool {
+    app.try_state::<QuitRequested>()
+        .map(|q| q.0.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(false)
+}
+
+fn mark_backend_failed(app: &AppHandle) {
+    if let Some(failed) = app.try_state::<BackendFailed>() {
+        failed.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn backend_has_failed(app: &AppHandle) -> bool {
+    app.try_state::<BackendFailed>()
+        .map(|failed| failed.0.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(false)
+}
+
+/// Native exit action exposed only to the recovery surface through Tauri's
+/// explicit command ACL.
+#[tauri::command]
+fn quit_after_backend_failure(app: AppHandle) -> Result<(), String> {
+    if !backend_has_failed(&app) {
+        return Err("backend recovery is not active".to_string());
+    }
+    mark_quit_requested(&app);
+    app.exit(0);
+    Ok(())
 }
 
 /// Environment variable naming the file the installer touches once it has
@@ -677,17 +747,40 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             updater_state,
             run_binary_update,
-            run_self_update
+            run_self_update,
+            quit_after_backend_failure
         ])
         .manage(BackendState(Mutex::new(None)))
         .manage(QuitRequested(std::sync::atomic::AtomicBool::new(false)))
+        .manage(BackendFailed(std::sync::atomic::AtomicBool::new(false)))
         .setup(|app| {
+            let instance_lock = claim_desktop_instance().map_err(|error| {
+                let message = if error.kind() == std::io::ErrorKind::WouldBlock {
+                    "another FlintTrade desktop instance owns this workspace".to_string()
+                } else {
+                    format!("could not claim the FlintTrade desktop instance lock: {error}")
+                };
+                std::io::Error::new(error.kind(), message)
+            })?;
+            let shell_pid = instance_lock.shell_pid;
+            let launch_token = instance_lock.launch_token.clone();
+            if !app.manage(instance_lock) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "desktop instance lock state was already registered",
+                )
+                .into());
+            }
             // First-run secret provisioning (best-effort; never blocks launch).
             provision_master_password();
 
-            // Orphan-protection layer 1: terminate an identity-checked stale
-            // sidecar left behind by a crashed or force-quit previous run.
-            reap_stale_sidecar();
+            // Terminate an identity-checked stale sidecar left behind by a
+            // crashed or force-quit previous run.
+            reap_stale_sidecar().map_err(|error| {
+                std::io::Error::other(format!(
+                    "refusing to spawn a backend while stale sidecar state is unresolved: {error}"
+                ))
+            })?;
 
             // Tray + global hotkey: the app lives in the background (agent +
             // monitoring keep running) and the operator can summon it anytime.
@@ -708,16 +801,31 @@ pub fn run() {
                 .sidecar("flinttrade-backend")?
                 .args(["--port", "0"])
                 .env("FLINTTRADE_DESKTOP", "1")
-                // Orphan-protection layer 2: the sidecar entry script watches
-                // this PID and exits cleanly when the shell dies.
+                // The sidecar entry script watches this PID and exits cleanly
+                // when the shell dies.
                 .env("FLINTTRADE_PARENT_PID", std::process::id().to_string());
             let (mut rx, child) = command.spawn()?;
-            // Orphan-protection layer 3: record the sidecar PID so the *next*
-            // launch can reap it if this shell dies without running its
-            // kill-on-exit cleanup.
-            write_sidecar_pid_file(child.pid());
+            let sidecar_pid = child.pid();
+            let sidecar_record = SidecarRecord {
+                sidecar_pid,
+                shell_pid,
+                launch_token,
+            };
+            // Record the sidecar identity so the *next* launch can reap it if
+            // this shell dies without running its kill-on-exit cleanup.
+            if let Err(error) = write_sidecar_record(&sidecar_record) {
+                let _ = child.kill();
+                let _ = wait_for_process_exit(sidecar_pid, SIDECAR_KILL_CONFIRM_POLLS);
+                return Err(std::io::Error::other(format!(
+                    "could not atomically record the backend sidecar; launch aborted: {error}"
+                ))
+                .into());
+            }
             if let Some(state) = app.try_state::<BackendState>() {
-                *state.0.lock().unwrap() = Some(child);
+                *state.0.lock().unwrap() = Some(ManagedSidecar {
+                    child,
+                    record: sidecar_record.clone(),
+                });
             }
 
             // Drain the sidecar's output: parse the ready handshake, surface
@@ -753,12 +861,16 @@ pub fn run() {
                         }
                         CommandEvent::Terminated(payload) => {
                             eprintln!("[flinttrade] backend terminated: {payload:?}");
-                            // The recorded PID is now dead — drop the file so a
-                            // later launch never inspects a reused PID.
-                            remove_sidecar_pid_file();
-                            if !shown {
+                            clear_terminated_backend(&handle, &sidecar_record);
+                            // Remove only this launch's exact record. The
+                            // instance lock prevents a successor shell from
+                            // replacing it while this process is still alive.
+                            remove_sidecar_record(&sidecar_record);
+                            if should_show_backend_recovery(quit_was_requested(&handle)) {
+                                mark_backend_failed(&handle);
                                 let h = handle.clone();
-                                let _ = handle.run_on_main_thread(move || show_backend_error(&h));
+                                let _ =
+                                    handle.run_on_main_thread(move || show_backend_recovery(&h));
                             }
                             break;
                         }
@@ -776,6 +888,9 @@ pub fn run() {
         .expect("error while building the FlintTrade desktop app")
         .run(|app_handle, event| match event {
             RunEvent::ExitRequested { .. } => {
+                // Mark OS/app-menu exits before stopping the sidecar so its
+                // termination event cannot be mistaken for a crash.
+                mark_quit_requested(app_handle);
                 kill_backend(app_handle);
             }
             // macOS: clicking the dock icon while the window is hidden in the
@@ -824,6 +939,23 @@ fn navigation_allowed(
         && target.port() == backend_port;
     let privileged_scheme = matches!(target.scheme(), "http" | "https");
     same_origin || !privileged_scheme
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MainWindowCloseAction {
+    HideToTray,
+    AllowClose,
+    ExitApp,
+}
+
+fn main_window_close_action(quit_requested: bool, backend_failed: bool) -> MainWindowCloseAction {
+    if backend_failed {
+        MainWindowCloseAction::ExitApp
+    } else if quit_requested {
+        MainWindowCloseAction::AllowClose
+    } else {
+        MainWindowCloseAction::HideToTray
+    }
 }
 
 /// Create the main window pointed at the backend, then close the splash.
@@ -882,14 +1014,20 @@ fn show_main_window(app: &AppHandle, port: u16) {
             let app_for_close = app.clone();
             win.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
-                    let quitting = app_for_close
-                        .try_state::<QuitRequested>()
-                        .map(|q| q.0.load(std::sync::atomic::Ordering::SeqCst))
-                        .unwrap_or(false);
-                    if !quitting {
-                        api.prevent_close();
-                        if let Some(w) = app_for_close.get_webview_window("main") {
-                            let _ = w.hide();
+                    match main_window_close_action(
+                        quit_was_requested(&app_for_close),
+                        backend_has_failed(&app_for_close),
+                    ) {
+                        MainWindowCloseAction::HideToTray => {
+                            api.prevent_close();
+                            if let Some(w) = app_for_close.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                        }
+                        MainWindowCloseAction::AllowClose => {}
+                        MainWindowCloseAction::ExitApp => {
+                            mark_quit_requested(&app_for_close);
+                            app_for_close.exit(0);
                         }
                     }
                 }
@@ -938,9 +1076,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event: MenuEvent| match event.id().as_ref() {
             "show" => show_and_focus_main(app),
             "quit" => {
-                if let Some(q) = app.try_state::<QuitRequested>() {
-                    q.0.store(true, std::sync::atomic::Ordering::SeqCst);
-                }
+                mark_quit_requested(app);
                 app.exit(0);
             }
             _ => {}
@@ -1002,25 +1138,118 @@ fn parse_notify_line(line: &str) -> Option<(String, String)> {
     Some((title.to_string(), body.trim().to_string()))
 }
 
-/// Update the splash to report that the backend failed to come up.
-fn show_backend_error(app: &AppHandle) {
-    if let Some(splash) = app.get_webview_window("splash") {
-        let _ = splash.eval(
-            "var s=document.getElementById('status');\
-             if(s){s.textContent='Backend failed to start \\u2014 see logs.';s.style.color='#ff6a3d';}",
-        );
+const BACKEND_RECOVERY_SCRIPT: &str = r#"
+(() => {
+  const renderRecovery = () => {
+    document.title = 'FlintTrade - Backend stopped';
+    document.body.innerHTML = `
+      <main style="min-height:100vh;display:grid;place-items:center;background:#111318;color:#f7f7f8;font-family:system-ui;padding:24px;box-sizing:border-box">
+        <section style="width:min(100%,34rem)">
+          <p style="margin:0 0 10px;color:#ff7a59;font-size:13px;font-weight:700">BACKEND STOPPED</p>
+          <h1 style="margin:0;font-size:24px;line-height:1.25">FlintTrade needs to close</h1>
+          <p style="margin:14px 0 24px;color:#b8bbc2;font-size:15px;line-height:1.6">The desktop backend ended unexpectedly. Your workspace data remains on disk.</p>
+          <button id="flinttrade-recovery-quit" type="button" style="min-height:42px;padding:0 16px;border:0;border-radius:6px;background:#f7f7f8;color:#111318;font:600 14px system-ui;cursor:pointer">Quit FlintTrade</button>
+          <p id="flinttrade-recovery-status" aria-live="polite" style="min-height:20px;margin:12px 0 0;color:#ff9b82;font-size:13px"></p>
+        </section>
+      </main>`;
+    const button = document.getElementById('flinttrade-recovery-quit');
+    const status = document.getElementById('flinttrade-recovery-status');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.style.cursor = 'wait';
+      status.textContent = 'Quitting FlintTrade...';
+      try {
+        await window.__TAURI_INTERNALS__.invoke('quit_after_backend_failure');
+      } catch (error) {
+        button.disabled = false;
+        button.style.cursor = 'pointer';
+        status.textContent = 'Could not quit automatically. Use the tray Quit action.';
+      }
+    });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderRecovery, { once: true });
+  } else {
+    renderRecovery();
+  }
+})();
+"#;
+
+fn should_show_backend_recovery(quit_requested: bool) -> bool {
+    !quit_requested
+}
+
+/// Replace the main window with an actionable recovery surface. If the
+/// backend dies before the normal main window exists, create a trusted local
+/// main window from the bundled splash asset so the same ACL-gated native Quit
+/// command remains available.
+fn show_backend_recovery(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.eval(BACKEND_RECOVERY_SCRIPT);
+        let _ = main.show();
+        let _ = main.set_focus();
+        return;
+    }
+
+    let recovery =
+        WebviewWindowBuilder::new(app, "main", WebviewUrl::App(PathBuf::from("index.html")))
+            .title("FlintTrade - Backend stopped")
+            .inner_size(620.0, 420.0)
+            .min_inner_size(520.0, 360.0)
+            .center()
+            .initialization_script(BACKEND_RECOVERY_SCRIPT)
+            .build();
+
+    match recovery {
+        Ok(window) => {
+            let app_for_close = app.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { .. } = event {
+                    mark_quit_requested(&app_for_close);
+                    app_for_close.exit(0);
+                }
+            });
+            if let Some(splash) = app.get_webview_window("splash") {
+                let _ = splash.close();
+            }
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        Err(error) => {
+            eprintln!("[flinttrade] could not create backend recovery window: {error}");
+            if let Some(splash) = app.get_webview_window("splash") {
+                let _ = splash.eval(
+                    "var s=document.getElementById('status');\
+                     if(s){s.textContent='Backend stopped. Use the tray Quit action.';s.style.color='#ff6a3d';}",
+                );
+            }
+        }
+    }
+}
+
+fn clear_terminated_backend(app: &AppHandle, record: &SidecarRecord) {
+    let Some(state) = app.try_state::<BackendState>() else {
+        return;
+    };
+    let mut active = state.0.lock().unwrap();
+    if active
+        .as_ref()
+        .map(|managed| &managed.record)
+        .is_some_and(|active_record| active_record == record)
+    {
+        active.take();
     }
 }
 
 /// Gracefully stop the backend sidecar, with a bounded hard-kill fallback.
 fn kill_backend(app: &AppHandle) {
     if let Some(state) = app.try_state::<BackendState>() {
-        if let Some(mut child) = state.0.lock().unwrap().take() {
-            let pid = child.pid();
-            if child.write(SIDECAR_SHUTDOWN_COMMAND).is_ok()
+        if let Some(mut managed) = state.0.lock().unwrap().take() {
+            let pid = managed.record.sidecar_pid;
+            if managed.child.write(SIDECAR_SHUTDOWN_COMMAND).is_ok()
                 && wait_for_process_exit(pid, SIDECAR_SHUTDOWN_POLLS)
             {
-                remove_sidecar_pid_file();
+                remove_sidecar_record(&managed.record);
                 return;
             }
             match process_liveness(pid) {
@@ -1036,11 +1265,11 @@ fn kill_backend(app: &AppHandle) {
                 }
                 ProcessLiveness::Dead => {}
             }
-            if let Err(error) = child.kill() {
+            if let Err(error) = managed.child.kill() {
                 eprintln!("[flinttrade] backend hard-kill request failed: {error}");
             }
             if wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS) {
-                remove_sidecar_pid_file();
+                remove_sidecar_record(&managed.record);
             } else {
                 eprintln!(
                     "[flinttrade] backend pid {pid} is still alive after hard kill; retaining recovery record"
@@ -1059,28 +1288,111 @@ fn sidecar_pid_file() -> Option<PathBuf> {
     flinttrade_home().map(|d| d.join(SIDECAR_PID_FILE))
 }
 
-/// Serialise the PID file: line 1 = sidecar PID, line 2 = owning shell PID.
-fn format_pid_file(sidecar_pid: u32, shell_pid: u32) -> String {
-    format!("{sidecar_pid}\n{shell_pid}\n")
+fn instance_lock_file() -> Option<PathBuf> {
+    flinttrade_home().map(|d| d.join(DESKTOP_INSTANCE_LOCK_FILE))
 }
 
-/// Parse a PID file written by [`format_pid_file`].
-///
-/// Returns ``(sidecar_pid, shell_pid)``; the shell PID is ``None`` for a
-/// single-line file. Any malformed first line yields ``None``.
-fn parse_pid_file(contents: &str) -> Option<(u32, Option<u32>)> {
+fn instance_lock_contended(error: &std::io::Error) -> bool {
+    let expected = fs2::lock_contended_error();
+    expected.raw_os_error().is_some() && error.raw_os_error() == expected.raw_os_error()
+}
+
+impl DesktopInstanceLock {
+    fn acquire_at(path: &Path, shell_pid: u32, launch_token: String) -> std::io::Result<Self> {
+        if shell_pid == 0 || !valid_launch_token(&launch_token) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "desktop instance identity is invalid",
+            ));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)?;
+        if let Err(error) = file.try_lock_exclusive() {
+            return Err(if instance_lock_contended(&error) {
+                std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "desktop instance lock is already held",
+                )
+            } else {
+                error
+            });
+        }
+
+        // Diagnostic text is written only after the kernel grants ownership.
+        // A partial or stale value never affects future lock claims.
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        writeln!(file, "{shell_pid}")?;
+        file.sync_all()?;
+
+        Ok(Self {
+            _file: file,
+            shell_pid,
+            launch_token,
+        })
+    }
+}
+
+fn generate_launch_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|error| {
+        std::io::Error::other(format!("could not generate launch token: {error}"))
+    })?;
+    Ok(to_hex(&bytes))
+}
+
+fn claim_desktop_instance() -> std::io::Result<DesktopInstanceLock> {
+    let path = instance_lock_file().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "could not resolve the FlintTrade workspace directory",
+        )
+    })?;
+    DesktopInstanceLock::acquire_at(&path, std::process::id(), generate_launch_token()?)
+}
+
+fn valid_launch_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Serialise the recovery record as exactly three lines: sidecar PID, shell
+/// PID, then the per-launch token.
+fn format_sidecar_record(record: &SidecarRecord) -> String {
+    format!(
+        "{}\n{}\n{}\n",
+        record.sidecar_pid, record.shell_pid, record.launch_token
+    )
+}
+
+fn parse_sidecar_record(contents: &str) -> Option<SidecarRecord> {
     let mut lines = contents.lines();
-    let sidecar = lines
+    let sidecar_pid = lines
         .next()?
         .trim()
         .parse::<u32>()
         .ok()
-        .filter(|p| *p > 0)?;
-    let shell = lines
-        .next()
-        .and_then(|l| l.trim().parse::<u32>().ok())
-        .filter(|p| *p > 0);
-    Some((sidecar, shell))
+        .filter(|pid| *pid > 0)?;
+    let shell_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let launch_token = lines.next()?.trim().to_string();
+    if lines.next().is_some() || !valid_launch_token(&launch_token) {
+        return None;
+    }
+    Some(SidecarRecord {
+        sidecar_pid,
+        shell_pid,
+        launch_token,
+    })
 }
 
 /// True when a process command line / image name identifies our sidecar.
@@ -1088,39 +1400,69 @@ fn looks_like_backend_sidecar(command_line: &str) -> bool {
     command_line.contains(SIDECAR_PROCESS_MARKER)
 }
 
+/// Conservatively identify a FlintTrade desktop shell. False positives only
+/// refuse startup; they never result in terminating a process.
+fn looks_like_desktop_shell(command_line: &str) -> bool {
+    let lower = command_line.to_ascii_lowercase();
+    if lower.contains(SIDECAR_PROCESS_MARKER) {
+        return false;
+    }
+    let executable = if let Some(quoted) = lower.strip_prefix('"') {
+        quoted.split('"').next()
+    } else {
+        lower.split_whitespace().next()
+    };
+    let Some(executable) = executable else {
+        return false;
+    };
+    let image_name = executable.rsplit(['/', '\\']).next().unwrap_or_default();
+    matches!(
+        image_name,
+        "flinttrade" | "flinttrade.exe" | "flinttrade-desktop" | "flinttrade-desktop.exe"
+    )
+}
+
 /// Return the command line (unix `ps`) for a PID, or ``None`` when no such
-/// process exists.
+/// process exists. Tool execution failures stay distinct from absence.
 #[cfg(unix)]
-fn process_command_line(pid: u32) -> Option<String> {
+fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
     let out = std::process::Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "args="])
-        .output()
-        .ok()?;
+        .output()?;
     if !out.status.success() {
-        return None;
+        return Err(std::io::Error::other(format!(
+            "ps exited with status {}",
+            out.status
+        )));
     }
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(text)
+        Ok(Some(text))
     }
 }
 
 /// Return the `tasklist` CSV row (image name + PID) for a PID, or ``None``
 /// when no such process exists.
 #[cfg(windows)]
-fn process_command_line(pid: u32) -> Option<String> {
+fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
     let out = std::process::Command::new("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .output()
-        .ok()?;
+        .output()?;
+    if !out.status.success() {
+        return Err(std::io::Error::other(format!(
+            "tasklist exited with status {}",
+            out.status
+        )));
+    }
     let text = String::from_utf8_lossy(&out.stdout).to_string();
     // A match prints a quoted CSV row; a miss prints an ``INFO:`` line.
     let needle = format!("\"{pid}\"");
-    text.lines()
-        .find(|l| l.contains(&needle))
-        .map(str::to_string)
+    Ok(text
+        .lines()
+        .find(|line| line.contains(&needle))
+        .map(str::to_string))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1210,95 +1552,335 @@ fn terminate_process(pid: u32) -> bool {
     wait_for_process_exit(pid, SIDECAR_KILL_CONFIRM_POLLS)
 }
 
-/// Startup layer of orphan protection.
-///
-/// If a previous shell run crashed or was force-quit, its kill-on-exit path
-/// never ran and the sidecar keeps serving. Read the PID file it left behind
-/// and terminate that sidecar — but only after two safety checks:
-///
-/// * the shell recorded as its owner is no longer alive (a live shell means a
-///   second FlintTrade instance is running; killing its backend would be far
-///   worse than tolerating a duplicate), and
-/// * the PID's current command line still identifies our
-///   ``flinttrade-backend`` binary — a reused PID belonging to any other
-///   process is never killed.
-fn reap_stale_sidecar() {
-    let Some(path) = sidecar_pid_file() else {
-        return;
-    };
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return;
-    };
-    let Some((sidecar_pid, shell_pid)) = parse_pid_file(&contents) else {
-        let _ = std::fs::remove_file(&path);
-        return;
-    };
-    if let Some(owner) = shell_pid {
-        if owner != std::process::id() {
-            match process_liveness(owner) {
-                ProcessLiveness::Alive => {
-                    eprintln!(
-                        "[flinttrade] sidecar pid file is owned by a live shell (pid {owner}); skipping reap"
-                    );
-                    return;
-                }
-                ProcessLiveness::Unknown => {
-                    eprintln!(
-                        "[flinttrade] shell pid {owner} liveness is unknown; retaining sidecar recovery record"
-                    );
-                    return;
-                }
-                ProcessLiveness::Dead => {}
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReapOutcome {
+    NoRecord,
+    RemovedConfirmedDead,
+    RemovedConfirmedReused,
+    TerminatedAndRemoved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReapError {
+    WorkspaceUnavailable,
+    RecordRead { message: String },
+    InvalidRecord,
+    ShellLivenessUnknown { pid: u32 },
+    ShellIdentityLookupFailed { pid: u32 },
+    ShellIdentityUnconfirmed { pid: u32 },
+    ShellStillAlive { pid: u32 },
+    SidecarLivenessUnknown { pid: u32 },
+    SidecarIdentityLookupFailed { pid: u32 },
+    SidecarIdentityUnconfirmed { pid: u32 },
+    TerminationFailed { pid: u32 },
+    RecordChanged,
+    RecordRemoval { message: String },
+}
+
+impl std::fmt::Display for ReapError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkspaceUnavailable => write!(formatter, "workspace directory is unavailable"),
+            Self::RecordRead { message } => {
+                write!(
+                    formatter,
+                    "sidecar recovery record could not be read: {message}"
+                )
+            }
+            Self::InvalidRecord => write!(
+                formatter,
+                "sidecar recovery record is incomplete or invalid"
+            ),
+            Self::ShellLivenessUnknown { pid } => {
+                write!(formatter, "owning shell pid {pid} liveness is unknown")
+            }
+            Self::ShellIdentityLookupFailed { pid } => {
+                write!(formatter, "owning shell pid {pid} identity lookup failed")
+            }
+            Self::ShellIdentityUnconfirmed { pid } => {
+                write!(
+                    formatter,
+                    "owning shell pid {pid} identity could not be confirmed"
+                )
+            }
+            Self::ShellStillAlive { pid } => {
+                write!(
+                    formatter,
+                    "recorded FlintTrade shell pid {pid} is still alive"
+                )
+            }
+            Self::SidecarLivenessUnknown { pid } => {
+                write!(formatter, "sidecar pid {pid} liveness is unknown")
+            }
+            Self::SidecarIdentityLookupFailed { pid } => {
+                write!(formatter, "sidecar pid {pid} identity lookup failed")
+            }
+            Self::SidecarIdentityUnconfirmed { pid } => {
+                write!(
+                    formatter,
+                    "sidecar pid {pid} identity could not be confirmed"
+                )
+            }
+            Self::TerminationFailed { pid } => {
+                write!(
+                    formatter,
+                    "sidecar pid {pid} termination could not be confirmed"
+                )
+            }
+            Self::RecordChanged => write!(formatter, "sidecar recovery record changed during reap"),
+            Self::RecordRemoval { message } => {
+                write!(
+                    formatter,
+                    "sidecar recovery record could not be removed: {message}"
+                )
             }
         }
     }
-    let remove_recovery_record = match process_liveness(sidecar_pid) {
-        ProcessLiveness::Dead => true,
-        ProcessLiveness::Unknown => false,
-        ProcessLiveness::Alive => match process_command_line(sidecar_pid) {
-            Some(cmd) if looks_like_backend_sidecar(&cmd) => {
-                eprintln!(
-                    "[flinttrade] terminating stale backend sidecar (pid {sidecar_pid}) from a previous run"
-                );
-                terminate_process(sidecar_pid)
+}
+
+impl std::error::Error for ReapError {}
+
+fn remove_reaped_record(
+    path: &Path,
+    record: &SidecarRecord,
+    outcome: ReapOutcome,
+) -> Result<ReapOutcome, ReapError> {
+    match remove_sidecar_record_at(path, record) {
+        Ok(true) => Ok(outcome),
+        Ok(false) => Err(ReapError::RecordChanged),
+        Err(error) => Err(ReapError::RecordRemoval {
+            message: error.to_string(),
+        }),
+    }
+}
+
+/// Startup layer of orphan protection. Every ambiguous process state is an
+/// error so setup cannot overwrite an unresolved record and spawn a duplicate.
+fn reap_stale_sidecar_at<L, I, T>(
+    path: &Path,
+    current_shell_pid: u32,
+    liveness: L,
+    identity: I,
+    terminate: T,
+) -> Result<ReapOutcome, ReapError>
+where
+    L: Fn(u32) -> ProcessLiveness,
+    I: Fn(u32) -> std::io::Result<Option<String>>,
+    T: Fn(u32) -> bool,
+{
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ReapOutcome::NoRecord);
+        }
+        Err(error) => {
+            return Err(ReapError::RecordRead {
+                message: error.to_string(),
+            });
+        }
+    };
+    let record = parse_sidecar_record(&contents).ok_or(ReapError::InvalidRecord)?;
+
+    // If the OS reused the previous shell PID for this process, the held
+    // kernel lock proves the old owner is gone. Otherwise a live process must
+    // be identified before its PID can be classified as reused.
+    if record.shell_pid != current_shell_pid {
+        match liveness(record.shell_pid) {
+            ProcessLiveness::Dead => {}
+            ProcessLiveness::Unknown => {
+                return Err(ReapError::ShellLivenessUnknown {
+                    pid: record.shell_pid,
+                });
             }
-            Some(_) => {
+            ProcessLiveness::Alive => match identity(record.shell_pid) {
+                Ok(Some(command)) if looks_like_desktop_shell(&command) => {
+                    return Err(ReapError::ShellStillAlive {
+                        pid: record.shell_pid,
+                    });
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => match liveness(record.shell_pid) {
+                    ProcessLiveness::Dead => {}
+                    ProcessLiveness::Unknown => {
+                        return Err(ReapError::ShellLivenessUnknown {
+                            pid: record.shell_pid,
+                        });
+                    }
+                    ProcessLiveness::Alive => {
+                        return Err(ReapError::ShellIdentityUnconfirmed {
+                            pid: record.shell_pid,
+                        });
+                    }
+                },
+                Err(_) => match liveness(record.shell_pid) {
+                    ProcessLiveness::Dead => {}
+                    ProcessLiveness::Alive | ProcessLiveness::Unknown => {
+                        return Err(ReapError::ShellIdentityLookupFailed {
+                            pid: record.shell_pid,
+                        });
+                    }
+                },
+            },
+        }
+    }
+
+    let outcome = match liveness(record.sidecar_pid) {
+        ProcessLiveness::Dead => ReapOutcome::RemovedConfirmedDead,
+        ProcessLiveness::Unknown => {
+            return Err(ReapError::SidecarLivenessUnknown {
+                pid: record.sidecar_pid,
+            });
+        }
+        ProcessLiveness::Alive => match identity(record.sidecar_pid) {
+            Ok(Some(command)) if looks_like_backend_sidecar(&command) => {
                 eprintln!(
-                    "[flinttrade] pid {sidecar_pid} from a previous run was reused by another process; leaving it alone"
+                    "[flinttrade] terminating stale backend sidecar (pid {}) from a previous run",
+                    record.sidecar_pid
                 );
-                true
+                if !terminate(record.sidecar_pid)
+                    || liveness(record.sidecar_pid) != ProcessLiveness::Dead
+                {
+                    return Err(ReapError::TerminationFailed {
+                        pid: record.sidecar_pid,
+                    });
+                }
+                ReapOutcome::TerminatedAndRemoved
             }
-            None => false,
+            Ok(Some(_)) => {
+                eprintln!(
+                    "[flinttrade] sidecar pid {} was reused by another process; leaving the process alone",
+                    record.sidecar_pid
+                );
+                ReapOutcome::RemovedConfirmedReused
+            }
+            Ok(None) => match liveness(record.sidecar_pid) {
+                ProcessLiveness::Dead => ReapOutcome::RemovedConfirmedDead,
+                ProcessLiveness::Unknown => {
+                    return Err(ReapError::SidecarLivenessUnknown {
+                        pid: record.sidecar_pid,
+                    });
+                }
+                ProcessLiveness::Alive => {
+                    return Err(ReapError::SidecarIdentityUnconfirmed {
+                        pid: record.sidecar_pid,
+                    });
+                }
+            },
+            Err(_) => match liveness(record.sidecar_pid) {
+                ProcessLiveness::Dead => ReapOutcome::RemovedConfirmedDead,
+                ProcessLiveness::Alive | ProcessLiveness::Unknown => {
+                    return Err(ReapError::SidecarIdentityLookupFailed {
+                        pid: record.sidecar_pid,
+                    });
+                }
+            },
         },
     };
-    if remove_recovery_record {
-        let _ = std::fs::remove_file(&path);
-    } else {
-        eprintln!(
-            "[flinttrade] stale backend pid {sidecar_pid} could not be confirmed stopped; retaining recovery record"
-        );
-    }
+
+    remove_reaped_record(path, &record, outcome)
 }
 
-/// Record the freshly spawned sidecar (and this shell) in the PID file so the
-/// next launch can reap it if this shell crashes without cleanup.
-fn write_sidecar_pid_file(sidecar_pid: u32) {
+fn reap_stale_sidecar() -> Result<ReapOutcome, ReapError> {
+    let path = sidecar_pid_file().ok_or(ReapError::WorkspaceUnavailable)?;
+    reap_stale_sidecar_at(
+        &path,
+        std::process::id(),
+        process_liveness,
+        process_command_line,
+        terminate_process,
+    )
+}
+
+/// Atomically publish a complete sidecar record. The destination must be
+/// absent after stale-state reaping; replacing an existing record is refused.
+fn write_sidecar_record_at(path: &Path, record: &SidecarRecord) -> std::io::Result<()> {
+    let serialised = format_sidecar_record(record);
+    if parse_sidecar_record(&serialised).as_ref() != Some(record) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sidecar record is invalid",
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sidecar record path has no parent directory",
+        )
+    })?;
+    std::fs::create_dir_all(parent)?;
+    if path.try_exists()? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "sidecar recovery record already exists",
+        ));
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sidecar record path has no valid file name",
+            )
+        })?;
+    let temporary = parent.join(format!(".{file_name}.{}.tmp", record.launch_token));
+    let result = (|| -> std::io::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(serialised.as_bytes())?;
+        file.sync_all()?;
+        harden_file(&temporary);
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn write_sidecar_record(record: &SidecarRecord) -> std::io::Result<()> {
+    let path = sidecar_pid_file().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "could not resolve workspace directory for sidecar record",
+        )
+    })?;
+    write_sidecar_record_at(&path, record)
+}
+
+/// Compare all three identity fields before deleting. The process-lifetime
+/// instance lock prevents a successor shell from replacing the record between
+/// comparison and removal.
+fn remove_sidecar_record_at(path: &Path, expected: &SidecarRecord) -> std::io::Result<bool> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if parse_sidecar_record(&contents).as_ref() != Some(expected) {
+        return Ok(false);
+    }
+    std::fs::remove_file(path)?;
+    Ok(true)
+}
+
+fn remove_sidecar_record(expected: &SidecarRecord) {
     let Some(path) = sidecar_pid_file() else {
-        eprintln!("[flinttrade] could not resolve workspace dir; sidecar pid not recorded");
+        eprintln!("[flinttrade] could not resolve workspace dir; retaining sidecar record");
         return;
     };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Err(e) = std::fs::write(&path, format_pid_file(sidecar_pid, std::process::id())) {
-        eprintln!("[flinttrade] could not write sidecar pid file: {e}");
-    }
-}
-
-/// Remove the PID file once the sidecar has been stopped deliberately.
-fn remove_sidecar_pid_file() {
-    if let Some(path) = sidecar_pid_file() {
-        let _ = std::fs::remove_file(&path);
+    match remove_sidecar_record_at(&path, expected) {
+        Ok(true) => {}
+        Ok(false) => eprintln!(
+            "[flinttrade] sidecar recovery record no longer matches this launch; retaining it"
+        ),
+        Err(error) => {
+            eprintln!("[flinttrade] could not remove sidecar recovery record: {error}")
+        }
     }
 }
 
@@ -1468,26 +2050,410 @@ mod tests {
     }
 
     #[test]
-    fn pid_file_round_trips() {
+    fn sidecar_record_round_trips() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 99,
+            launch_token: "a".repeat(64),
+        };
+
         assert_eq!(
-            parse_pid_file(&format_pid_file(1234, 99)),
-            Some((1234, Some(99)))
+            parse_sidecar_record(&format_sidecar_record(&record)),
+            Some(record)
         );
     }
 
     #[test]
-    fn pid_file_tolerates_a_missing_shell_line() {
-        assert_eq!(parse_pid_file("4321\n"), Some((4321, None)));
-        assert_eq!(parse_pid_file("4321"), Some((4321, None)));
-        assert_eq!(parse_pid_file("4321\nnot-a-pid\n"), Some((4321, None)));
+    fn rejects_incomplete_or_malformed_sidecar_records() {
+        assert_eq!(parse_sidecar_record(""), None);
+        assert_eq!(parse_sidecar_record("1234\n99\n"), None);
+        assert_eq!(parse_sidecar_record("1234\n99\nshort-token\n"), None);
+        assert_eq!(
+            parse_sidecar_record(&format!("0\n99\n{}\n", "a".repeat(64))),
+            None
+        );
+        assert_eq!(
+            parse_sidecar_record(&format!("1234\n0\n{}\n", "a".repeat(64))),
+            None
+        );
+        assert_eq!(
+            parse_sidecar_record(&format!("1234\n99\n{}\nextra\n", "a".repeat(64))),
+            None
+        );
     }
 
     #[test]
-    fn rejects_malformed_pid_files() {
-        assert_eq!(parse_pid_file(""), None);
-        assert_eq!(parse_pid_file("not-a-pid\n77\n"), None);
-        assert_eq!(parse_pid_file("0\n77\n"), None);
-        assert_eq!(parse_pid_file("-5\n77\n"), None);
+    fn competing_kernel_lock_claimants_block_until_owner_drops() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-instance-compete-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-instance.lock");
+
+        let first = DesktopInstanceLock::acquire_at(&path, 77, "a".repeat(64)).unwrap();
+        let error = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+
+        drop(first);
+        let successor = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "99\n");
+        drop(successor);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fs2_contention_error_is_recognised_cross_platform() {
+        assert!(instance_lock_contended(&fs2::lock_contended_error()));
+        assert!(!instance_lock_contended(&std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "not lock contention",
+        )));
+    }
+
+    #[test]
+    fn stale_or_empty_diagnostics_do_not_control_kernel_lock_ownership() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-instance-diagnostic-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-instance.lock");
+        std::fs::write(&path, "stale or malformed diagnostic text\n").unwrap();
+
+        let stale = DesktopInstanceLock::acquire_at(&path, 99, "a".repeat(64)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "99\n");
+        drop(stale);
+
+        std::fs::write(&path, "").unwrap();
+        let empty = DesktopInstanceLock::acquire_at(&path, 100, "b".repeat(64)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "100\n");
+        drop(empty);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unknown_sidecar_owner_refuses_reap_and_retains_record() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-unknown-owner-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+
+        let result = reap_stale_sidecar_at(
+            &path,
+            99,
+            |_| ProcessLiveness::Unknown,
+            |_| panic!("identity lookup must not run for unknown liveness"),
+            |_| panic!("termination must not run for unknown liveness"),
+        );
+
+        assert_eq!(result, Err(ReapError::ShellLivenessUnknown { pid: 77 }));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_sidecar_termination_refuses_reap_and_retains_record() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-failed-termination-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+
+        let result = reap_stale_sidecar_at(
+            &path,
+            99,
+            |pid| match pid {
+                77 => ProcessLiveness::Dead,
+                1234 => ProcessLiveness::Alive,
+                _ => panic!("unexpected pid {pid}"),
+            },
+            |pid| {
+                assert_eq!(pid, 1234);
+                Ok(Some(
+                    "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0"
+                        .to_string(),
+                ))
+            },
+            |pid| {
+                assert_eq!(pid, 1234);
+                false
+            },
+        );
+
+        assert_eq!(result, Err(ReapError::TerminationFailed { pid: 1234 }));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ambiguous_liveness_or_identity_lookup_refuses_reap() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-ambiguous-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Unknown,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| panic!("identity lookup must not run for unknown liveness"),
+                |_| panic!("termination must not run for unknown liveness"),
+            ),
+            Err(ReapError::SidecarLivenessUnknown { pid: 1234 })
+        );
+
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Err(std::io::Error::other("lookup failed")),
+                |_| panic!("termination must not run after failed owner lookup"),
+            ),
+            Err(ReapError::ShellIdentityLookupFailed { pid: 77 })
+        );
+
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Err(std::io::Error::other("lookup failed")),
+                |_| panic!("termination must not run after failed sidecar lookup"),
+            ),
+            Err(ReapError::SidecarIdentityLookupFailed { pid: 1234 })
+        );
+
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Ok(None),
+                |_| panic!("termination must not run for unconfirmed identity"),
+            ),
+            Err(ReapError::SidecarIdentityUnconfirmed { pid: 1234 })
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sidecar_record_is_published_atomically_without_overwrite() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-record-publish-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+
+        write_sidecar_record_at(&path, &record).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+
+        let replacement = SidecarRecord {
+            sidecar_pid: 4321,
+            launch_token: "b".repeat(64),
+            ..record.clone()
+        };
+        let error = write_sidecar_record_at(&path, &replacement).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&record)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sidecar_record_removal_requires_token_and_shell_match() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-record-removal-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let actual = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&actual)).unwrap();
+
+        let wrong_shell = SidecarRecord {
+            shell_pid: 88,
+            ..actual.clone()
+        };
+        assert!(!remove_sidecar_record_at(&path, &wrong_shell).unwrap());
+        assert!(path.exists());
+
+        let wrong_token = SidecarRecord {
+            launch_token: "b".repeat(64),
+            ..actual.clone()
+        };
+        assert!(!remove_sidecar_record_at(&path, &wrong_token).unwrap());
+        assert!(path.exists());
+
+        assert!(remove_sidecar_record_at(&path, &actual).unwrap());
+        assert!(!path.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backend_recovery_is_only_shown_for_unexpected_termination() {
+        assert!(!should_show_backend_recovery(true));
+        assert!(should_show_backend_recovery(false));
+    }
+
+    #[test]
+    fn main_window_close_exits_recovery_instead_of_hiding_to_tray() {
+        assert_eq!(
+            main_window_close_action(false, false),
+            MainWindowCloseAction::HideToTray
+        );
+        assert_eq!(
+            main_window_close_action(true, false),
+            MainWindowCloseAction::AllowClose
+        );
+        assert_eq!(
+            main_window_close_action(false, true),
+            MainWindowCloseAction::ExitApp
+        );
+    }
+
+    #[test]
+    fn confirmed_dead_or_reused_sidecar_records_are_removed() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-safe-removal-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |_| ProcessLiveness::Dead,
+                |_| panic!("identity lookup must not run for a dead process"),
+                |_| panic!("termination must not run for a dead process"),
+            ),
+            Ok(ReapOutcome::RemovedConfirmedDead)
+        );
+        assert!(!path.exists());
+
+        std::fs::write(&path, format_sidecar_record(&record)).unwrap();
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Ok(Some("/usr/bin/python3 unrelated.py".to_string())),
+                |_| panic!("termination must not run for a reused pid"),
+            ),
+            Ok(ReapOutcome::RemovedConfirmedReused)
+        );
+        assert!(!path.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1564,13 +2530,19 @@ mod tests {
         // Marker present -> step aside regardless of the child's exit state.
         assert_eq!(handoff_decision(true, None), HandoffDecision::Proceed);
         assert_eq!(handoff_decision(true, Some(true)), HandoffDecision::Proceed);
-        assert_eq!(handoff_decision(true, Some(false)), HandoffDecision::Proceed);
+        assert_eq!(
+            handoff_decision(true, Some(false)),
+            HandoffDecision::Proceed
+        );
         // No marker, still running -> keep waiting (a slow download must not
         // make the app vanish).
         assert_eq!(handoff_decision(false, None), HandoffDecision::KeepWaiting);
         // No marker, exited with failure -> the update could not proceed; stay
         // alive and surface it.
-        assert_eq!(handoff_decision(false, Some(false)), HandoffDecision::Failed);
+        assert_eq!(
+            handoff_decision(false, Some(false)),
+            HandoffDecision::Failed
+        );
         // No marker, exited cleanly -> nothing to step aside for.
         assert_eq!(handoff_decision(false, Some(true)), HandoffDecision::Done);
     }
@@ -1623,6 +2595,23 @@ mod tests {
         assert!(!looks_like_backend_sidecar(
             "\"notepad.exe\",\"1234\",\"Console\",\"1\",\"9,000 K\""
         ));
+    }
+
+    #[test]
+    fn desktop_shell_identity_covers_packaged_platform_names() {
+        assert!(looks_like_desktop_shell(
+            "/opt/FlintTrade/flinttrade --some-runtime-flag"
+        ));
+        assert!(looks_like_desktop_shell(
+            "/Applications/FlintTrade.app/Contents/MacOS/FlintTrade"
+        ));
+        assert!(looks_like_desktop_shell(
+            "\"FlintTrade.exe\",\"1234\",\"Console\",\"1\",\"120,000 K\""
+        ));
+        assert!(!looks_like_desktop_shell(
+            "/opt/FlintTrade/flinttrade-backend --port 0"
+        ));
+        assert!(!looks_like_desktop_shell("/usr/bin/python3 unrelated.py"));
     }
 
     #[test]

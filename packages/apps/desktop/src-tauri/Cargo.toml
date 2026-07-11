@@ -31,9 +31,12 @@ tauri-plugin-notification = "2"
 # to https URLs in capabilities/default.json) to launch the default browser.
 tauri-plugin-opener = "2"
 # Cross-platform CSPRNG for provisioning the credential-vault master password
-# on first launch (loopback, single-user desktop). No other runtime deps —
-# kept minimal so the CI build matrix stays green across all three OSes.
+# on first launch (loopback, single-user desktop).
 getrandom = "0.2"
+# Cross-platform advisory kernel locks for one desktop shell per workspace. The
+# open lock file is held in Tauri managed state for the process lifetime; its
+# text is diagnostic only and never participates in ownership decisions.
+fs2 = "0.4"
 # Serialising the ``updater_state`` command payload over Tauri IPC. Already in
 # the dependency graph via tauri itself, so this adds no supply-chain weight.
 serde = { version = "1", features = ["derive"] }
