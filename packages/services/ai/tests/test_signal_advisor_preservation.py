@@ -6,6 +6,7 @@ import hashlib
 import math
 import pickle
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,9 +30,11 @@ LEGACY_FEATURE_NAMES = [
 
 
 def _bars(count: int = 120) -> list[dict[str, float | str]]:
+    final_stamp = datetime.now(timezone.utc) - timedelta(minutes=5)
+    first_stamp = final_stamp - timedelta(minutes=5 * (count - 1))
     return [
         {
-            "timestamp": f"2026-07-10T09:{index:03d}:00+05:30",
+            "timestamp": (first_stamp + timedelta(minutes=5 * index)).isoformat(),
             "open": 100.0 + index * 0.45,
             "high": 101.5 + index * 0.5,
             "low": 99.0 + index * 0.4,
