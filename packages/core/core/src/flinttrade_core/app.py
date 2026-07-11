@@ -3588,6 +3588,14 @@ def _market_calendar_refresh_delay(*, loaded: bool) -> float:
     return max(1.0, (refresh_at - now).total_seconds())
 
 
+def _current_market_calendar_year() -> int:
+    """Return the current exchange-calendar year in IST."""
+    from datetime import datetime  # noqa: PLC0415
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    return datetime.now(ZoneInfo("Asia/Kolkata")).year
+
+
 class FlintTradeApp:
     """Main application — creates and wires all FlintTrade subsystems.
 
@@ -3709,13 +3717,38 @@ class FlintTradeApp:
 
     async def _refresh_market_calendar(self) -> bool:
         """Refresh and apply one authoritative market-calendar payload."""
+        calendar_year = _current_market_calendar_year()
+        before_generation = getattr(self.cron, "holiday_generation", None)
+        before_year = getattr(self.cron, "holiday_year", None)
+        fail_closed = before_year != calendar_year
+        calendar_invalidated = False
+        if self._calendar_loaded and fail_closed:
+            self._fail_closed_calendar_year(calendar_year)
+            calendar_invalidated = True
         try:
             await self.cron.load_holidays()
         except Exception as exc:
             logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
+            if fail_closed and not calendar_invalidated:
+                self._fail_closed_calendar_year(calendar_year)
             return False
 
         if self._stop_started:
+            return False
+
+        after_generation = getattr(self.cron, "holiday_generation", None)
+        loaded_year = getattr(self.cron, "holiday_year", None)
+        fresh_generation = (
+            isinstance(before_generation, int)
+            and isinstance(after_generation, int)
+            and after_generation > before_generation
+        )
+        if not fresh_generation or loaded_year != calendar_year:
+            logger.warning(
+                "Market calendar refresh did not produce current-year authority; retaining a fail-closed year"
+            )
+            if fail_closed and not calendar_invalidated:
+                self._fail_closed_calendar_year(calendar_year)
             return False
 
         calendar_payload = getattr(self.cron, "holiday_payload", None)
@@ -3725,14 +3758,31 @@ class FlintTradeApp:
             )
             return False
         try:
-            self.time_scheduler.set_holidays(calendar_payload)
+            self.time_scheduler.set_holidays(
+                calendar_payload,
+                year=str(calendar_year),
+            )
         except Exception as exc:
             logger.warning("Could not apply loaded market holidays: %s", exc)
+            self._fail_closed_calendar_year(calendar_year)
             return False
         self._calendar_loaded = True
         if self._calendar_runtime_ready:
             self._start_calendar_schedulers()
         return True
+
+    def _fail_closed_calendar_year(self, year: int) -> None:
+        """Block calendar-gated work until an authoritative year is loaded."""
+        blocked_dates = self.cron.fail_closed_calendar_year(year)
+        self._calendar_loaded = False
+        try:
+            self.time_scheduler.set_holidays(blocked_dates, year=str(year))
+        except Exception as exc:
+            logger.error("Could not apply fail-closed market calendar: %s", exc)
+            if self._strategy_cron_started:
+                self.strategy_cron_scheduler.stop()
+                self._strategy_cron_started = False
+                self._calendar_schedulers_started = False
 
     def _start_calendar_schedulers(self) -> None:
         """Start market-sensitive schedulers after an authoritative calendar."""

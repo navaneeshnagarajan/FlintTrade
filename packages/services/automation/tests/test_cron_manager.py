@@ -663,6 +663,58 @@ class TestLoadHolidays:
         assert cron.holidays == {"2026-01-26"}
         assert cron.holiday_payload is first_payload
 
+    def test_failed_refresh_does_not_advance_calendar_generation(self):
+        import asyncio
+        from flinttrade_automation.cron_manager import CronManager
+
+        calls = 0
+
+        async def holidays(**_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"status": "success", "year": 2026, "data": []}
+            return {"status": "error", "year": 2026, "data": []}
+
+        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        with patch("flinttrade_automation.cron_manager.datetime") as clock:
+            clock.now.return_value = datetime(2026, 7, 11, tzinfo=IST)
+            asyncio.run(cron.load_holidays())
+            generation = cron.holiday_generation
+            asyncio.run(cron.load_holidays())
+
+        assert generation == 1
+        assert cron.holiday_generation == generation
+        assert cron.holiday_year == 2026
+
+    def test_authoritative_refresh_records_requested_year(self):
+        import asyncio
+        from flinttrade_automation.cron_manager import CronManager
+
+        async def holidays(**_kwargs):
+            return {"status": "success", "year": 2027, "data": []}
+
+        cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
+        with patch("flinttrade_automation.cron_manager.datetime") as clock:
+            clock.now.return_value = datetime(2027, 1, 1, tzinfo=IST)
+            asyncio.run(cron.load_holidays())
+
+        assert cron.holiday_generation == 1
+        assert cron.holiday_year == 2027
+
+    def test_fail_closed_calendar_year_mutates_retained_holiday_reference(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        cron = CronManager()
+        retained_reference = cron.holidays
+
+        blocked = cron.fail_closed_calendar_year(2026)
+
+        assert blocked is retained_reference
+        assert len(blocked) == 365
+        assert "2026-01-01" in blocked
+        assert "2026-12-31" in blocked
+
     def test_requests_active_year_with_guarded_legacy_fallback(self):
         import asyncio
         from flinttrade_automation.cron_manager import load_holidays_from_client

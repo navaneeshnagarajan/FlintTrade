@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from flinttrade_core.openalgo_client import (
+    is_authoritative_market_calendar,
     normalise_holiday_dates,
     normalise_market_calendar,
 )
@@ -46,6 +47,67 @@ def test_rejects_invalid_dates_and_unrelated_envelope_metadata() -> None:
     }
 
     assert normalise_holiday_dates(payload) == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "error", "year": 2026, "data": []},
+        {"status": "success", "year": 2025, "data": []},
+        {"status": "success", "year": 2026, "data": "not-a-calendar"},
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [{"date": "not-a-date", "holiday_type": "TRADING_HOLIDAY"}],
+        },
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-01-26",
+                    "holiday_type": "TRADING_HOLIDAY",
+                    "closed_exchanges": "NSE",
+                }
+            ],
+        },
+    ],
+)
+def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> None:
+    assert not is_authoritative_market_calendar(payload, expected_year=2026)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "success", "year": 2026, "data": []},
+        {"holidays": []},
+        {"data": {"holidays": ["2026-01-26"]}},
+        ["2026-01-26"],
+    ],
+)
+def test_accepts_supported_authoritative_market_calendar_envelopes(payload: Any) -> None:
+    assert is_authoritative_market_calendar(payload, expected_year=2026)
+
+
+def test_incomplete_trading_holiday_row_fails_closed_for_all_exchanges() -> None:
+    rows = normalise_market_calendar(
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-01-26",
+                    "holiday_type": "TRADING_HOLIDAY",
+                    "closed_exchanges": [],
+                    "open_exchanges": [],
+                }
+            ],
+        }
+    )
+
+    assert rows[0]["closed_exchanges"] == ["*"]
+    assert normalise_holiday_dates(rows, exchange="NSE") == ["2026-01-26"]
 
 
 def test_current_calendar_preserves_exchange_closures_and_open_sessions() -> None:

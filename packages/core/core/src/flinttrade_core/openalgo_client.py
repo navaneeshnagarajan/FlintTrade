@@ -107,6 +107,84 @@ def _normalise_open_exchange(value: Any) -> dict[str, Any] | None:
     return session
 
 
+def is_authoritative_market_calendar(
+    payload: Any,
+    *,
+    expected_year: int | None = None,
+) -> bool:
+    """Return whether a calendar response is complete enough to replace live state."""
+    data = payload
+    explicit_success = False
+    explicit_year = False
+    for _ in range(4):
+        if not isinstance(data, dict):
+            break
+        if "status" in data:
+            explicit_success = str(data["status"]).strip().lower() in {"ok", "success"}
+            if not explicit_success:
+                return False
+        if "year" in data:
+            try:
+                response_year = int(data["year"])
+            except (TypeError, ValueError):
+                return False
+            explicit_year = True
+            if expected_year is not None and response_year != expected_year:
+                return False
+        if "data" in data:
+            data = data["data"]
+            continue
+        if "holidays" in data:
+            data = data["holidays"]
+            continue
+        break
+
+    candidates: list[Any]
+    if isinstance(data, list | tuple | set):
+        candidates = list(data)
+    elif isinstance(data, dict):
+        if not data:
+            return explicit_success and (expected_year is None or explicit_year)
+        candidates = []
+        for values in data.values():
+            if not isinstance(values, list | tuple | set):
+                return False
+            candidates.extend(values)
+    else:
+        return False
+
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            raw_date = candidate.get("date") or candidate.get("holiday_date") or candidate.get(
+                "trading_date"
+            )
+            if _normalise_calendar_date(raw_date) is None:
+                return False
+            if "holiday_type" in candidate:
+                holiday_type = str(candidate["holiday_type"] or "").strip().upper()
+                if holiday_type not in {
+                    "SETTLEMENT_HOLIDAY",
+                    "SPECIAL_SESSION",
+                    "TRADING_HOLIDAY",
+                }:
+                    return False
+            raw_closed = candidate.get("closed_exchanges", [])
+            if "closed_exchanges" in candidate and not isinstance(
+                raw_closed, list | tuple | set
+            ):
+                return False
+            if any(not isinstance(value, str) or not value.strip() for value in raw_closed):
+                return False
+            raw_open = candidate.get("open_exchanges", [])
+            if "open_exchanges" in candidate and not isinstance(raw_open, list | tuple):
+                return False
+            if any(_normalise_open_exchange(value) is None for value in raw_open):
+                return False
+        elif _normalise_calendar_date(candidate) is None:
+            return False
+    return True
+
+
 def normalise_market_calendar(payload: Any) -> list[dict[str, Any]]:
     """Return validated calendar rows without discarding exchange semantics."""
     data = payload
@@ -158,6 +236,8 @@ def normalise_market_calendar(payload: Any) -> list[dict[str, Any]]:
                     for candidate in raw_open
                     if (session := _normalise_open_exchange(candidate)) is not None
                 ]
+            if holiday_type != "SETTLEMENT_HOLIDAY" and not closed_exchanges:
+                closed_exchanges = {"*"}
         else:
             closed_exchanges = {default_exchange}
 

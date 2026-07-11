@@ -59,6 +59,24 @@ def _runtime_app() -> object:
     return app
 
 
+def _set_calendar_load(
+    app: object,
+    *,
+    payload: object,
+    year: int,
+) -> None:
+    """Configure a CronManager-shaped authoritative calendar refresh double."""
+    app.cron.holiday_payload = payload
+    app.cron.holiday_year = year
+    app.cron.holiday_generation = 0
+
+    async def load_holidays() -> set[str]:
+        app.cron.holiday_generation += 1
+        return set()
+
+    app.cron.load_holidays = load_holidays
+
+
 @pytest.mark.asyncio
 async def test_stop_during_holiday_load_prevents_startup_from_resuming(
     monkeypatch: pytest.MonkeyPatch,
@@ -406,6 +424,8 @@ async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
         holiday_started.set()
         await release_holiday.wait()
         runtime.cron.holiday_payload = []
+        runtime.cron.holiday_year = 2026
+        runtime.cron.holiday_generation += 1
         return set()
 
     def create_app(**_kwargs: object) -> Flask:
@@ -413,11 +433,14 @@ async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
         factory_calls += 1
         return Flask(f"start-generation-{factory_calls}")
 
+    runtime.cron.holiday_generation = 0
+    runtime.cron.holiday_year = None
     runtime.cron.load_holidays = load_holidays
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(app_module, "create_flask_app", create_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+    monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2026)
 
     first = asyncio.create_task(runtime.start())
     await asyncio.wait_for(holiday_started.wait(), timeout=1.0)
@@ -468,8 +491,7 @@ async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
     import flinttrade_core.app as app_module
 
     app = _runtime_app()
-    app.cron.load_holidays = AsyncMock(return_value=set())
-    app.cron.holiday_payload = []
+    _set_calendar_load(app, payload=[], year=2026)
     flask_app = Flask("shared-strategy-cron")
     captured_factory_args: dict[str, object] = {}
 
@@ -487,6 +509,7 @@ async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
     monkeypatch.setattr(app_module, "create_flask_app", create_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+    monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2026)
 
     await app.start()
 
@@ -505,12 +528,17 @@ async def test_failed_initial_calendar_load_does_not_replace_the_calendar(
     app = _runtime_app()
     app.cron.load_holidays = AsyncMock(return_value=set())
     app.cron.holiday_payload = None
+    app.cron.holiday_generation = 0
+    app.cron.holiday_year = None
+    blocked_dates = {"2026-01-01", "2026-12-31"}
+    app.cron.fail_closed_calendar_year.return_value = blocked_dates
     flask_app = Flask("failed-calendar-load")
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+    monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2026)
 
     start_task = asyncio.create_task(app.start())
     await asyncio.sleep(0.05)
@@ -522,7 +550,11 @@ async def test_failed_initial_calendar_load_does_not_replace_the_calendar(
     await app.stop()
     await asyncio.wait_for(start_task, timeout=1.0)
 
-    app.time_scheduler.set_holidays.assert_not_called()
+    app.cron.fail_closed_calendar_year.assert_called_once_with(2026)
+    app.time_scheduler.set_holidays.assert_called_once_with(
+        blocked_dates,
+        year="2026",
+    )
 
 
 @pytest.mark.asyncio
@@ -538,12 +570,17 @@ async def test_calendar_refresh_loop_retries_a_failed_initial_load(
 
     async def load_holidays() -> set[str]:
         app.cron.holiday_payload = calendar_payload
+        app.cron.holiday_year = 2027
+        app.cron.holiday_generation += 1
         return {"2027-01-26"}
 
-    def apply_holidays(payload: object) -> None:
+    def apply_holidays(payload: object, *, year: str | None = None) -> None:
         assert payload == calendar_payload
+        assert year == "2027"
         applied.set()
 
+    app.cron.holiday_generation = 0
+    app.cron.holiday_year = None
     app.cron.load_holidays = load_holidays
     app.time_scheduler.set_holidays.side_effect = apply_holidays
     monkeypatch.setattr(
@@ -551,6 +588,7 @@ async def test_calendar_refresh_loop_retries_a_failed_initial_load(
         "_market_calendar_refresh_delay",
         lambda **_kwargs: 0.001,
     )
+    monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2027)
 
     refresh_task = asyncio.create_task(
         app._market_calendar_refresh_loop(loaded=False)
@@ -560,6 +598,34 @@ async def test_calendar_refresh_loop_retries_a_failed_initial_load(
     await asyncio.wait_for(refresh_task, timeout=1.0)
 
     app.time_scheduler.set_holidays.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_year_rollover_refresh_marks_current_year_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale prior-year payload must never authorise the new trading year."""
+    import flinttrade_core.app as app_module
+
+    app = _runtime_app()
+    app._calendar_loaded = True
+    app.cron.holiday_generation = 4
+    app.cron.holiday_year = 2026
+    app.cron.holiday_payload = {"status": "success", "year": 2026, "data": []}
+    app.cron.load_holidays = AsyncMock(return_value=set())
+    blocked_dates = {"2027-01-01", "2027-12-31"}
+    app.cron.fail_closed_calendar_year.return_value = blocked_dates
+    monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2027)
+
+    loaded = await app._refresh_market_calendar()
+
+    assert loaded is False
+    assert app._calendar_loaded is False
+    app.cron.fail_closed_calendar_year.assert_called_once_with(2027)
+    app.time_scheduler.set_holidays.assert_called_once_with(
+        blocked_dates,
+        year="2027",
+    )
 
 
 @pytest.mark.asyncio
@@ -630,7 +696,6 @@ async def test_start_applies_cron_holidays_to_time_scheduler(
     import flinttrade_core.app as app_module
 
     app = _runtime_app()
-    holidays = {"2026-01-26", "2026-08-15"}
     calendar_payload = {
         "data": {
             "holidays": [
@@ -649,13 +714,13 @@ async def test_start_applies_cron_holidays_to_time_scheduler(
             ]
         }
     }
-    app.cron.load_holidays = AsyncMock(return_value=holidays)
-    app.cron.holiday_payload = calendar_payload
+    _set_calendar_load(app, payload=calendar_payload, year=2026)
     flask_app = Flask("holiday-runtime-wiring")
 
-    def apply_holidays(values: object) -> None:
+    def apply_holidays(values: object, *, year: str | None = None) -> None:
         try:
             assert values == calendar_payload
+            assert year == "2026"
         finally:
             app._stop_started = True
             app._stop_event.set()
@@ -665,7 +730,11 @@ async def test_start_applies_cron_holidays_to_time_scheduler(
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+    monkeypatch.setattr(app_module, "_current_market_calendar_year", lambda: 2026)
 
     await app.start()
 
-    app.time_scheduler.set_holidays.assert_called_once_with(calendar_payload)
+    app.time_scheduler.set_holidays.assert_called_once_with(
+        calendar_payload,
+        year="2026",
+    )

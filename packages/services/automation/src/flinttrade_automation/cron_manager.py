@@ -420,11 +420,17 @@ async def load_holidays_from_client(
             year=str(calendar_year),
             allow_legacy_fallback=True,
         )
-        if payload_sink is not None:
-            payload_sink(data)
-        from flinttrade_core.openalgo_client import normalise_holiday_dates  # noqa: PLC0415
+        from flinttrade_core.openalgo_client import (  # noqa: PLC0415
+            is_authoritative_market_calendar,
+            normalise_holiday_dates,
+        )
+
+        if not is_authoritative_market_calendar(data, expected_year=calendar_year):
+            raise ValueError("market calendar response was not authoritative")
 
         result = set(normalise_holiday_dates(data, exchange="NSE"))
+        if payload_sink is not None:
+            payload_sink(data)
         logger.info("Loaded %d market holidays", len(result))
         return result
     except (_json.JSONDecodeError, ValueError) as exc:
@@ -501,6 +507,8 @@ class CronManager:
         self.eod_sync_starter: Callable[[], Any] | None = None
         self._holidays: set[str] = set()
         self._holiday_payload: Any | None = None
+        self._holiday_generation = 0
+        self._holiday_year: int | None = None
 
     @property
     def running(self) -> bool:
@@ -514,6 +522,28 @@ class CronManager:
     def holiday_payload(self) -> Any | None:
         """Return the last raw calendar envelope for exchange-aware consumers."""
         return self._holiday_payload
+
+    @property
+    def holiday_generation(self) -> int:
+        """Return the successful calendar-load generation."""
+        return self._holiday_generation
+
+    @property
+    def holiday_year(self) -> int | None:
+        """Return the requested year of the latest authoritative calendar."""
+        return self._holiday_year
+
+    def fail_closed_calendar_year(self, year: int) -> set[str]:
+        """Treat every date in an unavailable calendar year as a holiday."""
+        if year < 2020 or year > 2050:
+            raise ValueError("calendar year must be between 2020 and 2050")
+        current = datetime(year, 1, 1, tzinfo=IST)
+        end = datetime(year + 1, 1, 1, tzinfo=IST)
+        self._holidays.clear()
+        while current < end:
+            self._holidays.add(current.date().isoformat())
+            current += timedelta(days=1)
+        return self._holidays
 
     def _get_scheduler(self) -> Any:
         """Lazy-initialise APScheduler."""
@@ -534,6 +564,7 @@ class CronManager:
     async def load_holidays(self) -> set[str]:
         """Load holidays from OpenAlgo and cache them. Must be awaited."""
         if self.openalgo_client:
+            calendar_year = datetime.now(IST).year
             missing_payload = object()
             payload: Any = missing_payload
 
@@ -544,10 +575,13 @@ class CronManager:
             loaded = await load_holidays_from_client(
                 self.openalgo_client,
                 payload_sink=retain_payload,
+                year=calendar_year,
             )
             if payload is missing_payload:
                 return self._holidays
             self._holiday_payload = payload
+            self._holiday_year = calendar_year
+            self._holiday_generation += 1
             self._holidays.clear()
             self._holidays.update(loaded)
         return self._holidays
