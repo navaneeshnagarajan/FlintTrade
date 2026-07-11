@@ -131,8 +131,10 @@ describe("OrderFlowWidget", () => {
   });
 
   it("clears an explicit NSE index exchange when the user changes symbol", () => {
+    const updateParameters = vi.fn();
     const props = makeDockviewPanelProps({
-      params: { symbol: "NIFTY", exchange: "NSE_INDEX" },
+      params: { symbol: "NIFTY", exchange: "NSE_INDEX", view: "footprint" },
+      api: { ...defaultProps.api, updateParameters },
     });
     render(<OrderFlowWidget {...props} />);
 
@@ -141,6 +143,11 @@ describe("OrderFlowWidget", () => {
     });
 
     expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
+    expect(updateParameters).toHaveBeenCalledWith({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      view: "footprint",
+    });
   });
 
   it("shows interval buttons (1m, 3m, 5m)", () => {
@@ -191,6 +198,32 @@ describe("OrderFlowWidget", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByText("Live")).toBeInTheDocument();
+  });
+
+  it("uses the backend interval in chart and legend labels", () => {
+    const sampleData = {
+      buckets: [
+        {
+          time_label: "09:15",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+        },
+      ],
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      interval: 60,
+      is_live: true,
+    };
+    mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
+
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    expect(screen.getByText(/1 bars.*NIFTY 1m/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /NIFTY, 1m interval/ })).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(mockUseOrderFlow).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", 300, 20);
   });
 
   it("shows 'Sample' badge when is_live is false", () => {

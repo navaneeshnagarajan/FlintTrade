@@ -80,6 +80,11 @@ const INTERVALS: { label: string; minutes: number }[] = [
   { label: "5m", minutes: 5 },
 ];
 
+function formatIntervalLabel(seconds: number | undefined, fallback: string): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return fallback;
+  return seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
+}
+
 // Canvas drawing constants
 const MARGIN_RIGHT = 56;
 const MARGIN_LEFT = 12;
@@ -498,12 +503,14 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   );
 
   const handleSymbolChange = useCallback((nextSymbol: string) => {
-    setInstrument((current) => (
-      current.symbol === nextSymbol
-        ? current
-        : { symbol: nextSymbol, explicitExchange: undefined }
-    ));
-  }, []);
+    const nextExchange = resolveOrderFlowExchange(nextSymbol);
+    setInstrument({ symbol: nextSymbol, explicitExchange: nextExchange });
+    props.api.updateParameters({
+      ...(panelParams ?? {}),
+      symbol: nextSymbol,
+      exchange: nextExchange,
+    });
+  }, [panelParams, props.api]);
 
   const intervalMinutes = useMemo(
     () => INTERVALS.find((i) => i.label === intervalLabel)?.minutes ?? 5,
@@ -519,6 +526,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   );
 
   const isLive = data?.is_live ?? false;
+  const displayIntervalLabel = formatIntervalLabel(data?.interval, intervalLabel);
 
   const columns = useMemo(
     () => (data?.buckets ? bucketsToColumns(data.buckets) : []),
@@ -755,7 +763,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
           <span className="text-xs text-zinc-500">LTP</span>
         </div>
         <div className="ml-auto text-xs text-text-muted">
-          {columns.length} bars &bull; {symbol} {intervalLabel}
+          {columns.length} bars &bull; {symbol} {displayIntervalLabel}
         </div>
       </div>
 
@@ -764,7 +772,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         role="img"
-        aria-label={`Order flow footprint chart for ${symbol}, ${intervalLabel} interval. Shows buy volume (green) and sell volume (red) per price level per time bucket. Point of Control (POC) highlighted in amber.`}
+        aria-label={`Order flow footprint chart for ${symbol}, ${displayIntervalLabel} interval. Shows buy volume (green) and sell volume (red) per price level per time bucket. Point of Control (POC) highlighted in amber.`}
       >
         <canvas
           ref={canvasRef}

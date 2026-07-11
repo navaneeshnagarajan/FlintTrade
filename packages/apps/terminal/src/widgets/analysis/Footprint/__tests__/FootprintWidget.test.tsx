@@ -230,8 +230,10 @@ describe("FootprintWidget", () => {
   });
 
   it("clears an explicit NFO exchange when the user changes symbol", () => {
+    const updateParameters = vi.fn();
     const props = makeDockviewPanelProps({
-      params: { symbol: "NIFTY", exchange: "NFO" },
+      params: { symbol: "NIFTY", exchange: "NFO", displayMode: "compact" },
+      api: { ...defaultProps.api, updateParameters },
     });
     render(<FootprintWidget {...props} />);
 
@@ -240,6 +242,26 @@ describe("FootprintWidget", () => {
     });
 
     expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
+    expect(updateParameters).toHaveBeenCalledWith({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      displayMode: "compact",
+    });
+  });
+
+  it("uses the backend interval in chart and legend labels", () => {
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: { buckets: sampleBuckets, symbol: "NIFTY", exchange: "NSE_INDEX", interval: 60, is_live: false },
+      }),
+    );
+
+    render(<FootprintWidget {...defaultProps} />);
+
+    expect(screen.getByText(/2 buckets.*NIFTY 1m/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /NIFTY 1m/ })).toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(mockUseOrderFlow).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", 300, 20);
   });
 
   it("shows bucket count in legend when data is present", () => {

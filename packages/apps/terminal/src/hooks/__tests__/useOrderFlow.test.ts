@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import type { OrderFlowData } from "../useOrderFlow";
@@ -18,12 +18,21 @@ import type { OrderFlowData } from "../useOrderFlow";
 // ---------------------------------------------------------------------------
 
 const mockFetch = vi.fn();
+const mockIsMarketHours = vi.hoisted(
+  () => vi.fn<(exchange?: string) => boolean>(() => false),
+);
+
+vi.mock("@/lib/market", () => ({
+  isMarketHours: (exchange?: string) => mockIsMarketHours(exchange),
+}));
 
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch);
+  mockIsMarketHours.mockReset().mockReturnValue(false);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -141,6 +150,55 @@ describe("useOrderFlow", () => {
     expect(url).toContain("interval=60");
     expect(url).toContain("bins=20");
   });
+
+  it.each(["MCX", "CDS"])(
+    "re-evaluates %s polling from 60s when closed to 5s while open",
+    async (exchange) => {
+      vi.useFakeTimers();
+      let isOpen = false;
+      mockIsMarketHours.mockImplementation(
+        (candidate) => candidate === exchange && isOpen,
+      );
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          status: "success",
+          data: {
+            buckets: [],
+            symbol: exchange === "MCX" ? "GOLD" : "USDINR",
+            exchange,
+            interval: 300,
+            is_live: true,
+          },
+        }),
+      });
+
+      renderHook(
+        () => useOrderFlow(exchange === "MCX" ? "GOLD" : "USDINR", exchange),
+        { wrapper: createWrapper() },
+      );
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      expect(mockIsMarketHours).toHaveBeenCalledWith(exchange);
+
+      mockFetch.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      isOpen = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(55_000);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      mockFetch.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("throws the backend's message on HTTP error", async () => {
     // ftApi.helpers now extracts the backend's {message} body on !ok (the

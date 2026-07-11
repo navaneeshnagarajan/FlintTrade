@@ -79,6 +79,11 @@ const INTERVALS: { label: string; minutes: number }[] = [
   { label: "5m", minutes: 5 },
 ];
 
+function formatIntervalLabel(seconds: number | undefined, fallback: string): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return fallback;
+  return seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
+}
+
 // Layout margins (CSS px)
 const MARGIN_RIGHT = 60;
 const MARGIN_LEFT = 8;
@@ -453,12 +458,14 @@ function FootprintWidget(props: IDockviewPanelProps) {
   );
 
   const handleSymbolChange = useCallback((nextSymbol: string) => {
-    setInstrument((current) => (
-      current.symbol === nextSymbol
-        ? current
-        : { symbol: nextSymbol, explicitExchange: undefined }
-    ));
-  }, []);
+    const nextExchange = resolveOrderFlowExchange(nextSymbol);
+    setInstrument({ symbol: nextSymbol, explicitExchange: nextExchange });
+    props.api.updateParameters({
+      ...(panelParams ?? {}),
+      symbol: nextSymbol,
+      exchange: nextExchange,
+    });
+  }, [panelParams, props.api]);
 
   const intervalMinutes = useMemo(
     () => INTERVALS.find((iv) => iv.label === intervalLabel)?.minutes ?? 5,
@@ -473,6 +480,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
   );
 
   const isLive = data?.is_live ?? false;
+  const displayIntervalLabel = formatIntervalLabel(data?.interval, intervalLabel);
 
   const columns = useMemo(() => {
     if (!data?.buckets) return [];
@@ -674,7 +682,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
           <span>Cum. Δ</span>
         </div>
         <span className="ml-auto tabular-nums">
-          {columns.length} buckets &bull; {symbol} {intervalLabel}
+          {columns.length} buckets &bull; {symbol} {displayIntervalLabel}
         </span>
       </div>
 
@@ -683,7 +691,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         role="img"
-        aria-label={`Footprint chart for ${symbol} ${intervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. Cumulative delta line at bottom.`}
+        aria-label={`Footprint chart for ${symbol} ${displayIntervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. Cumulative delta line at bottom.`}
       >
         <canvas
           ref={canvasRef}
