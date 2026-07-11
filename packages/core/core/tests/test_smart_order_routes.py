@@ -359,6 +359,38 @@ def test_twap_splits_into_gated_slices(live_auth):
     assert sorted(int(o.quantity) for o in adapter.orders) == [5, 5]
 
 
+def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth):
+    app, stale_adapter = _make_app()
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 10,
+            "urgency": "low",
+        },
+    )
+    assert response.status_code == 202
+    job_id = response.get_json()["data"]["job_id"]
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not stale_adapter.orders:
+        time.sleep(0.02)
+    assert len(stale_adapter.orders) == 1
+
+    stale_router = app.config["BROKER_ROUTER"]
+    current_adapter = _NoIoAdapter()
+    app.config["BROKER_ROUTER"] = BrokerRouter({"openalgo": current_adapter}, _session)
+    assert stale_router.revoke_and_drain(timeout=0.5) is True
+
+    final = _wait_done(client, job_id)
+    assert final["status"] == "done"
+    assert len(stale_adapter.orders) == 1
+    assert len(current_adapter.orders) == 1
+
+
 def test_status_shows_children_mid_flight(live_auth):
     """The live snapshot must expose children WHILE the route runs — TWAP
     jobs take minutes and the widget polls. Pins the result_observer wiring
@@ -512,6 +544,50 @@ async def test_executor_passes_real_gate_and_returns_orderid():
     assert decision.passed is True
     assert decision.order_response.orderid == "OID-1"
     assert len(adapter.orders) == 1
+
+
+async def test_executor_resolves_the_current_router_for_each_child():
+    stale_adapter = _NoIoAdapter()
+    current_adapter = _NoIoAdapter()
+    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session)
+    current_router = stale_router
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=stale_router,
+        router_provider=lambda: current_router,
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+    )
+
+    first = await executor.route_order(_child_order(1))
+    current_router = BrokerRouter({"openalgo": current_adapter}, _session)
+    second = await executor.route_order(_child_order(2))
+
+    assert first.passed is True
+    assert second.passed is True
+    assert [order.quantity for order in stale_adapter.orders] == ["1"]
+    assert [order.quantity for order in current_adapter.orders] == ["2"]
+
+
+async def test_executor_fails_closed_when_current_router_was_removed():
+    stale_adapter = _NoIoAdapter()
+    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session)
+    current_router = None
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=stale_router,
+        router_provider=lambda: current_router,
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+    )
+
+    decision = await executor.route_order(_child_order())
+
+    assert decision.passed is False
+    assert "verification failed" in decision.error
+    assert stale_adapter.orders == []
 
 
 async def test_executor_enforces_l2_from_portfolio_provider():

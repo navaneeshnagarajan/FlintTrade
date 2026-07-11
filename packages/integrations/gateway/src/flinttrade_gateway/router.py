@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Awaitable, Mapping
 from typing import Any, Callable
 
@@ -207,6 +209,59 @@ class BrokerRouter:
         # dispatch, never bypass safety. None → no tagging (the adapters'
         # retail-default algo ids apply unchanged).
         self._algo_tag_guard = algo_tag_guard
+        # A router instance is one immutable routing generation. Runtime
+        # rebuilds revoke the old generation before dropping it from app state;
+        # retained references then fail closed, while writes admitted before
+        # revocation are given a bounded opportunity to finish.
+        self._write_condition = threading.Condition()
+        self._writes_revoked = False
+        self._admitted_writes = 0
+
+    def _admit_write(self) -> None:
+        """Admit one write unless this router generation was revoked."""
+        with self._write_condition:
+            if self._writes_revoked:
+                raise SafetyBypassError("BrokerRouter generation has been revoked")
+            self._admitted_writes += 1
+
+    def _release_write(self) -> None:
+        """Release one admitted write and wake drain waiters at zero."""
+        with self._write_condition:
+            self._admitted_writes -= 1
+            if self._admitted_writes == 0:
+                self._write_condition.notify_all()
+
+    def revoke_and_drain(self, *, timeout: float = 5.0) -> bool:
+        """Permanently revoke this generation and wait boundedly for writes.
+
+        Revocation and the admission check share one condition lock, so a
+        concurrent write is ordered atomically: it is either admitted before
+        revocation (and included in the drain count) or refused. A timeout does
+        not re-enable the router; it remains revoked and later releases can be
+        observed by calling this method again.
+
+        Args:
+            timeout: Maximum seconds to wait for admitted writes. Zero performs
+                an atomic revoke and non-blocking drain check.
+
+        Returns:
+            ``True`` when every admitted write drained before the deadline;
+            ``False`` on timeout.
+
+        Raises:
+            ValueError: When ``timeout`` is negative.
+        """
+        if timeout < 0:
+            raise ValueError("revoke timeout must be non-negative")
+        deadline = time.monotonic() + timeout
+        with self._write_condition:
+            self._writes_revoked = True
+            while self._admitted_writes:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._write_condition.wait(timeout=remaining)
+            return True
 
     @property
     def rate_limiter(self) -> Any | None:
@@ -375,15 +430,19 @@ class BrokerRouter:
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
     ) -> Any:
-        if hint is not None or adapter_id is None:
-            adapter_id, account_id = self._resolve(routing_key, order, hint)
-        session = self._session_provider(request_ctx, adapter_id, account_id)
-        if session.is_read_only:
-            raise SafetyBypassError(f"session {account_id!r} is read-only")
-        self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
-        self._algo_tag(adapter_id, session, order)
-        await self._throttle(adapter_id, "order")
-        return await self._adapters[adapter_id].place_order(session, order, _router_token=_ROUTER_TOKEN)
+        self._admit_write()
+        try:
+            if hint is not None or adapter_id is None:
+                adapter_id, account_id = self._resolve(routing_key, order, hint)
+            session = self._session_provider(request_ctx, adapter_id, account_id)
+            if session.is_read_only:
+                raise SafetyBypassError(f"session {account_id!r} is read-only")
+            self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+            self._algo_tag(adapter_id, session, order)
+            await self._throttle(adapter_id, "order")
+            return await self._adapters[adapter_id].place_order(session, order, _router_token=_ROUTER_TOKEN)
+        finally:
+            self._release_write()
 
     async def modify_order(
         self,
@@ -405,17 +464,21 @@ class BrokerRouter:
         adapter. Resolution, ACL, read-only, SafetyContext verification, and
         one-shot gate consumption are identical to :meth:`place_order`.
         """
-        if hint is not None or adapter_id is None:
-            adapter_id, account_id = self._resolve(routing_key, order, hint)
-        session = self._session_provider(request_ctx, adapter_id, account_id)
-        if session.is_read_only:
-            raise SafetyBypassError(f"session {account_id!r} is read-only")
-        self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
-        self._algo_tag(adapter_id, session, order)
-        await self._throttle(adapter_id, "order")
-        return await self._adapters[adapter_id].modify_order(
-            session, order_id, changes, _router_token=_ROUTER_TOKEN
-        )
+        self._admit_write()
+        try:
+            if hint is not None or adapter_id is None:
+                adapter_id, account_id = self._resolve(routing_key, order, hint)
+            session = self._session_provider(request_ctx, adapter_id, account_id)
+            if session.is_read_only:
+                raise SafetyBypassError(f"session {account_id!r} is read-only")
+            self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+            self._algo_tag(adapter_id, session, order)
+            await self._throttle(adapter_id, "order")
+            return await self._adapters[adapter_id].modify_order(
+                session, order_id, changes, _router_token=_ROUTER_TOKEN
+            )
+        finally:
+            self._release_write()
 
     async def cancel_order(
         self,
@@ -443,30 +506,34 @@ class BrokerRouter:
         fingerprint, so an extra the gate did not cover can never reach the
         broker.
         """
-        if hint is not None or adapter_id is None:
-            adapter_id, account_id = self._resolve(routing_key, order, hint)
-        session = self._session_provider(request_ctx, adapter_id, account_id)
-        if session.is_read_only:
-            raise SafetyBypassError(f"session {account_id!r} is read-only")
-        self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
-        if extras:
-            # Field-by-field coverage check: every dispatched extra must appear
-            # verbatim in the verified canonical fingerprint (contract §8.0 — no
-            # unhashed mutable field may reach the broker).
-            if not isinstance(order, Mapping):
-                raise SafetyBypassError(
-                    "cancel extras require a Mapping cancel fingerprint that covers them"
-                )
-            mismatched = sorted(k for k, v in extras.items() if order.get(k) != v)
-            if mismatched:
-                raise SafetyBypassError(
-                    f"cancel extras not covered by the signed cancel fingerprint: {mismatched}"
-                )
-        self._algo_tag(adapter_id, session, order)
-        await self._throttle(adapter_id, "order")
-        return await self._adapters[adapter_id].cancel_order(
-            session, order_id, **dict(extras or {}), _router_token=_ROUTER_TOKEN
-        )
+        self._admit_write()
+        try:
+            if hint is not None or adapter_id is None:
+                adapter_id, account_id = self._resolve(routing_key, order, hint)
+            session = self._session_provider(request_ctx, adapter_id, account_id)
+            if session.is_read_only:
+                raise SafetyBypassError(f"session {account_id!r} is read-only")
+            self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+            if extras:
+                # Field-by-field coverage check: every dispatched extra must appear
+                # verbatim in the verified canonical fingerprint (contract §8.0 — no
+                # unhashed mutable field may reach the broker).
+                if not isinstance(order, Mapping):
+                    raise SafetyBypassError(
+                        "cancel extras require a Mapping cancel fingerprint that covers them"
+                    )
+                mismatched = sorted(k for k, v in extras.items() if order.get(k) != v)
+                if mismatched:
+                    raise SafetyBypassError(
+                        f"cancel extras not covered by the signed cancel fingerprint: {mismatched}"
+                    )
+            self._algo_tag(adapter_id, session, order)
+            await self._throttle(adapter_id, "order")
+            return await self._adapters[adapter_id].cancel_order(
+                session, order_id, **dict(extras or {}), _router_token=_ROUTER_TOKEN
+            )
+        finally:
+            self._release_write()
 
     async def execute_gated(
         self,
@@ -515,23 +582,27 @@ class BrokerRouter:
             UnsupportedCapabilityError: The resolved adapter does not implement
                 ``verb``.
         """
-        dispatch = _GATED_VERB_DISPATCH.get(verb)
-        if dispatch is None:
-            raise SafetyBypassError(f"unknown gated write verb {verb!r}")
-        if not isinstance(payload, Mapping) or payload.get("_op") != verb:
-            raise SafetyBypassError(
-                f"gated payload _op does not match verb {verb!r} — a SafetyContext "
-                "minted for one verb cannot dispatch another"
-            )
-        if hint is not None or adapter_id is None:
-            adapter_id, account_id = self._resolve(routing_key, payload, hint)
-        session = self._session_provider(request_ctx, adapter_id, account_id)
-        if session.is_read_only:
-            raise SafetyBypassError(f"session {account_id!r} is read-only")
-        self._verify_safety(request_ctx, payload, safety_ctx, adapter_id, account_id)
-        self._algo_tag(adapter_id, session, payload)
-        await self._throttle(adapter_id, "order")
-        return await dispatch(self._adapters[adapter_id], session, payload)
+        self._admit_write()
+        try:
+            dispatch = _GATED_VERB_DISPATCH.get(verb)
+            if dispatch is None:
+                raise SafetyBypassError(f"unknown gated write verb {verb!r}")
+            if not isinstance(payload, Mapping) or payload.get("_op") != verb:
+                raise SafetyBypassError(
+                    f"gated payload _op does not match verb {verb!r} — a SafetyContext "
+                    "minted for one verb cannot dispatch another"
+                )
+            if hint is not None or adapter_id is None:
+                adapter_id, account_id = self._resolve(routing_key, payload, hint)
+            session = self._session_provider(request_ctx, adapter_id, account_id)
+            if session.is_read_only:
+                raise SafetyBypassError(f"session {account_id!r} is read-only")
+            self._verify_safety(request_ctx, payload, safety_ctx, adapter_id, account_id)
+            self._algo_tag(adapter_id, session, payload)
+            await self._throttle(adapter_id, "order")
+            return await dispatch(self._adapters[adapter_id], session, payload)
+        finally:
+            self._release_write()
 
     # ------------------------------------------------------------------
     # Operator onboarding (trust-on-first-use)

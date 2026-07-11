@@ -142,12 +142,17 @@ class _GatedDecision:
 class GatedChildExecutor:
     """Dispatches each smart-route child order through the full gated path.
 
-    Every dependency is captured at construction (no ``current_app``) because
-    ``route_order`` runs on a background job thread outside any Flask context.
+    Every dependency or provider is captured at construction (no
+    ``current_app``) because ``route_order`` runs on a background job thread
+    outside any Flask context.
 
     Args:
         safety: The app's :class:`~flinttrade_engine.safety.SafetySystem`.
-        router: The app's :class:`~flinttrade_gateway.router.BrokerRouter`.
+        router: Static :class:`~flinttrade_gateway.router.BrokerRouter` used by
+            existing callers and whenever ``router_provider`` is absent.
+        router_provider: Optional ``() -> BrokerRouter | None`` resolved before
+            every child. Long-lived executors use it to follow runtime router
+            rebuilds; ``None`` fails closed when routing was removed.
         request_ctx: Selector-bound request context for the initiating actor.
         adapter_id: Broker adapter id (e.g. ``"openalgo"``).
         account_id: Broker account id within the adapter.
@@ -176,6 +181,7 @@ class GatedChildExecutor:
         *,
         safety: Any,
         router: Any,
+        router_provider: Any = None,
         request_ctx: Any,
         adapter_id: str,
         account_id: str,
@@ -186,6 +192,7 @@ class GatedChildExecutor:
     ) -> None:
         self._safety = safety
         self._router = router
+        self._router_provider = router_provider
         self._request_ctx = request_ctx
         self._adapter_id = adapter_id
         self._account_id = account_id
@@ -209,6 +216,7 @@ class GatedChildExecutor:
         Returns:
             A :class:`_GatedDecision` with ``passed``/``order_response``/``error``.
         """
+        from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
         from flinttrade_engine.safety import gate_order  # noqa: PLC0415
         from flinttrade_engine.smart_router import SmartRouteAbort  # noqa: PLC0415
         from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
@@ -248,13 +256,20 @@ class GatedChildExecutor:
 
         # --- gate + ACL + one-shot dispatch ---------------------------------
         try:
+            router = (
+                self._router_provider()
+                if self._router_provider is not None
+                else self._router
+            )
+            if router is None:
+                raise SafetyBypassError("current BrokerRouter generation is unavailable")
             safety_ctx = gate_order(
                 order,
                 self._request_ctx,
                 adapter_id=self._adapter_id,
                 account_id=self._account_id,
             )
-            result = await self._router.place_order(
+            result = await router.place_order(
                 self._request_ctx,
                 order=order,
                 safety_ctx=safety_ctx,
@@ -681,6 +696,7 @@ def start_smart_route() -> tuple[Any, int]:
     executor = GatedChildExecutor(
         safety=safety,
         router=router,
+        router_provider=lambda: app_obj.config.get("BROKER_ROUTER"),
         request_ctx=request_ctx,
         adapter_id=adapter_id,
         account_id=account_id,
