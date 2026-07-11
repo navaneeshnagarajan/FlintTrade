@@ -4163,6 +4163,7 @@ class FlintTradeApp:
             flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
         logger.info("FlintTrade shutting down...")
         errors: list[tuple[str, str]] = []
+        deferred_errors: list[tuple[str, str]] = []
 
         def attempt(label: str, callback: Callable[[], Any]) -> bool:
             try:
@@ -4278,10 +4279,18 @@ class FlintTradeApp:
         if tick_recorder is not None and (tick_task is None or tick_task_error is not None):
             flush_pending = getattr(tick_recorder, "flush_pending", None)
             if callable(flush_pending):
-                if attempt("tick recorder retained buffer", flush_pending):
+                try:
+                    flush_pending()
+                except Exception as exc:  # noqa: BLE001 - report after independent cleanup
+                    deferred_errors.append(
+                        ("tick recorder retained buffer", type(exc).__name__)
+                    )
+                else:
                     tick_task_error = None
             elif tick_task_error is not None:
-                errors.append(("tick recorder task", type(tick_task_error).__name__))
+                deferred_errors.append(
+                    ("tick recorder task", type(tick_task_error).__name__)
+                )
 
         if errors:
             summary = ", ".join(
@@ -4332,6 +4341,7 @@ class FlintTradeApp:
             logger.error("FlintTrade shutdown request drain failed: %s", summary)
             raise RuntimeError(f"shutdown encountered errors: {summary}")
 
+        errors.extend(deferred_errors)
         try:
             strategy_cron_scheduler = getattr(self, "strategy_cron_scheduler", None)
             if strategy_cron_scheduler is not None:
