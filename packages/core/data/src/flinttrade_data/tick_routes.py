@@ -27,7 +27,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .tick_recorder import _canonical_instrument
+from .tick_recorder import MAX_WATCHLIST_INSTRUMENTS, WatchlistCapacityError, _canonical_instrument
 
 logger = logging.getLogger("flinttrade.data.tick_routes")
 
@@ -289,12 +289,24 @@ def update_watchlist() -> Any:
                     recorder.add_symbols(instruments, mode=mode)
                 else:
                     recorder.remove_symbols(instruments, mode=mode)
+            except WatchlistCapacityError as exc:
+                replace_watchlist(previous_watchlist)
+                return jsonify({"status": "error", "message": str(exc)}), 400
             except Exception as exc:  # noqa: BLE001 - restore any partial recorder mutation
                 logger.warning("Recorder watchlist update failed (%s)", type(exc).__name__)
                 replace_watchlist(previous_watchlist)
                 return jsonify({"status": "error", "message": "Recorder watchlist update failed."}), 500
 
             updated_watchlist = recorder.get_watchlist()
+            max_instruments = getattr(recorder, "max_instruments", MAX_WATCHLIST_INSTRUMENTS)
+            if len(qualified_identities(updated_watchlist)) > max_instruments:
+                replace_watchlist(previous_watchlist)
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": f"watchlist cannot exceed {max_instruments} unique instruments",
+                    }
+                ), 400
             if updated_watchlist == previous_watchlist:
                 return jsonify(
                     {

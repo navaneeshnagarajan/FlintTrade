@@ -49,7 +49,9 @@ _BIGINT_MAX = 2**63 - 1
 _MAX_FRAME_TIMESTAMP_TEXT_LENGTH = 64
 _MIN_FRAME_TIMESTAMP_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
 _MAX_FRAME_TIMESTAMP_EPOCH = datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp()
-_MAX_FRAME_TIMESTAMP_AGE_SECONDS = 24 * 60 * 60
+_MAX_FRAME_TIMESTAMP_AGE_SECONDS = 5 * 60
+MAX_WATCHLIST_INSTRUMENTS = 512
+_MISSING_TIMESTAMP = object()
 
 
 def _optional_websocket_exception(name: str) -> type[BaseException] | None:
@@ -163,27 +165,75 @@ def _frame_timestamp(
     frame: dict[str, Any],
     payload: dict[str, Any],
     received_at: datetime,
-) -> tuple[datetime, bool]:
-    """Return storage time plus whether source time is safe for order-flow state."""
-    def resolve(candidate: Any) -> tuple[datetime, bool]:
-        parsed = _normalise_frame_timestamp(candidate)
-        if parsed is None:
-            return received_at, False
-        age_seconds = (received_at - parsed).total_seconds()
-        if age_seconds < 0:
-            return received_at, False
-        if age_seconds <= _MAX_FRAME_TIMESTAMP_AGE_SECONDS:
-            return parsed, True
-        return received_at, False
+) -> datetime | None:
+    """Resolve source time, using receipt time only when source time is absent."""
+    candidate = payload.get("timestamp", _MISSING_TIMESTAMP)
+    if candidate is _MISSING_TIMESTAMP and payload is not frame:
+        candidate = frame.get("timestamp", _MISSING_TIMESTAMP)
+    if candidate is _MISSING_TIMESTAMP:
+        return received_at
 
-    payload_timestamp = payload.get("timestamp")
-    if payload_timestamp is not None:
-        return resolve(payload_timestamp)
-    if payload is not frame:
-        frame_timestamp = frame.get("timestamp")
-        if frame_timestamp is not None:
-            return resolve(frame_timestamp)
-    return received_at, True
+    parsed = _normalise_frame_timestamp(candidate)
+    if parsed is None:
+        return None
+    age_seconds = (received_at - parsed).total_seconds()
+    if age_seconds < 0 or age_seconds > _MAX_FRAME_TIMESTAMP_AGE_SECONDS:
+        return None
+    return parsed
+
+
+def _first_level_price(levels: Any, *price_keys: str) -> float | None:
+    """Return the first finite price from a best-first depth ladder."""
+    if not isinstance(levels, (list, tuple)) or not levels:
+        return None
+    level = levels[0]
+    if isinstance(level, dict):
+        for key in price_keys:
+            price = _finite_float_or_none(level.get(key))
+            if price is not None:
+                return price
+        return None
+    if isinstance(level, (list, tuple)) and level:
+        return _finite_float_or_none(level[0])
+    return None
+
+
+def _depth_bbo(depth: Any) -> tuple[float | None, float | None]:
+    """Extract best bid and ask from supported OpenAlgo depth shapes."""
+    if isinstance(depth, dict):
+        bid = _finite_float_or_none(depth.get("bid"))
+        bid = bid if bid is not None else _finite_float_or_none(depth.get("bid_price"))
+        ask = _finite_float_or_none(depth.get("ask"))
+        ask = ask if ask is not None else _finite_float_or_none(depth.get("ask_price"))
+        for key in ("bids", "buy"):
+            if bid is None:
+                bid = _first_level_price(depth.get(key), "price", "bid_price", "bid")
+        for key in ("asks", "sell"):
+            if ask is None:
+                ask = _first_level_price(depth.get(key), "price", "ask_price", "ask")
+        return bid, ask
+    if isinstance(depth, (list, tuple)) and depth and isinstance(depth[0], dict):
+        level = depth[0]
+        bid = _finite_float_or_none(level.get("bid_price"))
+        bid = bid if bid is not None else _finite_float_or_none(level.get("bid"))
+        ask = _finite_float_or_none(level.get("ask_price"))
+        ask = ask if ask is not None else _finite_float_or_none(level.get("ask"))
+        return bid, ask
+    return None, None
+
+
+def _payload_bbo(payload: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Canonicalise quote aliases and depth ladders into best bid and ask."""
+    bid = _finite_float_or_none(payload.get("bid"))
+    bid = bid if bid is not None else _finite_float_or_none(payload.get("bid_price"))
+    ask = _finite_float_or_none(payload.get("ask"))
+    ask = ask if ask is not None else _finite_float_or_none(payload.get("ask_price"))
+    if bid is None:
+        bid = _first_level_price(payload.get("bids"), "price", "bid_price", "bid")
+    if ask is None:
+        ask = _first_level_price(payload.get("asks"), "price", "ask_price", "ask")
+    depth_bid, depth_ask = _depth_bbo(payload.get("depth"))
+    return bid if bid is not None else depth_bid, ask if ask is not None else depth_ask
 
 
 def _canonical_identity(exchange: Any, symbol: Any) -> tuple[str, str] | None:
@@ -214,6 +264,14 @@ class _ReconnectRequired(RuntimeError):
 
 class _ConnectionReconfigured(RuntimeError):
     """Internal marker for an obsolete connection attempt."""
+
+
+class WatchlistCapacityError(ValueError):
+    """Raised when a recorder watchlist exceeds its unique-identity limit."""
+
+
+class TickPersistenceError(RuntimeError):
+    """Raised when the recorder cannot persist its final buffered batch."""
 
 
 class TickRecorder:
@@ -256,6 +314,12 @@ class TickRecorder:
         self._flush_lock = threading.Lock()
         # Optional live order-flow aggregator fed from each tick (None = off).
         self._orderflow = orderflow_aggregator
+        aggregator_capacity = getattr(orderflow_aggregator, "max_instruments", MAX_WATCHLIST_INSTRUMENTS)
+        self._max_instruments = (
+            min(aggregator_capacity, MAX_WATCHLIST_INSTRUMENTS)
+            if type(aggregator_capacity) is int and aggregator_capacity > 0
+            else MAX_WATCHLIST_INSTRUMENTS
+        )
         self._ws_url = ws_url or _DEFAULT_WS_URL
         self._batch_size = batch_size
         self._flush_interval = normalised_flush_interval
@@ -345,6 +409,11 @@ class TickRecorder:
         """Shared re-entrant lock for cross-component watchlist transactions."""
         return self._subscription_lock
 
+    @property
+    def max_instruments(self) -> int:
+        """Maximum unique exchange-symbol identities accepted by the watchlist."""
+        return self._max_instruments
+
     def status_snapshot(self) -> dict[str, Any]:
         """Return one atomic snapshot of recorder lifecycle and persistence state."""
         with self._state_lock:
@@ -378,9 +447,13 @@ class TickRecorder:
             if mode not in self._subscriptions:
                 raise ValueError(f"Invalid mode: {mode}. Use {list(_MODE_LABELS)}")
             canonical_instruments = [_canonical_instrument(instrument) for instrument in instruments]
+            updated = [dict(instrument) for instrument in self._subscriptions[mode]]
             for inst in canonical_instruments:
-                if inst not in self._subscriptions[mode]:
-                    self._subscriptions[mode].append(inst)
+                if inst not in updated:
+                    updated.append(inst)
+            candidate = {**self._subscriptions, mode: updated}
+            self._validate_watchlist_capacity_locked(candidate)
+            self._subscriptions[mode] = updated
             self._refresh_allowed_identities_locked()
 
     def remove_symbols(
@@ -417,8 +490,24 @@ class TickRecorder:
                 mode: [_canonical_instrument(instrument) for instrument in watchlist[mode]]
                 for mode in self._subscriptions
             }
+            self._validate_watchlist_capacity_locked(canonical_watchlist)
             self._subscriptions = canonical_watchlist
             self._refresh_allowed_identities_locked()
+
+    def _validate_watchlist_capacity_locked(
+        self,
+        watchlist: dict[str, list[dict[str, str]]],
+    ) -> None:
+        identities = {
+            identity
+            for instruments in watchlist.values()
+            for instrument in instruments
+            if (identity := _canonical_identity(instrument.get("exchange"), instrument.get("symbol"))) is not None
+        }
+        if len(identities) > self._max_instruments:
+            raise WatchlistCapacityError(
+                f"watchlist cannot exceed {self._max_instruments} unique instruments"
+            )
 
     def _refresh_allowed_identities_locked(self) -> None:
         """Rebuild the union allowlist while ``_subscription_lock`` is held."""
@@ -509,7 +598,7 @@ class TickRecorder:
                 self._reconfigure_event = None
                 self._active_ws = None
                 self._loop = None
-            self._flush(force=True)
+            self._flush(force=True, raise_on_error=True)
             logger.info("TickRecorder stopped. Total ticks recorded: %d", self._tick_count)
 
     def stop(self) -> None:
@@ -714,9 +803,20 @@ class TickRecorder:
             return reconnect
 
         payload = data.get("data") if isinstance(data.get("data"), dict) else data
-        identity = _canonical_identity(data.get("exchange"), data.get("symbol"))
-        if identity is None and payload is not data:
-            identity = _canonical_identity(payload.get("exchange"), payload.get("symbol"))
+        frame_identity = _canonical_identity(data.get("exchange"), data.get("symbol"))
+        payload_identity = (
+            _canonical_identity(payload.get("exchange"), payload.get("symbol"))
+            if payload is not data
+            else frame_identity
+        )
+        if payload is not data:
+            frame_has_identity = "exchange" in data or "symbol" in data
+            payload_has_identity = "exchange" in payload or "symbol" in payload
+            if (frame_has_identity and frame_identity is None) or (payload_has_identity and payload_identity is None):
+                return False
+            if frame_identity is not None and payload_identity is not None and frame_identity != payload_identity:
+                return False
+        identity = payload_identity or frame_identity
         if identity is None:
             return False
 
@@ -736,10 +836,13 @@ class TickRecorder:
     ) -> bool:
         """Buffer and dispatch one canonical frame admitted by the allowlist."""
         received_at = datetime.now(timezone.utc)
-        ts, orderflow_timestamp_trusted = _frame_timestamp(data, payload, received_at)
+        ts = _frame_timestamp(data, payload, received_at)
+        if ts is None:
+            return False
         mode = self._detect_mode(payload, data.get("mode"))
         cumulative_volume = _bigint_or_none(payload.get("volume"))
         persisted_volume = cumulative_volume if cumulative_volume is None or cumulative_volume >= 0 else None
+        bid, ask = _payload_bbo(payload)
 
         depth_json = None
         if "depth" in payload:
@@ -758,8 +861,8 @@ class TickRecorder:
             _finite_float_or_none(payload.get("low")),
             _finite_float_or_none(payload.get("close")),
             persisted_volume,
-            _finite_float_or_none(payload.get("bid")),
-            _finite_float_or_none(payload.get("ask")),
+            bid,
+            ask,
             _bigint_or_none(payload.get("oi")),
             _finite_float_or_none(payload.get("prev_close")),
             depth_json,
@@ -775,19 +878,17 @@ class TickRecorder:
         # Feed the live order-flow aggregator (best-effort — must never break
         # tick recording). LTP + cumulative volume drive the footprint; bid/ask
         # sharpen the aggressor classification when present.
-        if self._orderflow is not None and orderflow_timestamp_trusted:
+        if self._orderflow is not None:
             ltp = payload.get("ltp")
             if ltp is not None and cumulative_volume is not None:
-                bid = payload.get("bid")
-                ask = payload.get("ask")
                 try:
                     self._orderflow.feed_market_tick(
                         symbol,
                         float(ltp),
                         cumulative_volume,
                         exchange=exchange,
-                        bid=float(bid) if bid is not None else None,
-                        ask=float(ask) if ask is not None else None,
+                        bid=bid,
+                        ask=ask,
                         timestamp=ts.timestamp(),
                     )
                 except Exception as exc:  # noqa: BLE001 - feeding never breaks recording
@@ -807,7 +908,7 @@ class TickRecorder:
             return _NUMERIC_MODES[reported_mode]
         if "depth" in data or "bids" in data or "asks" in data:
             return MODE_DEPTH
-        if "bid" in data or "volume" in data:
+        if {"bid", "ask", "bid_price", "ask_price", "volume"} & data.keys():
             return MODE_QUOTE
         return MODE_LTP
 
@@ -963,7 +1064,7 @@ class TickRecorder:
                 continue
             return
 
-    def _flush(self, *, force: bool = False) -> bool:
+    def _flush(self, *, force: bool = False, raise_on_error: bool = False) -> bool:
         """Write buffered ticks to DuckDB.
 
         Clears the buffer ONLY after a successful insert. On failure the batch is
@@ -1009,7 +1110,9 @@ class TickRecorder:
                 retry_delay = min(self._persistence_backoff, self._max_persistence_retry_delay)
                 self._next_persistence_retry_at = now + retry_delay
                 self._persistence_backoff = min(retry_delay * 2, self._max_persistence_retry_delay)
-                return True
+                if raise_on_error:
+                    raise TickPersistenceError(self._persistence_error) from None
+                return False
 
             logger.debug("Flushed %d ticks to DuckDB", batch_size)
             self._persisted_tick_count += batch_size

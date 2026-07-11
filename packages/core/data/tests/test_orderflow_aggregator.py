@@ -567,6 +567,17 @@ class TestFeedMarketTick:
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
         assert agg.get_footprint("NIFTY") == []  # need a baseline first
 
+    def test_prior_session_last_tick_is_exposed_as_stale(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
+
+        freshness = agg.get_market_freshness("NIFTY", now=self._TS + 24 * 60 * 60)
+
+        assert freshness["state"] == "stale"
+        assert freshness["is_fresh"] is False
+        assert freshness["last_tick_timestamp"] == self._TS
+        assert freshness["last_tick_session"] != freshness["current_session"]
+
     def test_uptick_records_incremental_buy_volume(self):
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
@@ -591,32 +602,46 @@ class TestFeedMarketTick:
         agg.feed_market_tick("NIFTY", 24505.0, 1000, timestamp=self._TS + 1)  # no trade
         assert agg.get_footprint("NIFTY") == []
 
-    def test_cumulative_volume_decrease_rebaselines_and_clears_stale_side(self):
+    def test_cumulative_volume_decrease_does_not_poison_valid_baseline(self):
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
         agg.feed_market_tick("NIFTY", 99.0, 1100, timestamp=self._TS + 1)  # establish SELL
-        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 300)  # feed reset
-        agg.feed_market_tick("NIFTY", 99.0, 150, timestamp=self._TS + 301)  # flat, fresh default BUY
+        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 300)  # invalid regression
+        agg.feed_market_tick("NIFTY", 99.0, 1125, timestamp=self._TS + 301)
 
         latest_bin = max(bucket.timestamp_bin for bucket in agg.get_footprint("NIFTY"))
         latest = [bucket for bucket in agg.get_footprint("NIFTY") if bucket.timestamp_bin == latest_bin]
 
-        assert sum(bucket.buy_volume for bucket in latest) == 50
-        assert sum(bucket.sell_volume for bucket in latest) == 0
+        assert sum(bucket.buy_volume for bucket in latest) == 0
+        assert sum(bucket.sell_volume for bucket in latest) == 25
 
-    def test_negative_cumulative_volume_clears_baseline_and_stale_side(self):
+    def test_intraday_cumulative_volume_reset_recovers_after_two_monotonic_samples(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+
+        # A single lower frame is held as an untrusted reset candidate. A later
+        # monotonic sample confirms the new counter without inventing the first
+        # sample's unknown volume.
+        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 2)
+        agg.feed_market_tick("NIFTY", 98.0, 125, timestamp=self._TS + 3)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume for bucket in latest) == 100
+        assert sum(bucket.sell_volume for bucket in latest) == 25
+
+    def test_negative_cumulative_volume_does_not_clear_valid_baseline(self):
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
         agg.feed_market_tick("NIFTY", 99.0, 1100, timestamp=self._TS + 1)  # establish SELL
         agg.feed_market_tick("NIFTY", 99.0, -1, timestamp=self._TS + 300)
-        agg.feed_market_tick("NIFTY", 99.0, 100, timestamp=self._TS + 301)  # safe baseline only
-        agg.feed_market_tick("NIFTY", 99.0, 125, timestamp=self._TS + 302)  # flat, fresh default BUY
+        agg.feed_market_tick("NIFTY", 99.0, 1125, timestamp=self._TS + 301)
 
         latest_bin = max(bucket.timestamp_bin for bucket in agg.get_footprint("NIFTY"))
         latest = [bucket for bucket in agg.get_footprint("NIFTY") if bucket.timestamp_bin == latest_bin]
 
-        assert sum(bucket.buy_volume for bucket in latest) == 25
-        assert sum(bucket.sell_volume for bucket in latest) == 0
+        assert sum(bucket.buy_volume for bucket in latest) == 0
+        assert sum(bucket.sell_volume for bucket in latest) == 25
 
     @pytest.mark.parametrize("next_session_opening_volume", [100, 5000])
     def test_new_ist_session_rebaselines_higher_and_lower_opening_cumulative_volume(
@@ -654,6 +679,17 @@ class TestFeedMarketTick:
 
         latest = agg.get_footprint("NIFTY")
         assert sum(bucket.buy_volume + bucket.sell_volume for bucket in latest) == 125
+
+    def test_equal_timestamp_and_volume_does_not_replace_valid_price_baseline(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 99.0, 1100, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 100.0, 1125, timestamp=self._TS + 2)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume for bucket in latest) == 100
+        assert sum(bucket.sell_volume for bucket in latest) == 25
 
     @pytest.mark.parametrize("stale_offset", [0, 1], ids=["older", "equal"])
     def test_stale_negative_volume_does_not_clear_valid_baseline(self, stale_offset):

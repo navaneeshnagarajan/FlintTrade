@@ -28,6 +28,7 @@ class _FakeRecorder:
         self.pending_tick_count = 2
         self.dropped_tick_count = 3
         self.reconnect_requests = 0
+        self.max_instruments = 512
         self._subscription_lock = threading.RLock()
         self._watchlist: dict[str, list[dict[str, str]]] = {
             "quote": [{"exchange": "NSE_INDEX", "symbol": "NIFTY"}],
@@ -491,6 +492,29 @@ class TestWatchlist:
         assert response.status_code == 200
         assert response.get_json()["data"]["changed"] is False
         assert response.get_json()["data"]["applies_on"] == "unchanged"
+        assert hub.update_calls == 0
+        assert wired.reconnect_requests == 0
+
+    def test_add_rejects_watchlist_capacity_overflow_without_partial_update(self, client, app, wired):
+        wired._watchlist["quote"] = [
+            {"exchange": "NSE", "symbol": f"SYM{index}"}
+            for index in range(wired.max_instruments)
+        ]
+        previous = wired.get_watchlist()
+        hub = app.config["SIGNAL_HUB"]
+
+        response = client.post(
+            "/api/v1/data/ticks/watchlist",
+            json={
+                "action": "add",
+                "mode": "quote",
+                "instruments": [{"exchange": "NSE", "symbol": "OVERFLOW"}],
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["message"] == "watchlist cannot exceed 512 unique instruments"
+        assert wired.get_watchlist() == previous
         assert hub.update_calls == 0
         assert wired.reconnect_requests == 0
 

@@ -55,6 +55,7 @@ _SECONDS_PER_DAY = 24 * 60 * 60
 # segment. Instrument-specific display grids are applied losslessly by the API.
 LIVE_MARKET_INGESTION_INTERVAL_SECONDS = 60
 LIVE_MARKET_INGESTION_TICK_SIZE = 0.0001
+LIVE_TICK_FRESHNESS_SECONDS = 120.0
 
 # Attempt to import zoneinfo (3.9+) then fall back to pytz.
 try:
@@ -251,6 +252,11 @@ class OrderFlowAggregator:
         # Per-instrument baseline for deriving incremental volume + aggressor
         # side from raw market ticks (which carry cumulative volume and no side).
         self._last_tick: dict[_InstrumentIdentity, tuple[float, int, date, float]] = {}
+        # A lower intraday cumulative counter needs a second monotonic sample
+        # before it can replace the last trusted baseline.
+        self._pending_volume_reset: dict[
+            _InstrumentIdentity, tuple[float, int, date, float]
+        ] = {}
         self._last_side: dict[_InstrumentIdentity, Side] = {}
         self._identity_recency: OrderedDict[_InstrumentIdentity, None] = OrderedDict()
         # feed_market_tick nests classification and recording under one state
@@ -378,31 +384,119 @@ class OrderFlowAggregator:
         with self._lock:
             current_volume = int(cumulative_volume)
             prev = self._last_tick.get(identity)
+            if current_volume < 0:
+                return
             if prev is not None:
                 if tick_timestamp < prev[3]:
                     return
                 if tick_timestamp == prev[3] and current_volume < prev[1]:
                     return
-            if current_volume < 0:
-                self._last_tick.pop(identity, None)
-                self._last_side.pop(identity, None)
-                return
+                if tick_timestamp == prev[3] and current_volume == prev[1]:
+                    return
             self._touch_identity_locked(identity)
             if prev is None or prev[2] != session_date:
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                self._pending_volume_reset.pop(identity, None)
                 self._last_side.pop(identity, None)
                 return
             prev_ltp, prev_vol, _, _ = prev
-            self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
             if current_volume < prev_vol:
-                self._last_side.pop(identity, None)
+                pending = self._pending_volume_reset.get(identity)
+                if pending is None or pending[2] != session_date:
+                    self._pending_volume_reset[identity] = (
+                        ltp,
+                        current_volume,
+                        session_date,
+                        tick_timestamp,
+                    )
+                    return
+
+                pending_ltp, pending_volume, _, pending_timestamp = pending
+                if tick_timestamp <= pending_timestamp:
+                    return
+                if current_volume < pending_volume:
+                    self._pending_volume_reset[identity] = (
+                        ltp,
+                        current_volume,
+                        session_date,
+                        tick_timestamp,
+                    )
+                    return
+
+                self._pending_volume_reset.pop(identity, None)
+                self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                inc_volume = current_volume - pending_volume
+                if inc_volume <= 0:
+                    return
+                side = self._classify_side(
+                    symbol,
+                    ltp,
+                    pending_ltp,
+                    bid,
+                    ask,
+                    exchange=exchange,
+                )
+                self.add_tick(
+                    symbol,
+                    ltp,
+                    inc_volume,
+                    side,
+                    timestamp=tick_timestamp,
+                    exchange=exchange,
+                )
                 return
+            self._pending_volume_reset.pop(identity, None)
+            self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
 
             inc_volume = current_volume - prev_vol
             if inc_volume <= 0:
                 return
             side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
             self.add_tick(symbol, ltp, inc_volume, side, timestamp=tick_timestamp, exchange=exchange)
+
+    def get_market_freshness(
+        self,
+        symbol: str,
+        *,
+        exchange: str = "",
+        now: float | None = None,
+    ) -> dict[str, str | float | bool | None]:
+        """Return last-tick recency and IST-session freshness for an identity."""
+        import time as _time
+
+        now_timestamp = _time.time() if now is None else float(now)
+        current_session = _ist_session_date(now_timestamp)
+        identity = _instrument_identity(symbol, exchange)
+        with self._lock:
+            last_tick = self._last_tick.get(identity)
+
+        if last_tick is None:
+            return {
+                "state": "unavailable",
+                "is_fresh": False,
+                "last_tick_timestamp": None,
+                "last_tick_session": None,
+                "current_session": current_session.isoformat(),
+                "age_seconds": None,
+            }
+
+        last_timestamp = last_tick[3]
+        last_session = last_tick[2]
+        age_seconds = now_timestamp - last_timestamp
+        if last_session != current_session:
+            state = "stale"
+        elif age_seconds < 0 or age_seconds > LIVE_TICK_FRESHNESS_SECONDS:
+            state = "delayed"
+        else:
+            state = "live"
+        return {
+            "state": state,
+            "is_fresh": state == "live",
+            "last_tick_timestamp": last_timestamp,
+            "last_tick_session": last_session.isoformat(),
+            "current_session": current_session.isoformat(),
+            "age_seconds": age_seconds,
+        }
 
     def retain_identities(self, identities: set[_InstrumentIdentity]) -> None:
         """Discard every identity no longer present in the recorder watchlist."""
@@ -414,6 +508,7 @@ class OrderFlowAggregator:
             known = (
                 set(self._state)
                 | set(self._last_tick)
+                | set(self._pending_volume_reset)
                 | set(self._last_side)
                 | set(self._identity_recency)
             )
@@ -476,6 +571,7 @@ class OrderFlowAggregator:
             if symbol is None:
                 self._state.clear()
                 self._last_tick.clear()
+                self._pending_volume_reset.clear()
                 self._last_side.clear()
                 self._identity_recency.clear()
                 return
@@ -642,6 +738,7 @@ class OrderFlowAggregator:
         """Remove one identity from every state map while holding ``_lock``."""
         self._state.pop(identity, None)
         self._last_tick.pop(identity, None)
+        self._pending_volume_reset.pop(identity, None)
         self._last_side.pop(identity, None)
         self._identity_recency.pop(identity, None)
 
@@ -653,6 +750,7 @@ class OrderFlowAggregator:
             oldest, _ = self._identity_recency.popitem(last=False)
             self._state.pop(oldest, None)
             self._last_tick.pop(oldest, None)
+            self._pending_volume_reset.pop(oldest, None)
             self._last_side.pop(oldest, None)
 
     def _evict_retained_state_locked(self, symbol_state: dict[int, _BinState]) -> None:

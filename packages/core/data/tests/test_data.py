@@ -1113,6 +1113,32 @@ class TestTickRecorder:
         assert recorder._buffer[0][1:3] == ("RELIANCE", "NSE")
         sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 100)
 
+    def test_conflicting_envelope_and_payload_identities_are_rejected(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        sink = MagicMock()
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), ltp_sink=sink, orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"), ("BSE", "TCS"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "data": {
+                    "exchange": "BSE",
+                    "symbol": "TCS",
+                    "ltp": 3500.0,
+                    "volume": 100,
+                },
+            }
+        )
+
+        assert recorder.tick_count == 0
+        assert recorder.pending_tick_count == 0
+        sink.assert_not_called()
+        orderflow.feed_market_tick.assert_not_called()
+
     def test_frame_arriving_after_watchlist_removal_is_ignored(self):
         from flinttrade_data.tick_recorder import TickRecorder
 
@@ -1308,6 +1334,51 @@ class TestTickRecorder:
     @pytest.mark.parametrize(
         "frame_timestamp",
         [
+            pytest.param("not-a-timestamp", id="invalid"),
+            pytest.param("2026-03-23T03:44:59Z", id="stale"),
+            pytest.param("2026-03-25T03:39:59Z", id="older-than-live-window"),
+            pytest.param("2026-03-25T03:45:01Z", id="future"),
+        ],
+    )
+    def test_explicit_untrusted_timestamp_is_rejected_without_receipt_rewrite(
+        self,
+        frame_timestamp,
+        monkeypatch,
+    ):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        received_at = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return received_at if tz is not None else received_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        sink = MagicMock()
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), ltp_sink=sink, orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "volume": 1000,
+                "timestamp": frame_timestamp,
+            }
+        )
+
+        assert recorder.tick_count == 0
+        assert recorder.pending_tick_count == 0
+        sink.assert_not_called()
+        orderflow.feed_market_tick.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "frame_timestamp",
+        [
             "2026-03-23T03:44:59Z",
             "2026-03-25T03:45:01Z",
             "2026-03-25T03:50:00Z",
@@ -1315,7 +1386,7 @@ class TestTickRecorder:
         ],
         ids=["too-old", "one-second-future", "five-minutes-future", "too-far-future"],
     )
-    def test_implausibly_skewed_frame_timestamp_uses_receipt_time(
+    def test_implausibly_skewed_frame_timestamp_is_rejected(
         self,
         frame_timestamp,
         monkeypatch,
@@ -1345,7 +1416,7 @@ class TestTickRecorder:
             }
         )
 
-        assert recorder._buffer[0][0] == received_at
+        assert recorder.pending_tick_count == 0
         orderflow.feed_market_tick.assert_not_called()
 
     @pytest.mark.parametrize("stale_volume", [-1, 1050])
@@ -1418,7 +1489,7 @@ class TestTickRecorder:
             "x" * 65,
         ],
     )
-    def test_invalid_or_out_of_bounds_frame_timestamp_uses_one_receipt_time(
+    def test_invalid_or_out_of_bounds_explicit_timestamp_is_rejected(
         self,
         invalid_timestamp,
     ):
@@ -1427,7 +1498,6 @@ class TestTickRecorder:
         orderflow = MagicMock()
         recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
         self._allow(recorder, ("NSE", "RELIANCE"))
-        before = datetime.now(timezone.utc)
 
         recorder._process_tick(
             {
@@ -1439,13 +1509,8 @@ class TestTickRecorder:
             }
         )
 
-        after = datetime.now(timezone.utc)
-        stored_timestamp = recorder._buffer[0][0]
-        assert before <= stored_timestamp <= after
-        if invalid_timestamp is None:
-            assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == stored_timestamp.timestamp()
-        else:
-            orderflow.feed_market_tick.assert_not_called()
+        assert recorder.pending_tick_count == 0
+        orderflow.feed_market_tick.assert_not_called()
 
     def test_missing_frame_timestamp_uses_one_receipt_time(self):
         from flinttrade_data.tick_recorder import TickRecorder
@@ -1499,6 +1564,58 @@ class TestTickRecorder:
 
         assert recorder._buffer[0][3] == "depth"
         assert json.loads(recorder._buffer[0][14])["buy"][0]["price"] == 2499.0
+
+    @pytest.mark.parametrize(
+        ("aliases", "expected_bid", "expected_ask"),
+        [
+            pytest.param(
+                {"bid_price": 2499.0, "ask_price": 2501.0},
+                2499.0,
+                2501.0,
+                id="quote-price-aliases",
+            ),
+            pytest.param(
+                {
+                    "depth": {
+                        "buy": [{"price": 2498.0, "quantity": 10}],
+                        "sell": [{"price": 2502.0, "quantity": 20}],
+                    }
+                },
+                2498.0,
+                2502.0,
+                id="legacy-depth-buy-sell",
+            ),
+            pytest.param(
+                {
+                    "bids": [{"price": 2497.0, "quantity": 10}],
+                    "asks": [{"price": 2503.0, "quantity": 20}],
+                },
+                2497.0,
+                2503.0,
+                id="depth-bids-asks",
+            ),
+        ],
+    )
+    def test_bbo_aliases_feed_storage_and_orderflow(self, aliases, expected_bid, expected_ask):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "volume": 1000,
+                **aliases,
+            }
+        )
+
+        assert recorder._buffer[0][10:12] == (expected_bid, expected_ask)
+        assert orderflow.feed_market_tick.call_args.kwargs["bid"] == expected_bid
+        assert orderflow.feed_market_tick.call_args.kwargs["ask"] == expected_ask
 
     def test_ltp_sink_receives_finite_tick_after_buffering(self):
         from flinttrade_data.storage import StorageManager
@@ -2368,6 +2485,44 @@ class TestTickRecorder:
         assert storage.insert_ticks_batch.call_count == 2
         assert recorder.persisted_tick_count == 1
         assert recorder.pending_tick_count == 0
+
+    @pytest.mark.asyncio
+    async def test_final_flush_failure_is_propagated_from_run(self, monkeypatch):
+        from flinttrade_data import tick_recorder as module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        class StoppingWebSocket:
+            async def send(self, _message):
+                return None
+
+            async def recv(self):
+                return json.dumps({"status": "authenticated"})
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                recorder.stop()
+                raise StopAsyncIteration
+
+        class WebSocketContext:
+            async def __aenter__(self):
+                return StoppingWebSocket()
+
+            async def __aexit__(self, _exc_type, _exc, _tb):
+                return False
+
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = RuntimeError("disk full")
+        recorder = TickRecorder(storage=storage)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0})
+        monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
+
+        with pytest.raises(RuntimeError, match="Tick persistence failed"):
+            await recorder.run()
+
+        assert recorder.pending_tick_count == 1
 
     @pytest.mark.asyncio
     async def test_normal_websocket_eof_clears_state_and_backs_off(self, monkeypatch):

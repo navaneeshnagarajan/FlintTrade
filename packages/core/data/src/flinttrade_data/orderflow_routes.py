@@ -13,11 +13,10 @@ Query parameters:
     bins      (int, optional):  Number of recent bins to return.  Default ``50``.
     tick_size (float, optional): Price-level granularity.  Default ``0.05``.
 
-The response includes ``is_live: true`` when the live OrderFlowAggregatorV2
-has accumulated data for the requested symbol.  When no live data is available
-(e.g. market is closed or the WebSocket tick pipeline is not yet wired), the
-endpoint falls back to the deterministic synthetic generator and returns
-``is_live: false``.
+The response includes ``is_live: true`` only when retained buckets have a fresh
+current-session source tick. ``live_state`` and ``freshness`` distinguish live,
+delayed, stale, warming, and unavailable data. When no retained buckets exist,
+the endpoint falls back to deterministic synthetic data.
 """
 
 from __future__ import annotations
@@ -192,6 +191,45 @@ def _source_tick_size(aggregator: Any, fallback: float) -> float:
     return value if math.isfinite(value) and value > 0 else fallback
 
 
+def _unavailable_market_freshness() -> dict[str, Any]:
+    return {
+        "state": "unavailable",
+        "is_fresh": False,
+        "last_tick_timestamp": None,
+        "last_tick_session": None,
+        "current_session": datetime.now(tz=_IST).date().isoformat(),
+        "age_seconds": None,
+    }
+
+
+def _market_freshness(aggregator: Any, symbol: str, exchange: str) -> dict[str, Any]:
+    """Read a validated freshness snapshot without trusting retained buckets alone."""
+    get_freshness = getattr(aggregator, "get_market_freshness", None)
+    if not callable(get_freshness):
+        return _unavailable_market_freshness()
+    try:
+        candidate = get_freshness(symbol, exchange=exchange)
+    except Exception as exc:  # noqa: BLE001 - freshness failure must fail closed
+        logger.debug("Order-flow freshness unavailable for %s:%s: %s", exchange, symbol, exc)
+        return _unavailable_market_freshness()
+    if not isinstance(candidate, dict) or candidate.get("state") not in {
+        "live",
+        "delayed",
+        "stale",
+        "unavailable",
+    }:
+        return _unavailable_market_freshness()
+    state = str(candidate["state"])
+    return {
+        "state": state,
+        "is_fresh": state == "live" and candidate.get("is_fresh") is True,
+        "last_tick_timestamp": candidate.get("last_tick_timestamp"),
+        "last_tick_session": candidate.get("last_tick_session"),
+        "current_session": candidate.get("current_session"),
+        "age_seconds": candidate.get("age_seconds"),
+    }
+
+
 def _round_to_tick(price: float, tick_size: float) -> float:
     """Round a source price onto a coarser exact-multiple tick boundary."""
     price_decimal = Decimal(str(price))
@@ -336,11 +374,15 @@ def orderflow_endpoint() -> tuple[Any, int]:
     effective_tick_size = tick_size
     source_interval = interval
     source_tick_size = tick_size
+    freshness = _unavailable_market_freshness()
+    live_state = "unavailable"
 
     # Try live aggregator first
     try:
         aggregator = _get_live_aggregator()
         if aggregator is not None:
+            freshness = _market_freshness(aggregator, symbol_upper, exchange)
+            live_state = str(freshness["state"])
             source_interval = _source_interval(aggregator, interval)
             source_tick_size = _source_tick_size(aggregator, tick_size)
             interval_ratio = _exact_multiple_ratio(interval, source_interval)
@@ -356,7 +398,7 @@ def orderflow_endpoint() -> tuple[Any, int]:
                     coarsen_interval=effective_interval if interval_ratio and interval_ratio > 1 else None,
                     coarsen_tick_size=effective_tick_size if tick_size_ratio and tick_size_ratio > 1 else None,
                 )[-bins:]
-                is_live = True
+                is_live = freshness["is_fresh"] is True
     except Exception as exc:
         logger.debug("Live aggregator unavailable for %s: %s", symbol_upper, exc)
 
@@ -373,6 +415,8 @@ def orderflow_endpoint() -> tuple[Any, int]:
         effective_tick_size = tick_size
         source_interval = interval
         source_tick_size = tick_size
+        if live_state == "live":
+            live_state = "warming"
 
     return jsonify({
         "status": "success",
@@ -387,5 +431,7 @@ def orderflow_endpoint() -> tuple[Any, int]:
             "source_interval": source_interval,
             "source_tick_size": source_tick_size,
             "is_live": is_live,
+            "live_state": live_state,
+            "freshness": freshness,
         },
     }), 200

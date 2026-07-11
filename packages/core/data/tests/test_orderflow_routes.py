@@ -11,6 +11,17 @@ from flask import Flask
 import flinttrade_data.orderflow_routes as mod
 
 
+def _mark_fresh(aggregator) -> None:
+    aggregator.get_market_freshness.return_value = {
+        "state": "live",
+        "is_fresh": True,
+        "last_tick_timestamp": 1_700_000_001.0,
+        "last_tick_session": "2026-07-11",
+        "current_session": "2026-07-11",
+        "age_seconds": 1.0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -160,6 +171,7 @@ def test_orderflow_live_reports_real_bin_width_not_requested(app):
     aggregator = MagicMock()
     aggregator.time_bin_seconds = 300
     aggregator.get_footprint.return_value = [bucket]
+    _mark_fresh(aggregator)
     app.config["ORDERFLOW_AGGREGATOR"] = aggregator
 
     with app.test_client() as c:
@@ -169,6 +181,26 @@ def test_orderflow_live_reports_real_bin_width_not_requested(app):
     assert data["is_live"] is True
     assert data["interval"] == 300          # the aggregator's true width, not 60
     assert data["requested_interval"] == 60  # the request is echoed separately
+
+
+def test_orderflow_prior_session_buckets_are_reported_as_stale_not_live(app):
+    from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+    prior_session = 1_700_000_000.0
+    aggregator = OrderFlowAggregator()
+    aggregator.feed_market_tick("NIFTY", 100.0, 1000, exchange="NFO", timestamp=prior_session)
+    aggregator.feed_market_tick("NIFTY", 101.0, 1100, exchange="NFO", timestamp=prior_session + 1)
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get("/api/v1/data/orderflow?symbol=NIFTY&exchange=NFO")
+
+    data = response.get_json()["data"]
+    assert data["buckets"]
+    assert data["is_live"] is False
+    assert data["live_state"] == "stale"
+    assert data["freshness"]["is_fresh"] is False
+    assert data["freshness"]["last_tick_timestamp"] == prior_session + 1
 
 
 def test_orderflow_live_reports_unrepresentable_interval_and_tick_size_honestly(app):
@@ -187,6 +219,7 @@ def test_orderflow_live_reports_unrepresentable_interval_and_tick_size_honestly(
     aggregator.time_bin_seconds = 300
     aggregator.tick_size = 0.05
     aggregator.get_footprint.return_value = [bucket]
+    _mark_fresh(aggregator)
     app.config["ORDERFLOW_AGGREGATOR"] = aggregator
 
     with app.test_client() as client:
@@ -220,6 +253,7 @@ def test_orderflow_live_coarsens_exact_interval_multiple_without_losing_volume(a
         )
         for offset, buy, sell in ((0, 10, 1), (300, 20, 2), (600, 30, 3))
     ]
+    _mark_fresh(aggregator)
     app.config["ORDERFLOW_AGGREGATOR"] = aggregator
 
     with app.test_client() as client:
@@ -252,6 +286,7 @@ def test_orderflow_live_coarsens_exact_tick_size_multiple_without_losing_volume(
         )
         for price, buy, sell in ((100.0, 10, 2), (100.5, 20, 3))
     ]
+    _mark_fresh(aggregator)
     app.config["ORDERFLOW_AGGREGATOR"] = aggregator
 
     with app.test_client() as client:
