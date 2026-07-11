@@ -161,13 +161,24 @@ const orderFlowFreshnessSchema = z.object({
   last_tick_timestamp: z.number().finite().nonnegative().nullable(),
   last_tick_session: z.string().min(1).nullable(),
   current_session: z.string().min(1).nullable(),
-  age_seconds: z.number().finite().min(-MAX_SOURCE_CLOCK_SKEW_SECONDS).nullable(),
+  age_seconds: z.number().finite().nullable(),
 }).passthrough().superRefine((freshness, ctx) => {
   if (freshness.is_fresh !== (freshness.state === "live")) {
     ctx.addIssue({
       code: "custom",
       path: ["is_fresh"],
       message: "is_fresh must agree with freshness state",
+    });
+  }
+  if (
+    freshness.state === "live"
+    && freshness.age_seconds !== null
+    && freshness.age_seconds < -MAX_SOURCE_CLOCK_SKEW_SECONDS
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["age_seconds"],
+      message: `Live freshness age cannot be below -${MAX_SOURCE_CLOCK_SKEW_SECONDS} seconds`,
     });
   }
 });
@@ -258,6 +269,18 @@ const orderFlowResponseSchema = z.object({
   }
 
   if (response.buckets.length === 0) return;
+  if (
+    !isSynthetic
+    && response.buckets.some(
+      (bucket) => bucket.quality === "sample" || bucket.provenance === "synthetic",
+    )
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["buckets"],
+      message: "Non-sample order flow cannot contain synthetic sample buckets",
+    });
+  }
   if (response.quality === "exact" && response.buckets.some((bucket) => bucket.quality !== "exact")) {
     ctx.addIssue({
       code: "custom",

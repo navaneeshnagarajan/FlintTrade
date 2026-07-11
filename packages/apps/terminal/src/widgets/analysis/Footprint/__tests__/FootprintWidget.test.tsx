@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -121,6 +122,61 @@ function resizeObservedElement(target: Element, width: number, height: number): 
   });
 }
 
+function installCanvasPaintHarness() {
+  const frameCallbacks: FrameRequestCallback[] = [];
+  const fillText = vi.fn();
+  const measureText = vi.fn((text: string) => ({ width: text.length * 6 }) as TextMetrics);
+  const moveTo = vi.fn();
+  const setLineDash = vi.fn();
+  const context = {
+    beginPath: vi.fn(),
+    closePath: vi.fn(),
+    fill: vi.fn(),
+    fillRect: vi.fn(),
+    fillText,
+    lineTo: vi.fn(),
+    measureText,
+    moveTo,
+    restore: vi.fn(),
+    save: vi.fn(),
+    setLineDash,
+    stroke: vi.fn(),
+    strokeRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D;
+
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    frameCallbacks.push(callback);
+    return frameCallbacks.length;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+
+  return {
+    fillText,
+    measureText,
+    moveTo,
+    setLineDash,
+    runLatestFrame: () => {
+      const callback = frameCallbacks.at(-1);
+      expect(callback).toBeDefined();
+      act(() => callback?.(0));
+    },
+  };
+}
+
+function getDashedLineY(
+  moveTo: ReturnType<typeof vi.fn>,
+  setLineDash: ReturnType<typeof vi.fn>,
+): number {
+  const dashOrder = setLineDash.mock.invocationCallOrder.at(-1);
+  expect(dashOrder).toBeDefined();
+  const moveIndex = moveTo.mock.invocationCallOrder.findIndex(
+    (order) => dashOrder !== undefined && order > dashOrder,
+  );
+  expect(moveIndex).toBeGreaterThanOrEqual(0);
+  return Number(moveTo.mock.calls[moveIndex]?.[1]);
+}
+
 const sampleBuckets = [
   {
     time_label: "09:15",
@@ -144,14 +200,28 @@ const sampleBuckets = [
   },
 ];
 
+const twentySecondPrecisionBuckets = Array.from({ length: 20 }, (_, index) => ({
+  time_label: `09:${String(15 + index).padStart(2, "0")}:00`,
+  cells: {
+    "22500": { buy_volume: 100 + index, sell_volume: 80 },
+  },
+  poc_price: 22500,
+  total_volume: 180 + index,
+  delta: 20 + index,
+}));
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("FootprintWidget", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     resizeObservations.length = 0;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     mockUseOrderFlow.mockReturnValue(hookResult());
   });
 
@@ -181,6 +251,7 @@ describe("FootprintWidget", () => {
 
     const panel = screen.getByTestId("footprint-panel");
     resizeObservedElement(panel, 220, 96);
+    resizeObservedElement(screen.getByTestId("footprint-chart"), 220, 64);
 
     expect(panel).toHaveAttribute("data-layout", "compact");
     const toolbar = screen.getByRole("toolbar", { name: "Footprint controls" });
@@ -196,6 +267,7 @@ describe("FootprintWidget", () => {
 
     fireEvent.pointerDown(moreControls, { button: 0, ctrlKey: false });
     expect(screen.getByTestId("footprint-compact-legend")).toBeInTheDocument();
+    expect(screen.queryByText("Cum. Δ")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitemradio", { name: "1m interval" }));
     expect(mockUseOrderFlow).toHaveBeenLastCalledWith("NIFTY", "NSE_INDEX", 60, 20);
   });
@@ -204,7 +276,10 @@ describe("FootprintWidget", () => {
     render(<FootprintWidget {...defaultProps} />);
 
     const panel = screen.getByTestId("footprint-panel");
-    resizeObservedElement(panel, 480, 360);
+    resizeObservedElement(panel, 520, 360);
+    expect(panel).toHaveAttribute("data-layout", "compact");
+
+    resizeObservedElement(panel, 521, 360);
     expect(panel).toHaveAttribute("data-layout", "compact");
 
     resizeObservedElement(panel, 640, 360);
@@ -217,17 +292,51 @@ describe("FootprintWidget", () => {
   });
 
   it("uses a bounded error status instead of overflowing a compact chart", () => {
+    const errorMessage = "A backend error message that cannot fit inside a short Dockview panel";
     mockUseOrderFlow.mockReturnValue(hookResult({
       isError: true,
-      error: new Error("A backend error message that cannot fit inside a short Dockview panel"),
+      error: new Error(errorMessage),
     }));
     render(<FootprintWidget {...defaultProps} />);
 
     const panel = screen.getByTestId("footprint-panel");
     resizeObservedElement(panel, 220, 96);
 
-    expect(screen.getByText("Unable to load")).toBeInTheDocument();
+    const compactError = screen.getByTestId("footprint-compact-state");
+    expect(compactError).toHaveTextContent("Unable to load");
+    expect(compactError).toHaveAttribute("tabindex", "0");
+    expect(compactError).toHaveAccessibleName(`Unable to load: ${errorMessage}`);
+    compactError.focus();
+    expect(compactError).toHaveFocus();
     expect(screen.queryByText("Retrying automatically…")).not.toBeInTheDocument();
+  });
+
+  it("keyboard-focuses compact menu status and the legend tail", async () => {
+    const user = userEvent.setup();
+    const errorMessage = "Full compact footprint failure details";
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      isError: true,
+      error: new Error(errorMessage),
+    }));
+    render(<FootprintWidget {...defaultProps} />);
+
+    const panel = screen.getByTestId("footprint-panel");
+    resizeObservedElement(panel, 220, 96);
+    await user.click(screen.getByRole("button", { name: "More footprint controls" }));
+
+    const status = screen.getByTestId("footprint-menu-status");
+    const legend = screen.getByTestId("footprint-compact-legend");
+    expect(screen.getByTestId("footprint-compact-menu")).toHaveStyle({
+      maxHeight: "min(var(--radix-dropdown-menu-content-available-height), calc(100dvh - 1rem))",
+      maxWidth: "calc(100vw - 1rem)",
+      width: "12rem",
+    });
+    expect(status).toHaveAccessibleName(`Status: Error. ${errorMessage}`);
+
+    await user.keyboard("{End}");
+    expect(legend).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(status).toHaveFocus();
   });
 
   it("uses a bounded loading status instead of skeleton rows in a compact chart", () => {
@@ -420,6 +529,92 @@ describe("FootprintWidget", () => {
     expect(requestAnimationFrameMock).toHaveBeenCalledTimes(requestCount + 1);
     expect(screen.getByTestId("footprint-canvas")).toHaveAttribute("width", "220");
     expect(screen.getByTestId("footprint-canvas")).toHaveAttribute("height", "64");
+  });
+
+  it("updates the canvas backing store when only device pixel ratio changes", () => {
+    vi.useFakeTimers();
+    let devicePixelRatio = 1;
+    vi.spyOn(window, "devicePixelRatio", "get").mockImplementation(() => devicePixelRatio);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: { buckets: sampleBuckets, symbol: "NIFTY", exchange: "NFO", interval: 300, is_live: false },
+      }),
+    );
+    render(<FootprintWidget {...defaultProps} />);
+    const chart = screen.getByTestId("footprint-chart");
+    const canvas = screen.getByTestId("footprint-canvas");
+
+    resizeObservedElement(chart, 220, 64);
+    expect(canvas).toHaveAttribute("width", "220");
+    expect(canvas).toHaveAttribute("height", "64");
+
+    devicePixelRatio = 2;
+    act(() => vi.advanceTimersByTime(250));
+
+    expect(canvas).toHaveAttribute("width", "440");
+    expect(canvas).toHaveAttribute("height", "128");
+    expect(canvas).toHaveStyle({ width: "220px", height: "64px" });
+  });
+
+  it("keeps footprint geometry stable across 139px and 140px canvas heights", () => {
+    const harness = installCanvasPaintHarness();
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: [sampleBuckets[0]],
+          symbol: "NIFTY",
+          exchange: "NFO",
+          interval: 300,
+          is_live: false,
+        },
+      }),
+    );
+    render(<FootprintWidget {...defaultProps} />);
+    const chart = screen.getByTestId("footprint-chart");
+
+    resizeObservedElement(chart, 520, 139);
+    harness.runLatestFrame();
+    const lineAt139 = getDashedLineY(harness.moveTo, harness.setLineDash);
+
+    harness.moveTo.mockClear();
+    harness.setLineDash.mockClear();
+    resizeObservedElement(chart, 520, 140);
+    harness.runLatestFrame();
+    const lineAt140 = getDashedLineY(harness.moveTo, harness.setLineDash);
+
+    expect(Math.abs(lineAt140 - lineAt139)).toBeLessThan(2);
+    expect(screen.getByText("Cum. Δ")).toBeInTheDocument();
+  });
+
+  it("measures and subsamples twenty HH:MM:SS time labels", () => {
+    const harness = installCanvasPaintHarness();
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: {
+          buckets: twentySecondPrecisionBuckets,
+          symbol: "NIFTY",
+          exchange: "NFO",
+          interval: 60,
+          is_live: false,
+        },
+      }),
+    );
+    render(<FootprintWidget {...defaultProps} />);
+
+    resizeObservedElement(screen.getByTestId("footprint-chart"), 520, 240);
+    harness.runLatestFrame();
+
+    const measuredTimes = harness.measureText.mock.calls
+      .map(([label]) => String(label))
+      .filter((label) => /^\d{2}:\d{2}:\d{2}$/.test(label));
+    const paintedTimes = harness.fillText.mock.calls
+      .map(([label]) => String(label))
+      .filter((label) => /^\d{2}:\d{2}:\d{2}$/.test(label));
+    expect(measuredTimes).toHaveLength(20);
+    expect(paintedTimes.length).toBeGreaterThan(1);
+    expect(paintedTimes.length).toBeLessThan(20);
   });
 
   it("requests the default NIFTY capture exchange", () => {

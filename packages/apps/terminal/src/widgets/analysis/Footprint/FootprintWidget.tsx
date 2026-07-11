@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -55,9 +56,20 @@ import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
+import {
+  DEVICE_PIXEL_RATIO_CHECK_INTERVAL_MS,
+  getFootprintCanvasLayout,
+  hasCanvasViewportChanged,
+  normaliseDevicePixelRatio,
+  selectTimeLabelIndices,
+  type CanvasViewport,
+} from "../canvasLayout";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
 import { OrderFlowQualityBadge } from "../OrderFlowQualityBadge";
-import { useCompactPanelLayout } from "../useCompactPanelLayout";
+import {
+  scrollCompactMenuItemIntoView,
+  useCompactPanelLayout,
+} from "../useCompactPanelLayout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,10 +112,6 @@ function formatIntervalLabel(seconds: number | undefined, fallback: string): str
 const MARGIN_RIGHT = 60;
 const MARGIN_LEFT = 8;
 const MARGIN_TOP = 8;
-const MARGIN_BOTTOM_CHART = 4;   // gap between chart and delta strip
-const DELTA_STRIP_H = 56;        // CSS px height reserved for cumulative delta
-const MARGIN_BOTTOM_DELTA = 20;  // time labels below delta strip
-const MIN_HEIGHT_WITH_DELTA_STRIP = 140;
 
 // Canvas colours
 const C_BG = "#0a0a0f";
@@ -183,20 +191,17 @@ function drawFootprint(
   if (columns.length === 0) return;
 
   // Layout zones
-  const showDeltaStrip = physH / dpr >= MIN_HEIGHT_WITH_DELTA_STRIP;
+  const layout = getFootprintCanvasLayout(physH / dpr);
+  const showDeltaStrip = layout.showCumulativeDelta;
   const chartLeft = css(MARGIN_LEFT);
   const chartRight = physW - css(MARGIN_RIGHT);
   const chartTop = css(MARGIN_TOP);
-  const deltaStripTop = showDeltaStrip
-    ? physH - css(MARGIN_BOTTOM_DELTA) - css(DELTA_STRIP_H)
-    : physH;
-  const chartBottom = showDeltaStrip
-    ? deltaStripTop - css(MARGIN_BOTTOM_CHART)
-    : physH - css(MARGIN_BOTTOM_CHART);
+  const deltaStripTop = css(layout.deltaStripTop);
+  const chartBottom = css(layout.chartBottom);
 
   const chartW = chartRight - chartLeft;
   const chartH = chartBottom - chartTop;
-  const deltaStripH = showDeltaStrip ? css(DELTA_STRIP_H) : 0;
+  const deltaStripH = css(layout.deltaStripHeight);
 
   if (chartW <= 0 || chartH <= 0) return;
 
@@ -299,15 +304,25 @@ function drawFootprint(
       }
     }
 
-    if (showDeltaStrip) {
-      ctx.save();
-      ctx.fillStyle = C_TEXT;
-      ctx.font = `${css(8)}px "JetBrains Mono", monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillText(col.time, colMid, deltaStripTop + deltaStripH + css(3));
-      ctx.restore();
+  }
+
+  if (showDeltaStrip) {
+    ctx.save();
+    ctx.fillStyle = C_TEXT;
+    ctx.font = `${css(8)}px "JetBrains Mono", monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    const timeLabelIndices = selectTimeLabelIndices(
+      columns.map((column) => column.time),
+      colW,
+      (label) => ctx.measureText(label).width,
+      css(4),
+    );
+    for (const columnIndex of timeLabelIndices) {
+      const columnMid = chartLeft + (columnIndex + 0.5) * colW;
+      ctx.fillText(columns[columnIndex].time, columnMid, css(layout.timeLabelY));
     }
+    ctx.restore();
   }
 
   // ── Price scale ───────────────────────────────────────────────────────────
@@ -456,6 +471,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
     explicitExchange: panelExchange,
   }));
   const [intervalLabel, setIntervalLabel] = useState("5m");
+  const [showsCumulativeDelta, setShowsCumulativeDelta] = useState(true);
   const { isCompact, panelRef } = useCompactPanelLayout<HTMLDivElement>();
 
   useEffect(() => {
@@ -508,11 +524,25 @@ function FootprintWidget(props: IDockviewPanelProps) {
   }, [data]);
 
   const cumDelta = useMemo(() => cumulativeDelta(columns), [columns]);
+  const errorMessage = error instanceof Error ? error.message : "Failed to load data";
+  const compactStatus = isLoading
+    ? "Loading"
+    : isError
+      ? "Error"
+      : columns.length === 0
+        ? "No data"
+        : dataState === "live"
+          ? "Live"
+          : dataState === "delayed"
+            ? "Delayed"
+            : dataState === "stale"
+              ? "Stale"
+              : "Sample data";
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
-  const sizeRef = useRef({ width: 0, height: 0 });
+  const sizeRef = useRef<CanvasViewport>({ width: 0, height: 0, dpr: 0 });
 
   // Use refs to avoid stale closures in rAF
   const columnsRef = useRef(columns);
@@ -528,7 +558,7 @@ function FootprintWidget(props: IDockviewPanelProps) {
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = sizeRef.current.dpr || normaliseDevicePixelRatio(window.devicePixelRatio);
       drawFootprint(
         ctx,
         columnsRef.current,
@@ -545,33 +575,74 @@ function FootprintWidget(props: IDockviewPanelProps) {
     const container = containerRef.current;
     if (!container) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (
-        Math.abs(width - sizeRef.current.width) < 1 &&
-        Math.abs(height - sizeRef.current.height) < 1
-      ) {
-        return;
-      }
-      sizeRef.current = { width, height };
+    const syncCanvasSize = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      const nextViewport: CanvasViewport = {
+        width,
+        height,
+        dpr: normaliseDevicePixelRatio(window.devicePixelRatio),
+      };
+      setShowsCumulativeDelta(getFootprintCanvasLayout(height).showCumulativeDelta);
+      if (!hasCanvasViewportChanged(sizeRef.current, nextViewport)) return;
+      sizeRef.current = nextViewport;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const dpr = window.devicePixelRatio || 1;
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
+      canvas.width = Math.floor(width * nextViewport.dpr);
+      canvas.height = Math.floor(height * nextViewport.dpr);
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       paint();
+    };
+
+    const syncCanvasFromElement = () => {
+      const rect = container.getBoundingClientRect();
+      syncCanvasSize(
+        rect.width > 0 ? rect.width : sizeRef.current.width,
+        rect.height > 0 ? rect.height : sizeRef.current.height,
+      );
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      syncCanvasSize(entry.contentRect.width, entry.contentRect.height);
     });
 
-    observer.observe(container);
-    return () => observer.disconnect();
+    let dprQuery: MediaQueryList | null = null;
+    const handleDprChange = () => {
+      syncCanvasFromElement();
+      subscribeToCurrentDpr();
+    };
+    const subscribeToCurrentDpr = () => {
+      dprQuery?.removeEventListener("change", handleDprChange);
+      dprQuery = window.matchMedia(
+        `(resolution: ${normaliseDevicePixelRatio(window.devicePixelRatio)}dppx)`,
+      );
+      dprQuery.addEventListener("change", handleDprChange);
+    };
+
+    syncCanvasFromElement();
+    try {
+      observer.observe(container, { box: "device-pixel-content-box" });
+    } catch {
+      observer.observe(container);
+    }
+    window.addEventListener("resize", syncCanvasFromElement);
+    subscribeToCurrentDpr();
+    const dprCheck = window.setInterval(() => {
+      const currentDpr = normaliseDevicePixelRatio(window.devicePixelRatio);
+      if (Math.abs(currentDpr - sizeRef.current.dpr) > 0.001) syncCanvasFromElement();
+    }, DEVICE_PIXEL_RATIO_CHECK_INTERVAL_MS);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncCanvasFromElement);
+      dprQuery?.removeEventListener("change", handleDprChange);
+      window.clearInterval(dprCheck);
+    };
   }, [paint]);
 
   // Repaint when data changes
@@ -728,7 +799,13 @@ function FootprintWidget(props: IDockviewPanelProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="w-48 border-border-default bg-surface-card text-text-primary"
+              className="w-48 overscroll-contain border-border-default bg-surface-card text-text-primary"
+              data-testid="footprint-compact-menu"
+              style={{
+                maxHeight: "min(var(--radix-dropdown-menu-content-available-height), calc(100dvh - 1rem))",
+                maxWidth: "calc(100vw - 1rem)",
+                width: "12rem",
+              }}
             >
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Interval
@@ -749,43 +826,47 @@ function FootprintWidget(props: IDockviewPanelProps) {
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Status
               </DropdownMenuLabel>
-              <div className="flex items-center justify-between gap-2 px-2 pb-1 text-xs">
-                <span>
-                  {isLoading
-                    ? "Loading"
-                    : isError
-                      ? "Error"
-                      : columns.length === 0
-                        ? "No data"
-                        : dataState === "live"
-                          ? "Live"
-                          : dataState === "delayed"
-                            ? "Delayed"
-                            : dataState === "stale"
-                              ? "Stale"
-                              : "Sample data"}
+              <DropdownMenuItem
+                aria-label={isError ? `Status: Error. ${errorMessage}` : `Status: ${compactStatus}`}
+                className="items-start justify-between gap-2 px-2 py-1 text-xs focus:bg-surface-active"
+                data-testid="footprint-menu-status"
+                onFocus={(event) => scrollCompactMenuItemIntoView(event.currentTarget)}
+                onSelect={(event) => event.preventDefault()}
+              >
+                <span className="min-w-0">
+                  <span className="block">{compactStatus}</span>
+                  {isError && (
+                    <span className="mt-0.5 block whitespace-normal break-words text-[11px] leading-tight text-loss">
+                      {errorMessage}
+                    </span>
+                  )}
                 </span>
                 {!isLoading && !isError && columns.length > 0 && data && (
                   <OrderFlowQualityBadge data={data} />
                 )}
-              </div>
+              </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-border-default" />
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Legend
               </DropdownMenuLabel>
-              <div
-                className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 pb-1 text-xs text-text-muted"
+              <DropdownMenuItem
+                aria-label={`Legend: Buy, Sell, POC, Latest POC${showsCumulativeDelta ? ", cumulative delta" : ""}. ${columns.length} buckets, ${symbol} ${displayIntervalLabel}`}
+                className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 py-1 text-xs text-text-muted focus:bg-surface-active"
                 data-testid="footprint-compact-legend"
+                onFocus={(event) => scrollCompactMenuItemIntoView(event.currentTarget)}
+                onSelect={(event) => event.preventDefault()}
               >
                 <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-profit" aria-hidden="true" />Buy</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-loss" aria-hidden="true" />Sell</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm border border-amber-400" aria-hidden="true" />POC</span>
                 <span className="flex items-center gap-1"><span className="w-3 border-t border-dashed border-indigo-400" aria-hidden="true" />Latest POC</span>
-                <span className="flex items-center gap-1"><span className="w-3 border-t border-indigo-300" aria-hidden="true" />Cum. Δ</span>
+                {showsCumulativeDelta && (
+                  <span className="flex items-center gap-1"><span className="w-3 border-t border-indigo-300" aria-hidden="true" />Cum. Δ</span>
+                )}
                 <span className="col-span-2 font-mono text-text-secondary">
                   {columns.length} buckets · {symbol} {displayIntervalLabel}
                 </span>
-              </div>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -812,10 +893,12 @@ function FootprintWidget(props: IDockviewPanelProps) {
           <div className="w-3 border-t border-dashed border-indigo-400" aria-hidden="true" />
           <span>Latest POC</span>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 border-t border-indigo-300" aria-hidden="true" />
-          <span>Cum. Δ</span>
-        </div>
+        {showsCumulativeDelta && (
+          <div className="flex items-center gap-1">
+            <div className="w-3 border-t border-indigo-300" aria-hidden="true" />
+            <span>Cum. Δ</span>
+          </div>
+        )}
         <span className="ml-auto tabular-nums">
           {columns.length} buckets &bull; {symbol} {displayIntervalLabel}
         </span>
@@ -826,9 +909,10 @@ function FootprintWidget(props: IDockviewPanelProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         data-density={isCompact ? "compact" : "full"}
+        data-cumulative-delta={showsCumulativeDelta ? "visible" : "hidden"}
         data-testid="footprint-chart"
         role="img"
-        aria-label={`Footprint chart for ${symbol} ${displayIntervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. The dashed line marks the latest bucket POC. Cumulative delta line at bottom.`}
+        aria-label={`Footprint chart for ${symbol} ${displayIntervalLabel}. Cells show buy (green) and sell (red) volume at each price level per time bucket. Delta value shown in each cell. The dashed line marks the latest bucket POC.${showsCumulativeDelta ? " Cumulative delta line shown at bottom." : " Cumulative delta is hidden at this height."}`}
       >
         <canvas
           ref={canvasRef}
@@ -858,9 +942,12 @@ function FootprintWidget(props: IDockviewPanelProps) {
         {isError && (
           isCompact ? (
             <div
-              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-loss/70"
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-loss/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-inset focus-visible:outline-loss"
               data-testid="footprint-compact-state"
-              title={error instanceof Error ? error.message : "Failed to load data"}
+              role="alert"
+              tabIndex={0}
+              aria-label={`Unable to load: ${errorMessage}`}
+              title={errorMessage}
             >
               <AlertCircle className="size-3 shrink-0" aria-hidden="true" />
               <span className="truncate">Unable to load</span>

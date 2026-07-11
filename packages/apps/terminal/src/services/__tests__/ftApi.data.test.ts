@@ -29,6 +29,12 @@ const validBucket = {
   provenance: "trade_tick",
 };
 
+const sampleBucket = {
+  ...validBucket,
+  quality: "sample",
+  provenance: "synthetic",
+};
+
 const validResponse = {
   buckets: [validBucket],
   symbol: "NIFTY",
@@ -79,6 +85,23 @@ describe("getOrderFlow runtime validation", () => {
     await expect(getOrderFlow("NIFTY", "NSE_INDEX", 20, 300, 0.05)).resolves.toEqual(response);
   });
 
+  it("accepts a coherent delayed response with a negative age beyond five seconds", async () => {
+    const response = {
+      ...validResponse,
+      is_live: false,
+      live_state: "delayed",
+      freshness: {
+        ...validResponse.freshness,
+        state: "delayed",
+        is_fresh: false,
+        age_seconds: -30,
+      },
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(response));
+
+    await expect(getOrderFlow("NIFTY", "NSE_INDEX", 20, 300, 0.05)).resolves.toEqual(response);
+  });
+
   it("accepts the backend's coherent synthetic warming state", async () => {
     const response = {
       ...validResponse,
@@ -96,7 +119,7 @@ describe("getOrderFlow runtime validation", () => {
 
   it.each([
     [
-      "freshness age beyond the backend clock-skew tolerance",
+      "live freshness age beyond the backend clock-skew tolerance",
       {
         ...validResponse,
         freshness: { ...validResponse.freshness, age_seconds: -5.001 },
@@ -175,6 +198,32 @@ describe("getOrderFlow runtime validation", () => {
         provenance: "synthetic",
         live_state: "unavailable",
         buckets: [{ ...validBucket, quality: "exact", provenance: "synthetic" }],
+      },
+    ],
+    [
+      "a synthetic sample bucket under a live mixed response",
+      {
+        ...validResponse,
+        buckets: [validBucket, sampleBucket],
+        quality: "estimated",
+        provenance: "mixed",
+      },
+    ],
+    [
+      "a synthetic sample bucket under a delayed non-sample response",
+      {
+        ...validResponse,
+        buckets: [validBucket, sampleBucket],
+        is_live: false,
+        quality: "estimated",
+        provenance: "mixed",
+        live_state: "delayed",
+        freshness: {
+          ...validResponse.freshness,
+          state: "delayed",
+          is_fresh: false,
+          age_seconds: 30,
+        },
       },
     ],
   ])("rejects %s", async (_caseName, payload) => {

@@ -42,6 +42,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -61,9 +62,19 @@ import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
+import {
+  DEVICE_PIXEL_RATIO_CHECK_INTERVAL_MS,
+  hasCanvasViewportChanged,
+  normaliseDevicePixelRatio,
+  selectTimeLabelIndices,
+  type CanvasViewport,
+} from "../canvasLayout";
 import { resolveOrderFlowExchange } from "../orderFlowExchange";
 import { OrderFlowQualityBadge } from "../OrderFlowQualityBadge";
-import { useCompactPanelLayout } from "../useCompactPanelLayout";
+import {
+  scrollCompactMenuItemIntoView,
+  useCompactPanelLayout,
+} from "../useCompactPanelLayout";
 // useOrderFlow includes the backend freshness state used by the status badge.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -255,15 +266,6 @@ function drawFootprint(
       }
     });
 
-    // Time label at bottom
-    ctx.save();
-    ctx.fillStyle = COLOR_TEXT;
-    ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(col.time, colMid, chartBottom + css(4));
-    ctx.restore();
-
     // Column divider
     ctx.save();
     ctx.strokeStyle = COLOR_GRID;
@@ -274,6 +276,23 @@ function drawFootprint(
     ctx.stroke();
     ctx.restore();
   });
+
+  ctx.save();
+  ctx.fillStyle = COLOR_TEXT;
+  ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const timeLabelIndices = selectTimeLabelIndices(
+    columns.map((column) => column.time),
+    colW,
+    (label) => ctx.measureText(label).width,
+    css(4),
+  );
+  for (const columnIndex of timeLabelIndices) {
+    const columnMid = chartLeft + (columnIndex + 0.5) * colW;
+    ctx.fillText(columns[columnIndex].time, columnMid, chartBottom + css(4));
+  }
+  ctx.restore();
 
   // ─── Price scale (right margin) ────────────────────────────────────────────
   ctx.save();
@@ -425,15 +444,24 @@ function drawFootprintHeatmap(
       }
     });
 
-    // Time label
-    ctx.save();
-    ctx.fillStyle = COLOR_TEXT;
-    ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(col.time, colLeft + colW / 2, chartBottom + css(4));
-    ctx.restore();
   });
+
+  ctx.save();
+  ctx.fillStyle = COLOR_TEXT;
+  ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const timeLabelIndices = selectTimeLabelIndices(
+    columns.map((column) => column.time),
+    colW,
+    (label) => ctx.measureText(label).width,
+    css(4),
+  );
+  for (const columnIndex of timeLabelIndices) {
+    const columnMid = chartLeft + (columnIndex + 0.5) * colW;
+    ctx.fillText(columns[columnIndex].time, columnMid, chartBottom + css(4));
+  }
+  ctx.restore();
 
   // Price scale
   ctx.save();
@@ -546,11 +574,25 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
   );
 
   const latestPoc = useMemo(() => getLatestPoc(columns), [columns]);
+  const errorMessage = error instanceof Error ? error.message : "Failed to load data";
+  const compactStatus = isLoading
+    ? "Loading"
+    : isError
+      ? "Error"
+      : columns.length === 0
+        ? "No data"
+        : dataState === "live"
+          ? "Live"
+          : dataState === "delayed"
+            ? "Delayed"
+            : dataState === "stale"
+              ? "Stale"
+              : "Sample data";
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
-  const sizeRef = useRef({ width: 0, height: 0 });
+  const sizeRef = useRef<CanvasViewport>({ width: 0, height: 0, dpr: 0 });
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
   const viewModeRef = useRef(viewMode);
@@ -566,7 +608,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = sizeRef.current.dpr || normaliseDevicePixelRatio(window.devicePixelRatio);
       const drawFn = viewModeRef.current === "heatmap" ? drawFootprintHeatmap : drawFootprint;
       drawFn(ctx, columnsRef.current, canvas.width, canvas.height, dpr);
     });
@@ -577,33 +619,73 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
     const container = containerRef.current;
     if (!container) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (
-        Math.abs(width - sizeRef.current.width) < 1 &&
-        Math.abs(height - sizeRef.current.height) < 1
-      ) {
-        return; // no meaningful size change
-      }
-      sizeRef.current = { width, height };
+    const syncCanvasSize = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      const nextViewport: CanvasViewport = {
+        width,
+        height,
+        dpr: normaliseDevicePixelRatio(window.devicePixelRatio),
+      };
+      if (!hasCanvasViewportChanged(sizeRef.current, nextViewport)) return;
+      sizeRef.current = nextViewport;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const dpr = window.devicePixelRatio || 1;
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
+      canvas.width = Math.floor(width * nextViewport.dpr);
+      canvas.height = Math.floor(height * nextViewport.dpr);
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       paint();
+    };
+
+    const syncCanvasFromElement = () => {
+      const rect = container.getBoundingClientRect();
+      syncCanvasSize(
+        rect.width > 0 ? rect.width : sizeRef.current.width,
+        rect.height > 0 ? rect.height : sizeRef.current.height,
+      );
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      syncCanvasSize(entry.contentRect.width, entry.contentRect.height);
     });
 
-    observer.observe(container);
-    return () => observer.disconnect();
+    let dprQuery: MediaQueryList | null = null;
+    const handleDprChange = () => {
+      syncCanvasFromElement();
+      subscribeToCurrentDpr();
+    };
+    const subscribeToCurrentDpr = () => {
+      dprQuery?.removeEventListener("change", handleDprChange);
+      dprQuery = window.matchMedia(
+        `(resolution: ${normaliseDevicePixelRatio(window.devicePixelRatio)}dppx)`,
+      );
+      dprQuery.addEventListener("change", handleDprChange);
+    };
+
+    syncCanvasFromElement();
+    try {
+      observer.observe(container, { box: "device-pixel-content-box" });
+    } catch {
+      observer.observe(container);
+    }
+    window.addEventListener("resize", syncCanvasFromElement);
+    subscribeToCurrentDpr();
+    const dprCheck = window.setInterval(() => {
+      const currentDpr = normaliseDevicePixelRatio(window.devicePixelRatio);
+      if (Math.abs(currentDpr - sizeRef.current.dpr) > 0.001) syncCanvasFromElement();
+    }, DEVICE_PIXEL_RATIO_CHECK_INTERVAL_MS);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncCanvasFromElement);
+      dprQuery?.removeEventListener("change", handleDprChange);
+      window.clearInterval(dprCheck);
+    };
   }, [paint]);
 
   // Repaint when columns or view mode change
@@ -796,7 +878,13 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="w-48 border-border-default bg-surface-card text-text-primary"
+              className="w-48 overscroll-contain border-border-default bg-surface-card text-text-primary"
+              data-testid="order-flow-compact-menu"
+              style={{
+                maxHeight: "min(var(--radix-dropdown-menu-content-available-height), calc(100dvh - 1rem))",
+                maxWidth: "calc(100vw - 1rem)",
+                width: "12rem",
+              }}
             >
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Interval
@@ -836,33 +924,35 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Status
               </DropdownMenuLabel>
-              <div className="flex items-center justify-between gap-2 px-2 pb-1 text-xs">
-                <span>
-                  {isLoading
-                    ? "Loading"
-                    : isError
-                      ? "Error"
-                      : columns.length === 0
-                        ? "No data"
-                        : dataState === "live"
-                          ? "Live"
-                          : dataState === "delayed"
-                            ? "Delayed"
-                            : dataState === "stale"
-                              ? "Stale"
-                              : "Sample data"}
+              <DropdownMenuItem
+                aria-label={isError ? `Status: Error. ${errorMessage}` : `Status: ${compactStatus}`}
+                className="items-start justify-between gap-2 px-2 py-1 text-xs focus:bg-surface-active"
+                data-testid="order-flow-menu-status"
+                onFocus={(event) => scrollCompactMenuItemIntoView(event.currentTarget)}
+                onSelect={(event) => event.preventDefault()}
+              >
+                <span className="min-w-0">
+                  <span className="block">{compactStatus}</span>
+                  {isError && (
+                    <span className="mt-0.5 block whitespace-normal break-words text-[11px] leading-tight text-loss">
+                      {errorMessage}
+                    </span>
+                  )}
                 </span>
                 {!isLoading && !isError && columns.length > 0 && data && (
                   <OrderFlowQualityBadge data={data} />
                 )}
-              </div>
+              </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-border-default" />
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Legend
               </DropdownMenuLabel>
-              <div
-                className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 pb-1 text-xs text-text-muted"
+              <DropdownMenuItem
+                aria-label={`Legend: Buy, Sell, POC, Latest POC. ${latestPoc > 0 ? latestPoc.toLocaleString("en-IN") : "No latest POC"}, ${columns.length} bars, ${displayIntervalLabel}`}
+                className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 py-1 text-xs text-text-muted focus:bg-surface-active"
                 data-testid="order-flow-compact-legend"
+                onFocus={(event) => scrollCompactMenuItemIntoView(event.currentTarget)}
+                onSelect={(event) => event.preventDefault()}
               >
                 <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-profit" aria-hidden="true" />Buy</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-loss" aria-hidden="true" />Sell</span>
@@ -871,7 +961,7 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
                 <span className="col-span-2 font-mono text-text-secondary">
                   {latestPoc > 0 ? latestPoc.toLocaleString("en-IN") : "—"} · {columns.length} bars · {displayIntervalLabel}
                 </span>
-              </div>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -943,9 +1033,12 @@ function OrderFlowWidget(props: IDockviewPanelProps) {
         {isError && (
           isCompact ? (
             <div
-              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-loss/70"
+              className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden px-2 text-xs text-loss/70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-inset focus-visible:outline-loss"
               data-testid="order-flow-compact-state"
-              title={error instanceof Error ? error.message : "Failed to load data"}
+              role="alert"
+              tabIndex={0}
+              aria-label={`Unable to load: ${errorMessage}`}
+              title={errorMessage}
             >
               <AlertCircle className="size-3 shrink-0" aria-hidden="true" />
               <span className="truncate">Unable to load</span>
