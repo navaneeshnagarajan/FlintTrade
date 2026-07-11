@@ -278,33 +278,7 @@ impl SpreadBacktest {
         entries: Vec<bool>,
         exits: Vec<bool>,
     ) -> PyResult<BacktestResult> {
-        let n = timestamps.len();
-
-        if legs_premiums.len() != self.config.legs.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "legs_premiums has {} series but config has {} legs",
-                legs_premiums.len(),
-                self.config.legs.len()
-            )));
-        }
-        for (i, series) in legs_premiums.iter().enumerate() {
-            if series.len() != n {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "legs_premiums[{i}] has {} bars but timestamps has {n}",
-                    series.len()
-                )));
-            }
-        }
-        if entries.len() != n || exits.len() != n {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "entries and exits must have the same length as timestamps",
-            ));
-        }
-        if n == 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "timestamps cannot be empty",
-            ));
-        }
+        validate_inputs(&self.config, &timestamps, &legs_premiums, &entries, &exits)?;
 
         Ok(self.simulate_inner(&timestamps, &legs_premiums, &entries, &exits))
     }
@@ -472,6 +446,44 @@ impl SpreadBacktest {
     }
 }
 
+fn validate_inputs(
+    config: &SpreadConfig,
+    timestamps: &[i64],
+    legs_premiums: &[Vec<f64>],
+    entries: &[bool],
+    exits: &[bool],
+) -> PyResult<()> {
+    let n = timestamps.len();
+
+    if legs_premiums.len() != config.legs.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "legs_premiums has {} series but config has {} legs",
+            legs_premiums.len(),
+            config.legs.len()
+        )));
+    }
+    for (i, series) in legs_premiums.iter().enumerate() {
+        if series.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "legs_premiums[{i}] has {} bars but timestamps has {n}",
+                series.len()
+            )));
+        }
+    }
+    if entries.len() != n || exits.len() != n {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "entries and exits must have the same length as timestamps",
+        ));
+    }
+    if n == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "timestamps cannot be empty",
+        ));
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Parallel batch execution
 // ---------------------------------------------------------------------------
@@ -498,13 +510,17 @@ pub fn run_spreads_batch(
         Vec<bool>,
         Vec<bool>,
     )>,
-) -> Vec<BacktestResult> {
-    items
+) -> PyResult<Vec<BacktestResult>> {
+    for (bt, ts, premiums, entries, exits) in &items {
+        validate_inputs(&bt.config, ts, premiums, entries, exits)?;
+    }
+
+    Ok(items
         .into_par_iter()
         .map(|(bt, ts, premiums, entries, exits)| {
             bt.simulate_inner(&ts, &premiums, &entries, &exits)
         })
-        .collect()
+        .collect())
 }
 
 /// Run a batch of spread backtests supplied as raw parameter tuples.
@@ -522,14 +538,18 @@ pub fn run_batch(
         Vec<bool>,
         Vec<bool>,
     )>,
-) -> Vec<BacktestResult> {
-    items
+) -> PyResult<Vec<BacktestResult>> {
+    for (_, cfg, ts, premiums, entries, exits) in &items {
+        validate_inputs(cfg, ts, premiums, entries, exits)?;
+    }
+
+    Ok(items
         .into_par_iter()
         .map(|(name, cfg, ts, premiums, entries, exits)| {
             let bt = SpreadBacktest { name, config: cfg };
             bt.simulate_inner(&ts, &premiums, &entries, &exits)
         })
-        .collect()
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -699,8 +719,44 @@ mod tests {
         };
 
         let items = vec![make_item("A"), make_item("B"), make_item("C")];
-        let results = run_spreads_batch(items);
+        let results = run_spreads_batch(items).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_object_batch_rejects_short_premium_series_without_panicking() {
+        let mut cfg = SpreadConfig::new(100_000.0, 0.0, None, None);
+        cfg.add_leg(LegConfig::new(OptionType::Call, 19_800.0, 1, 50));
+        let bt = SpreadBacktest::new("INVALID".to_string(), cfg);
+        let items = vec![(
+            bt,
+            vec![1, 2],
+            vec![vec![100.0]],
+            vec![true, false],
+            vec![false, true],
+        )];
+
+        let result = run_spreads_batch(items);
+
+        assert!(result.is_err(), "malformed batch input was accepted");
+    }
+
+    #[test]
+    fn test_raw_batch_rejects_short_premium_series_without_panicking() {
+        let mut cfg = SpreadConfig::new(100_000.0, 0.0, None, None);
+        cfg.add_leg(LegConfig::new(OptionType::Call, 19_800.0, 1, 50));
+        let items = vec![(
+            "INVALID".to_string(),
+            cfg,
+            vec![1, 2],
+            vec![vec![100.0]],
+            vec![true, false],
+            vec![false, true],
+        )];
+
+        let result = run_batch(items);
+
+        assert!(result.is_err(), "malformed batch input was accepted");
     }
 
     #[test]
