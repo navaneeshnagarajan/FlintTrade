@@ -244,6 +244,42 @@ class TestRunSync:
         await client.shutdown()
         assert client._owner_loop is None
 
+    @pytest.mark.asyncio
+    async def test_concurrent_shutdowns_share_one_owner_loop_close(self):
+        class CountingHttp:
+            def __init__(self) -> None:
+                self.close_calls = 0
+
+            async def aclose(self) -> None:
+                self.close_calls += 1
+                await asyncio.sleep(0)
+
+        client = _client()
+        http = CountingHttp()
+        client._http = http
+
+        async def _noop() -> None:
+            return None
+
+        client.run_sync(_noop())
+
+        await asyncio.wait_for(
+            asyncio.gather(client.shutdown(), client.shutdown()),
+            timeout=2.0,
+        )
+
+        assert http.close_calls == 1
+        assert client._owner_loop is None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_shutdowns_before_first_request_close_once(self):
+        client = _client()
+        client._http.aclose = AsyncMock()
+
+        await asyncio.gather(client.shutdown(), client.shutdown())
+
+        client._http.aclose.assert_awaited_once_with()
+
 
 class TestModuleHelpers:
     def test_client_call_sync_uses_owner_loop(self):

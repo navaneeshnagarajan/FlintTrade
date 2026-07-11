@@ -759,7 +759,7 @@ async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_failed_tick_task_does_not_abort_shutdown_or_leak_api_key(caplog) -> None:
+async def test_failed_tick_task_fails_shutdown_after_cleanup_without_leaking_api_key(caplog) -> None:
     from flinttrade_core.app import FlintTradeApp
 
     class FailedTask:
@@ -794,7 +794,8 @@ async def test_failed_tick_task_does_not_abort_shutdown_or_leak_api_key(caplog) 
     app._stop_event = MagicMock()
     caplog.set_level(logging.WARNING, logger="flinttrade")
 
-    await app.stop()
+    with pytest.raises(RuntimeError, match="tick recorder task"):
+        await app.stop()
 
     app.client.close.assert_awaited_once_with()
     app.audit.close.assert_called_once_with()

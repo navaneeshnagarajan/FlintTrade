@@ -106,8 +106,10 @@ class OpenAlgoClient:
         self._owner_loop: asyncio.AbstractEventLoop | None = None
         self._owner_thread: threading.Thread | None = None
         self._owner_guard = threading.RLock()
+        self._close_guard = threading.Lock()
         self._config_guard = threading.RLock()
         self._closing = False
+        self._closed = False
 
     def reconfigure(self, settings: Settings) -> OpenAlgoClient:
         """Atomically update endpoint and credentials without replacing this client.
@@ -232,15 +234,14 @@ class OpenAlgoClient:
     async def shutdown(self) -> None:
         """Close on the loop that owns active connections and stop sync ownership."""
         with self._owner_guard:
+            if self._closed:
+                return
             self._closing = True
             owner_loop = self._owner_loop
             owner_loop_active = owner_loop is not None and not owner_loop.is_closed()
-        if owner_loop_active:
-            if asyncio.get_running_loop() is owner_loop:
-                raise RuntimeError("OpenAlgo owner-loop shutdown must be initiated externally")
-            await asyncio.to_thread(self.close_sync)
-            return
-        await self._http.aclose()
+        if owner_loop_active and asyncio.get_running_loop() is owner_loop:
+            raise RuntimeError("OpenAlgo owner-loop shutdown must be initiated externally")
+        await asyncio.to_thread(self.close_sync)
 
     def close_sync(self, timeout: float = 50.0) -> None:
         """Close from synchronous code, tearing down the owner loop if any.
@@ -249,35 +250,40 @@ class OpenAlgoClient:
         fallbacks) must close on the SAME loop that served their requests —
         closing on a second fresh loop is the same cross-loop bug in reverse.
         """
-        with self._owner_guard:
-            self._closing = True
-            loop = self._owner_loop
-            thread = self._owner_thread
-        if loop is not None and not loop.is_closed():
-            if threading.current_thread() is thread:
-                raise RuntimeError("close_sync cannot run on the OpenAlgo owner thread")
-            future = asyncio.run_coroutine_threadsafe(
-                self._drain_owner_and_close(max(0.0, timeout - 5.0)),
-                loop,
-            )
-            try:
-                future.result(timeout)
-            except Exception:
-                future.cancel()
-                raise
-            loop.call_soon_threadsafe(loop.stop)
-            if thread is not None:
-                thread.join(timeout=5)
-                if thread.is_alive():
-                    raise RuntimeError("OpenAlgo owner loop did not stop")
-            loop.close()
+        with self._close_guard:
             with self._owner_guard:
-                if self._owner_loop is loop:
-                    self._owner_loop = None
-                    self._owner_thread = None
-        else:
-            # No HTTP operation has claimed an owner loop yet.
-            asyncio.run(self._http.aclose())
+                if self._closed:
+                    return
+                self._closing = True
+                loop = self._owner_loop
+                thread = self._owner_thread
+            if loop is not None and not loop.is_closed():
+                if threading.current_thread() is thread:
+                    raise RuntimeError("close_sync cannot run on the OpenAlgo owner thread")
+                future = asyncio.run_coroutine_threadsafe(
+                    self._drain_owner_and_close(max(0.0, timeout - 5.0)),
+                    loop,
+                )
+                try:
+                    future.result(timeout)
+                except Exception:
+                    future.cancel()
+                    raise
+                loop.call_soon_threadsafe(loop.stop)
+                if thread is not None:
+                    thread.join(timeout=5)
+                    if thread.is_alive():
+                        raise RuntimeError("OpenAlgo owner loop did not stop")
+                loop.close()
+                with self._owner_guard:
+                    if self._owner_loop is loop:
+                        self._owner_loop = None
+                        self._owner_thread = None
+            else:
+                # No HTTP operation has claimed an owner loop yet.
+                asyncio.run(self._http.aclose())
+            with self._owner_guard:
+                self._closed = True
 
     async def __aenter__(self) -> OpenAlgoClient:
         return self

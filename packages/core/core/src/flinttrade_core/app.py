@@ -1522,7 +1522,21 @@ def create_flask_app(
         )
     app.config["_FRONTEND_AVAILABLE"] = _frontend_available
     app.config["_DIST_PATH"] = _dist_path
+    app.config["RUNTIME_ACCEPTING_REQUESTS"] = True
     _tick_capture_lifecycle_lock(app)
+
+    @app.before_request
+    def _require_running_runtime() -> Any:
+        """Reject every request before it can touch dependencies being closed."""
+        if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
+            return None
+        response = jsonify({
+            "status": "error",
+            "message": "Application is shutting down",
+        })
+        response.status_code = 503
+        response.headers["Retry-After"] = "1"
+        return response
 
     # ------------------------------------------------------------------
     # Structured logging — ONE pipeline for both structlog calls and
@@ -3314,6 +3328,9 @@ class FlintTradeApp:
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
+        if await self._wait_for_shutdown_if_started():
+            return
+
         # Start FlintTrade API server (Flask, configurable loopback port).
         flask_app = create_flask_app(
             safety=self.safety,
@@ -3336,6 +3353,9 @@ class FlintTradeApp:
             await self.cron.load_holidays()
         except Exception as exc:
             logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
+
+        if await self._wait_for_shutdown_if_started():
+            return
 
         # Hand the cron manager the shared trade store (created by the Flask
         # factory above) so the nightly DuckDB maintenance job can CHECKPOINT +
@@ -3576,6 +3596,9 @@ class FlintTradeApp:
                             sanitise_rollback_error(cleanup_exc),
                         )
 
+        if await self._wait_for_shutdown_if_started():
+            return
+
         # Broker reconciliation runner (contract §14.2): reconciles every ACTIVE
         # native (adapter, session) pair on start and then every
         # Capabilities.reconcile_recommended_seconds — persisting JSONL under
@@ -3665,6 +3688,13 @@ class FlintTradeApp:
         # Wait for shutdown signal
         await self._stop_event.wait()
 
+    async def _wait_for_shutdown_if_started(self) -> bool:
+        """Let an in-progress stop retain ownership across startup await points."""
+        if not self._stop_started:
+            return False
+        await self._stop_event.wait()
+        return True
+
     async def stop(self) -> None:
         """Gracefully shut down all services, sharing concurrent attempts."""
         if getattr(self, "_stop_completed", False):
@@ -3679,6 +3709,9 @@ class FlintTradeApp:
     async def _stop_once(self) -> None:
         """Run one complete, best-effort shutdown attempt."""
         self._stop_started = True
+        flask_app = getattr(self, "_flask_app", None)
+        if flask_app is not None:
+            flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
         logger.info("FlintTrade shutting down...")
         errors: list[tuple[str, str]] = []
 
@@ -3724,6 +3757,7 @@ class FlintTradeApp:
                 except asyncio.CancelledError:
                     pass
                 except Exception as exc:  # noqa: BLE001 - a failed recorder must not abort shutdown
+                    errors.append(("tick recorder task", type(exc).__name__))
                     sanitise_error = getattr(tick_recorder, "sanitise_error", None)
                     try:
                         diagnostic = (
@@ -3737,7 +3771,6 @@ class FlintTradeApp:
                         "Tick recorder task ended with an error during shutdown (%s)",
                         diagnostic,
                     )
-            flask_app = getattr(self, "_flask_app", None)
             if flask_app is not None:
                 with _tick_capture_lifecycle_lock(flask_app):
                     published_recorder = flask_app.config.get("TICK_RECORDER")
@@ -3836,6 +3869,9 @@ class FlintTradeApp:
 
         try:
             loop.run_until_complete(self.start())
+            shutdown_task = getattr(self, "_shutdown_task", None)
+            if shutdown_task is not None:
+                loop.run_until_complete(asyncio.shield(shutdown_task))
         except KeyboardInterrupt:
             loop.run_until_complete(self.stop())
         finally:
