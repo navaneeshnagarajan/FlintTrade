@@ -248,6 +248,54 @@ class TestStorageManager:
         assert all("ingest_seq" not in tick for tick in ticks)
         storage.close()
 
+    def test_timestamp_provenance_migration_handles_existing_tick_index(self, tmp_path):
+        import duckdb
+
+        from flinttrade_data.storage import StorageManager
+
+        db_path = tmp_path / "indexed-ticks.duckdb"
+        existing = duckdb.connect(str(db_path))
+        existing.execute("CREATE SEQUENCE ticks_ingest_seq START 1")
+        existing.execute(
+            """CREATE TABLE ticks (
+                ts TIMESTAMP NOT NULL,
+                symbol VARCHAR NOT NULL,
+                exchange VARCHAR NOT NULL,
+                mode VARCHAR NOT NULL,
+                ltp DOUBLE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE,
+                volume BIGINT,
+                bid DOUBLE,
+                ask DOUBLE,
+                oi BIGINT,
+                prev_close DOUBLE,
+                depth_json VARCHAR,
+                ingest_seq BIGINT NOT NULL DEFAULT nextval('ticks_ingest_seq')
+            )"""
+        )
+        existing.execute(
+            "CREATE INDEX idx_ticks_sym_ex_ts_seq ON ticks (symbol, exchange, ts, ingest_seq)"
+        )
+        existing.close()
+
+        storage = StorageManager(str(db_path))
+        storage.initialise()
+
+        columns = {
+            row[1]: row
+            for row in storage.connection.execute("PRAGMA table_info('ticks')").fetchall()
+        }
+        indexes = storage.connection.execute(
+            "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'ticks'"
+        ).fetchall()
+
+        assert columns["timestamp_provenance"][3] is True
+        assert ("idx_ticks_sym_ex_ts_seq",) in indexes
+        storage.close()
+
     def test_insert_and_query_trade(self):
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 30, 0)

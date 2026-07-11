@@ -10,6 +10,7 @@ import csv
 import io
 import logging
 import os
+import threading
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ import duckdb
 
 logger = logging.getLogger("flinttrade.data.storage")
 IST = timezone(timedelta(hours=5, minutes=30))
+_SCHEMA_INITIALISE_LOCK = threading.RLock()
 
 
 def _normalise_ts(value: Any) -> Any:
@@ -165,6 +167,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit (event_type, ts)",
     "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_summary (trade_date, strategy)",
 ]
+_DROP_TICKS_INDEX = "DROP INDEX IF EXISTS idx_ticks_sym_ex_ts_seq"
 
 
 # ---------------------------------------------------------------------------
@@ -215,22 +218,35 @@ class StorageManager:
 
     def initialise(self) -> None:
         """Create all tables and indexes if they don't exist."""
-        self.connection.execute(_SCHEMA_TICKS_SEQUENCE)
-        for ddl in _ALL_SCHEMAS:
-            self.connection.execute(ddl)
-        self.connection.execute(_MIGRATE_TICKS_INGEST_SEQUENCE)
-        self.connection.execute(_MIGRATE_TICKS_TIMESTAMP_PROVENANCE)
-        tick_columns = {
-            row[1]: row
-            for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()
-        }
-        if not tick_columns["ingest_seq"][3]:
-            self.connection.execute(_REQUIRE_TICKS_INGEST_SEQUENCE)
-        if not tick_columns["timestamp_provenance"][3]:
-            self.connection.execute(_BACKFILL_TICKS_TIMESTAMP_PROVENANCE)
-            self.connection.execute(_REQUIRE_TICKS_TIMESTAMP_PROVENANCE)
-        for idx in _INDEXES:
-            self.connection.execute(idx)
+        with _SCHEMA_INITIALISE_LOCK:
+            self.connection.execute(_SCHEMA_TICKS_SEQUENCE)
+            for ddl in _ALL_SCHEMAS:
+                self.connection.execute(ddl)
+            self.connection.execute(_MIGRATE_TICKS_INGEST_SEQUENCE)
+            self.connection.execute(_MIGRATE_TICKS_TIMESTAMP_PROVENANCE)
+            tick_columns = {
+                row[1]: row
+                for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()
+            }
+            requires_constraint_migration = not (
+                tick_columns["ingest_seq"][3]
+                and tick_columns["timestamp_provenance"][3]
+            )
+            if requires_constraint_migration:
+                # DuckDB refuses ALTER COLUMN while any index depends on the
+                # table, even when that index does not mention the new column.
+                self.connection.execute(_DROP_TICKS_INDEX)
+            try:
+                if not tick_columns["ingest_seq"][3]:
+                    self.connection.execute(_REQUIRE_TICKS_INGEST_SEQUENCE)
+                if not tick_columns["timestamp_provenance"][3]:
+                    self.connection.execute(_BACKFILL_TICKS_TIMESTAMP_PROVENANCE)
+                    self.connection.execute(_REQUIRE_TICKS_TIMESTAMP_PROVENANCE)
+            finally:
+                if requires_constraint_migration:
+                    self.connection.execute(_INDEXES[0])
+            for idx in _INDEXES:
+                self.connection.execute(idx)
         logger.info("DuckDB schema initialised (tables + indexes)")
 
     # ------------------------------------------------------------------
