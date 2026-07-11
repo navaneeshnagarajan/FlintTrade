@@ -583,6 +583,26 @@ def test_from_upstox_timings_holidays_status():
     assert status["status"] == "NORMAL_OPEN" and status["exchange"] == "NSE"
 
 
+def test_from_upstox_holidays_preserves_special_session_epochs():
+    holidays = m.from_upstox_holidays({"data": [
+        {
+            "date": "2026-11-08",
+            "description": "Muhurat trading",
+            "holiday_type": "SPECIAL_SESSION",
+            "closed_exchanges": ["NSE", "BSE"],
+            "open_exchanges": [
+                {"exchange": "NSE", "start_time": 1794150000000, "end_time": 1794153600000},
+                {"exchange": "BSE", "start_time": 1794150000000, "end_time": 1794153600000},
+            ],
+        },
+    ]})
+
+    assert holidays[0]["open_exchanges"] == [
+        {"exchange": "NSE", "start_time": "1794150000000", "end_time": "1794153600000"},
+        {"exchange": "BSE", "start_time": "1794150000000", "end_time": "1794153600000"},
+    ]
+
+
 # ---------------------------------------------------------------------------
 # History params: one-second candles
 # ---------------------------------------------------------------------------

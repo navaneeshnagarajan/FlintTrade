@@ -1044,16 +1044,28 @@ def from_upstox_timings(resp: dict[str, Any]) -> list[dict[str, Any]]:
 def from_upstox_holidays(resp: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalise market holidays (``/v2/market/holidays[/{date}]``)."""
     rows = resp.get("data", []) if isinstance(resp, dict) else []
-    return [
-        {
+    holidays: list[dict[str, Any]] = []
+    for d in (rows if isinstance(rows, list) else []):
+        if not isinstance(d, dict):
+            continue
+        open_rows = d.get("open_exchanges", [])
+        open_exchanges = [
+            {
+                "exchange": session.get("exchange", ""),
+                "start_time": str(session.get("start_time", "")),
+                "end_time": str(session.get("end_time", "")),
+            }
+            for session in (open_rows if isinstance(open_rows, list) else [])
+            if isinstance(session, dict)
+        ]
+        holidays.append({
             "date": str(d.get("date", d.get("_date", ""))),
             "description": d.get("description", ""),
             "holiday_type": d.get("holiday_type", ""),
             "closed_exchanges": list(d.get("closed_exchanges", []) or []),
-        }
-        for d in (rows if isinstance(rows, list) else [])
-        if isinstance(d, dict)
-    ]
+            "open_exchanges": open_exchanges,
+        })
+    return holidays
 
 
 def from_upstox_market_status(resp: dict[str, Any]) -> dict[str, Any]:

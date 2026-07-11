@@ -285,7 +285,9 @@ class MockUpstox:
     def market_holidays(self, date=None):
         self.calls.append(("holidays", date))
         return {**_OK, "data": [{"date": "2025-08-15", "description": "Independence Day",
-                                 "holiday_type": "TRADING_HOLIDAY", "closed_exchanges": ["NSE"]}]}
+                                 "holiday_type": "SPECIAL_SESSION", "closed_exchanges": ["NSE"],
+                                 "open_exchanges": [{"exchange": "NSE", "start_time": 1755246600000,
+                                                      "end_time": 1755250200000}]}]}
 
     def market_status(self, exchange):
         self.calls.append(("status", exchange))
@@ -832,6 +834,9 @@ async def test_market_information_reads():
     assert timings[0]["exchange"] == "NSE"
     holidays = await adapter.market_holidays(session)
     assert holidays[0]["date"] == "2025-08-15"
+    assert holidays[0]["open_exchanges"] == [
+        {"exchange": "NSE", "start_time": "1755246600000", "end_time": "1755250200000"},
+    ]
     one_day = await adapter.market_holidays(session, "2025-08-15")
     assert one_day[0]["description"] == "Independence Day"
     status = await adapter.market_status(session, "nse")
