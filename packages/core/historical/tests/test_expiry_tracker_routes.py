@@ -159,9 +159,9 @@ def test_capture_historical_chain_reports_capture_failure(client):
 def test_get_tracker_wires_the_client_provider_not_an_instance(monkeypatch):
     """The lazy tracker must receive the ``get_openalgo_client`` PROVIDER.
 
-    Capturing a resolved client instance at construction time breaks after the
-    ``POST /v1/config/openalgo`` hot-reload closes that client — every later
-    expiry capture then fails until a process restart.
+    Provider wiring keeps the tracker on the authoritative shared client even
+    if startup fallback replaces it. Normal settings hot-reload reconfigures
+    the shared object in place.
     """
     captured: dict[str, object] = {}
 

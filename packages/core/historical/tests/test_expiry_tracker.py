@@ -364,10 +364,9 @@ class TestBulkCapture:
 class TestClientProvider:
     """ExpiryTracker resolves the client PER CAPTURE when given a provider.
 
-    ``POST /v1/config/openalgo`` swaps and CLOSES the shared app client; a
-    client instance captured at tracker construction would be permanently
-    closed after the first settings change, failing every later capture until
-    a process restart.
+    The provider keeps each capture on the authoritative shared client if
+    startup fallback replaces it. Normal settings hot-reload reconfigures the
+    same client object in place.
     """
 
     _CHAIN = [
@@ -391,7 +390,7 @@ class TestClientProvider:
         client_one.optionchain.assert_called_once()
         client_two.optionchain.assert_not_called()
 
-        # Settings hot-reload: the app swaps (and closes) the shared client.
+        # Simulate a startup fallback replacing the authoritative client.
         current["client"] = client_two
         assert tracker.capture_snapshot("NIFTY", "260402") == 2
         client_two.optionchain.assert_called_once()

@@ -106,6 +106,22 @@ class OpenAlgoClient:
         self._owner_loop: asyncio.AbstractEventLoop | None = None
         self._owner_thread: threading.Thread | None = None
         self._owner_guard = threading.Lock()
+        self._config_guard = threading.RLock()
+
+    def reconfigure(self, settings: Settings) -> OpenAlgoClient:
+        """Atomically update endpoint and credentials without replacing this client.
+
+        The broker router, schedulers, cron jobs and Telegram all retain this
+        object. Updating it in place keeps every caller on one connection owner
+        instead of closing an object that those live services still reference.
+        """
+        base = f"{openalgo_rest_base_url(settings)}/api/v1"
+        api_key = settings.openalgo_api_key
+        with self._config_guard:
+            self.settings = settings
+            self._base = base
+            self._api_key = api_key
+        return self
 
     def _ensure_owner_loop(self) -> asyncio.AbstractEventLoop:
         """Start (once) and return the client's dedicated event loop."""
@@ -187,7 +203,9 @@ class OpenAlgoClient:
 
     def _body(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         """Build request body with apikey injected."""
-        payload: dict[str, Any] = {"apikey": self._api_key}
+        with self._config_guard:
+            api_key = self._api_key
+        payload: dict[str, Any] = {"apikey": api_key}
         if extra:
             payload.update(extra)
         return payload
@@ -212,7 +230,11 @@ class OpenAlgoClient:
         max_retries: int = 3,
     ) -> dict[str, Any]:
         """POST with retry + exponential backoff."""
-        url = f"{self._base}/{endpoint}"
+        with self._config_guard:
+            url = f"{self._base}/{endpoint}"
+            request_payload = dict(payload)
+            if "apikey" in request_payload:
+                request_payload["apikey"] = self._api_key
         rl = limiter or self._general_limiter
         await rl.acquire()
 
@@ -220,7 +242,7 @@ class OpenAlgoClient:
         for attempt in range(1, max_retries + 1):
             try:
                 logger.debug("POST %s attempt=%d", endpoint, attempt)
-                resp = await self._http.post(url, json=payload)
+                resp = await self._http.post(url, json=request_payload)
 
                 if resp.status_code == 429:
                     retry_after = float(resp.headers.get("Retry-After", "1"))
@@ -260,13 +282,18 @@ class OpenAlgoClient:
 
     async def _get(self, endpoint: str, *, params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Any:
         """GET with retry."""
-        url = f"{self._base}/{endpoint}"
+        with self._config_guard:
+            url = f"{self._base}/{endpoint}"
+            request_headers = dict(headers or {})
+            for name in tuple(request_headers):
+                if name.lower() in {"x-api-key", "x-api_key"}:
+                    request_headers[name] = self._api_key
         await self._general_limiter.acquire()
 
         last_exc: Exception | None = None
         for attempt in range(1, 4):
             try:
-                resp = await self._http.get(url, params=params, headers=headers or {})
+                resp = await self._http.get(url, params=params, headers=request_headers)
                 if resp.status_code >= 400:
                     raise APIError(resp.status_code, resp.text, endpoint)
                 return resp.json()

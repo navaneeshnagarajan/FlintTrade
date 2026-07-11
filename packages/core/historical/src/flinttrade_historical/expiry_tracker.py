@@ -214,10 +214,9 @@ class ExpiryTracker:
         client: OpenAlgo client for fetching live option chain data, OR a
             zero-argument callable returning the CURRENT client (e.g.
             ``flinttrade_core.openalgo_client.get_openalgo_client``). Passing a
-            provider keeps the tracker honouring OpenAlgo settings hot-reload:
-            ``POST /v1/config/openalgo`` swaps AND CLOSES the shared app
-            client, so a client instance captured at construction time would
-            be permanently closed after the first settings change.
+            provider keeps the tracker resolving the authoritative shared
+            client across startup fallback and settings hot-reload. Normal hot
+            reload reconfigures that object in place rather than closing it.
         db_path: Path to the DuckDB database. Use ``":memory:"`` for tests.
         rate_limiter: Optional rate limiter. A default (5 req/s) is created
             if ``None``.
@@ -340,9 +339,9 @@ class ExpiryTracker:
         """Return the client to use for THIS capture call.
 
         ``self._client`` may be a client instance or a zero-argument provider
-        callable. Resolving per call (instead of once at construction) keeps
-        the tracker working across OpenAlgo settings hot-reloads, which close
-        the previously shared client out from under long-lived holders.
+        callable. Resolving per call keeps the tracker on the authoritative
+        client if startup fallback replaces it; normal settings hot-reload now
+        reconfigures the shared object in place.
         Provider detection: a plain callable that exposes none of the
         option-chain methods is treated as a provider; client objects (and
         test mocks, which expose every attribute) are returned as-is.

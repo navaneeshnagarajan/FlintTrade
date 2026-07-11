@@ -61,12 +61,12 @@ def test_start_launches_reconciliation_runner() -> None:
 @pytest.mark.unit
 def test_stop_stops_reconciliation_runner() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
-    stop = _find_method(tree, "FlintTradeApp", "stop")
-    assert stop is not None, "FlintTradeApp.stop not found"
+    stop_once = _find_method(tree, "FlintTradeApp", "_stop_once")
+    assert stop_once is not None, "FlintTradeApp._stop_once not found"
     refs = [
         n
-        for n in ast.walk(stop)
+        for n in ast.walk(stop_once)
         if isinstance(n, ast.Attribute)
         and n.attr in ("_reconciliation_runner", "_reconciliation_task")
     ]
-    assert refs, "stop() must stop/cancel the reconciliation runner"
+    assert refs, "_stop_once() must stop/cancel the reconciliation runner"

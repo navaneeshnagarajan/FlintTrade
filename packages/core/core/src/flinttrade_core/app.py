@@ -215,6 +215,43 @@ def _record_tick_capture_failure(flask_app: Flask, error: Any, api_key: str) -> 
     logger.warning("Tick capture failed to start (%s); not recording ticks", diagnostic)
 
 
+def _handle_tick_recorder_completion(
+    flask_app: Flask,
+    recorder: Any,
+    task: Any,
+    *,
+    api_key: str,
+    is_shutting_down: Callable[[], bool] | None = None,
+) -> bool:
+    """Unpublish a full-app recorder that terminated outside normal shutdown."""
+    if task.cancelled():
+        return False
+    try:
+        if is_shutting_down is not None and is_shutting_down():
+            return False
+    except Exception:
+        pass
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return False
+    failure = error if error is not None else RuntimeError("Tick recorder stopped unexpectedly")
+    sanitise_error = getattr(recorder, "sanitise_error", None)
+    try:
+        diagnostic_source = sanitise_error(failure) if callable(sanitise_error) else failure
+    except Exception:
+        diagnostic_source = failure
+    diagnostic = _sanitise_tick_capture_error(diagnostic_source, api_key)
+    with _tick_capture_lifecycle_lock(flask_app):
+        if flask_app.config.get("TICK_RECORDER") is not recorder:
+            return False
+        for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
+            flask_app.config.pop(key, None)
+        flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
+    logger.warning("Tick capture stopped unexpectedly (%s); not recording ticks", diagnostic)
+    return True
+
+
 def _build_tick_recorder(
     *,
     recorder_factory: Callable[..., Any],
@@ -2370,7 +2407,7 @@ def create_flask_app(
                               # back to the caller.
         "/v1/changelog",      # Frontend changelog viewer — public, paired with /v1/errors.
         "/api/v1/ping",       # Liveness probe — no auth required
-        "/v1/config/openalgo",          # Setup wizard — public, localhost-only
+        "/v1/config/openalgo",          # Localhost-only; self-authenticates after setup
         "/v1/test-connection",          # Setup wizard — public, localhost-only
     )
 
@@ -2610,18 +2647,33 @@ def create_flask_app(
 
         return serialised
 
+    def _openalgo_config_request_authenticated() -> bool:
+        auth_header = request.headers.get("Authorization", "")
+        bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+        if bearer:
+            try:
+                from .auth_routes import decode_token  # noqa: PLC0415
+
+                if decode_token(bearer).get("type") == "session":
+                    return True
+            except Exception:
+                pass
+
+        expected = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
+        supplied = request.headers.get("X-API-Key") or bearer
+        return bool(expected and supplied and secrets.compare_digest(str(supplied), expected))
+
     @app.route("/v1/config/openalgo", methods=["GET", "POST"])
     @limiter.limit("10 per minute")
     @_serialise_openalgo_config
     def _set_openalgo_config() -> Any:
         """Persist OpenAlgo connection settings from the UI.
 
-        Security: only accept requests from loopback (127.0.0.1) since the
-        payload includes the OpenAlgo API key. The default require_auth
-        layer still applies unless the caller is already authenticated —
-        however the Setup wizard runs *before* the user has an API key,
-        so we also permit requests that originate from localhost without
-        an API-key header.
+        Security: this setup-exempt route remains loopback-only. Before the
+        operator account exists, GET returns redacted metadata and POST must
+        carry an explicit OpenAlgo API key. After setup, both methods require
+        a session JWT or the configured backend/OpenAlgo API key; only an
+        authenticated GET may return the raw key for the local WebSocket.
 
         Request JSON: ``{"api_key": "...", "host": "...", "port": 5000, "ws_port": 8765}``
         """
@@ -2641,6 +2693,15 @@ def create_flask_app(
                 "message": "This endpoint is only reachable from localhost",
             }), 403
 
+        authenticated = _openalgo_config_request_authenticated()
+        auth_service = app.config.get("AUTH_SERVICE")
+        try:
+            operator_is_setup = bool(auth_service is None or auth_service.is_setup())
+        except Exception:
+            operator_is_setup = True
+        if operator_is_setup and not authenticated:
+            return jsonify({"status": "error", "message": "Authentication required"}), 401
+
         if request.method == "GET":
             try:
                 from .workspace import Workspace  # noqa: PLC0415
@@ -2652,26 +2713,22 @@ def create_flask_app(
                 if not isinstance(openalgo, dict):
                     openalgo = {}
                 api_key = str(openalgo.get("api_key", "") or "")
-                # Return the RAW api_key here (not just last4). This GET is
-                # loopback-guarded (127.0.0.1 only) — the same guard that
-                # protects the POST which accepts the raw key — and the frontend
-                # already holds the key in memory for every OpenAlgo request, so
-                # returning it on the loopback GET is consistent with the trust
-                # model. It lets the memory-only connection store rehydrate the
-                # key after a page/webview reload without the operator re-typing
-                # it, which is what keeps live-order bridge-vs-native routing
-                # from failing closed on every reload. api_key_configured /
-                # api_key_last4 are retained for callers that only need status.
+                data = {
+                    "api_key_configured": bool(api_key),
+                    "api_key_last4": api_key[-4:] if api_key else "",
+                    "host": str(openalgo.get("host", "") or ""),
+                    "port": openalgo.get("port", DEFAULT_OPENALGO_PORT),
+                    "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
+                }
+                # The terminal needs the bridge key in memory for its direct
+                # OpenAlgo WebSocket. Only an authenticated operator session (or
+                # explicit backend API key) may rehydrate it; pre-setup status
+                # probes receive redacted metadata only.
+                if authenticated:
+                    data["api_key"] = api_key
                 return jsonify({
                     "status": "success",
-                    "data": {
-                        "api_key": api_key,
-                        "api_key_configured": bool(api_key),
-                        "api_key_last4": api_key[-4:] if api_key else "",
-                        "host": str(openalgo.get("host", "") or ""),
-                        "port": openalgo.get("port", DEFAULT_OPENALGO_PORT),
-                        "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
-                    },
+                    "data": data,
                 }), 200
             except Exception as exc:
                 logger.error("Failed to read OpenAlgo config from workspace.json: %s", exc)
@@ -2680,7 +2737,12 @@ def create_flask_app(
                     "message": "Could not read config",
                 }), 500
 
-        payload = request.get_json(silent=True) or {}
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({
+                "status": "error",
+                "message": "Request body must be a JSON object",
+            }), 400
         has_api_key = "api_key" in payload
         has_host = "host" in payload
         has_port = "port" in payload
@@ -2689,6 +2751,12 @@ def create_flask_app(
         host = str(payload.get("host", "")).strip()
         port = payload.get("port")
         ws_port = payload.get("ws_port")
+
+        if not authenticated and (not has_api_key or not api_key):
+            return jsonify({
+                "status": "error",
+                "message": "Initial OpenAlgo setup must include the API key",
+            }), 401
 
         if not has_api_key and not has_host and not has_port and not has_ws_port:
             return jsonify({
@@ -2709,27 +2777,26 @@ def create_flask_app(
         # Persist to workspace.json
         try:
             from .workspace import Workspace  # noqa: PLC0415
-            from .workspace_migrations import default_workspace_config  # noqa: PLC0415
-
             ws = Workspace()
-            workspace_exists = ws.config_path.exists()
-            config = ws.as_dict() if workspace_exists else default_workspace_config()
-            current_openalgo = config.get("openalgo")
-            openalgo = dict(current_openalgo) if isinstance(current_openalgo, dict) else {}
-            if has_api_key:
-                openalgo["api_key"] = api_key
-            if has_host:
-                openalgo["host"] = host
-            if has_port:
-                openalgo["port"] = normalised_port
-            if has_ws_port:
-                openalgo["ws_port"] = normalised_ws_port
-            config["openalgo"] = openalgo
-            candidate_settings = Settings.from_workspace_data(config)
-            if workspace_exists:
-                ws.save(config)
-            else:
-                ws.initialise(config)
+
+            candidate: dict[str, Settings] = {}
+
+            def update_openalgo(config: dict[str, Any]) -> None:
+                current_openalgo = config.get("openalgo")
+                openalgo = dict(current_openalgo) if isinstance(current_openalgo, dict) else {}
+                if has_api_key:
+                    openalgo["api_key"] = api_key
+                if has_host:
+                    openalgo["host"] = host
+                if has_port:
+                    openalgo["port"] = normalised_port
+                if has_ws_port:
+                    openalgo["ws_port"] = normalised_ws_port
+                config["openalgo"] = openalgo
+                candidate["settings"] = Settings.from_workspace_data(config)
+
+            ws.update(update_openalgo)
+            candidate_settings = candidate["settings"]
         except (TypeError, ValueError):
             return jsonify({
                 "status": "error",
@@ -2749,26 +2816,23 @@ def create_flask_app(
         except Exception:
             pass
 
-        # Hot-reload OpenAlgoClient so subsequent backend→OpenAlgo calls
-        # use the fresh credentials without requiring a restart.
+        # Reconfigure the shared client in place. BrokerRouter, schedulers, cron
+        # and Telegram all retain this object, so replacing/closing it would
+        # strand live callers on stale credentials or a closed HTTP pool.
         old_client = app.config.get("CLIENT")
         old_settings = getattr(old_client, "settings", None)
         old_api_key_value = getattr(old_settings, "openalgo_api_key", "")
         old_api_key = old_api_key_value if isinstance(old_api_key_value, str) else ""
         try:
             new_settings = candidate_settings
-            new_client = OpenAlgoClient(new_settings)
+            if isinstance(old_client, OpenAlgoClient):
+                new_client = old_client.reconfigure(new_settings)
+            else:
+                new_client = OpenAlgoClient(new_settings)
             app.config["CLIENT"] = new_client
-            # Best-effort close of the previous client's HTTP pool.
-            if old_client is not None:
-                try:
-                    loop = asyncio.new_event_loop()
-                    try:
-                        loop.run_until_complete(old_client.close())
-                    finally:
-                        loop.close()
-                except Exception:
-                    pass
+            app.config["OPENALGO_CLIENT"] = new_client
+            if old_client is not new_client:
+                configure_broker_router(app, registry, credential_store, new_client)
         except Exception as exc:
             diagnostic = _sanitise_tick_capture_error(exc, api_key)
             diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
@@ -3199,6 +3263,10 @@ class FlintTradeApp:
         # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
         self._tick_recorder: Any | None = None
         self._tick_recorder_task: Any | None = None
+        self._stop_started = False
+        self._stop_completed = False
+        self._shutdown_task: asyncio.Task[Any] | None = None
+        self._shutdown_request_task: asyncio.Task[Any] | None = None
 
         # Broker reconciliation runner (contract §14.2) — wired in start().
         self._reconciliation_runner: Any | None = None
@@ -3395,6 +3463,25 @@ class FlintTradeApp:
                     flask_app.config["TICK_STORAGE"] = tick_storage
                     flask_app.config["TICK_STORAGE_LOCK"] = tick_lock
                     flask_app.config["TICK_CAPTURE_ERROR"] = ""
+                    def handle_recorder_completion(
+                        completed: Any,
+                        active: Any = recorder,
+                        key: str = capture_settings.openalgo_api_key,
+                    ) -> None:
+                        unpublished = _handle_tick_recorder_completion(
+                            flask_app,
+                            active,
+                            completed,
+                            api_key=key,
+                            is_shutting_down=lambda: self._stop_started,
+                        )
+                        if unpublished:
+                            self._tick_recorder = None
+                            self._tick_recorder_task = None
+                            self.cron.tick_storage = None
+                            self.cron.tick_storage_lock = None
+
+                    recorder_task.add_done_callback(handle_recorder_completion)
                 logger.info("Live tick capture started → %s", tick_db)
             except Exception as exc:
                 sanitise_error = getattr(recorder, "sanitise_error", None)
@@ -3528,63 +3615,98 @@ class FlintTradeApp:
         await self._stop_event.wait()
 
     async def stop(self) -> None:
-        """Gracefully shut down all services."""
+        """Gracefully shut down all services, sharing concurrent attempts."""
+        if getattr(self, "_stop_completed", False):
+            return
+
+        task = getattr(self, "_shutdown_task", None)
+        if task is None or task.done():
+            task = asyncio.create_task(self._stop_once())
+            self._shutdown_task = task
+        await asyncio.shield(task)
+
+    async def _stop_once(self) -> None:
+        """Run one complete, best-effort shutdown attempt."""
+        self._stop_started = True
         logger.info("FlintTrade shutting down...")
+        errors: list[tuple[str, str]] = []
 
-        # Stop strategies
-        await self.scheduler.stop_all()
-
-        # Stop cron
-        self.cron.stop()
-
-        # Stop the Telegram polling loop before the shared client closes, so it
-        # is not left long-polling and dispatching commands against a torn-down
-        # backend during shutdown.
-        if getattr(self, "telegram", None) is not None:
-            self.telegram.stop()
-
-        # Stop tick capture (signal the loop to exit, then cancel the task)
-        if self._tick_recorder is not None:
-            self._tick_recorder.stop()
-        if self._tick_recorder_task is not None:
-            self._tick_recorder_task.cancel()
+        def attempt(label: str, callback: Callable[[], Any]) -> None:
             try:
-                await self._tick_recorder_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:  # noqa: BLE001 - shutdown must finish after a failed task
-                sanitise_error = getattr(self._tick_recorder, "sanitise_error", None)
+                callback()
+            except Exception as exc:  # noqa: BLE001 - shutdown must continue
+                errors.append((label, type(exc).__name__))
+
+        async def attempt_async(label: str, callback: Callable[[], Any]) -> None:
+            try:
+                await callback()
+            except Exception as exc:  # noqa: BLE001 - shutdown must continue
+                errors.append((label, type(exc).__name__))
+
+        try:
+            # Stop strategies
+            await attempt_async("scheduler", self.scheduler.stop_all)
+
+            # Stop cron
+            attempt("cron", self.cron.stop)
+
+            # Stop the Telegram polling loop before the shared client closes, so it
+            # is not left long-polling and dispatching commands against a torn-down
+            # backend during shutdown.
+            telegram = getattr(self, "telegram", None)
+            if telegram is not None:
+                attempt("telegram", telegram.stop)
+
+            # Stop tick capture (signal the loop to exit, then cancel the task).
+            tick_recorder = self._tick_recorder
+            tick_task = self._tick_recorder_task
+            if tick_recorder is not None:
+                attempt("tick recorder", tick_recorder.stop)
+            if tick_task is not None:
+                tick_task.cancel()
                 try:
-                    diagnostic = (
-                        sanitise_error(exc)
-                        if callable(sanitise_error)
-                        else type(exc).__name__
+                    await tick_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:  # noqa: BLE001 - a failed recorder must not abort shutdown
+                    sanitise_error = getattr(tick_recorder, "sanitise_error", None)
+                    try:
+                        diagnostic = (
+                            sanitise_error(exc)
+                            if callable(sanitise_error)
+                            else type(exc).__name__
+                        )
+                    except Exception:  # pragma: no cover - diagnostics must not block shutdown
+                        diagnostic = type(exc).__name__
+                    logger.warning(
+                        "Tick recorder task ended with an error during shutdown (%s)",
+                        diagnostic,
                     )
-                except Exception:  # pragma: no cover - a diagnostic helper must not block shutdown
-                    diagnostic = type(exc).__name__
-                logger.warning(
-                    "Tick recorder task ended with an error during shutdown (%s)",
-                    diagnostic,
-                )
 
-        # Stop the reconciliation runner (signal the loop, then cancel the task)
-        if self._reconciliation_runner is not None:
-            self._reconciliation_runner.stop()
-        if self._reconciliation_task is not None:
-            self._reconciliation_task.cancel()
+            # Stop the reconciliation runner (signal the loop, then cancel the task).
+            reconciliation_runner = self._reconciliation_runner
+            reconciliation_task = self._reconciliation_task
+            if reconciliation_runner is not None:
+                attempt("reconciliation runner", reconciliation_runner.stop)
+            if reconciliation_task is not None:
+                attempt("reconciliation task", reconciliation_task.cancel)
 
-        # Log shutdown to audit before closing
-        self.audit.log_event("APP_STOP", version=self.version)
+            # Log shutdown to audit before closing.
+            attempt("audit event", lambda: self.audit.log_event("APP_STOP", version=self.version))
 
-        # Close API client
-        await self.client.close()
+            # Close API client and audit logger independently.
+            await attempt_async("OpenAlgo client", self.client.close)
+            attempt("audit logger", self.audit.close)
+        finally:
+            self._stop_event.set()
 
-        # Close audit logger
-        self.audit.close()
+        if errors:
+            summary = ", ".join(f"{label} ({error_type})" for label, error_type in errors)
+            logger.error("FlintTrade shutdown encountered errors: %s", summary)
+            raise RuntimeError(f"shutdown encountered errors: {summary}")
 
+        self._stop_completed = True
         logger.info("FlintTrade %s stopped", self.version)
-
-        self._stop_event.set()
 
     def run(self) -> None:
         """Run the application (blocking). Handles Ctrl+C gracefully."""
@@ -3596,9 +3718,25 @@ class FlintTradeApp:
         asyncio.set_event_loop(loop)
 
         # Handle signals
+        def request_stop() -> None:
+            task = getattr(self, "_shutdown_request_task", None)
+            if task is None or task.done():
+                task = loop.create_task(self.stop())
+                self._shutdown_request_task = task
+
+                def observe_shutdown(completed: asyncio.Task[Any]) -> None:
+                    try:
+                        completed.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:  # noqa: BLE001 - consume signal-task failure
+                        logger.error("FlintTrade shutdown failed (%s)", type(exc).__name__)
+
+                task.add_done_callback(observe_shutdown)
+
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                loop.add_signal_handler(sig, lambda: loop.create_task(self.stop()))
+                loop.add_signal_handler(sig, request_stop)
             except NotImplementedError:
                 # Windows doesn't support add_signal_handler
                 pass

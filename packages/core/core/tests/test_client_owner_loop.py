@@ -32,6 +32,23 @@ def _client() -> OpenAlgoClient:
 
 
 class TestRunSync:
+    def test_reconfigure_preserves_identity_and_updates_one_connection_snapshot(self):
+        client = _client()
+        original_http = client._http
+        replacement = Settings(
+            openalgo_host="https://openalgo.example",
+            openalgo_port=5443,
+            openalgo_api_key="rotated-key",
+        )
+
+        result = client.reconfigure(replacement)
+
+        assert result is client
+        assert client._http is original_http
+        assert client.settings is replacement
+        assert client._base == "https://openalgo.example:5443/api/v1"
+        assert client._api_key == "rotated-key"
+
     def test_many_sequential_calls_one_owner_loop(self):
         client = _client()
 

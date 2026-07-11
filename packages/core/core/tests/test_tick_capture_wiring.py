@@ -275,15 +275,15 @@ def test_capture_failure_redacts_api_key_from_status_and_log(caplog) -> None:
 @pytest.mark.unit
 def test_stop_stops_tick_recorder() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
-    stop = _find_method(tree, "FlintTradeApp", "stop")
-    assert stop is not None, "FlintTradeApp.stop not found"
+    stop_once = _find_method(tree, "FlintTradeApp", "_stop_once")
+    assert stop_once is not None, "FlintTradeApp._stop_once not found"
     # The stop path must reference the recorder handle so it is shut down.
     refs = [
         n
-        for n in ast.walk(stop)
+        for n in ast.walk(stop_once)
         if isinstance(n, ast.Attribute) and n.attr == "_tick_recorder"
     ]
-    assert refs, "stop() must stop/cancel the tick recorder (_tick_recorder)"
+    assert refs, "_stop_once() must stop/cancel the tick recorder (_tick_recorder)"
 
 
 @pytest.mark.unit
@@ -329,6 +329,183 @@ async def test_stop_awaits_cancelled_tick_recorder_cleanup() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_concurrent_stop_requests_run_shutdown_once() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.cron = MagicMock()
+    app.telegram = MagicMock()
+    app._tick_recorder = None
+    app._tick_recorder_task = None
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    await asyncio.gather(app.stop(), app.stop())
+
+    app.scheduler.stop_all.assert_awaited_once_with()
+    app.cron.stop.assert_called_once_with()
+    app.telegram.stop.assert_called_once_with()
+    app.client.close.assert_awaited_once_with()
+    app.audit.close.assert_called_once_with()
+    app._stop_event.set.assert_called_once_with()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_concurrent_stop_caller_waits_for_active_shutdown() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    shutdown_started = asyncio.Event()
+    release_shutdown = asyncio.Event()
+
+    async def blocking_stop_all() -> None:
+        shutdown_started.set()
+        await release_shutdown.wait()
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(stop_all=AsyncMock(side_effect=blocking_stop_all))
+    app.cron = MagicMock()
+    app.telegram = None
+    app._tick_recorder = None
+    app._tick_recorder_task = None
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    first = asyncio.create_task(app.stop())
+    await shutdown_started.wait()
+    second = asyncio.create_task(app.stop())
+    await asyncio.sleep(0)
+
+    assert second.done() is False
+    release_shutdown.set()
+    await asyncio.gather(first, second)
+    app.scheduler.stop_all.assert_awaited_once_with()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_failed_shutdown_finalises_and_can_be_retried() -> None:
+    from flinttrade_core.app import FlintTradeApp
+
+    app = FlintTradeApp.__new__(FlintTradeApp)
+    app.scheduler = MagicMock(
+        stop_all=AsyncMock(side_effect=[RuntimeError("scheduler failed"), None])
+    )
+    app.cron = MagicMock()
+    app.telegram = MagicMock()
+    app._tick_recorder = None
+    app._tick_recorder_task = None
+    app._reconciliation_runner = None
+    app._reconciliation_task = None
+    app.audit = MagicMock()
+    app.client = MagicMock(close=AsyncMock())
+    app.version = "test"
+    app._stop_event = MagicMock()
+
+    with pytest.raises(RuntimeError, match="scheduler"):
+        await app.stop()
+
+    app.cron.stop.assert_called_once_with()
+    app.telegram.stop.assert_called_once_with()
+    app.client.close.assert_awaited_once_with()
+    app.audit.close.assert_called_once_with()
+    app._stop_event.set.assert_called_once_with()
+
+    await app.stop()
+
+    assert app.scheduler.stop_all.await_count == 2
+    assert app._stop_event.set.call_count == 2
+
+
+@pytest.mark.unit
+def test_failed_recorder_completion_is_unpublished_and_redacted() -> None:
+    from flinttrade_core.app import _handle_tick_recorder_completion
+
+    class FailedTask:
+        @staticmethod
+        def cancelled() -> bool:
+            return False
+
+        @staticmethod
+        def exception() -> BaseException:
+            return RuntimeError("fatal recorder error with boot-secret and rotated-secret")
+
+    class Recorder:
+        @staticmethod
+        def sanitise_error(value: object) -> str:
+            return str(value).replace("rotated-secret", "[redacted]")
+
+    flask_app = Flask("failed-recorder")
+    recorder = Recorder()
+    flask_app.config.update(
+        TICK_CAPTURE_LIFECYCLE_LOCK=__import__("threading").RLock(),
+        TICK_RECORDER=recorder,
+        TICK_STORAGE=object(),
+        TICK_STORAGE_LOCK=object(),
+        ORDERFLOW_AGGREGATOR=object(),
+    )
+
+    unpublished = _handle_tick_recorder_completion(
+        flask_app,
+        recorder,
+        FailedTask(),
+        api_key="boot-secret",
+        is_shutting_down=lambda: False,
+    )
+
+    assert "TICK_RECORDER" not in flask_app.config
+    assert "TICK_STORAGE" not in flask_app.config
+    assert "TICK_STORAGE_LOCK" not in flask_app.config
+    assert "ORDERFLOW_AGGREGATOR" not in flask_app.config
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "fatal recorder error with [redacted] and [redacted]"
+    assert unpublished is True
+
+
+@pytest.mark.unit
+def test_normal_recorder_completion_during_shutdown_is_not_reported() -> None:
+    from flinttrade_core.app import _handle_tick_recorder_completion
+
+    class CompletedTask:
+        @staticmethod
+        def cancelled() -> bool:
+            return False
+
+        @staticmethod
+        def exception() -> None:
+            return None
+
+    flask_app = Flask("stopping-recorder")
+    recorder = object()
+    flask_app.config.update(
+        TICK_CAPTURE_LIFECYCLE_LOCK=__import__("threading").RLock(),
+        TICK_RECORDER=recorder,
+        TICK_CAPTURE_ERROR="",
+    )
+
+    unpublished = _handle_tick_recorder_completion(
+        flask_app,
+        recorder,
+        CompletedTask(),
+        api_key="boot-secret",
+        is_shutting_down=lambda: True,
+    )
+
+    assert flask_app.config["TICK_RECORDER"] is recorder
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == ""
+    assert unpublished is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) -> None:
     import flinttrade_data.tick_recorder as recorder_module
     from flinttrade_core.app import FlintTradeApp
@@ -348,6 +525,9 @@ async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) 
         def __aiter__(self):
             return self
 
+        async def send(self, _payload: str) -> None:
+            return None
+
         async def __anext__(self):
             self.consume_started.set()
             await asyncio.Future()
@@ -365,6 +545,7 @@ async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) 
     storage = FakeStorage()
     websocket = BlockingWebSocket()
     recorder = TickRecorder(storage=storage, ws_url="ws://openalgo.local:8770")
+    recorder.add_symbols([{"exchange": "NSE_INDEX", "symbol": "NIFTY"}])
     recorder._process_tick({
         "exchange": "NSE_INDEX",
         "symbol": "NIFTY",

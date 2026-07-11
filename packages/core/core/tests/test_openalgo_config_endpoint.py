@@ -11,6 +11,79 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+def test_openalgo_config_requires_auth_after_operator_setup(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
+    Workspace().set("openalgo.api_key", "operator-bridge-secret")
+
+    response = app.test_client().get(
+        "/v1/config/openalgo",
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 401
+    assert "operator-bridge-secret" not in response.get_data(as_text=True)
+
+
+def test_openalgo_config_pre_setup_status_never_returns_raw_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=False)
+    Workspace().set("openalgo.api_key", "pre-setup-bridge-secret")
+
+    response = app.test_client().get(
+        "/v1/config/openalgo",
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert "api_key" not in response.get_json()["data"]
+    assert "pre-setup-bridge-secret" not in response.get_data(as_text=True)
+
+
+def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core import auth_routes
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
+    Workspace().set("openalgo.api_key", "operator-session-secret")
+    monkeypatch.setattr(auth_routes, "decode_token", lambda _token: {"type": "session"})
+
+    response = app.test_client().get(
+        "/v1/config/openalgo",
+        headers={"Authorization": "Bearer signed-operator-session"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["api_key"] == "operator-session-secret"
+
+
 def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_path):
     """A native first run can save OpenAlgo settings without a pre-existing workspace.json."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
@@ -59,9 +132,8 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
     )
 
     assert get_response.status_code == 200
-    # The loopback GET returns the RAW api_key so the memory-only frontend store
-    # can rehydrate it after a reload (the browser already holds it in memory for
-    # every OpenAlgo request); status fields are retained alongside it.
+    # An authenticated loopback GET returns the raw api_key so the memory-only
+    # frontend store can rehydrate it after a reload; status fields remain too.
     assert get_response.get_json()["data"] == {
         "api_key": "openalgo-ui-key",
         "api_key_configured": True,
@@ -93,8 +165,42 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
     }
 
 
+def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import OpenAlgoClient
+
+    shared_client = OpenAlgoClient(
+        Settings(openalgo_host="http://127.0.0.1", openalgo_api_key="old-openalgo-key")
+    )
+    app = create_flask_app(client=shared_client)
+    app.config["TESTING"] = True
+    shared_router_client = app.config["OPENALGO_CLIENT"]
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={
+            "api_key": "rotated-openalgo-key",
+            "host": "https://openalgo.example",
+            "port": 5443,
+        },
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert app.config["CLIENT"] is shared_client
+    assert app.config["OPENALGO_CLIENT"] is shared_router_client is shared_client
+    assert shared_client.settings.openalgo_api_key == "rotated-openalgo-key"
+    assert shared_client._base == "https://openalgo.example:5443/api/v1"
+
+
 def test_openalgo_config_get_rejects_non_loopback_and_never_leaks_key(monkeypatch, tmp_path):
-    """The GET returns the raw api_key, so a non-loopback caller must be refused."""
+    """An authenticated GET still refuses non-loopback callers before reading secrets."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -144,6 +250,30 @@ def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):
     assert "between 1 and 65535" in response.get_json()["message"]
     assert Workspace().get("openalgo.api_key", "") != "must-not-persist"
     assert Workspace().get("openalgo.host", "") != "https://invalid.local"
+
+
+def test_openalgo_config_endpoint_rejects_non_object_json(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json=[{"api_key": "must-not-be-accepted"}],
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "status": "error",
+        "message": "Request body must be a JSON object",
+    }
 
 
 @pytest.mark.parametrize(
@@ -367,20 +497,23 @@ def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monke
     first_entered = threading.Event()
     release_first = threading.Event()
     second_entered = threading.Event()
-    original_save = Workspace.save
+    original_update = Workspace.update
 
-    def controlled_save(self, config=None):
-        effective_config = self.as_dict() if config is None else config
-        openalgo = effective_config.get("openalgo", {})
-        api_key = openalgo.get("api_key") if isinstance(openalgo, dict) else None
-        if api_key == "first-key":
-            first_entered.set()
-            assert release_first.wait(2)
-        elif api_key == "second-key":
-            second_entered.set()
-        return original_save(self, config)
+    def controlled_update(self, updater):
+        def observe(config):
+            result = updater(config)
+            openalgo = config.get("openalgo", {})
+            api_key = openalgo.get("api_key") if isinstance(openalgo, dict) else None
+            if api_key == "first-key":
+                first_entered.set()
+                assert release_first.wait(2)
+            elif api_key == "second-key":
+                second_entered.set()
+            return result
 
-    monkeypatch.setattr(Workspace, "save", controlled_save)
+        return original_update(self, observe)
+
+    monkeypatch.setattr(Workspace, "update", controlled_update)
     responses: dict[str, object] = {}
 
     def post(name: str) -> None:
