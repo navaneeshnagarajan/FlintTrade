@@ -131,6 +131,30 @@ def test_configure_broker_router_retries_retained_generation_before_build(
     assert app.config["BROKER_ROUTER"] is candidate
 
 
+@pytest.mark.unit
+def test_configure_broker_router_refuses_and_retires_during_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("router-rebuild-during-shutdown")
+    router = MagicMock()
+    router.revoke_and_drain.return_value = True
+    build = MagicMock()
+    app.config.update(
+        BROKER_ROUTER=router,
+        RUNTIME_ACCEPTING_REQUESTS=False,
+    )
+    monkeypatch.setattr(app_module, "build_broker_router", build)
+
+    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+
+    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    build.assert_not_called()
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["BROKER_ROUTER_DRAINING"] is None
+
+
 def test_build_broker_router_from_default_config() -> None:
     router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
     assert isinstance(router, BrokerRouter)

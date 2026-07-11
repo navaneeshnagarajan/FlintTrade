@@ -1491,6 +1491,13 @@ def configure_broker_router(
         "BROKER_ROUTER_REBUILD_LOCK", threading.RLock()
     )
     with rebuild_lock:
+        if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
+            logger.warning("BrokerRouter rebuild refused while the runtime is shutting down")
+            retire_broker_router_generation(app)
+            app.config["SMART_ROUTING"] = {}
+            app.config["NATIVE_ADAPTERS"] = {}
+            app.config["RECONCILE_TARGETS"] = None
+            return False
         if not retire_broker_router_generation(app):
             app.config["SMART_ROUTING"] = {}
             app.config["NATIVE_ADAPTERS"] = {}
@@ -1551,6 +1558,10 @@ def configure_broker_router(
                     "~/.flinttrade/workspace.brokers.bak.json",
                     build_error,
                 )
+            return False
+
+        if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
+            logger.warning("BrokerRouter candidate discarded because shutdown began during rebuild")
             return False
 
         app.config["OPENALGO_CLIENT"] = openalgo_client
@@ -1763,6 +1774,7 @@ def create_flask_app(
     credential_store: CredentialStore | None = None,
     contract_manager: ContractManager | None = None,
     rag: Any | None = None,
+    cron_strategy_scheduler: Any | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -1776,6 +1788,7 @@ def create_flask_app(
         credential_store: CredentialStore for encrypted credential persistence.
         contract_manager: ContractManager for broker symbol contract data.
         rag: RAGPipeline instance for knowledge base queries.
+        cron_strategy_scheduler: Shared market-aware strategy cron scheduler.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -2291,7 +2304,11 @@ def create_flask_app(
         try:
             from flinttrade_engine.scheduler import CronStrategyScheduler  # noqa: PLC0415
 
-            app.config["CRON_SCHEDULER"] = CronStrategyScheduler()
+            app.config["CRON_SCHEDULER"] = (
+                cron_strategy_scheduler
+                if cron_strategy_scheduler is not None
+                else CronStrategyScheduler()
+            )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Cron scheduler wiring failed (%s); strategy scheduling will 503", exc)
 
@@ -3534,7 +3551,22 @@ def _shutdown_rotation_scheduler(app: Flask) -> None:
     rotation_scheduler = app.config.get("ROTATION_SCHEDULER")
     if rotation_scheduler is None or not getattr(rotation_scheduler, "running", False):
         return
-    rotation_scheduler.shutdown(wait=True)
+    rotation_scheduler.shutdown(wait=False)
+
+
+def _market_calendar_refresh_delay(*, loaded: bool) -> float:
+    """Return seconds until the next calendar refresh or short failure retry."""
+    if not loaded:
+        return 300.0
+
+    from datetime import datetime, timedelta  # noqa: PLC0415
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    refresh_at = now.replace(hour=0, minute=5, second=0, microsecond=0)
+    if refresh_at <= now:
+        refresh_at += timedelta(days=1)
+    return max(1.0, (refresh_at - now).total_seconds())
 
 
 class FlintTradeApp:
@@ -3566,12 +3598,19 @@ class FlintTradeApp:
         # gateway BrokerRouter (gate_order → BrokerRouter → adapter); the legacy
         # ungated OrderRouter was removed 2026-07-09.
         from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
-        from flinttrade_engine.scheduler import StrategyScheduler, TimeScheduler  # noqa: PLC0415
+        from flinttrade_engine.scheduler import (  # noqa: PLC0415
+            CronStrategyScheduler,
+            StrategyScheduler,
+            TimeScheduler,
+        )
 
         self.safety = SafetySystem(SafetyConfig(check_market_hours=True))
         self.time_scheduler = TimeScheduler(client=self.client)
         self.scheduler = StrategyScheduler(
             client=self.client,
+            time_scheduler=self.time_scheduler,
+        )
+        self.strategy_cron_scheduler = CronStrategyScheduler(
             time_scheduler=self.time_scheduler,
         )
 
@@ -3630,6 +3669,7 @@ class FlintTradeApp:
         self._stop_completed = False
         self._shutdown_task: asyncio.Task[Any] | None = None
         self._shutdown_request_task: asyncio.Task[Any] | None = None
+        self._holiday_refresh_task: asyncio.Task[Any] | None = None
 
         # Broker reconciliation runner (contract §14.2) — wired in start().
         self._reconciliation_runner: Any | None = None
@@ -3639,6 +3679,40 @@ class FlintTradeApp:
         self._shutdown_failed_event = asyncio.Event()
 
         logger.info("FlintTradeApp initialised — %s", self.version)
+
+    async def _refresh_market_calendar(self) -> bool:
+        """Refresh and apply one authoritative market-calendar payload."""
+        try:
+            await self.cron.load_holidays()
+        except Exception as exc:
+            logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
+            return False
+
+        if self._stop_started:
+            return False
+
+        calendar_payload = getattr(self.cron, "holiday_payload", None)
+        if not isinstance(calendar_payload, dict | list | tuple | set):
+            logger.warning(
+                "Market calendar was not returned; retaining the current calendar until retry"
+            )
+            return False
+        try:
+            self.time_scheduler.set_holidays(calendar_payload)
+        except Exception as exc:
+            logger.warning("Could not apply loaded market holidays: %s", exc)
+            return False
+        return True
+
+    async def _market_calendar_refresh_loop(self, *, loaded: bool) -> None:
+        """Retry failed loads promptly and refresh successful calendars daily."""
+        while True:
+            delay = _market_calendar_refresh_delay(loaded=loaded)
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
+                return
+            except TimeoutError:
+                loaded = await self._refresh_market_calendar()
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
@@ -3656,29 +3730,30 @@ class FlintTradeApp:
             credential_store=self.credential_store,
             contract_manager=self.contract_manager,
             rag=self.rag,
+            cron_strategy_scheduler=self.strategy_cron_scheduler,
         )
         self._flask_app = flask_app
         tick_capture_enabled = _tick_capture_enabled()
         _set_tick_capture_intent(flask_app, tick_capture_enabled)
         _run_flask_server(flask_app, port=_resolve_backend_port())
 
-        # Load market holidays (graceful — warns if OpenAlgo unreachable)
-        loaded_holidays: set[str] = set()
-        try:
-            loaded_holidays = await self.cron.load_holidays()
-        except Exception as exc:
-            logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
+        # Load the market calendar once, then keep retrying failed loads and
+        # refresh it daily so year rollover and newly-published sessions apply.
+        calendar_loaded = await self._refresh_market_calendar()
 
         if await self._wait_for_shutdown_if_started():
             return
 
         try:
-            calendar_payload = getattr(self.cron, "holiday_payload", None)
-            if not isinstance(calendar_payload, dict | list | tuple | set):
-                calendar_payload = loaded_holidays
-            self.time_scheduler.set_holidays(calendar_payload)
+            self.strategy_cron_scheduler.start()
         except Exception as exc:
-            logger.warning("Could not apply loaded market holidays: %s", exc)
+            logger.warning(
+                "Strategy cron scheduler failed to start (%s); strategy schedules will not run",
+                exc,
+            )
+        self._holiday_refresh_task = asyncio.create_task(
+            self._market_calendar_refresh_loop(loaded=calendar_loaded)
+        )
 
         # Hand the cron manager the shared trade store (created by the Flask
         # factory above) so the nightly DuckDB maintenance job can CHECKPOINT +
@@ -4137,11 +4212,6 @@ class FlintTradeApp:
                 if not agent_stopped:
                     errors.append(("autonomous agent", "TimeoutError"))
 
-            attempt(
-                "native session rotation scheduler",
-                lambda: _shutdown_rotation_scheduler(flask_app),
-            )
-
             try:
                 router_retired = await asyncio.to_thread(
                     retire_broker_router_generation,
@@ -4153,12 +4223,31 @@ class FlintTradeApp:
                 if not router_retired:
                     errors.append(("broker router", "TimeoutError"))
 
+            attempt(
+                "native session rotation scheduler",
+                lambda: _shutdown_rotation_scheduler(flask_app),
+            )
+
         tick_recorder = self._tick_recorder
         tick_task = self._tick_recorder_task
         tick_storage = getattr(self, "_tick_storage", None)
         tick_storage_lock = getattr(self, "_tick_storage_lock", None)
+
+        holiday_refresh_task = getattr(self, "_holiday_refresh_task", None)
+        if holiday_refresh_task is not None:
+            holiday_refresh_task.cancel()
+            try:
+                await holiday_refresh_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001 - shutdown must continue
+                errors.append(("market calendar refresh", type(exc).__name__))
+            finally:
+                self._holiday_refresh_task = None
+
         if tick_recorder is not None:
             attempt("tick recorder", tick_recorder.stop)
+        tick_task_error: Exception | None = None
         if tick_task is not None:
             tick_task.cancel()
             try:
@@ -4166,7 +4255,7 @@ class FlintTradeApp:
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001 - retain dependencies for a retry
-                errors.append(("tick recorder task", type(exc).__name__))
+                tick_task_error = exc
                 sanitise_error = getattr(tick_recorder, "sanitise_error", None)
                 try:
                     diagnostic = (
@@ -4185,10 +4274,14 @@ class FlintTradeApp:
                 # Clear process ownership so a later stop() retries the
                 # recorder's retained buffer directly instead.
                 self._tick_recorder_task = None
-        elif tick_recorder is not None:
+
+        if tick_recorder is not None and (tick_task is None or tick_task_error is not None):
             flush_pending = getattr(tick_recorder, "flush_pending", None)
             if callable(flush_pending):
-                attempt("tick recorder retained buffer", flush_pending)
+                if attempt("tick recorder retained buffer", flush_pending):
+                    tick_task_error = None
+            elif tick_task_error is not None:
+                errors.append(("tick recorder task", type(tick_task_error).__name__))
 
         if errors:
             summary = ", ".join(
@@ -4220,7 +4313,30 @@ class FlintTradeApp:
                     "shutdown encountered errors: active requests (TimeoutError)"
                 )
 
+        if flask_app is not None:
+            try:
+                router_retired = await asyncio.to_thread(
+                    retire_broker_router_generation,
+                    flask_app,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail closed on late publication
+                errors.append(("broker router after request drain", type(exc).__name__))
+            else:
+                if not router_retired:
+                    errors.append(("broker router after request drain", "TimeoutError"))
+
+        if errors:
+            summary = ", ".join(
+                f"{label} ({error_type})" for label, error_type in errors
+            )
+            logger.error("FlintTrade shutdown request drain failed: %s", summary)
+            raise RuntimeError(f"shutdown encountered errors: {summary}")
+
         try:
+            strategy_cron_scheduler = getattr(self, "strategy_cron_scheduler", None)
+            if strategy_cron_scheduler is not None:
+                attempt("strategy cron scheduler", strategy_cron_scheduler.stop)
+
             # Stop strategies
             await attempt_async("scheduler", self.scheduler.stop_all)
 
