@@ -60,6 +60,7 @@ from .app import (
     _workspace_dir,
     create_flask_app,
 )
+from .openalgo_client import client_close_sync
 from .workspace import Workspace
 
 logger = logging.getLogger("flinttrade.desktop")
@@ -120,6 +121,8 @@ class _DesktopTickCaptureRuntime:
         self._stop_lock = threading.Lock()
         self._stopped = False
         self._startup_error: BaseException | None = None
+        self._shutdown_error_lock = threading.Lock()
+        self._shutdown_error: BaseException | None = None
         self._storage_close_lock = threading.Lock()
         self._storage_closed = False
         self._unpublish_lock = threading.Lock()
@@ -225,6 +228,22 @@ class _DesktopTickCaptureRuntime:
                     self._sanitise(exc),
                 )
 
+    def _remember_shutdown_error(self, error: BaseException) -> None:
+        """Retain the first recorder cleanup error without exposing its payload."""
+        with self._shutdown_error_lock:
+            if self._shutdown_error is None:
+                self._shutdown_error = error
+        logger.warning(
+            "Desktop tick recorder cleanup failed (%s)",
+            self._sanitise(error),
+        )
+
+    def _raise_if_shutdown_failed(self) -> None:
+        with self._shutdown_error_lock:
+            failed = self._shutdown_error is not None
+        if failed:
+            raise RuntimeError("Desktop tick capture shutdown failed") from None
+
     def _run(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -251,8 +270,11 @@ class _DesktopTickCaptureRuntime:
                 if not self._is_stopped():
                     failure = RuntimeError("Tick recorder stopped unexpectedly")
 
-            if failure is not None and not self._is_stopped():
-                self._report_failure(failure)
+            if failure is not None:
+                if self._is_stopped():
+                    self._remember_shutdown_error(failure)
+                else:
+                    self._report_failure(failure)
         finally:
             self._started.set()
             pending = [pending_task for pending_task in asyncio.all_tasks(loop) if not pending_task.done()]
@@ -267,43 +289,44 @@ class _DesktopTickCaptureRuntime:
             self._close_storage_once()
 
     def stop(self, *, timeout: float = _CAPTURE_THREAD_STOP_TIMEOUT) -> None:
-        """Stop capture, wait briefly for recorder cleanup, and close storage."""
+        """Stop capture and fail truthfully if cleanup cannot complete."""
         with self._stop_lock:
-            if self._stopped:
-                if not self._thread.is_alive():
-                    self._unpublish_once()
-                    self._close_storage_once()
-                return
-            self._stopped = True
+            first_stop = not self._stopped
+            if first_stop:
+                self._stopped = True
 
         self._unpublish_once()
 
-        loop = self._loop
-        task = self._task
+        if first_stop:
+            loop = self._loop
+            task = self._task
 
-        def request_stop() -> None:
-            try:
-                self.recorder.stop()
-            except Exception as exc:  # pragma: no cover - defensive shutdown
-                diagnostic = self._sanitise(exc)
-                logger.warning("Desktop tick recorder stop signal failed (%s)", diagnostic)
-            if task is not None and not task.done():
-                task.cancel()
+            def request_stop() -> None:
+                try:
+                    self.recorder.stop()
+                except Exception as exc:  # pragma: no cover - defensive shutdown
+                    self._remember_shutdown_error(exc)
+                if task is not None and not task.done():
+                    task.cancel()
 
-        if loop is not None and loop.is_running():
-            try:
-                loop.call_soon_threadsafe(request_stop)
-            except RuntimeError:
+            if loop is not None and loop.is_running():
+                try:
+                    loop.call_soon_threadsafe(request_stop)
+                except RuntimeError:
+                    request_stop()
+            else:
                 request_stop()
-        else:
-            request_stop()
 
         if self._thread.is_alive():
             self._thread.join(timeout=max(0.0, timeout))
         if self._thread.is_alive():
             logger.warning("Desktop tick recorder did not stop within %.1fs", timeout)
-        else:
-            self._close_storage_once()
+            raise RuntimeError("Desktop tick capture shutdown timed out") from None
+
+        storage_closed = self._close_storage_once()
+        self._raise_if_shutdown_failed()
+        if not storage_closed:
+            raise RuntimeError("Desktop tick storage shutdown failed") from None
 
 
 def _configure_tick_capture(
@@ -334,9 +357,11 @@ def _configure_tick_capture(
 
             recorder_factory = TickRecorder
         if orderflow_factory is None:
-            from flinttrade_data.orderflow_aggregator import OrderFlowAggregator  # noqa: PLC0415
+            from flinttrade_data.orderflow_aggregator import (  # noqa: PLC0415
+                create_live_market_orderflow_aggregator,
+            )
 
-            orderflow_factory = OrderFlowAggregator
+            orderflow_factory = create_live_market_orderflow_aggregator
 
         storage = storage_factory(str(_workspace_dir() / "ticks.duckdb"))
         storage.initialise()
@@ -395,7 +420,13 @@ def _configure_tick_capture(
         return runtime
     except Exception as exc:
         if runtime is not None:
-            runtime.stop()
+            try:
+                runtime.stop()
+            except Exception as cleanup_exc:  # noqa: BLE001 - retain original startup failure
+                logger.warning(
+                    "Desktop tick runtime rollback failed (%s)",
+                    runtime.sanitise_error(cleanup_exc),
+                )
         elif storage is not None:
             try:
                 storage.close()
@@ -549,8 +580,28 @@ def serve(
     except (KeyboardInterrupt, SystemExit):  # pragma: no cover - signal path
         pass
     finally:
+        propagating_error = sys.exc_info()[0] is not None
+        shutdown_failed = False
         if shutdown_signal is not None and shutdown_callback is not None:
-            shutdown_signal.uninstall(shutdown_callback)
+            try:
+                shutdown_signal.uninstall(shutdown_callback)
+            except Exception as exc:  # noqa: BLE001 - continue closing owned resources
+                shutdown_failed = True
+                logger.warning(
+                    "Desktop shutdown callback cleanup failed (%s)",
+                    type(exc).__name__,
+                )
+
+        tracker = app.config.get("RUNTIME_REQUEST_TRACKER")
+        stop_admitting = getattr(tracker, "stop_admitting", None)
+        if callable(stop_admitting):
+            stop_admitting()
+        app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
+        wait_for_idle = getattr(tracker, "wait_for_idle", None)
+        if callable(wait_for_idle) and not wait_for_idle(60.0):
+            shutdown_failed = True
+            logger.warning("Desktop shutdown timed out draining active requests")
+
         runtime = app.config.get(_CAPTURE_RUNTIME_CONFIG)
         if runtime is not None:
             try:
@@ -565,6 +616,27 @@ def serve(
                     "Desktop tick capture shutdown failed (%s)",
                     diagnostic,
                 )
+                shutdown_failed = True
+
+        client = app.config.get("CLIENT")
+        if client is not None:
+            try:
+                client_close_sync(client)
+            except Exception as exc:  # noqa: BLE001 - audit close must still run
+                shutdown_failed = True
+                logger.warning("Desktop OpenAlgo client shutdown failed (%s)", type(exc).__name__)
+
+        audit = app.config.get("AUDIT")
+        close_audit = getattr(audit, "close", None)
+        if callable(close_audit):
+            try:
+                close_audit()
+            except Exception as exc:  # noqa: BLE001 - all owners get one cleanup attempt
+                shutdown_failed = True
+                logger.warning("Desktop audit shutdown failed (%s)", type(exc).__name__)
+
+        if shutdown_failed and not propagating_error:
+            raise RuntimeError("Desktop backend shutdown failed") from None
 
 
 def main(

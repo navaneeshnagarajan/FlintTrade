@@ -101,6 +101,21 @@ class _UnexpectedFailureRecorder(_FakeRecorder):
         raise RuntimeError(f"recorder stopped with {self.api_key}")
 
 
+class _FlushFailureRecorder(_FakeRecorder):
+    def __init__(self, api_key: str) -> None:
+        super().__init__()
+        self.api_key = api_key
+
+    async def run(self) -> None:
+        self.run_started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            raise RuntimeError(f"final flush rejected {self.api_key}") from None
+        finally:
+            self.run_finished.set()
+
+
 @pytest.mark.unit
 def test_runtime_redacts_original_and_hot_reloaded_api_keys() -> None:
     runtime = desktop._DesktopTickCaptureRuntime(
@@ -196,7 +211,8 @@ def test_failed_storage_close_remains_retryable_and_unpublished(
     assert runtime is not None
     assert recorder.run_started.wait(1)
 
-    runtime.stop(timeout=1)
+    with pytest.raises(RuntimeError, match="tick storage shutdown failed"):
+        runtime.stop(timeout=1)
 
     assert storage.close_calls == 2
     assert storage.closed is False
@@ -285,7 +301,8 @@ def test_stop_never_closes_storage_while_recorder_thread_is_still_flushing(
     assert runtime is not None
     assert recorder.run_started.wait(1)
 
-    runtime.stop(timeout=0.01)
+    with pytest.raises(RuntimeError, match="shutdown timed out"):
+        runtime.stop(timeout=0.01)
 
     assert recorder.cancel_seen.wait(1)
     assert runtime._thread.is_alive()
@@ -296,6 +313,28 @@ def test_stop_never_closes_storage_while_recorder_thread_is_still_flushing(
     assert not runtime._thread.is_alive()
     assert recorder.run_finished.is_set()
     assert storage.closed is True
+
+
+@pytest.mark.unit
+def test_final_recorder_flush_failure_is_redacted_and_propagated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    api_key = "final-flush-secret"
+    recorder = _FlushFailureRecorder(api_key)
+    storage = _FakeStorage("unused")
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, api_key)
+    caplog.set_level(logging.WARNING, logger="flinttrade.desktop")
+    runtime.start()
+    assert recorder.run_started.wait(1)
+
+    with pytest.raises(RuntimeError, match="tick capture shutdown failed") as error:
+        runtime.stop(timeout=1)
+
+    assert recorder.run_finished.wait(1)
+    assert storage.closed is True
+    assert api_key not in str(error.value)
+    assert api_key not in caplog.text
+    assert "final flush rejected [redacted]" in caplog.text
 
 
 @pytest.mark.unit
@@ -404,6 +443,58 @@ def test_serve_announces_ready_after_capture_start_and_stops_runtime(
     desktop.serve(0, ready_writer=lambda _message: events.append("ready"))
 
     assert events == ["capture-start", "ready", "server-run", "capture-stop"]
+
+
+@pytest.mark.unit
+def test_serve_closes_app_owned_client_and_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    client = object()
+    audit = SimpleNamespace(close=lambda: events.append("audit-close"))
+    flask_app = Flask("desktop-owned-dependencies")
+    flask_app.config.update(CLIENT=client, AUDIT=audit)
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(
+        desktop,
+        "client_close_sync",
+        lambda value: events.append("client-close") if value is client else None,
+    )
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            effective_port=5100,
+            run=lambda: events.append("server-run"),
+        ),
+    )
+
+    desktop.serve(5100, ready_writer=lambda _message: None)
+
+    assert events == ["server-run", "client-close", "audit-close"]
+
+
+@pytest.mark.unit
+def test_serve_reports_client_close_failure_after_closing_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit = MagicMock()
+    flask_app = Flask("desktop-client-close-failure")
+    flask_app.config.update(CLIENT=object(), AUDIT=audit)
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(
+        desktop,
+        "client_close_sync",
+        MagicMock(side_effect=RuntimeError("close failed")),
+    )
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
+    )
+
+    with pytest.raises(RuntimeError, match="backend shutdown failed"):
+        desktop.serve(5100, ready_writer=lambda _message: None)
+
+    audit.close.assert_called_once_with()
 
 
 @pytest.mark.unit
@@ -537,7 +628,8 @@ def test_serve_redacts_capture_shutdown_failure(
     )
     caplog.set_level(logging.WARNING, logger="flinttrade.desktop")
 
-    desktop.serve(5100, ready_writer=lambda _message: None)
+    with pytest.raises(RuntimeError, match="backend shutdown failed"):
+        desktop.serve(5100, ready_writer=lambda _message: None)
 
     assert old_api_key not in caplog.text
     assert new_api_key not in caplog.text
