@@ -1074,7 +1074,6 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     assert retrain_call.kwargs["trigger_args"] == {
         "hour": 16,
         "minute": 0,
-        "day_of_week": "mon-fri",
         "timezone": "Asia/Kolkata",
     }
     late_retrain_call = calls["ml_signal_retrain_late"]
@@ -1271,8 +1270,9 @@ def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuou
         lambda exchange, *, on, symbol: sessions.get(exchange)
     )
     ist = timezone(timedelta(hours=5, minutes=30))
-    regular_now = datetime(2026, 7, 10, 16, 0, tzinfo=ist)
-    late_now = datetime(2026, 7, 10, 23, 59, tzinfo=ist)
+    # Saturday special sessions must still reach both daily roster jobs.
+    regular_now = datetime(2026, 7, 11, 16, 0, tzinfo=ist)
+    late_now = datetime(2026, 7, 11, 23, 59, tzinfo=ist)
     time_scheduler.now_ist.side_effect = [regular_now, late_now]
 
     assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
@@ -1283,14 +1283,14 @@ def test_runtime_retrains_only_closed_instruments_then_covers_late_and_continuou
     calls["ml_signal_retrain"].kwargs["handler"]()
     retrainer.run_all.assert_called_once_with(
         instruments=[instruments[0]],
-        session_date=date(2026, 7, 10),
+        session_date=date(2026, 7, 11),
     )
 
     retrainer.run_all.reset_mock()
     calls["ml_signal_retrain_late"].kwargs["handler"]()
     retrainer.run_all.assert_called_once_with(
         instruments=instruments[1:],
-        session_date=date(2026, 7, 10),
+        session_date=date(2026, 7, 11),
     )
 
 

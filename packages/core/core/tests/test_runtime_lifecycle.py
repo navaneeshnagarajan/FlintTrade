@@ -242,6 +242,25 @@ async def test_shutdown_quiesces_stream_agent_and_rotation_before_request_drain(
 
 
 @pytest.mark.asyncio
+async def test_shutdown_retires_router_before_dependencies_close() -> None:
+    runtime = _runtime_app()
+    flask_app = Flask("shutdown-router-retirement")
+    router = MagicMock()
+    router.revoke_and_drain.side_effect = (
+        lambda **_kwargs: flask_app.config.get("BROKER_ROUTER") is None
+    )
+    flask_app.config["BROKER_ROUTER"] = router
+    runtime._flask_app = flask_app
+
+    await runtime.stop()
+
+    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    assert flask_app.config["BROKER_ROUTER"] is None
+    assert flask_app.config["BROKER_ROUTER_DRAINING"] is None
+    runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_agent_shutdown_failure_preserves_dependencies_for_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -265,6 +284,34 @@ async def test_agent_shutdown_failure_preserves_dependencies_for_retry(
     tracker.wait_for_idle.assert_not_called()
     runtime.client.close.assert_not_awaited()
     assert runtime._stop_event.is_set() is False
+
+
+@pytest.mark.asyncio
+async def test_failed_tick_finalisation_retries_retained_buffer_on_next_stop() -> None:
+    runtime = _runtime_app()
+    flush_pending = MagicMock()
+    runtime._tick_recorder = MagicMock(
+        stop=MagicMock(),
+        flush_pending=flush_pending,
+        sanitise_error=lambda exc: type(exc).__name__,
+    )
+
+    async def failed_finalisation() -> None:
+        raise RuntimeError("final flush failed")
+
+    runtime._tick_recorder_task = asyncio.create_task(failed_finalisation())
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="tick recorder task"):
+        await runtime.stop()
+
+    flush_pending.assert_not_called()
+    runtime.client.close.assert_not_awaited()
+
+    await runtime.stop()
+
+    flush_pending.assert_called_once_with()
+    runtime.client.close.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

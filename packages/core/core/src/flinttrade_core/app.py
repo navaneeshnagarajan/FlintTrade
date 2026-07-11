@@ -1409,6 +1409,67 @@ def build_broker_router(
     )
 
 
+def _broker_router_drain_timeout(app: Flask) -> float:
+    """Return the configured bounded generation-drain timeout."""
+    raw_timeout = app.config.get("BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS", 10.0)
+    try:
+        return max(0.0, float(raw_timeout))
+    except (TypeError, ValueError):
+        return 10.0
+
+
+def retire_broker_router_generation(app: Flask, *, timeout: float | None = None) -> bool:
+    """Unpublish and permanently retire the current routing generation.
+
+    A timed-out generation remains strongly referenced in app config so a
+    later rebuild or shutdown retry must finish draining that exact instance
+    before any replacement can be published.
+    """
+    rebuild_lock = app.config.setdefault(
+        "BROKER_ROUTER_REBUILD_LOCK", threading.RLock()
+    )
+    with rebuild_lock:
+        active_router = app.config.get("BROKER_ROUTER")
+        draining_router = app.config.get("BROKER_ROUTER_DRAINING")
+        if active_router is not None:
+            if draining_router is not None and draining_router is not active_router:
+                app.config["BROKER_ROUTER"] = None
+                logger.critical(
+                    "Multiple BrokerRouter generations require draining; routing is disabled"
+                )
+                return False
+            app.config["BROKER_ROUTER"] = None
+            draining_router = active_router
+            app.config["BROKER_ROUTER_DRAINING"] = active_router
+
+        if draining_router is None:
+            app.config["BROKER_ROUTER_DRAINING"] = None
+            return True
+
+        revoke_and_drain = getattr(draining_router, "revoke_and_drain", None)
+        if not callable(revoke_and_drain):
+            logger.critical(
+                "BrokerRouter generation cannot be revoked; routing is disabled"
+            )
+            return False
+
+        drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
+        try:
+            drained = bool(revoke_and_drain(timeout=drain_timeout))
+        except Exception as exc:  # noqa: BLE001 - stale writes fail closed
+            logger.critical(
+                "BrokerRouter generation revocation failed (%s)",
+                type(exc).__name__,
+            )
+            return False
+        if not drained:
+            return False
+
+        if app.config.get("BROKER_ROUTER_DRAINING") is draining_router:
+            app.config["BROKER_ROUTER_DRAINING"] = None
+        return True
+
+
 def configure_broker_router(
     app: Flask,
     registry: Any,
@@ -1430,34 +1491,7 @@ def configure_broker_router(
         "BROKER_ROUTER_REBUILD_LOCK", threading.RLock()
     )
     with rebuild_lock:
-        previous_router = app.config.get("BROKER_ROUTER")
-        # Unpublish first. Once revocation begins, concurrent callers must see
-        # routing as unavailable rather than retaining the old generation.
-        app.config["BROKER_ROUTER"] = None
-        raw_timeout = app.config.get("BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS", 10.0)
-        try:
-            drain_timeout = max(0.0, float(raw_timeout))
-        except (TypeError, ValueError):
-            drain_timeout = 10.0
-
-        drained = True
-        if previous_router is not None:
-            revoke_and_drain = getattr(previous_router, "revoke_and_drain", None)
-            if not callable(revoke_and_drain):
-                drained = False
-                logger.critical(
-                    "BrokerRouter generation cannot be revoked; routing is disabled"
-                )
-            else:
-                try:
-                    drained = bool(revoke_and_drain(timeout=drain_timeout))
-                except Exception as exc:  # noqa: BLE001 - stale writes fail closed
-                    drained = False
-                    logger.critical(
-                        "BrokerRouter generation revocation failed (%s)",
-                        type(exc).__name__,
-                    )
-        if not drained:
+        if not retire_broker_router_generation(app):
             app.config["SMART_ROUTING"] = {}
             app.config["NATIVE_ADAPTERS"] = {}
             app.config["RECONCILE_TARGETS"] = None
@@ -1691,7 +1725,6 @@ def _wire_ml_signal_runtime(
             trigger_args={
                 "hour": 16,
                 "minute": 0,
-                "day_of_week": "mon-fri",
                 "timezone": "Asia/Kolkata",
             },
         )
@@ -4109,6 +4142,17 @@ class FlintTradeApp:
                 lambda: _shutdown_rotation_scheduler(flask_app),
             )
 
+            try:
+                router_retired = await asyncio.to_thread(
+                    retire_broker_router_generation,
+                    flask_app,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail closed on router ownership loss
+                errors.append(("broker router", type(exc).__name__))
+            else:
+                if not router_retired:
+                    errors.append(("broker router", "TimeoutError"))
+
         tick_recorder = self._tick_recorder
         tick_task = self._tick_recorder_task
         tick_storage = getattr(self, "_tick_storage", None)
@@ -4136,6 +4180,15 @@ class FlintTradeApp:
                     "Tick recorder task ended with an error during shutdown (%s)",
                     diagnostic,
                 )
+            finally:
+                # A completed failed task can only replay the same exception.
+                # Clear process ownership so a later stop() retries the
+                # recorder's retained buffer directly instead.
+                self._tick_recorder_task = None
+        elif tick_recorder is not None:
+            flush_pending = getattr(tick_recorder, "flush_pending", None)
+            if callable(flush_pending):
+                attempt("tick recorder retained buffer", flush_pending)
 
         if errors:
             summary = ", ".join(

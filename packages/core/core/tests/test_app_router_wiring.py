@@ -92,6 +92,43 @@ def test_configure_broker_router_drain_timeout_never_publishes_candidate(
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=0.25)
     assert app.config["BROKER_ROUTER"] is None
+    assert app.config["BROKER_ROUTER_DRAINING"] is old_router
+
+
+@pytest.mark.unit
+def test_configure_broker_router_retries_retained_generation_before_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("router-generation-drain-retry")
+    old_router = MagicMock()
+    old_router.revoke_and_drain.side_effect = [False, True]
+    candidate = object()
+    build = MagicMock(return_value=candidate)
+    app.config.update(
+        BROKER_ROUTER=old_router,
+        BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_read_workspace_brokers",
+        lambda: default_workspace_config()["brokers"],
+    )
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
+    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
+
+    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    build.assert_not_called()
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["BROKER_ROUTER_DRAINING"] is old_router
+
+    assert app_module.configure_broker_router(app, object(), object(), object()) is True
+
+    assert old_router.revoke_and_drain.call_count == 2
+    assert app.config["BROKER_ROUTER_DRAINING"] is None
+    assert app.config["BROKER_ROUTER"] is candidate
 
 
 def test_build_broker_router_from_default_config() -> None:
