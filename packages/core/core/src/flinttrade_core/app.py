@@ -1375,7 +1375,7 @@ def _wire_ml_signal_runtime(
         "ml_signal_cycle",
         handler=make_ml_signal_job(
             pipeline,
-            lambda: bool(time_scheduler.is_market_open("NSE")),
+            lambda exchange: bool(time_scheduler.is_market_open(exchange)),
         ),
         description="Publish scheduled LightGBM signals into the canonical feed",
         trigger_type="interval",
@@ -1401,12 +1401,14 @@ def _wire_ml_signal_runtime(
         else:
             raise TypeError("ML_SIGNAL_RETRAIN_CONFIG must be a RetrainConfig or mapping")
 
+        retrain_cancel_event = threading.Event()
         retrainer = SignalRetrainer(
             retrain_config,
             instruments=pipeline.instruments,
             data_fetcher=pipeline.fetch_bars,
             pipeline=pipeline,
             instrument_provider=lambda: pipeline.instruments,
+            cancel_requested=retrain_cancel_event.is_set,
         )
 
         def _run_signal_retrain() -> list[Any]:
@@ -1434,6 +1436,7 @@ def _wire_ml_signal_runtime(
         app.config["ML_SIGNAL_RETRAIN_CONFIG"] = retrain_config
         app.config["ML_SIGNAL_RETRAINER"] = retrainer
         app.config["ML_SIGNAL_RETRAIN_JOB"] = "ml_signal_retrain"
+        app.config["ML_SIGNAL_RETRAIN_CANCEL_EVENT"] = retrain_cancel_event
     return True
 
 
@@ -3728,6 +3731,15 @@ class FlintTradeApp:
                 await callback()
             except Exception as exc:  # noqa: BLE001 - shutdown must continue
                 errors.append((label, type(exc).__name__))
+
+        retrain_cancel_event = (
+            flask_app.config.get("ML_SIGNAL_RETRAIN_CANCEL_EVENT")
+            if flask_app is not None
+            else None
+        )
+        cancel_retraining = getattr(retrain_cancel_event, "set", None)
+        if callable(cancel_retraining):
+            attempt("signal retraining cancellation", cancel_retraining)
 
         try:
             # Stop strategies

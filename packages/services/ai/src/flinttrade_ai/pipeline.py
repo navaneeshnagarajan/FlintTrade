@@ -377,15 +377,37 @@ class SignalPipeline:
 
         return _normalise_history_rows(rows)
 
-    def run_cycle(self) -> dict[str, dict[str, Any]]:
+    def run_cycle(
+        self,
+        *,
+        market_is_open: Callable[[str], bool] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         """Run one signal cycle for all instruments.
+
+        Args:
+            market_is_open: Optional exchange predicate used by scheduled runs.
+                Closed exchanges are skipped before any history request.
 
         Returns a dict keyed by ``exchange:symbol`` with signal details.
         """
+        instruments = self.instruments
+        if market_is_open is not None:
+            eligible: list[dict[str, str]] = []
+            for instrument in instruments:
+                exchange = instrument["exchange"]
+                try:
+                    if market_is_open(exchange):
+                        eligible.append(instrument)
+                except Exception:  # noqa: BLE001 - one bad calendar lookup must fail closed
+                    logger.exception("Could not determine market hours for %s", exchange)
+            instruments = eligible
+            if not instruments:
+                return {}
+
         self._ensure_generator()
         results: dict[str, dict[str, Any]] = {}
 
-        for inst in self.instruments:
+        for inst in instruments:
             key = f"{inst['exchange']}:{inst['symbol']}"
             try:
                 bars = self.fetch_bars(inst["symbol"], inst["exchange"])

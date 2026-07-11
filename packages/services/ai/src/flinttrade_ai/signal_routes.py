@@ -64,15 +64,27 @@ def configure_signal_sources(
 
 def make_ml_signal_job(
     pipeline: SignalPipeline,
-    market_is_open: Callable[[], bool],
+    market_is_open: Callable[[str], bool],
 ) -> Callable[[], dict[str, dict[str, Any]]]:
-    """Build the market-hours guard around the scheduled ML signal cycle."""
+    """Build a stable per-exchange market-hours guard for one ML cycle."""
 
     def run() -> dict[str, dict[str, Any]]:
-        if not market_is_open():
-            logger.debug("Scheduled ML signal cycle skipped outside NSE market hours")
+        open_exchanges: set[str] = set()
+        checked: set[str] = set()
+        for instrument in pipeline.instruments:
+            exchange = str(instrument.get("exchange") or "")
+            if not exchange or exchange in checked:
+                continue
+            checked.add(exchange)
+            try:
+                if market_is_open(exchange):
+                    open_exchanges.add(exchange)
+            except Exception:  # noqa: BLE001 - an unknown calendar must fail closed
+                logger.exception("Scheduled ML market-hours lookup failed for %s", exchange)
+        if not open_exchanges:
+            logger.debug("Scheduled ML signal cycle skipped: all configured exchanges are closed")
             return {}
-        return pipeline.run_cycle()
+        return pipeline.run_cycle(market_is_open=open_exchanges.__contains__)
 
     return run
 

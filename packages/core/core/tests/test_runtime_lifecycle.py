@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from types import MethodType
 from unittest.mock import AsyncMock, MagicMock
@@ -135,3 +136,22 @@ def test_run_propagates_background_shutdown_failure() -> None:
 
     with pytest.raises(RuntimeError, match="tick recorder"):
         app.run()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_retraining_before_waiting_for_cron() -> None:
+    """Cron's blocking shutdown must see cooperative ML cancellation first."""
+    app = _runtime_app()
+    cancel_event = threading.Event()
+    flask_app = Flask("retrain-cancellation")
+    flask_app.config["ML_SIGNAL_RETRAIN_CANCEL_EVENT"] = cancel_event
+    app._flask_app = flask_app
+
+    def stop_cron() -> None:
+        assert cancel_event.is_set()
+
+    app.cron.stop = MagicMock(side_effect=stop_cron)
+
+    await app.stop()
+
+    app.cron.stop.assert_called_once_with()

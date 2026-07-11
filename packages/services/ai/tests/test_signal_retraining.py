@@ -937,6 +937,11 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
         "timezone": "Asia/Kolkata",
     }
     assert isinstance(app.config["ML_SIGNAL_RETRAINER"], SignalRetrainer)
+    cancel_event = app.config["ML_SIGNAL_RETRAIN_CANCEL_EVENT"]
+    assert cancel_event.is_set() is False
+    assert app.config["ML_SIGNAL_RETRAINER"]._is_cancelled() is False
+    cancel_event.set()
+    assert app.config["ML_SIGNAL_RETRAINER"]._is_cancelled() is True
     assert app.config["ML_SIGNAL_RETRAIN_JOB"] == "ml_signal_retrain"
     assert app.config["ML_SIGNAL_JOB"] == "ml_signal_cycle"
 
