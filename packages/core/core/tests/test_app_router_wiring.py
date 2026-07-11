@@ -9,6 +9,9 @@ and leaves BROKER_ROUTER unset rather than bricking the app.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
+from flask import Flask
 import pytest
 
 from flinttrade_core.app import build_broker_router
@@ -17,6 +20,78 @@ from flinttrade_gateway.registry import BrokerRegistry
 from flinttrade_gateway.router import BrokerRouter
 from flinttrade_gateway.routing_config import RoutingConfig, RoutingConfigError
 from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
+
+
+@pytest.mark.unit
+def test_configure_broker_router_revokes_old_generation_before_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("router-generation-swap")
+    old_router = MagicMock()
+    old_router.revoke_and_drain.side_effect = (
+        lambda **_kwargs: app.config["BROKER_ROUTER"] is None
+    )
+    candidate = object()
+    app.config["BROKER_ROUTER"] = old_router
+    monkeypatch.setattr(
+        app_module,
+        "_read_workspace_brokers",
+        lambda: default_workspace_config()["brokers"],
+    )
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
+    monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
+    monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
+
+    assert app_module.configure_broker_router(app, object(), object(), object()) is True
+
+    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    assert app.config["BROKER_ROUTER"] is candidate
+
+
+@pytest.mark.unit
+def test_configure_broker_router_build_failure_revokes_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("router-generation-build-failure")
+    old_router = MagicMock()
+    old_router.revoke_and_drain.return_value = True
+    app.config["BROKER_ROUTER"] = old_router
+    monkeypatch.setattr(
+        app_module,
+        "build_broker_router",
+        MagicMock(side_effect=ValueError("invalid routing")),
+    )
+
+    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+
+    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    assert app.config["BROKER_ROUTER"] is None
+
+
+@pytest.mark.unit
+def test_configure_broker_router_drain_timeout_never_publishes_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("router-generation-drain-timeout")
+    old_router = MagicMock()
+    old_router.revoke_and_drain.return_value = False
+    candidate = object()
+    app.config.update(
+        BROKER_ROUTER=old_router,
+        BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.25,
+    )
+    monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
+
+    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.25)
+    assert app.config["BROKER_ROUTER"] is None
 
 
 def test_build_broker_router_from_default_config() -> None:

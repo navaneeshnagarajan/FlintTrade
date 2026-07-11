@@ -1414,70 +1414,119 @@ def configure_broker_router(
     registry: Any,
     credential_store: Any,
     openalgo_client: Any,
-) -> None:
+) -> bool:
     """Build (or rebuild) the BrokerRouter and store it + friends on app.config.
 
     Extracted from ``create_flask_app`` so it can be re-invoked at runtime after
     the credential vault or the ``brokers.registered``/``account_acls`` config
     changes (an interactive "connect native broker" action) — rebuilding
     re-reads the vault + config, so a native that just gained credentials
-    activates. Best-effort: a malformed brokers block must NOT brick the app;
-    on failure ``BROKER_ROUTER`` is left ``None`` so the gated order path returns
-    a clear 503 rather than dispatching, and the rest of the app stays up.
+    activates. A rebuild publishes one complete routing generation atomically.
+    The prior generation is revoked and drained before the candidate becomes
+    reachable, so retained background references cannot dispatch through stale
+    credentials or ACLs. Any failure leaves routing unavailable.
     """
-    app.config["BROKER_ROUTER"] = None
-    # Smart routing stays disabled when the brokers block fails to parse —
-    # the smart-route endpoint reads this and fails closed with a clear 403.
-    app.config["SMART_ROUTING"] = {}
-    # Active native adapters (broker_id -> adapter) + the reconciliation targets
-    # provider the engine runner polls (contract §14.2). Reset on every rebuild
-    # so a removed native drops out of both routing and reconciliation.
-    app.config["NATIVE_ADAPTERS"] = {}
-    app.config["RECONCILE_TARGETS"] = None
-    try:
-        from .workspace_migrations import default_workspace_config  # noqa: PLC0415
-        from flinttrade_engine.local_state_provider import JournalLocalStateProvider  # noqa: PLC0415
+    rebuild_lock = app.config.setdefault(
+        "BROKER_ROUTER_REBUILD_LOCK", threading.RLock()
+    )
+    with rebuild_lock:
+        previous_router = app.config.get("BROKER_ROUTER")
+        # Unpublish first. Once revocation begins, concurrent callers must see
+        # routing as unavailable rather than retaining the old generation.
+        app.config["BROKER_ROUTER"] = None
+        raw_timeout = app.config.get("BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS", 10.0)
+        try:
+            drain_timeout = max(0.0, float(raw_timeout))
+        except (TypeError, ValueError):
+            drain_timeout = 10.0
 
-        _brokers_cfg = _read_workspace_brokers()
-        _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
-        app.config["SMART_ROUTING"] = dict(_effective_brokers.get("smart_routing") or {})
-        _native_attest_ok, _native_has_credentials = _native_activation_checks(credential_store)
-        # Expose the OpenAlgo client so sync analysis routes (the screener) can
-        # fetch a real option chain through the functional bridge adapter rather
-        # than always falling back to sample data.
+        drained = True
+        if previous_router is not None:
+            revoke_and_drain = getattr(previous_router, "revoke_and_drain", None)
+            if not callable(revoke_and_drain):
+                drained = False
+                logger.critical(
+                    "BrokerRouter generation cannot be revoked; routing is disabled"
+                )
+            else:
+                try:
+                    drained = bool(revoke_and_drain(timeout=drain_timeout))
+                except Exception as exc:  # noqa: BLE001 - stale writes fail closed
+                    drained = False
+                    logger.critical(
+                        "BrokerRouter generation revocation failed (%s)",
+                        type(exc).__name__,
+                    )
+        if not drained:
+            app.config["SMART_ROUTING"] = {}
+            app.config["NATIVE_ADAPTERS"] = {}
+            app.config["RECONCILE_TARGETS"] = None
+            logger.critical(
+                "BrokerRouter rebuild aborted because the prior generation did not drain"
+            )
+            return False
+
+        candidate_router = None
+        candidate_smart_routing: dict[str, Any] = {}
+        candidate_native_adapters: dict[str, Any] = {}
+        candidate_reconcile_targets = None
+        brokers_cfg: dict[str, Any] | None = None
+        build_error: Exception | None = None
+        try:
+            from .workspace_migrations import default_workspace_config  # noqa: PLC0415
+            from flinttrade_engine.local_state_provider import JournalLocalStateProvider  # noqa: PLC0415
+
+            brokers_cfg = _read_workspace_brokers()
+            effective_brokers = brokers_cfg or default_workspace_config()["brokers"]
+            candidate_smart_routing = dict(
+                effective_brokers.get("smart_routing") or {}
+            )
+            native_attest_ok, native_has_credentials = _native_activation_checks(
+                credential_store
+            )
+            local_state_provider = JournalLocalStateProvider(
+                storage_provider=lambda: app.config.get("TRADE_STORAGE"),
+                lock_provider=lambda: app.config.get("TRADE_STORAGE_LOCK"),
+            )
+            candidate_router = build_broker_router(
+                registry,
+                effective_brokers,
+                openalgo_client=openalgo_client,
+                native_attest_ok=native_attest_ok,
+                native_has_credentials=native_has_credentials,
+                native_adapter_kwargs=_native_adapter_kwargs_for(local_state_provider),
+                on_native_activated=candidate_native_adapters.update,
+            )
+            candidate_reconcile_targets = _build_reconcile_targets_provider(
+                registry,
+                candidate_native_adapters,
+                [str(s) for s in (effective_brokers.get("registered") or [])],
+            )
+        except Exception as exc:  # noqa: BLE001 - malformed routing fails closed
+            build_error = exc
+
+        if build_error is not None or candidate_router is None:
+            app.config["SMART_ROUTING"] = {}
+            app.config["NATIVE_ADAPTERS"] = {}
+            app.config["RECONCILE_TARGETS"] = None
+            if build_error is not None:
+                logger.critical(
+                    "BrokerRouter not built — workspace.json brokers routing is invalid: %s. "
+                    "Order routing is unavailable until you fix brokers.routing; the rest of "
+                    "the app is up. Last known-good config: "
+                    "~/.flinttrade/workspace.brokers.bak.json",
+                    build_error,
+                )
+            return False
+
         app.config["OPENALGO_CLIENT"] = openalgo_client
-        # Journal-backed local-state provider threaded into every native adapter
-        # (contract §14): the flinttrade-side mirror reconcile() diffs broker
-        # state against. Resolves lazily from app.config so the shared trade
-        # store (created later in the factory) is picked up.
-        _local_state_provider = JournalLocalStateProvider(
-            storage_provider=lambda: app.config.get("TRADE_STORAGE"),
-            lock_provider=lambda: app.config.get("TRADE_STORAGE_LOCK"),
-        )
-        _native_adapters: dict[str, Any] = app.config["NATIVE_ADAPTERS"]
-        app.config["BROKER_ROUTER"] = build_broker_router(
-            registry,
-            _effective_brokers,
-            openalgo_client=openalgo_client,
-            native_attest_ok=_native_attest_ok,
-            native_has_credentials=_native_has_credentials,
-            native_adapter_kwargs=_native_adapter_kwargs_for(_local_state_provider),
-            on_native_activated=_native_adapters.update,
-        )
-        app.config["RECONCILE_TARGETS"] = _build_reconcile_targets_provider(
-            registry,
-            _native_adapters,
-            [str(s) for s in (_effective_brokers.get("registered") or [])],
-        )
-        if _brokers_cfg is not None:
-            _snapshot_brokers_bak(_brokers_cfg)
-    except Exception as exc:
-        logger.critical(
-            "BrokerRouter not built — workspace.json brokers routing is invalid: %s. "
-            "Order routing is unavailable until you fix brokers.routing; the rest of "
-            "the app is up. Last known-good config: ~/.flinttrade/workspace.brokers.bak.json",
-            exc,
-        )
+        app.config["SMART_ROUTING"] = candidate_smart_routing
+        app.config["NATIVE_ADAPTERS"] = candidate_native_adapters
+        app.config["RECONCILE_TARGETS"] = candidate_reconcile_targets
+        app.config["BROKER_ROUTER"] = candidate_router
+        if brokers_cfg is not None:
+            _snapshot_brokers_bak(brokers_cfg)
+        return True
 
 
 def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str, Any]:
@@ -1783,6 +1832,8 @@ def create_flask_app(
     app.config["_FRONTEND_AVAILABLE"] = _frontend_available
     app.config["_DIST_PATH"] = _dist_path
     _install_runtime_request_tracking(app)
+    app.config["SIGNAL_STREAM_SHUTDOWN_EVENT"] = threading.Event()
+    app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"] = threading.Event()
     _tick_capture_lifecycle_lock(app)
 
     # ------------------------------------------------------------------
@@ -3471,6 +3522,14 @@ def _run_flask_server(app: Flask, port: int = 5100) -> None:
             logger.warning("Session-refresh scheduler failed to start: %s", exc)
 
 
+def _shutdown_rotation_scheduler(app: Flask) -> None:
+    """Stop the native-session rotation owner when it was started."""
+    rotation_scheduler = app.config.get("ROTATION_SCHEDULER")
+    if rotation_scheduler is None or not getattr(rotation_scheduler, "running", False):
+        return
+    rotation_scheduler.shutdown(wait=True)
+
+
 class FlintTradeApp:
     """Main application — creates and wires all FlintTrade subsystems.
 
@@ -3570,6 +3629,7 @@ class FlintTradeApp:
         self._reconciliation_task: Any | None = None
 
         self._stop_event = asyncio.Event()
+        self._shutdown_failed_event = asyncio.Event()
 
         logger.info("FlintTradeApp initialised — %s", self.version)
 
@@ -3951,14 +4011,38 @@ class FlintTradeApp:
                 exc,
             )
 
-        # Wait for shutdown signal
-        await self._stop_event.wait()
+        # Wait for either successful teardown or a fail-closed shutdown error.
+        await self._wait_for_shutdown_result()
+
+    async def _wait_for_shutdown_result(self) -> None:
+        """Wait for shutdown completion and propagate a failed attempt."""
+        failed_event = getattr(self, "_shutdown_failed_event", None)
+        if failed_event is None:
+            failed_event = asyncio.Event()
+            self._shutdown_failed_event = failed_event
+        stopped = asyncio.create_task(self._stop_event.wait())
+        failed = asyncio.create_task(failed_event.wait())
+        try:
+            await asyncio.wait(
+                {stopped, failed},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for waiter in (stopped, failed):
+                if not waiter.done():
+                    waiter.cancel()
+            await asyncio.gather(stopped, failed, return_exceptions=True)
+        if failed_event.is_set():
+            shutdown_task = getattr(self, "_shutdown_task", None)
+            if shutdown_task is not None:
+                await asyncio.shield(shutdown_task)
+            raise RuntimeError("shutdown failed before completion")
 
     async def _wait_for_shutdown_if_started(self) -> bool:
         """Let an in-progress stop retain ownership across startup await points."""
         if not self._stop_started:
             return False
-        await self._stop_event.wait()
+        await self._wait_for_shutdown_result()
         return True
 
     async def stop(self) -> None:
@@ -3968,9 +4052,18 @@ class FlintTradeApp:
 
         task = getattr(self, "_shutdown_task", None)
         if task is None or task.done():
+            failed_event = getattr(self, "_shutdown_failed_event", None)
+            if failed_event is None:
+                failed_event = asyncio.Event()
+                self._shutdown_failed_event = failed_event
+            failed_event.clear()
             task = asyncio.create_task(self._stop_once())
             self._shutdown_task = task
-        await asyncio.shield(task)
+        try:
+            await asyncio.shield(task)
+        except Exception:
+            self._shutdown_failed_event.set()
+            raise
 
     async def _stop_once(self) -> None:
         """Run one complete, best-effort shutdown attempt."""
@@ -4000,6 +4093,80 @@ class FlintTradeApp:
             except Exception as exc:  # noqa: BLE001 - shutdown must continue
                 errors.append((label, type(exc).__name__))
 
+        # Long-lived streams and background writers are not represented by a
+        # short request handler. Quiesce them before waiting on the request
+        # tracker, otherwise an SSE response can hold the drain open forever
+        # and a tick recorder can miss its final flush on timeout.
+        if flask_app is not None:
+            for label, config_key in (
+                ("signal stream", "SIGNAL_STREAM_SHUTDOWN_EVENT"),
+                ("signal retraining cancellation", "ML_SIGNAL_RETRAIN_CANCEL_EVENT"),
+            ):
+                shutdown_event = flask_app.config.get(config_key)
+                set_event = getattr(shutdown_event, "set", None)
+                if callable(set_event):
+                    attempt(label, set_event)
+
+            from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
+
+            raw_agent_timeout = flask_app.config.get(
+                "AUTONOMOUS_AGENT_SHUTDOWN_TIMEOUT_SECONDS", 30.0
+            )
+            try:
+                agent_timeout = max(0.0, float(raw_agent_timeout))
+            except (TypeError, ValueError):
+                agent_timeout = 30.0
+            try:
+                agent_stopped = shutdown_agent_runtime(
+                    flask_app,
+                    timeout=agent_timeout,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail closed on agent ownership loss
+                errors.append(("autonomous agent", type(exc).__name__))
+            else:
+                if not agent_stopped:
+                    errors.append(("autonomous agent", "TimeoutError"))
+
+            attempt(
+                "native session rotation scheduler",
+                lambda: _shutdown_rotation_scheduler(flask_app),
+            )
+
+        tick_recorder = self._tick_recorder
+        tick_task = self._tick_recorder_task
+        tick_storage = getattr(self, "_tick_storage", None)
+        tick_storage_lock = getattr(self, "_tick_storage_lock", None)
+        if tick_recorder is not None:
+            attempt("tick recorder", tick_recorder.stop)
+        if tick_task is not None:
+            tick_task.cancel()
+            try:
+                await tick_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001 - retain dependencies for a retry
+                errors.append(("tick recorder task", type(exc).__name__))
+                sanitise_error = getattr(tick_recorder, "sanitise_error", None)
+                try:
+                    diagnostic = (
+                        sanitise_error(exc)
+                        if callable(sanitise_error)
+                        else type(exc).__name__
+                    )
+                except Exception:  # pragma: no cover - diagnostics must not block shutdown
+                    diagnostic = type(exc).__name__
+                logger.warning(
+                    "Tick recorder task ended with an error during shutdown (%s)",
+                    diagnostic,
+                )
+
+        if errors:
+            summary = ", ".join(
+                f"{label} ({error_type})" for label, error_type in errors
+            )
+            logger.error("FlintTrade shutdown quiesce failed: %s", summary)
+            raise RuntimeError(f"shutdown encountered errors: {summary}")
+
         if request_tracker is not None:
             raw_timeout = flask_app.config.get(
                 "RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS", 60.0
@@ -4018,20 +4185,10 @@ class FlintTradeApp:
                 # Do not close any dependency while a handler still owns it. A
                 # later stop() retry can complete teardown after the request
                 # leaves; the process exits non-zero if it never does.
-                self._stop_event.set()
                 logger.error("FlintTrade shutdown timed out draining active requests")
                 raise RuntimeError(
                     "shutdown encountered errors: active requests (TimeoutError)"
                 )
-
-        retrain_cancel_event = (
-            flask_app.config.get("ML_SIGNAL_RETRAIN_CANCEL_EVENT")
-            if flask_app is not None
-            else None
-        )
-        cancel_retraining = getattr(retrain_cancel_event, "set", None)
-        if callable(cancel_retraining):
-            attempt("signal retraining cancellation", cancel_retraining)
 
         try:
             # Stop strategies
@@ -4047,34 +4204,8 @@ class FlintTradeApp:
             if telegram is not None:
                 attempt("telegram", telegram.stop)
 
-            # Stop tick capture (signal the loop to exit, then cancel the task).
-            tick_recorder = self._tick_recorder
-            tick_task = self._tick_recorder_task
-            tick_storage = getattr(self, "_tick_storage", None)
-            tick_storage_lock = getattr(self, "_tick_storage_lock", None)
-            if tick_recorder is not None:
-                attempt("tick recorder", tick_recorder.stop)
-            if tick_task is not None:
-                tick_task.cancel()
-                try:
-                    await tick_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:  # noqa: BLE001 - a failed recorder must not abort shutdown
-                    errors.append(("tick recorder task", type(exc).__name__))
-                    sanitise_error = getattr(tick_recorder, "sanitise_error", None)
-                    try:
-                        diagnostic = (
-                            sanitise_error(exc)
-                            if callable(sanitise_error)
-                            else type(exc).__name__
-                        )
-                    except Exception:  # pragma: no cover - diagnostics must not block shutdown
-                        diagnostic = type(exc).__name__
-                    logger.warning(
-                        "Tick recorder task ended with an error during shutdown (%s)",
-                        diagnostic,
-                    )
+            # The recorder was stopped and flushed before request draining;
+            # unpublish and close its storage only after admitted handlers left.
             if flask_app is not None:
                 with _tick_capture_lifecycle_lock(flask_app):
                     published_recorder = flask_app.config.get("TICK_RECORDER")

@@ -54,6 +54,7 @@ from .app import (
     _record_tick_capture_failure,
     _sanitise_tick_capture_error,
     _set_tick_capture_intent,
+    _shutdown_rotation_scheduler,
     _tick_capture_enabled,
     _tick_capture_lifecycle_lock,
     _tick_capture_mode,
@@ -597,6 +598,7 @@ def serve(
     finally:
         propagating_error = sys.exc_info()[0] is not None
         shutdown_failed = False
+        owner_quiesce_failed = False
         if shutdown_signal is not None and shutdown_callback is not None:
             try:
                 shutdown_signal.uninstall(shutdown_callback)
@@ -612,10 +614,49 @@ def serve(
         if callable(stop_admitting):
             stop_admitting()
         app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
-        wait_for_idle = getattr(tracker, "wait_for_idle", None)
-        if callable(wait_for_idle) and not wait_for_idle(60.0):
+
+        for label, config_key in (
+            ("signal stream", "SIGNAL_STREAM_SHUTDOWN_EVENT"),
+            ("signal retraining", "ML_SIGNAL_RETRAIN_CANCEL_EVENT"),
+        ):
+            shutdown_event = app.config.get(config_key)
+            set_event = getattr(shutdown_event, "set", None)
+            if callable(set_event):
+                try:
+                    set_event()
+                except Exception as exc:  # noqa: BLE001 - retain dependency ownership
+                    owner_quiesce_failed = True
+                    shutdown_failed = True
+                    logger.warning(
+                        "Desktop %s shutdown failed (%s)",
+                        label,
+                        type(exc).__name__,
+                    )
+
+        try:
+            from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
+
+            if not shutdown_agent_runtime(app, timeout=30.0):
+                owner_quiesce_failed = True
+                shutdown_failed = True
+                logger.warning("Desktop autonomous agent shutdown timed out")
+        except Exception as exc:  # noqa: BLE001 - live agent ownership must fail closed
+            owner_quiesce_failed = True
             shutdown_failed = True
-            logger.warning("Desktop shutdown timed out draining active requests")
+            logger.warning(
+                "Desktop autonomous agent shutdown failed (%s)",
+                type(exc).__name__,
+            )
+
+        try:
+            _shutdown_rotation_scheduler(app)
+        except Exception as exc:  # noqa: BLE001 - retain dependencies for recovery
+            owner_quiesce_failed = True
+            shutdown_failed = True
+            logger.warning(
+                "Desktop session rotation shutdown failed (%s)",
+                type(exc).__name__,
+            )
 
         runtime = app.config.get(_CAPTURE_RUNTIME_CONFIG)
         if runtime is not None:
@@ -631,24 +672,32 @@ def serve(
                     "Desktop tick capture shutdown failed (%s)",
                     diagnostic,
                 )
+                owner_quiesce_failed = True
                 shutdown_failed = True
 
-        client = app.config.get("CLIENT")
-        if client is not None:
-            try:
-                client_close_sync(client)
-            except Exception as exc:  # noqa: BLE001 - audit close must still run
-                shutdown_failed = True
-                logger.warning("Desktop OpenAlgo client shutdown failed (%s)", type(exc).__name__)
+        wait_for_idle = getattr(tracker, "wait_for_idle", None)
+        drained = not callable(wait_for_idle) or bool(wait_for_idle(60.0))
+        if not drained:
+            shutdown_failed = True
+            logger.warning("Desktop shutdown timed out draining active requests")
 
-        audit = app.config.get("AUDIT")
-        close_audit = getattr(audit, "close", None)
-        if callable(close_audit):
-            try:
-                close_audit()
-            except Exception as exc:  # noqa: BLE001 - all owners get one cleanup attempt
-                shutdown_failed = True
-                logger.warning("Desktop audit shutdown failed (%s)", type(exc).__name__)
+        if drained and not owner_quiesce_failed:
+            client = app.config.get("CLIENT")
+            if client is not None:
+                try:
+                    client_close_sync(client)
+                except Exception as exc:  # noqa: BLE001 - audit close must still run
+                    shutdown_failed = True
+                    logger.warning("Desktop OpenAlgo client shutdown failed (%s)", type(exc).__name__)
+
+            audit = app.config.get("AUDIT")
+            close_audit = getattr(audit, "close", None)
+            if callable(close_audit):
+                try:
+                    close_audit()
+                except Exception as exc:  # noqa: BLE001 - all owners get one cleanup attempt
+                    shutdown_failed = True
+                    logger.warning("Desktop audit shutdown failed (%s)", type(exc).__name__)
 
         if shutdown_failed and not propagating_error:
             raise RuntimeError("Desktop backend shutdown failed") from None

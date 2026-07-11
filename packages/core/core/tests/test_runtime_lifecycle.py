@@ -45,6 +45,7 @@ def _runtime_app() -> object:
     app._shutdown_task = None
     app._shutdown_request_task = None
     app._stop_event = asyncio.Event()
+    app._shutdown_failed_event = asyncio.Event()
     return app
 
 
@@ -191,12 +192,97 @@ async def test_request_drain_timeout_leaves_dependencies_open_for_retry() -> Non
 
     runtime.scheduler.stop_all.assert_not_awaited()
     runtime.client.close.assert_not_awaited()
+    assert runtime._stop_event.is_set() is False
     release_request.set()
     request_thread.join(timeout=1.0)
 
     await runtime.stop()
     runtime.scheduler.stop_all.assert_awaited_once_with()
     runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_quiesces_stream_agent_and_rotation_before_request_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long-lived/background writers stop before admitted requests are drained."""
+    import flinttrade_core.agent_routes as agent_routes
+
+    runtime = _runtime_app()
+    flask_app = Flask("shutdown-quiesce-order")
+    stream_shutdown = threading.Event()
+    events: list[str] = []
+    rotation = MagicMock(running=True)
+    rotation.shutdown.side_effect = lambda **_kwargs: events.append("rotation")
+    tracker = MagicMock()
+
+    def wait_for_idle(_timeout: float) -> bool:
+        assert stream_shutdown.is_set()
+        assert events == ["agent", "rotation"]
+        return True
+
+    tracker.wait_for_idle.side_effect = wait_for_idle
+    flask_app.config.update(
+        RUNTIME_REQUEST_TRACKER=tracker,
+        SIGNAL_STREAM_SHUTDOWN_EVENT=stream_shutdown,
+        ROTATION_SCHEDULER=rotation,
+    )
+    runtime._flask_app = flask_app
+    monkeypatch.setattr(
+        agent_routes,
+        "shutdown_agent_runtime",
+        lambda _app, **_kwargs: events.append("agent") or True,
+        raising=False,
+    )
+
+    await runtime.stop()
+
+    rotation.shutdown.assert_called_once_with(wait=True)
+    tracker.wait_for_idle.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_shutdown_failure_preserves_dependencies_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.agent_routes as agent_routes
+
+    runtime = _runtime_app()
+    flask_app = Flask("agent-shutdown-failure")
+    tracker = MagicMock()
+    flask_app.config["RUNTIME_REQUEST_TRACKER"] = tracker
+    runtime._flask_app = flask_app
+    monkeypatch.setattr(
+        agent_routes,
+        "shutdown_agent_runtime",
+        lambda _app, **_kwargs: False,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="autonomous agent"):
+        await runtime.stop()
+
+    tracker.wait_for_idle.assert_not_called()
+    runtime.client.close.assert_not_awaited()
+    assert runtime._stop_event.is_set() is False
+
+
+@pytest.mark.asyncio
+async def test_failed_shutdown_wakes_start_wait_without_claiming_completion() -> None:
+    runtime = _runtime_app()
+    runtime._stop_started = True
+
+    async def fail_shutdown() -> None:
+        raise RuntimeError("shutdown encountered errors: active requests")
+
+    runtime._shutdown_task = asyncio.create_task(fail_shutdown())
+    await asyncio.sleep(0)
+    runtime._shutdown_failed_event.set()
+
+    with pytest.raises(RuntimeError, match="active requests"):
+        await runtime._wait_for_shutdown_if_started()
+
+    assert runtime._stop_event.is_set() is False
 
 
 def test_run_propagates_background_shutdown_failure() -> None:

@@ -158,6 +158,17 @@ def test_router_unavailable_503(live_auth):
     assert resp.status_code == 503
 
 
+def test_start_refuses_while_runtime_is_shutting_down(live_auth):
+    app = _make_app()
+    app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"] = __import__("threading").Event()
+    app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"].set()
+
+    resp = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+
+    assert resp.status_code == 503
+    assert "shutting down" in resp.get_json()["message"].lower()
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
@@ -179,6 +190,7 @@ def test_start_wires_gated_executor_with_agent_principal(live_auth):
     assert ctx.selector == "openalgo:default"
     # The mid-flight revocation brake is wired.
     assert executor._pre_dispatch_check is not None  # noqa: SLF001
+    assert callable(executor._router_provider)  # noqa: SLF001
 
     snap = resp.get_json()["data"]
     assert snap["running"] is True
@@ -268,6 +280,21 @@ def test_stop_requests_square_off_and_status_reflects(live_auth):
 def test_stop_without_session_404(live_auth):
     resp = _make_app().test_client().post("/api/v1/ai/agent/stop", json={})
     assert resp.status_code == 404
+
+
+def test_runtime_shutdown_requests_square_off_and_joins_agent(live_auth):
+    app = _make_app()
+    client = app.test_client()
+    assert client.post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is True
+
+    trader = _FakeTrader.instances[-1]
+    assert trader.stop_calls == [True]
+    assert app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"].is_set()
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        thread = mod._RUNNER.get("thread")  # noqa: SLF001
+    assert thread is not None and not thread.is_alive()
 
 
 def test_status_idle_shape(live_auth):

@@ -54,6 +54,43 @@ def _reset_runner_for_tests() -> None:
         _RUNNER.clear()
 
 
+def _shutdown_event(app: Any) -> threading.Event:
+    """Return the process-owned agent shutdown event for one Flask app."""
+    configured = app.config.get("AUTONOMOUS_AGENT_SHUTDOWN_EVENT")
+    if configured is None:
+        configured = threading.Event()
+        app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"] = configured
+    if not isinstance(configured, threading.Event):
+        raise TypeError("AUTONOMOUS_AGENT_SHUTDOWN_EVENT must be a threading.Event")
+    return configured
+
+
+def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
+    """Stop and join the process-wide autonomous agent before dependencies close.
+
+    The trader's own stop path performs its configured square-off through the
+    existing ``GatedChildExecutor``. The shutdown event blocks new sessions but
+    deliberately does not short-circuit that reduce-only cleanup path.
+    """
+    _shutdown_event(app).set()
+    with _RUNNER_LOCK:
+        trader = _RUNNER.get("trader")
+        thread = _RUNNER.get("thread")
+
+    if trader is None or thread is None or not thread.is_alive():
+        return True
+    try:
+        trader.request_stop(square_off=True)
+    except Exception:  # noqa: BLE001 - shutdown must fail closed without leaking details
+        logger.exception("Autonomous agent stop request failed")
+        return False
+    thread.join(timeout=max(0.0, float(timeout)))
+    if thread.is_alive():
+        logger.error("Autonomous agent did not stop within the shutdown deadline")
+        return False
+    return True
+
+
 def _agent_flag_enabled() -> bool:
     """Live-read the ``ai.autonomous_agent.enabled`` workspace flag."""
     try:
@@ -168,6 +205,13 @@ def start_agent() -> tuple[Any, int]:
     )
     from .smart_order_routes import GatedChildExecutor  # noqa: PLC0415
 
+    app_obj = current_app._get_current_object()  # noqa: SLF001
+    if _shutdown_event(app_obj).is_set():
+        return jsonify({
+            "status": "error",
+            "message": "The application is shutting down; no new agent session can start.",
+        }), 503
+
     if not _agent_flag_enabled():
         return jsonify({
             "status": "error",
@@ -248,6 +292,11 @@ def start_agent() -> tuple[Any, int]:
     # second update would orphan the first (unreachable by /stop). The sentinel
     # is rolled back on any failure below so a crashed start never wedges the slot.
     with _RUNNER_LOCK:
+        if _shutdown_event(app_obj).is_set():
+            return jsonify({
+                "status": "error",
+                "message": "The application is shutting down; no new agent session can start.",
+            }), 503
         thread = _RUNNER.get("thread")
         if (thread is not None and thread.is_alive()) or _RUNNER.get("starting"):
             return jsonify({
@@ -287,8 +336,6 @@ def start_agent() -> tuple[Any, int]:
         )
 
         journal_store = current_app.config.get("TRADE_STORAGE")
-        app_obj = current_app._get_current_object()  # noqa: SLF001
-
         def _journal_write(order: Any, orderid: str) -> None:
             if journal_store is None:
                 return
@@ -310,6 +357,8 @@ def start_agent() -> tuple[Any, int]:
             except Exception:
                 logger.exception("agent revocation check failed — refusing order (fail closed)")
                 return "session revocation check unavailable"
+            if not _acl_grants_agent(adapter_id, account_id):
+                return "agent account authorisation was revoked"
             return None
 
         # L2 portfolio state, fetched FRESH per order — the agent session is
@@ -333,6 +382,7 @@ def start_agent() -> tuple[Any, int]:
         executor = GatedChildExecutor(
             safety=safety,
             router=router,
+            router_provider=lambda: app_obj.config.get("BROKER_ROUTER"),
             request_ctx=request_ctx,
             adapter_id=adapter_id,
             account_id=account_id,
@@ -378,6 +428,12 @@ def start_agent() -> tuple[Any, int]:
 
     session_thread = threading.Thread(target=_run, name="autonomous-agent", daemon=True)
     with _RUNNER_LOCK:
+        if _shutdown_event(app_obj).is_set():
+            _RUNNER.pop("starting", None)
+            return jsonify({
+                "status": "error",
+                "message": "The application is shutting down; no new agent session can start.",
+            }), 503
         _RUNNER.clear()  # replace the slot wholesale (drops the "starting" sentinel)
         _RUNNER.update({
             "trader": trader,

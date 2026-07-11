@@ -516,6 +516,78 @@ def test_serve_reports_client_close_failure_after_closing_audit(
 
 
 @pytest.mark.unit
+def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.agent_routes as agent_routes
+
+    events: list[str] = []
+    stream_shutdown = threading.Event()
+    runtime = SimpleNamespace(stop=lambda **_kwargs: events.append("capture-stop"))
+    rotation = MagicMock(running=True)
+    rotation.shutdown.side_effect = lambda **_kwargs: events.append("rotation-stop")
+    tracker = MagicMock()
+
+    def wait_for_idle(_timeout: float) -> bool:
+        assert stream_shutdown.is_set()
+        assert events == ["agent-stop", "rotation-stop", "capture-stop"]
+        return True
+
+    tracker.wait_for_idle.side_effect = wait_for_idle
+    flask_app = Flask("desktop-quiesce-order")
+    flask_app.config.update(
+        DESKTOP_TICK_CAPTURE_RUNTIME=runtime,
+        RUNTIME_REQUEST_TRACKER=tracker,
+        SIGNAL_STREAM_SHUTDOWN_EVENT=stream_shutdown,
+        ROTATION_SCHEDULER=rotation,
+    )
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(
+        agent_routes,
+        "shutdown_agent_runtime",
+        lambda _app, **_kwargs: events.append("agent-stop") or True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
+    )
+
+    desktop.serve(5100, ready_writer=lambda _message: None)
+
+    tracker.wait_for_idle.assert_called_once()
+
+
+@pytest.mark.unit
+def test_serve_drain_timeout_does_not_close_request_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = object()
+    audit = MagicMock()
+    tracker = MagicMock()
+    tracker.wait_for_idle.return_value = False
+    flask_app = Flask("desktop-drain-timeout")
+    flask_app.config.update(
+        CLIENT=client,
+        AUDIT=audit,
+        RUNTIME_REQUEST_TRACKER=tracker,
+    )
+    close_client = MagicMock()
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "client_close_sync", close_client)
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
+    )
+
+    with pytest.raises(RuntimeError, match="backend shutdown failed"):
+        desktop.serve(5100, ready_writer=lambda _message: None)
+
+    close_client.assert_not_called()
+    audit.close.assert_not_called()
+
+
+@pytest.mark.unit
 def test_serve_stops_capture_when_waitress_bind_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = MagicMock()
     flask_app = Flask("desktop-bind-failure")
