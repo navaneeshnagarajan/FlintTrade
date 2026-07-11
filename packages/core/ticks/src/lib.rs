@@ -43,6 +43,8 @@ pub mod session;
 pub mod strategies;
 pub mod types;
 
+use strategies::spreads::{run_batch_py, run_spreads_batch_py};
+
 // Convenience re-exports
 pub use session::{SessionConfig, SessionState, SessionTracker};
 pub use strategies::{
@@ -512,8 +514,8 @@ fn tick_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(iron_condor_config, m)?)?;
 
     // Parallel batch functions
-    m.add_function(wrap_pyfunction!(run_spreads_batch, m)?)?;
-    m.add_function(wrap_pyfunction!(run_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(run_spreads_batch_py, m)?)?;
+    m.add_function(wrap_pyfunction!(run_batch_py, m)?)?;
 
     // ---- Monte Carlo ----
     m.add_function(wrap_pyfunction!(simulate, m)?)?;

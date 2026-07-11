@@ -27,6 +27,7 @@ pytestmark = pytest.mark.skipif(
 
 BatchInput = tuple[str, list[int], list[list[float]], list[bool], list[bool]]
 BatchRunner = Callable[[list[BatchInput]], list[object]]
+ConfiguredBatchRunner = Callable[[SpreadConfig, list[list[float]]], list[object]]
 
 
 def _config() -> SpreadConfig:
@@ -53,8 +54,28 @@ def _run_raw_batch(items: list[BatchInput]) -> list[object]:
     )
 
 
+def _run_object_batch_with_config(config: SpreadConfig, premiums: list[list[float]]) -> list[object]:
+    return run_spreads_batch(
+        [(SpreadBacktest("invalid", config), [1, 2], premiums, [True, False], [False, True])]
+    )
+
+
+def _run_raw_batch_with_config(config: SpreadConfig, premiums: list[list[float]]) -> list[object]:
+    return run_batch(
+        [("invalid", config, [1, 2], premiums, [True, False], [False, True])]
+    )
+
+
 @pytest.fixture(params=[_run_object_batch, _run_raw_batch], ids=["run_spreads_batch", "run_batch"])
 def batch_runner(request: pytest.FixtureRequest) -> BatchRunner:
+    return request.param
+
+
+@pytest.fixture(
+    params=[_run_object_batch_with_config, _run_raw_batch_with_config],
+    ids=["run_spreads_batch", "run_batch"],
+)
+def configured_batch_runner(request: pytest.FixtureRequest) -> ConfiguredBatchRunner:
     return request.param
 
 
@@ -92,3 +113,55 @@ def test_batch_preserves_valid_extraction_order_and_results(batch_runner: BatchR
 
     assert [result.strategy_name for result in results] == ["rising", "falling"]
     assert [result.total_pnl for result in results] == pytest.approx([2.0, -3.0])
+
+
+@pytest.mark.parametrize("premium", [float("nan"), float("inf"), float("-inf"), -0.01])
+def test_batch_rejects_invalid_premium_before_parallel_work(
+    configured_batch_runner: ConfiguredBatchRunner,
+    premium: float,
+) -> None:
+    with pytest.raises(ValueError, match=r"legs_premiums\[0\]\[1\] must be finite and non-negative"):
+        configured_batch_runner(_config(), [[10.0, premium]])
+
+
+@pytest.mark.parametrize(
+    ("config_kwargs", "leg_kwargs", "add_leg", "message"),
+    [
+        ({"initial_capital": float("nan")}, {}, True, "initial_capital must be finite and positive"),
+        ({"initial_capital": 0.0}, {}, True, "initial_capital must be finite and positive"),
+        ({"fees": float("inf")}, {}, True, "fees must be finite and non-negative"),
+        ({"fees": -0.01}, {}, True, "fees must be finite and non-negative"),
+        ({"max_loss": 0.0}, {}, True, "max_loss must be finite and positive"),
+        ({"target_profit": float("nan")}, {}, True, "target_profit must be finite and positive"),
+        ({}, {}, False, "config must contain at least one leg"),
+        ({}, {"strike": 0.0}, True, r"config\.legs\[0\] strike must be finite and positive"),
+        ({}, {"strike": float("inf")}, True, r"config\.legs\[0\] strike must be finite and positive"),
+        ({}, {"quantity": 0}, True, r"config\.legs\[0\] quantity cannot be zero"),
+        ({}, {"lot_size": 0}, True, r"config\.legs\[0\] lot_size must be positive"),
+    ],
+)
+def test_batch_rejects_invalid_financial_config_before_parallel_work(
+    configured_batch_runner: ConfiguredBatchRunner,
+    config_kwargs: dict[str, float],
+    leg_kwargs: dict[str, float | int],
+    add_leg: bool,
+    message: str,
+) -> None:
+    config = SpreadConfig(
+        initial_capital=config_kwargs.get("initial_capital", 100.0),
+        fees=config_kwargs.get("fees", 0.0),
+        max_loss=config_kwargs.get("max_loss"),
+        target_profit=config_kwargs.get("target_profit"),
+    )
+    if add_leg:
+        config.add_leg(
+            LegConfig(
+                OptionType.Call,
+                leg_kwargs.get("strike", 100.0),
+                leg_kwargs.get("quantity", 1),
+                leg_kwargs.get("lot_size", 1),
+            )
+        )
+
+    with pytest.raises(ValueError, match=message):
+        configured_batch_runner(config, [[10.0, 11.0]] if add_leg else [])

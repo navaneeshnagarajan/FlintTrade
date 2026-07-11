@@ -455,6 +455,54 @@ fn validate_inputs(
 ) -> PyResult<()> {
     let n = timestamps.len();
 
+    if !config.initial_capital.is_finite() || config.initial_capital <= 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "initial_capital must be finite and positive",
+        ));
+    }
+    if !config.fees.is_finite() || config.fees < 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "fees must be finite and non-negative",
+        ));
+    }
+    if config
+        .max_loss
+        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+    {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "max_loss must be finite and positive",
+        ));
+    }
+    if config
+        .target_profit
+        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+    {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "target_profit must be finite and positive",
+        ));
+    }
+    if config.legs.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "config must contain at least one leg",
+        ));
+    }
+    for (index, leg) in config.legs.iter().enumerate() {
+        if !leg.strike.is_finite() || leg.strike <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "config.legs[{index}] strike must be finite and positive"
+            )));
+        }
+        if leg.quantity == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "config.legs[{index}] quantity cannot be zero"
+            )));
+        }
+        if leg.lot_size == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "config.legs[{index}] lot_size must be positive"
+            )));
+        }
+    }
     if legs_premiums.len() != config.legs.len() {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "legs_premiums has {} series but config has {} legs",
@@ -468,6 +516,13 @@ fn validate_inputs(
                 "legs_premiums[{i}] has {} bars but timestamps has {n}",
                 series.len()
             )));
+        }
+        for (bar_index, premium) in series.iter().enumerate() {
+            if !premium.is_finite() || *premium < 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "legs_premiums[{i}][{bar_index}] must be finite and non-negative"
+                )));
+            }
         }
     }
     if entries.len() != n || exits.len() != n {
@@ -488,6 +543,55 @@ fn validate_inputs(
 // Parallel batch execution
 // ---------------------------------------------------------------------------
 
+type SpreadBatchItem = (
+    SpreadBacktest,
+    Vec<i64>,
+    Vec<Vec<f64>>,
+    Vec<bool>,
+    Vec<bool>,
+);
+type RawSpreadBatchItem = (
+    String,
+    SpreadConfig,
+    Vec<i64>,
+    Vec<Vec<f64>>,
+    Vec<bool>,
+    Vec<bool>,
+);
+
+fn validate_spread_batch(items: &[SpreadBatchItem]) -> PyResult<()> {
+    for (backtest, timestamps, premiums, entries, exits) in items {
+        validate_inputs(&backtest.config, timestamps, premiums, entries, exits)?;
+    }
+    Ok(())
+}
+
+fn execute_spread_batch(items: Vec<SpreadBatchItem>) -> Vec<BacktestResult> {
+    items
+        .into_par_iter()
+        .map(|(backtest, timestamps, premiums, entries, exits)| {
+            backtest.simulate_inner(&timestamps, &premiums, &entries, &exits)
+        })
+        .collect()
+}
+
+fn validate_raw_spread_batch(items: &[RawSpreadBatchItem]) -> PyResult<()> {
+    for (_, config, timestamps, premiums, entries, exits) in items {
+        validate_inputs(config, timestamps, premiums, entries, exits)?;
+    }
+    Ok(())
+}
+
+fn execute_raw_spread_batch(items: Vec<RawSpreadBatchItem>) -> Vec<BacktestResult> {
+    items
+        .into_par_iter()
+        .map(|(name, config, timestamps, premiums, entries, exits)| {
+            let backtest = SpreadBacktest { name, config };
+            backtest.simulate_inner(&timestamps, &premiums, &entries, &exits)
+        })
+        .collect()
+}
+
 /// Run a batch of `SpreadBacktest` instances in parallel using Rayon.
 ///
 /// Each element is a tuple of `(backtest, timestamps, legs_premiums, entries, exits)`.
@@ -501,7 +605,6 @@ fn validate_inputs(
 ///          (backtest2, ts, premiums2, entries2, exits2)]
 /// results = run_spreads_batch(items)
 /// ```
-#[pyfunction]
 pub fn run_spreads_batch(
     items: Vec<(
         SpreadBacktest,
@@ -510,17 +613,25 @@ pub fn run_spreads_batch(
         Vec<bool>,
         Vec<bool>,
     )>,
-) -> PyResult<Vec<BacktestResult>> {
-    for (bt, ts, premiums, entries, exits) in &items {
-        validate_inputs(&bt.config, ts, premiums, entries, exits)?;
+) -> Vec<BacktestResult> {
+    if validate_spread_batch(&items).is_err() {
+        panic!("invalid spread batch input");
     }
+    execute_spread_batch(items)
+}
 
-    Ok(items
-        .into_par_iter()
-        .map(|(bt, ts, premiums, entries, exits)| {
-            bt.simulate_inner(&ts, &premiums, &entries, &exits)
-        })
-        .collect())
+#[pyfunction(name = "run_spreads_batch")]
+pub(crate) fn run_spreads_batch_py(
+    items: Vec<(
+        SpreadBacktest,
+        Vec<i64>,
+        Vec<Vec<f64>>,
+        Vec<bool>,
+        Vec<bool>,
+    )>,
+) -> PyResult<Vec<BacktestResult>> {
+    validate_spread_batch(&items)?;
+    Ok(execute_spread_batch(items))
 }
 
 /// Run a batch of spread backtests supplied as raw parameter tuples.
@@ -528,7 +639,6 @@ pub fn run_spreads_batch(
 /// This lower-level entry point avoids the need to construct `SpreadBacktest`
 /// objects on the Python side.  Each tuple is:
 /// `(name, config, timestamps, legs_premiums, entries, exits)`.
-#[pyfunction]
 pub fn run_batch(
     items: Vec<(
         String,
@@ -538,18 +648,26 @@ pub fn run_batch(
         Vec<bool>,
         Vec<bool>,
     )>,
-) -> PyResult<Vec<BacktestResult>> {
-    for (_, cfg, ts, premiums, entries, exits) in &items {
-        validate_inputs(cfg, ts, premiums, entries, exits)?;
+) -> Vec<BacktestResult> {
+    if validate_raw_spread_batch(&items).is_err() {
+        panic!("invalid raw spread batch input");
     }
+    execute_raw_spread_batch(items)
+}
 
-    Ok(items
-        .into_par_iter()
-        .map(|(name, cfg, ts, premiums, entries, exits)| {
-            let bt = SpreadBacktest { name, config: cfg };
-            bt.simulate_inner(&ts, &premiums, &entries, &exits)
-        })
-        .collect())
+#[pyfunction(name = "run_batch")]
+pub(crate) fn run_batch_py(
+    items: Vec<(
+        String,
+        SpreadConfig,
+        Vec<i64>,
+        Vec<Vec<f64>>,
+        Vec<bool>,
+        Vec<bool>,
+    )>,
+) -> PyResult<Vec<BacktestResult>> {
+    validate_raw_spread_batch(&items)?;
+    Ok(execute_raw_spread_batch(items))
 }
 
 // ---------------------------------------------------------------------------
@@ -719,8 +837,58 @@ mod tests {
         };
 
         let items = vec![make_item("A"), make_item("B"), make_item("C")];
-        let results = run_spreads_batch(items).unwrap();
+        let results: Vec<BacktestResult> = run_spreads_batch(items);
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_raw_batch_public_api_returns_vec() {
+        let cfg = straddle_config(19800.0, 50, true, 100_000.0, 0.001);
+        let n = 10;
+        let items = vec![(
+            "RAW".to_string(),
+            cfg,
+            make_ts(n),
+            vec![vec![200.0; n], vec![200.0; n]],
+            vec![false; n],
+            vec![false; n],
+        )];
+
+        let results: Vec<BacktestResult> = run_batch(items);
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid spread batch input")]
+    fn test_object_batch_public_api_rejects_invalid_input_before_parallel_work() {
+        let cfg = straddle_config(19800.0, 50, true, 100_000.0, 0.001);
+        let bt = SpreadBacktest::new("INVALID".to_string(), cfg);
+        let items = vec![(
+            bt,
+            vec![1, 2],
+            vec![vec![200.0, f64::NAN], vec![200.0, 199.0]],
+            vec![false; 2],
+            vec![false; 2],
+        )];
+
+        run_spreads_batch(items);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid raw spread batch input")]
+    fn test_raw_batch_public_api_rejects_invalid_input_before_parallel_work() {
+        let cfg = straddle_config(19800.0, 50, true, 100_000.0, 0.001);
+        let items = vec![(
+            "INVALID".to_string(),
+            cfg,
+            vec![1, 2],
+            vec![vec![200.0, f64::INFINITY], vec![200.0, 199.0]],
+            vec![false; 2],
+            vec![false; 2],
+        )];
+
+        run_batch(items);
     }
 
     #[test]
@@ -736,7 +904,7 @@ mod tests {
             vec![false, true],
         )];
 
-        let result = run_spreads_batch(items);
+        let result = run_spreads_batch_py(items);
 
         assert!(result.is_err(), "malformed batch input was accepted");
     }
@@ -754,7 +922,7 @@ mod tests {
             vec![false, true],
         )];
 
-        let result = run_batch(items);
+        let result = run_batch_py(items);
 
         assert!(result.is_err(), "malformed batch input was accepted");
     }
