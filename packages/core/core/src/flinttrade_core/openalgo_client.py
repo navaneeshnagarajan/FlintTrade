@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 import logging
 import threading
 import time
@@ -41,6 +42,48 @@ from .models import (
 )
 
 logger = logging.getLogger("flinttrade.core")
+
+
+def normalise_holiday_dates(payload: Any, exchange: str = "NSE") -> list[str]:
+    """Return sorted ISO holiday dates from supported OpenAlgo envelopes.
+
+    OpenAlgo versions and native adapters expose holidays as a bare list,
+    ``{"holidays": [...]}``, ``{"data": ...}``, or an exchange-keyed map.
+    Rows may be ISO strings or objects carrying a date field. Invalid values are
+    ignored so callers never mistake status metadata for a trading holiday.
+    """
+    data = payload
+    for _ in range(3):
+        if not isinstance(data, dict) or "data" not in data:
+            break
+        data = data["data"]
+
+    candidates: Any = []
+    if isinstance(data, list):
+        candidates = data
+    elif isinstance(data, dict):
+        exchange_key = str(exchange or "NSE").strip().upper() or "NSE"
+        candidates = data.get(exchange_key, data.get("holidays", []))
+        if isinstance(candidates, dict):
+            candidates = candidates.get("holidays", [])
+
+    dates: set[str] = set()
+    if not isinstance(candidates, list | tuple | set):
+        return []
+    for entry in candidates:
+        raw = entry
+        if isinstance(entry, dict):
+            raw = entry.get("date") or entry.get("holiday_date") or entry.get("trading_date")
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if len(value) >= 10:
+            value = value[:10]
+        try:
+            dates.add(date.fromisoformat(value).isoformat())
+        except ValueError:
+            continue
+    return sorted(dates)
 
 
 # ---------------------------------------------------------------------------

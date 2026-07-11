@@ -31,12 +31,14 @@ try:
     from flinttrade_core.openalgo_client import (
         client_call_sync,
         client_close_sync,
+        normalise_holiday_dates,
         resolve_openalgo_client,
     )
 except Exception:  # pragma: no cover
     resolve_openalgo_client = None  # type: ignore[assignment,misc]
     client_call_sync = None  # type: ignore[assignment,misc]
     client_close_sync = None  # type: ignore[assignment,misc]
+    normalise_holiday_dates = None  # type: ignore[assignment,misc]
 
 holidays_bp = Blueprint("holidays", __name__, url_prefix="/api/v1")
 
@@ -101,14 +103,9 @@ def get_holidays() -> tuple[Any, int]:
             if close_client:
                 client_close_sync(client)
 
-        data = raw.get("data", raw) if isinstance(raw, dict) else raw
-        holidays_list: list[str] = []
-
-        if isinstance(data, list):
-            holidays_list = [str(h) for h in data]
-        elif isinstance(data, dict):
-            # Some OpenAlgo versions return {"NSE": ["2026-01-01", ...]}
-            holidays_list = [str(h) for h in data.get(exchange, data.get("holidays", []))]
+        if normalise_holiday_dates is None:
+            raise ImportError("holiday response normaliser not available")
+        holidays_list = normalise_holiday_dates(raw, exchange=exchange)
 
         return (
             jsonify(

@@ -22,6 +22,7 @@ def _runtime_app() -> object:
     app = FlintTradeApp.__new__(FlintTradeApp)
     app.safety = MagicMock()
     app.scheduler = MagicMock(stop_all=AsyncMock())
+    app.time_scheduler = MagicMock()
     app.cron = MagicMock()
     app.audit = MagicMock()
     app.client = MagicMock(close=AsyncMock(), ping=AsyncMock(return_value={}))
@@ -85,6 +86,7 @@ async def test_stop_during_holiday_load_prevents_startup_from_resuming(
     await asyncio.wait_for(start_task, timeout=1.0)
 
     app.cron.register_builtin_jobs.assert_not_called()
+    app.time_scheduler.set_holidays.assert_not_called()
     assert flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
 
 
@@ -236,3 +238,32 @@ async def test_shutdown_cancels_retraining_before_waiting_for_cron() -> None:
     await app.stop()
 
     app.cron.stop.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_start_applies_cron_holidays_to_time_scheduler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The market-hours owner receives the calendar fetched at startup."""
+    import flinttrade_core.app as app_module
+
+    app = _runtime_app()
+    holidays = {"2026-01-26", "2026-08-15"}
+    app.cron.load_holidays = AsyncMock(return_value=holidays)
+    flask_app = Flask("holiday-runtime-wiring")
+
+    def apply_holidays(values: set[str]) -> None:
+        assert values == holidays
+        app._stop_started = True
+        app._stop_event.set()
+
+    app.time_scheduler.set_holidays = MagicMock(side_effect=apply_holidays)
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
+    monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+
+    await app.start()
+
+    app.time_scheduler.set_holidays.assert_called_once_with(holidays)

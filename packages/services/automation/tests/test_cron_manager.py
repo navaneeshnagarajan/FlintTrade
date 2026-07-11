@@ -551,6 +551,27 @@ class TestLoadHolidays:
         assert "2026-01-01" in result
         assert "2026-01-26" in result
 
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            ["2026-04-14"],
+            {"data": {"holidays": ["2026-04-14"]}},
+            {"data": {"NSE": [{"date": "2026-04-14"}]}},
+        ],
+    )
+    def test_loads_supported_openalgo_envelopes(self, payload):
+        import asyncio
+        from flinttrade_automation.cron_manager import load_holidays_from_client
+
+        async def holidays():
+            return payload
+
+        result = asyncio.run(
+            load_holidays_from_client(MagicMock(holidays=holidays))
+        )
+
+        assert result == {"2026-04-14"}
+
     def test_returns_empty_on_error(self):
         import asyncio
         from flinttrade_automation.cron_manager import load_holidays_from_client

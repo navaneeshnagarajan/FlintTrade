@@ -652,6 +652,36 @@ class TestTimeScheduler:
         late = datetime(2026, 3, 16, 22, 0, 0, tzinfo=IST)
         assert sched.is_market_open("MCX", at=late)
 
+    @pytest.mark.parametrize(
+        "symbol",
+        ["EURUSD", "GBPUSD29JUL26FUT", "USDJPY29JUL26150CE"],
+    )
+    def test_cds_cross_currency_uses_extended_session(self, symbol):
+        from flinttrade_engine.scheduler import TimeScheduler
+
+        sched = TimeScheduler()
+        evening = datetime(2026, 3, 16, 18, 30, 0, tzinfo=IST)
+
+        assert sched.is_market_open("CDS", at=evening, symbol=symbol)
+
+    def test_cds_standard_currency_closes_at_five(self):
+        from flinttrade_engine.scheduler import TimeScheduler
+
+        sched = TimeScheduler()
+        evening = datetime(2026, 3, 16, 18, 30, 0, tzinfo=IST)
+
+        assert not sched.is_market_open("CDS", at=evening, symbol="USDINR29JUL26FUT")
+
+    def test_cds_cross_currency_close_boundary_is_inclusive(self):
+        from flinttrade_engine.scheduler import TimeScheduler
+
+        sched = TimeScheduler()
+        close = datetime(2026, 3, 16, 19, 30, 0, tzinfo=IST)
+        after = datetime(2026, 3, 16, 19, 31, 0, tzinfo=IST)
+
+        assert sched.is_market_open("CDS", at=close, symbol="EURUSD29JUL26FUT")
+        assert not sched.is_market_open("CDS", at=after, symbol="EURUSD29JUL26FUT")
+
     def test_delta_always_open(self):
         from flinttrade_engine.scheduler import TimeScheduler
         sched = TimeScheduler()
@@ -736,6 +766,16 @@ class TestTimeScheduler:
         from flinttrade_engine.scheduler import TimeScheduler
         sched = TimeScheduler()
         sched._holidays["2026"] = ["2026-03-16"]
+        assert not sched.is_trading_day("NSE", on=date(2026, 3, 16))
+
+    def test_set_holidays_accepts_nested_runtime_payload(self):
+        from flinttrade_engine.scheduler import TimeScheduler
+
+        sched = TimeScheduler()
+
+        loaded = sched.set_holidays({"data": {"NSE": [{"date": "2026-03-16"}]}})
+
+        assert loaded == ["2026-03-16"]
         assert not sched.is_trading_day("NSE", on=date(2026, 3, 16))
 
 
@@ -1008,6 +1048,7 @@ class TestStrategyRunner:
         assert strategy.state.value == "STOPPED"
         assert runner.tick_count > 0
         assert len(strategy.ticks) > 0
+        scheduler.is_market_open.assert_any_call("NSE", symbol="RELIANCE")
 
     @pytest.mark.asyncio
     async def test_runner_delivers_ticks_when_deploy_frozen(self):

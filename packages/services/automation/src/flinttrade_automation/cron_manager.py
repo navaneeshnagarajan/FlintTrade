@@ -411,11 +411,11 @@ async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
 
     try:
         data = await openalgo_client.holidays()
-        holidays_list = data.get("holidays", []) if isinstance(data, dict) else []
-        if isinstance(holidays_list, list):
-            result = set(holidays_list)
-            logger.info("Loaded %d market holidays", len(result))
-            return result
+        from flinttrade_core.openalgo_client import normalise_holiday_dates  # noqa: PLC0415
+
+        result = set(normalise_holiday_dates(data, exchange="NSE"))
+        logger.info("Loaded %d market holidays", len(result))
+        return result
     except (_json.JSONDecodeError, ValueError) as exc:
         # Empty body from OpenAlgo means "no broker yet authenticated".
         # Log once at INFO so it's traceable but not alarming.

@@ -3447,13 +3447,19 @@ class FlintTradeApp:
         _run_flask_server(flask_app, port=_resolve_backend_port())
 
         # Load market holidays (graceful — warns if OpenAlgo unreachable)
+        loaded_holidays: set[str] = set()
         try:
-            await self.cron.load_holidays()
+            loaded_holidays = await self.cron.load_holidays()
         except Exception as exc:
             logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
 
         if await self._wait_for_shutdown_if_started():
             return
+
+        try:
+            self.time_scheduler.set_holidays(loaded_holidays)
+        except Exception as exc:
+            logger.warning("Could not apply loaded market holidays: %s", exc)
 
         # Hand the cron manager the shared trade store (created by the Flask
         # factory above) so the nightly DuckDB maintenance job can CHECKPOINT +

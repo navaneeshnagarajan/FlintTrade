@@ -84,6 +84,13 @@ _EXCHANGE_TO_SEGMENT: dict[str, str] = {
     "DELTA": "crypto", "GLOBAL_INDEX": "crypto",
 }
 
+_CDS_CROSS_CURRENCY_UNDERLYINGS = ("EURUSD", "GBPUSD", "USDJPY")
+
+
+def _is_cds_cross_currency(symbol: str | None) -> bool:
+    value = str(symbol or "").strip().upper()
+    return any(value.startswith(underlying) for underlying in _CDS_CROSS_CURRENCY_UNDERLYINGS)
+
 
 class TimeScheduler:
     """Knows market hours, deploy freezes, holidays, and square-off times.
@@ -110,10 +117,16 @@ class TimeScheduler:
     # ------------------------------------------------------------------
 
     def get_schedule(self, exchange: str) -> ExchangeSchedule | None:
-        return EXCHANGE_SCHEDULES.get(exchange)
+        return EXCHANGE_SCHEDULES.get(exchange.strip().upper())
 
-    def is_market_open(self, exchange: str, at: datetime | None = None) -> bool:
+    def is_market_open(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+    ) -> bool:
         """Check whether the exchange is open on the trading calendar and clock."""
+        exchange = exchange.strip().upper()
         sched = EXCHANGE_SCHEDULES.get(exchange)
         if sched is None:
             return False
@@ -125,7 +138,12 @@ class TimeScheduler:
         if not self.is_trading_day(exchange, on=current.date()):
             return False
         current_time = current.time().replace(tzinfo=None)
-        return sched.market_open <= current_time <= sched.market_close
+        market_close = (
+            time(19, 30)
+            if exchange == "CDS" and _is_cds_cross_currency(symbol)
+            else sched.market_close
+        )
+        return sched.market_open <= current_time <= market_close
 
     def is_trading_day(self, exchange: str, on: date | None = None) -> bool:
         """Check if the given date is a trading day (not weekend, not holiday)."""
@@ -208,6 +226,29 @@ class TimeScheduler:
     # Holidays
     # ------------------------------------------------------------------
 
+    def set_holidays(
+        self,
+        holidays: Any,
+        *,
+        year: str | None = None,
+        exchange: str = "NSE",
+    ) -> list[str]:
+        """Cache a normalised holiday payload already fetched by another owner."""
+        from flinttrade_core.openalgo_client import normalise_holiday_dates  # noqa: PLC0415
+
+        values = normalise_holiday_dates(holidays, exchange=exchange)
+        grouped: dict[str, list[str]] = {}
+        for value in values:
+            grouped.setdefault(value[:4], []).append(value)
+        for holiday_year, dates in grouped.items():
+            self._holidays[holiday_year] = dates
+        if not values:
+            resolved_year = year or str(self.now_ist().year)
+            self._holidays[resolved_year] = []
+        elif year is not None and year not in grouped:
+            self._holidays[year] = []
+        return values
+
     def load_holidays(self, year: str | None = None) -> list[str]:
         """Fetch holidays from OpenAlgo and cache them.
 
@@ -230,33 +271,20 @@ class TimeScheduler:
                 loop = None
 
             if loop is not None and loop.is_running():
-                # Already inside an async context — cannot call asyncio.run().
-                # Schedule the coroutine and await it via a new task. Callers
-                # in an async context should use the async variant instead.
-                import concurrent.futures
-                future: concurrent.futures.Future[dict] = concurrent.futures.Future()
-
-                async def _fetch() -> None:
-                    try:
-                        result = await self._client.holidays(year=y)  # type: ignore[union-attr]
-                        future.set_result(result)
-                    except Exception as exc:
-                        future.set_exception(exc)
-
-                asyncio.ensure_future(_fetch())
-                # Block the current thread briefly to collect the result.
-                data = future.result(timeout=10)
+                logger.error(
+                    "Cannot synchronously load holidays from a running event-loop thread; "
+                    "fetch asynchronously and call set_holidays()"
+                )
+                return []
             else:
                 # One-owner-loop rule for the shared client's pooled connections.
                 from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
 
                 data = client_call_sync(self._client, self._client.holidays(year=y))  # type: ignore[union-attr]
 
-            holidays = data.get("holidays", []) if isinstance(data, dict) else []
-            if isinstance(holidays, list):
-                self._holidays[y] = holidays
-                logger.info("Loaded %d holidays for %s", len(holidays), y)
-                return holidays
+            holidays = self.set_holidays(data, year=y)
+            logger.info("Loaded %d holidays for %s", len(holidays), y)
+            return holidays
         except Exception as exc:
             logger.error("Failed to load holidays for %s: %s", y, exc)
 
@@ -377,7 +405,7 @@ class StrategyRunner:
         exchange = self.strategy.exchange
 
         # Skip if market is closed
-        if not self.scheduler.is_market_open(exchange):
+        if not self.scheduler.is_market_open(exchange, symbol=self.symbol):
             return
 
         # NOTE: is_deploy_frozen() guards code *deployment*, not tick delivery.
