@@ -498,6 +498,7 @@ async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
     def create_app(**kwargs: object) -> Flask:
         captured_factory_args.update(kwargs)
         flask_app.config["CRON_SCHEDULER"] = kwargs["cron_strategy_scheduler"]
+        flask_app.config["TIME_SCHEDULER"] = kwargs["time_scheduler"]
         return flask_app
 
     def start_strategy_cron() -> None:
@@ -514,6 +515,8 @@ async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
     await app.start()
 
     assert captured_factory_args["cron_strategy_scheduler"] is app.strategy_cron_scheduler
+    assert captured_factory_args["time_scheduler"] is app.time_scheduler
+    assert flask_app.config["TIME_SCHEDULER"] is app.time_scheduler
     app.strategy_cron_scheduler.start.assert_called_once_with()
 
 

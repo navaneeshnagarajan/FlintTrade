@@ -1794,6 +1794,7 @@ def create_flask_app(
     contract_manager: ContractManager | None = None,
     rag: Any | None = None,
     cron_strategy_scheduler: Any | None = None,
+    time_scheduler: Any | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -1808,6 +1809,7 @@ def create_flask_app(
         contract_manager: ContractManager for broker symbol contract data.
         rag: RAGPipeline instance for knowledge base queries.
         cron_strategy_scheduler: Shared market-aware strategy cron scheduler.
+        time_scheduler: Shared effective-session calendar owner.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -2319,6 +2321,19 @@ def create_flask_app(
             app.config["STRATEGY_RUNNER"] = UserStrategyRunner(_workspace_dir() / "strategies")
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Strategy runner wiring failed (%s); /strategies writes will 503", exc)
+    resolved_time_scheduler = time_scheduler
+    if cron_strategy_scheduler is not None:
+        resolved_time_scheduler = (
+            getattr(cron_strategy_scheduler, "time_scheduler", None)
+            or resolved_time_scheduler
+        )
+    if resolved_time_scheduler is None:
+        try:
+            from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
+
+            resolved_time_scheduler = TimeScheduler(client=client)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Time scheduler wiring failed (%s); market-aware work will 503", exc)
     if "CRON_SCHEDULER" not in app.config:
         try:
             from flinttrade_engine.scheduler import CronStrategyScheduler  # noqa: PLC0415
@@ -2326,10 +2341,17 @@ def create_flask_app(
             app.config["CRON_SCHEDULER"] = (
                 cron_strategy_scheduler
                 if cron_strategy_scheduler is not None
-                else CronStrategyScheduler()
+                else CronStrategyScheduler(time_scheduler=resolved_time_scheduler)
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Cron scheduler wiring failed (%s); strategy scheduling will 503", exc)
+    if resolved_time_scheduler is None:
+        resolved_time_scheduler = getattr(
+            app.config.get("CRON_SCHEDULER"),
+            "time_scheduler",
+            None,
+        )
+    app.config["TIME_SCHEDULER"] = resolved_time_scheduler
 
     # Execution-quality analytics (POST /api/v1/analytics/execution) and strategy
     # comparison (POST /api/v1/backtest/compare) — both fully built + tested but were
@@ -3844,6 +3866,7 @@ class FlintTradeApp:
             contract_manager=self.contract_manager,
             rag=self.rag,
             cron_strategy_scheduler=self.strategy_cron_scheduler,
+            time_scheduler=self.time_scheduler,
         )
         self._flask_app = flask_app
         tick_capture_enabled = _tick_capture_enabled()

@@ -77,16 +77,31 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         trader = _RUNNER.get("trader")
         thread = _RUNNER.get("thread")
 
-    if trader is None or thread is None or not thread.is_alive():
+    if trader is None and thread is None:
         return True
-    try:
-        trader.request_stop(square_off=True)
-    except Exception:  # noqa: BLE001 - shutdown must fail closed without leaking details
-        logger.exception("Autonomous agent stop request failed")
+    if trader is None or thread is None:
+        logger.error("Autonomous agent ownership is incomplete during shutdown")
         return False
-    thread.join(timeout=max(0.0, float(timeout)))
+
     if thread.is_alive():
-        logger.error("Autonomous agent did not stop within the shutdown deadline")
+        try:
+            trader.request_stop(square_off=True)
+        except Exception:  # noqa: BLE001 - shutdown must fail closed without leaking details
+            logger.exception("Autonomous agent stop request failed")
+            return False
+        thread.join(timeout=max(0.0, float(timeout)))
+        if thread.is_alive():
+            logger.error("Autonomous agent did not stop within the shutdown deadline")
+            return False
+
+    try:
+        shutdown_complete = bool(trader.shutdown_complete)
+    except Exception:  # noqa: BLE001 - an unreadable terminal state fails closed
+        logger.exception("Autonomous agent terminal state is unavailable")
+        return False
+    if not shutdown_complete:
+        failure = str(getattr(trader, "stop_failure", "") or "incomplete square-off")
+        logger.error("Autonomous agent shutdown incomplete: %s", failure[:256])
         return False
     return True
 
@@ -174,6 +189,8 @@ def _snapshot() -> dict[str, Any]:
             "last_signals": {k: str(v) for k, v in state.last_signals.items()},
             "squared_off": state.squared_off,
             "stop_loss_hit": state.stop_loss_hit,
+            "shutdown_complete": bool(getattr(trader, "shutdown_complete", False)),
+            "stop_failure": str(getattr(trader, "stop_failure", "") or ""),
         })
     return snap
 
@@ -249,6 +266,15 @@ def start_agent() -> tuple[Any, int]:
                 "Order routing unavailable — workspace.json brokers configuration is "
                 "missing or invalid. Check the startup logs, then restart."
             ),
+        }), 503
+
+    time_scheduler = current_app.config.get("TIME_SCHEDULER")
+    get_market_session = getattr(time_scheduler, "get_market_session", None)
+    market_clock = getattr(time_scheduler, "now_ist", None)
+    if not callable(get_market_session) or not callable(market_clock):
+        return jsonify({
+            "status": "error",
+            "message": "Market calendar unavailable — autonomous trading remains disabled.",
         }), 503
 
     body: dict[str, Any] = request.get_json(silent=True) or {}
@@ -405,12 +431,26 @@ def start_agent() -> tuple[Any, int]:
             max_trades_per_symbol=max_trades,
             cycle_interval_sec=cycle_interval,
         )
+
+        def _market_session_provider(
+            provider_exchange: str,
+            provider_symbol: str,
+            session_date: Any,
+        ) -> Any:
+            return get_market_session(
+                provider_exchange,
+                on=session_date,
+                symbol=provider_symbol,
+            )
+
         trader = _trader_factory(
             llm_client=llm,
             openalgo_client=client,
             config=config,
             vault=_build_vault(),
             order_executor=executor,
+            market_session_provider=_market_session_provider,
+            clock=market_clock,
         )
     except Exception:
         _release_slot()

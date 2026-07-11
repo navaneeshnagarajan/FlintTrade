@@ -10,6 +10,7 @@ agent actor id in workspace.json.
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime, time as wall_time
 import threading
 import time
 from typing import Any
@@ -46,6 +47,14 @@ class _FakeTrader:
     def request_stop(self, square_off: bool = True) -> None:
         self.stop_calls.append(square_off)
         self._running = False
+
+    @property
+    def shutdown_complete(self) -> bool:
+        return not self._running
+
+    @property
+    def stop_failure(self) -> str:
+        return ""
 
     async def run_session(self) -> None:
         import asyncio
@@ -86,6 +95,22 @@ def _make_app(broker_router: object | None = None) -> Flask:
     app.config["BROKER_ROUTER"] = broker_router if broker_router is not None else object()
     app.config["OPENALGO_CLIENT"] = object()
     app.config["SAFETY"] = SafetySystem(SafetyConfig(check_market_hours=False))
+    app.config["TIME_SCHEDULER"] = type(
+        "_TimeScheduler",
+        (),
+        {
+            "now_ist": staticmethod(
+                lambda: datetime.fromisoformat("2026-07-13T10:00:00+05:30")
+            ),
+            "get_market_session": staticmethod(
+                lambda exchange, *, on, symbol: (
+                    (wall_time(9, 15), wall_time(15, 30))
+                    if exchange == "NSE" and symbol == "RELIANCE" and on == date(2026, 7, 13)
+                    else None
+                )
+            ),
+        },
+    )()
     app.register_blueprint(mod.agent_bp)
     return app
 
@@ -193,6 +218,14 @@ def test_start_wires_gated_executor_with_agent_principal(live_auth):
     # The mid-flight revocation brake is wired.
     assert executor._pre_dispatch_check is not None  # noqa: SLF001
     assert callable(executor._router_provider)  # noqa: SLF001
+    assert trader.kwargs["clock"]() == datetime.fromisoformat(
+        "2026-07-13T10:00:00+05:30"
+    )
+    assert trader.kwargs["market_session_provider"](
+        "NSE",
+        "RELIANCE",
+        date(2026, 7, 13),
+    ) == (wall_time(9, 15), wall_time(15, 30))
 
     snap = resp.get_json()["data"]
     assert snap["running"] is True
@@ -351,6 +384,25 @@ def test_runtime_shutdown_requests_square_off_and_joins_agent(live_auth):
     with mod._RUNNER_LOCK:  # noqa: SLF001
         thread = mod._RUNNER.get("thread")  # noqa: SLF001
     assert thread is not None and not thread.is_alive()
+
+
+def test_runtime_shutdown_rejects_joined_incomplete_square_off() -> None:
+    app = _make_app()
+
+    class _FailedTrader:
+        shutdown_complete = False
+        stop_failure = "Square-off incomplete"
+
+        def request_stop(self, square_off: bool = True) -> None:
+            assert square_off is True
+
+    thread = threading.Thread(target=lambda: None)
+    thread.start()
+    thread.join()
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.update({"trader": _FailedTrader(), "thread": thread})  # noqa: SLF001
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
 
 
 def test_runtime_shutdown_cannot_finish_before_registered_thread_starts(
