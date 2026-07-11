@@ -6,6 +6,7 @@ All tests are pure in-memory and require no external connections.
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -62,6 +63,61 @@ class TestConstructorValidation:
         agg = OrderFlowAggregator()
         assert agg.time_bin_seconds == 60
         assert agg.tick_size == 0.05
+
+    def test_live_market_factory_uses_precise_shared_ingestion_grid_without_changing_analytics_default(self):
+        from flinttrade_data.orderflow_aggregator import (
+            LIVE_MARKET_INGESTION_INTERVAL_SECONDS,
+            LIVE_MARKET_INGESTION_TICK_SIZE,
+            OrderFlowAggregator,
+            create_live_market_orderflow_aggregator,
+        )
+
+        live = create_live_market_orderflow_aggregator()
+
+        assert LIVE_MARKET_INGESTION_INTERVAL_SECONDS == 60
+        assert LIVE_MARKET_INGESTION_TICK_SIZE == 0.0001
+        assert live.time_bin_seconds == LIVE_MARKET_INGESTION_INTERVAL_SECONDS
+        assert live.tick_size == LIVE_MARKET_INGESTION_TICK_SIZE
+        assert OrderFlowAggregator().tick_size == 0.05
+
+    def test_one_live_market_aggregator_preserves_distinct_levels_across_instrument_granularities(self):
+        from flinttrade_data.orderflow_aggregator import create_live_market_orderflow_aggregator
+
+        agg = create_live_market_orderflow_aggregator()
+        instruments = (
+            ("EURUSD", "CDS", 1.0840, 1.0841),
+            ("USDINR", "CDS", 83.0000, 83.0025),
+            ("CRUDEOIL", "MCX", 6500.0, 6501.0),
+            ("RELIANCE", "NSE", 2500.00, 2500.01),
+        )
+
+        for symbol, exchange, first_price, second_price in instruments:
+            agg.add_tick(symbol, first_price, 10, "BUY", timestamp=_BASE_TS, exchange=exchange)
+            agg.add_tick(symbol, second_price, 20, "SELL", timestamp=_BASE_TS + 1, exchange=exchange)
+
+        for symbol, exchange, first_price, second_price in instruments:
+            levels = {round(bucket.price_level, 4) for bucket in agg.get_footprint(symbol, exchange=exchange)}
+            assert levels == {round(first_price, 4), round(second_price, 4)}
+
+    def test_global_identity_retention_bounds_all_state_maps(self):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        agg = OrderFlowAggregator(max_instruments=3)
+        for index in range(10):
+            symbol = f"SYM{index}"
+            agg.add_tick(symbol, 100.0, 1, "BUY", timestamp=_BASE_TS + index, exchange="NSE")
+            agg.feed_market_tick(
+                symbol,
+                100.0,
+                100,
+                timestamp=_BASE_TS + index,
+                exchange="NSE",
+            )
+
+        assert len(agg._state) == 3
+        assert len(agg._last_tick) == 3
+        assert len(agg._identity_recency) == 3
+        assert set(agg._state) == {("NSE", "SYM7"), ("NSE", "SYM8"), ("NSE", "SYM9")}
 
 
 # ===========================================================================
@@ -215,6 +271,38 @@ class TestGetFootprint:
 
         assert {bucket.timestamp_bin for bucket in bins} == {int(latest_session)}
         assert sum(bucket.delta for bucket in bins) == 100
+
+    def test_retained_state_evicts_old_sessions_and_oldest_bins_within_each_session(self):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        agg = OrderFlowAggregator(
+            time_bin_seconds=60,
+            tick_size=0.05,
+            max_retained_sessions=2,
+            max_bins_per_session=2,
+        )
+
+        for session_offset in range(3):
+            for bin_offset in range(3):
+                agg.add_tick(
+                    "NIFTY",
+                    24500.0,
+                    100,
+                    "BUY",
+                    timestamp=_BASE_TS + session_offset * 24 * 3600 + bin_offset * 60,
+                    exchange="NFO",
+                )
+
+        retained = agg._state[("NFO", "NIFTY")]
+        retained_sessions = {
+            datetime.fromtimestamp(bin_start, tz=timezone(timedelta(hours=5, minutes=30))).date()
+            for bin_start in retained
+        }
+
+        assert len(retained) == 4
+        assert len(retained_sessions) == 2
+        latest = agg.get_footprint("NIFTY", n_bins=10, exchange="NFO")
+        assert len({bucket.timestamp_bin for bucket in latest}) == 2
 
 
 # ===========================================================================
@@ -530,6 +618,76 @@ class TestFeedMarketTick:
         assert sum(bucket.buy_volume for bucket in latest) == 25
         assert sum(bucket.sell_volume for bucket in latest) == 0
 
+    @pytest.mark.parametrize("next_session_opening_volume", [100, 5000])
+    def test_new_ist_session_rebaselines_higher_and_lower_opening_cumulative_volume(
+        self,
+        next_session_opening_volume,
+    ):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 99.0, 1100, timestamp=self._TS + 1)  # establish stale SELL
+
+        next_session = self._TS + 24 * 3600
+        agg.feed_market_tick("NIFTY", 99.0, next_session_opening_volume, timestamp=next_session)
+        agg.feed_market_tick("NIFTY", 99.0, next_session_opening_volume + 25, timestamp=next_session + 1)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume for bucket in latest) == 25
+        assert sum(bucket.sell_volume for bucket in latest) == 0
+
+    def test_late_intraday_tick_does_not_rebase_cumulative_volume(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 2)
+        agg.feed_market_tick("NIFTY", 100.5, 1050, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 102.0, 1125, timestamp=self._TS + 3)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume + bucket.sell_volume for bucket in latest) == 125
+
+    def test_equal_timestamp_volume_regression_does_not_rebase_cumulative_volume(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 100.5, 1050, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 102.0, 1125, timestamp=self._TS + 2)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume + bucket.sell_volume for bucket in latest) == 125
+
+    @pytest.mark.parametrize("stale_offset", [0, 1], ids=["older", "equal"])
+    def test_stale_negative_volume_does_not_clear_valid_baseline(self, stale_offset):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 101.0, 1100, timestamp=self._TS + 1)
+        agg.feed_market_tick("NIFTY", 100.5, -1, timestamp=self._TS + stale_offset)
+        agg.feed_market_tick("NIFTY", 102.0, 1125, timestamp=self._TS + 2)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume + bucket.sell_volume for bucket in latest) == 125
+
+    def test_late_previous_session_tick_does_not_drop_current_increment(self):
+        agg = self._agg()
+        current_session = self._TS + 24 * 3600
+        agg.feed_market_tick("NIFTY", 100.0, 1000, timestamp=current_session)
+        agg.feed_market_tick("NIFTY", 101.0, 1025, timestamp=current_session + 1)
+        agg.feed_market_tick("NIFTY", 99.0, 500, timestamp=self._TS + 2)
+        agg.feed_market_tick("NIFTY", 102.0, 1050, timestamp=current_session + 2)
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.buy_volume + bucket.sell_volume for bucket in latest) == 50
+
+    def test_retain_identities_prunes_removed_instrument_state(self):
+        agg = self._agg()
+        agg.add_tick("NIFTY", 100.0, 10, "BUY", timestamp=self._TS, exchange="NFO")
+        agg.feed_market_tick("NIFTY", 100.0, 100, timestamp=self._TS, exchange="NFO")
+
+        agg.retain_identities({("NSE", "RELIANCE")})
+
+        assert ("NFO", "NIFTY") not in agg._state
+        assert ("NFO", "NIFTY") not in agg._last_tick
+        assert ("NFO", "NIFTY") not in agg._last_side
+
     def test_exchange_qualified_streams_keep_baselines_sides_and_buckets_isolated(self):
         agg = self._agg()
 
@@ -606,6 +764,31 @@ class TestResetMarketTickState:
         agg.feed_market_tick("INFY", 1510.0, 9000, timestamp=self._TS + 2)
         assert agg.get_footprint("RELIANCE", exchange="NSE") == []
         assert agg.get_footprint("INFY") == []
+
+    def test_targeted_reset_removes_identity_from_global_lru(self):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+
+        agg = OrderFlowAggregator(max_instruments=3)
+        for symbol in ("A", "B", "C"):
+            agg.add_tick(symbol, 100.0, 1, "BUY", timestamp=self._TS, exchange="NSE")
+
+        agg.reset("C", exchange="NSE")
+        agg.add_tick("D", 100.0, 1, "BUY", timestamp=self._TS + 1, exchange="NSE")
+
+        assert set(agg._state) == {
+            ("NSE", "A"),
+            ("NSE", "B"),
+            ("NSE", "D"),
+        }
+        assert ("NSE", "C") not in agg._identity_recency
+
+    def test_full_reset_clears_global_lru(self):
+        agg = self._agg()
+        agg.add_tick("NIFTY", 100.0, 1, "BUY", timestamp=self._TS, exchange="NFO")
+
+        agg.reset()
+
+        assert agg._identity_recency == {}
 
 
 class TestConcurrentAccess:

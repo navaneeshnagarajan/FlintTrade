@@ -34,6 +34,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as dt_time
 from threading import RLock
@@ -48,6 +49,12 @@ logger = logging.getLogger("flinttrade.data.orderflow_aggregator")
 _MARKET_OPEN_DEFAULT = "09:15"
 _MARKET_OPEN_HOUR = 9
 _MARKET_OPEN_MINUTE = 15
+_SECONDS_PER_DAY = 24 * 60 * 60
+
+# A shared live aggregator must retain the finest tick used by any supported
+# segment. Instrument-specific display grids are applied losslessly by the API.
+LIVE_MARKET_INGESTION_INTERVAL_SECONDS = 60
+LIVE_MARKET_INGESTION_TICK_SIZE = 0.0001
 
 # Attempt to import zoneinfo (3.9+) then fall back to pytz.
 try:
@@ -78,7 +85,7 @@ def _instrument_identity(symbol: str, exchange: str) -> _InstrumentIdentity:
     return exchange.strip().upper(), symbol.strip().upper()
 
 
-def _ist_session_date(timestamp: int) -> date:
+def _ist_session_date(timestamp: int | float) -> date:
     """Return the IST calendar date represented by one bin timestamp."""
     if _HAS_TZ and _IST is not None:
         return datetime.fromtimestamp(timestamp, tz=_IST).date()  # type: ignore[arg-type]
@@ -185,6 +192,14 @@ class OrderFlowAggregator:
         tick_size: Price rounding granularity. Default ``0.05`` (suitable for
             USDINR and many equity instruments). Use ``50.0`` for NIFTY
             futures, ``0.25`` for Bank NIFTY options, etc.
+        max_retained_sessions: Maximum IST trading dates retained per
+            instrument. Default ``2``.
+        max_bins_per_session: Maximum bins retained per instrument and IST
+            date. Defaults to enough bins for a full 24-hour day at the source
+            interval.
+        max_instruments: Maximum instrument identities retained globally.
+            Least-recently-used identities are evicted together with all of
+            their bins and cumulative-volume state. Default ``512``.
 
     Example::
 
@@ -200,6 +215,9 @@ class OrderFlowAggregator:
         self,
         time_bin_seconds: int = 60,
         tick_size: float = 0.05,
+        max_retained_sessions: int = 2,
+        max_bins_per_session: int | None = None,
+        max_instruments: int = 512,
     ) -> None:
         if time_bin_seconds <= 0:
             raise ValueError(
@@ -209,16 +227,32 @@ class OrderFlowAggregator:
             raise ValueError(
                 f"tick_size must be positive, got {tick_size}"
             )
+        if max_retained_sessions <= 0:
+            raise ValueError(
+                f"max_retained_sessions must be positive, got {max_retained_sessions}"
+            )
+        if max_bins_per_session is not None and max_bins_per_session <= 0:
+            raise ValueError(
+                f"max_bins_per_session must be positive, got {max_bins_per_session}"
+            )
+        if max_instruments <= 0:
+            raise ValueError(f"max_instruments must be positive, got {max_instruments}")
 
         self.time_bin_seconds = time_bin_seconds
         self.tick_size = tick_size
+        self.max_retained_sessions = max_retained_sessions
+        self.max_bins_per_session = max_bins_per_session or (
+            (_SECONDS_PER_DAY + time_bin_seconds - 1) // time_bin_seconds + 1
+        )
+        self.max_instruments = max_instruments
 
         # (exchange, symbol) → {bin_start → _BinState}
         self._state: dict[_InstrumentIdentity, dict[int, _BinState]] = {}
         # Per-instrument baseline for deriving incremental volume + aggressor
         # side from raw market ticks (which carry cumulative volume and no side).
-        self._last_tick: dict[_InstrumentIdentity, tuple[float, int]] = {}
+        self._last_tick: dict[_InstrumentIdentity, tuple[float, int, date, float]] = {}
         self._last_side: dict[_InstrumentIdentity, Side] = {}
+        self._identity_recency: OrderedDict[_InstrumentIdentity, None] = OrderedDict()
         # feed_market_tick nests classification and recording under one state
         # transaction, so this must permit re-entry.
         self._lock = RLock()
@@ -270,14 +304,18 @@ class OrderFlowAggregator:
 
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
+            self._touch_identity_locked(identity)
             if identity not in self._state:
                 self._state[identity] = {}
             symbol_state = self._state[identity]
 
             if bin_start not in symbol_state:
                 symbol_state[bin_start] = _BinState(bin_start=bin_start)
+                self._evict_retained_state_locked(symbol_state)
 
-            symbol_state[bin_start].add(price_level, side, volume)
+            bin_state = symbol_state.get(bin_start)
+            if bin_state is not None:
+                bin_state.add(price_level, side, volume)
         logger.debug(
             "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d",
             identity[0], identity[1], price_level, volume, side, bin_start,
@@ -332,20 +370,30 @@ class OrderFlowAggregator:
         between ticks. This is the glue that turns the live tick stream into a
         real order-flow footprint instead of synthetic data.
         """
+        import time as _time
+
+        tick_timestamp = timestamp if timestamp is not None else _time.time()
+        session_date = _ist_session_date(tick_timestamp)
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
             current_volume = int(cumulative_volume)
+            prev = self._last_tick.get(identity)
+            if prev is not None:
+                if tick_timestamp < prev[3]:
+                    return
+                if tick_timestamp == prev[3] and current_volume < prev[1]:
+                    return
             if current_volume < 0:
                 self._last_tick.pop(identity, None)
                 self._last_side.pop(identity, None)
                 return
-
-            prev = self._last_tick.get(identity)
-            if prev is None:
-                self._last_tick[identity] = (ltp, current_volume)
+            self._touch_identity_locked(identity)
+            if prev is None or prev[2] != session_date:
+                self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                self._last_side.pop(identity, None)
                 return
-            prev_ltp, prev_vol = prev
-            self._last_tick[identity] = (ltp, current_volume)
+            prev_ltp, prev_vol, _, _ = prev
+            self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
             if current_volume < prev_vol:
                 self._last_side.pop(identity, None)
                 return
@@ -354,7 +402,23 @@ class OrderFlowAggregator:
             if inc_volume <= 0:
                 return
             side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
-            self.add_tick(symbol, ltp, inc_volume, side, timestamp=timestamp, exchange=exchange)
+            self.add_tick(symbol, ltp, inc_volume, side, timestamp=tick_timestamp, exchange=exchange)
+
+    def retain_identities(self, identities: set[_InstrumentIdentity]) -> None:
+        """Discard every identity no longer present in the recorder watchlist."""
+        allowed = {
+            (str(exchange).strip().upper(), str(symbol).strip().upper())
+            for exchange, symbol in identities
+        }
+        with self._lock:
+            known = (
+                set(self._state)
+                | set(self._last_tick)
+                | set(self._last_side)
+                | set(self._identity_recency)
+            )
+            for identity in known - allowed:
+                self._drop_identity_locked(identity)
 
     def get_footprint(
         self,
@@ -413,12 +477,11 @@ class OrderFlowAggregator:
                 self._state.clear()
                 self._last_tick.clear()
                 self._last_side.clear()
+                self._identity_recency.clear()
                 return
 
             identity = _instrument_identity(symbol, exchange)
-            self._state.pop(identity, None)
-            self._last_tick.pop(identity, None)
-            self._last_side.pop(identity, None)
+            self._drop_identity_locked(identity)
 
     # ------------------------------------------------------------------
     # Static / class-level analytics
@@ -575,6 +638,39 @@ class OrderFlowAggregator:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _drop_identity_locked(self, identity: _InstrumentIdentity) -> None:
+        """Remove one identity from every state map while holding ``_lock``."""
+        self._state.pop(identity, None)
+        self._last_tick.pop(identity, None)
+        self._last_side.pop(identity, None)
+        self._identity_recency.pop(identity, None)
+
+    def _touch_identity_locked(self, identity: _InstrumentIdentity) -> None:
+        """Mark one identity as recent and enforce the global LRU bound."""
+        self._identity_recency.pop(identity, None)
+        self._identity_recency[identity] = None
+        while len(self._identity_recency) > self.max_instruments:
+            oldest, _ = self._identity_recency.popitem(last=False)
+            self._state.pop(oldest, None)
+            self._last_tick.pop(oldest, None)
+            self._last_side.pop(oldest, None)
+
+    def _evict_retained_state_locked(self, symbol_state: dict[int, _BinState]) -> None:
+        """Bound one instrument's bins by newest IST sessions and per-session bins."""
+        bins_by_session: dict[date, list[int]] = {}
+        for bin_start in symbol_state:
+            bins_by_session.setdefault(_ist_session_date(bin_start), []).append(bin_start)
+
+        retained_sessions = sorted(bins_by_session)[-self.max_retained_sessions:]
+        retained_session_set = set(retained_sessions)
+        for session_date, session_bins in bins_by_session.items():
+            if session_date not in retained_session_set:
+                for bin_start in session_bins:
+                    symbol_state.pop(bin_start, None)
+                continue
+            for bin_start in sorted(session_bins)[:-self.max_bins_per_session]:
+                symbol_state.pop(bin_start, None)
+
     def _round_to_tick(self, price: float) -> float:
         """Round ``price`` to the nearest ``tick_size`` boundary.
 
@@ -585,3 +681,16 @@ class OrderFlowAggregator:
             Price rounded to the nearest tick.
         """
         return round(price / self.tick_size) * self.tick_size
+
+
+def create_live_market_orderflow_aggregator() -> OrderFlowAggregator:
+    """Build the shared production aggregator without collapsing fine-tick instruments.
+
+    The application factory should use this helper for live ingestion. Direct
+    analytics callers retain :class:`OrderFlowAggregator`'s established
+    ``0.05`` default unless they explicitly choose another grid.
+    """
+    return OrderFlowAggregator(
+        time_bin_seconds=LIVE_MARKET_INGESTION_INTERVAL_SECONDS,
+        tick_size=LIVE_MARKET_INGESTION_TICK_SIZE,
+    )

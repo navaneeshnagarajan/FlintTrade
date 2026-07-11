@@ -1126,6 +1126,21 @@ class TestTickRecorder:
         assert recorder.tick_count == 0
         assert recorder.pending_tick_count == 0
 
+    def test_watchlist_removal_prunes_orderflow_identity_state(self):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        orderflow = OrderFlowAggregator()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        instrument = {"exchange": "NSE", "symbol": "RELIANCE"}
+        recorder.add_symbols([instrument], mode="quote")
+        orderflow.add_tick("RELIANCE", 2500.0, 10, "BUY", exchange="NSE")
+
+        recorder.remove_symbols([instrument], mode="quote")
+        recorder.request_reconnect()
+
+        assert ("NSE", "RELIANCE") not in orderflow._state
+
     def test_invalid_mode_raises(self):
         _, recorder = self._make_recorder()
         with pytest.raises(ValueError, match="Invalid mode"):
@@ -1241,6 +1256,213 @@ class TestTickRecorder:
         legacy_recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", **fields})
 
         assert nested_recorder._buffer[0][4:14] == legacy_recorder._buffer[0][4:14]
+
+    @pytest.mark.parametrize("nested", [False, True], ids=["legacy", "nested"])
+    @pytest.mark.parametrize(
+        "frame_timestamp",
+        [
+            pytest.param(1_774_410_300, id="epoch-seconds"),
+            pytest.param(1_774_410_300_000, id="epoch-milliseconds"),
+            pytest.param(1_774_410_300_000_000, id="epoch-microseconds"),
+            pytest.param(1_774_410_300_000_000_000, id="epoch-nanoseconds"),
+            pytest.param("1774410300000", id="numeric-string-milliseconds"),
+            pytest.param("2026-03-25T03:45:00Z", id="iso-utc"),
+            pytest.param("2026-03-25T09:15:00+05:30", id="iso-ist"),
+        ],
+    )
+    def test_supported_frame_timestamps_are_preserved_for_storage_and_orderflow(
+        self,
+        nested,
+        frame_timestamp,
+        monkeypatch,
+    ):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        expected = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return expected if tz is not None else expected.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+        payload = {
+            "exchange": " nse ",
+            "symbol": " reliance ",
+            "ltp": 2500.0,
+            "volume": 1000,
+            "timestamp": frame_timestamp,
+        }
+        frame = {"type": "quote", "data": payload} if nested else payload
+
+        recorder._process_tick(frame)
+
+        assert recorder._buffer[0][0] == expected
+        orderflow.feed_market_tick.assert_called_once()
+        assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == expected.timestamp()
+
+    @pytest.mark.parametrize(
+        "frame_timestamp",
+        [
+            "2026-03-23T03:44:59Z",
+            "2026-03-25T03:45:01Z",
+            "2026-03-25T03:50:00Z",
+            "2026-03-25T03:50:01Z",
+        ],
+        ids=["too-old", "one-second-future", "five-minutes-future", "too-far-future"],
+    )
+    def test_implausibly_skewed_frame_timestamp_uses_receipt_time(
+        self,
+        frame_timestamp,
+        monkeypatch,
+    ):
+        import flinttrade_data.tick_recorder as recorder_module
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        received_at = datetime(2026, 3, 25, 3, 45, tzinfo=timezone.utc)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return received_at if tz is not None else received_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(recorder_module, "datetime", FixedDateTime)
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "volume": 1000,
+                "timestamp": frame_timestamp,
+            }
+        )
+
+        assert recorder._buffer[0][0] == received_at
+        orderflow.feed_market_tick.assert_not_called()
+
+    @pytest.mark.parametrize("stale_volume", [-1, 1050])
+    def test_rejected_explicit_timestamp_cannot_mutate_orderflow_baseline(self, stale_volume):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        now = datetime.now(timezone.utc)
+        base = now.timestamp()
+        orderflow = OrderFlowAggregator()
+        orderflow.feed_market_tick("RELIANCE", 2500.0, 1000, exchange="NSE", timestamp=base - 2)
+        orderflow.feed_market_tick("RELIANCE", 2501.0, 1100, exchange="NSE", timestamp=base - 1)
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2499.0,
+                "volume": stale_volume,
+                "timestamp": (now - timedelta(days=1, microseconds=1)).isoformat(),
+            }
+        )
+        orderflow.feed_market_tick("RELIANCE", 2502.0, 1125, exchange="NSE", timestamp=base + 1)
+
+        buckets = orderflow.get_footprint("RELIANCE", exchange="NSE")
+        assert sum(bucket.buy_volume + bucket.sell_volume for bucket in buckets) == 125
+
+    @pytest.mark.parametrize("stale_volume", [-1, 1050])
+    def test_rejected_nested_timestamp_cannot_regain_trust_from_envelope(self, stale_volume):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        now = datetime.now(timezone.utc)
+        base = now.timestamp()
+        orderflow = OrderFlowAggregator()
+        orderflow.feed_market_tick("RELIANCE", 2500.0, 1000, exchange="NSE", timestamp=base - 2)
+        orderflow.feed_market_tick("RELIANCE", 2501.0, 1100, exchange="NSE", timestamp=base - 1)
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick(
+            {
+                "timestamp": now.isoformat(),
+                "data": {
+                    "exchange": "NSE",
+                    "symbol": "RELIANCE",
+                    "ltp": 2499.0,
+                    "volume": stale_volume,
+                    "timestamp": (now - timedelta(days=1, microseconds=1)).isoformat(),
+                },
+            }
+        )
+        orderflow.feed_market_tick("RELIANCE", 2502.0, 1125, exchange="NSE", timestamp=base + 1)
+
+        buckets = orderflow.get_footprint("RELIANCE", exchange="NSE")
+        assert sum(bucket.buy_volume + bucket.sell_volume for bucket in buckets) == 125
+
+    @pytest.mark.parametrize(
+        "invalid_timestamp",
+        [
+            None,
+            0,
+            -1,
+            10**30,
+            "not-a-timestamp",
+            "1999-12-31T23:59:59Z",
+            "2100-01-01T00:00:01Z",
+            "x" * 65,
+        ],
+    )
+    def test_invalid_or_out_of_bounds_frame_timestamp_uses_one_receipt_time(
+        self,
+        invalid_timestamp,
+    ):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+        before = datetime.now(timezone.utc)
+
+        recorder._process_tick(
+            {
+                "exchange": "NSE",
+                "symbol": "RELIANCE",
+                "ltp": 2500.0,
+                "volume": 1000,
+                "timestamp": invalid_timestamp,
+            }
+        )
+
+        after = datetime.now(timezone.utc)
+        stored_timestamp = recorder._buffer[0][0]
+        assert before <= stored_timestamp <= after
+        if invalid_timestamp is None:
+            assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == stored_timestamp.timestamp()
+        else:
+            orderflow.feed_market_tick.assert_not_called()
+
+    def test_missing_frame_timestamp_uses_one_receipt_time(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        orderflow = MagicMock()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=orderflow)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+        before = datetime.now(timezone.utc)
+
+        recorder._process_tick(
+            {"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000}
+        )
+
+        after = datetime.now(timezone.utc)
+        stored_timestamp = recorder._buffer[0][0]
+        assert before <= stored_timestamp <= after
+        assert orderflow.feed_market_tick.call_args.kwargs["timestamp"] == stored_timestamp.timestamp()
 
     def test_numeric_mode_three_persists_as_depth(self):
         _, recorder = self._make_recorder()

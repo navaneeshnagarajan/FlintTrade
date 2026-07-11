@@ -50,6 +50,16 @@ def _storage() -> tuple[Any | None, Any | None]:
     )
 
 
+def _storage_unavailable_response() -> tuple[Any, int]:
+    """Return the fail-closed response used once tick storage is unpublished."""
+    return jsonify(
+        {
+            "status": "error",
+            "message": "Tick capture is not enabled — no tick store to query.",
+        }
+    ), 409
+
+
 @ticks_bp.route("/status", methods=["GET"])
 def tick_status() -> Any:
     """Report tick-capture status.
@@ -134,12 +144,7 @@ def query_ticks() -> Any:
     """
     storage, lock = _storage()
     if storage is None:
-        return jsonify(
-            {
-                "status": "error",
-                "message": "Tick capture is not enabled — no tick store to query.",
-            }
-        ), 409
+        return _storage_unavailable_response()
 
     symbol = str(request.args.get("symbol", "")).strip().upper()
     exchange = str(request.args.get("exchange", "")).strip().upper()
@@ -162,8 +167,12 @@ def query_ticks() -> Any:
     try:
         if lock is not None:
             with lock:
+                if current_app.config.get("TICK_STORAGE") is not storage:
+                    return _storage_unavailable_response()
                 rows = storage.get_ticks(symbol, exchange, start, end, limit=limit + 1)
         else:
+            if current_app.config.get("TICK_STORAGE") is not storage:
+                return _storage_unavailable_response()
             rows = storage.get_ticks(symbol, exchange, start, end, limit=limit + 1)
     except Exception as exc:
         logger.warning("Tick query failed for %s:%s %s..%s: %s", exchange, symbol, start, end, exc)

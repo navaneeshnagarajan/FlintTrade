@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import time as host_time
+
 import pytest
 from flask import Flask
 
@@ -24,6 +27,23 @@ def app():
 @pytest.fixture()
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture()
+def non_ist_host_timezone():
+    if not hasattr(host_time, "tzset"):
+        pytest.skip("host timezone mutation requires time.tzset")
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    host_time.tzset()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        host_time.tzset()
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +265,76 @@ def test_orderflow_live_coarsens_exact_tick_size_multiple_without_losing_volume(
     assert len(data["buckets"][0]["cells"]) == 1
     assert data["buckets"][0]["total_volume"] == 35
     assert data["buckets"][0]["delta"] == 25
+
+
+@pytest.mark.parametrize(
+    ("symbol", "exchange", "prices", "requested_tick_size", "expected_cell_count"),
+    [
+        ("EURUSD", "CDS", (1.0840, 1.0841), 0.0001, 2),
+        ("USDINR", "CDS", (83.0000, 83.0001), 0.0025, 1),
+        ("CRUDEOIL", "MCX", (6500.0, 6500.0001), 1.0, 1),
+        ("RELIANCE", "NSE", (2500.00, 2500.0001), 0.01, 1),
+    ],
+)
+def test_precise_shared_live_grid_coarsens_each_instrument_without_losing_volume(
+    app,
+    symbol,
+    exchange,
+    prices,
+    requested_tick_size,
+    expected_cell_count,
+):
+    from flinttrade_data.orderflow_aggregator import create_live_market_orderflow_aggregator
+
+    aggregator = create_live_market_orderflow_aggregator()
+    aggregator.add_tick(symbol, prices[0], 12, "BUY", timestamp=1_774_410_300, exchange=exchange)
+    aggregator.add_tick(symbol, prices[1], 23, "SELL", timestamp=1_774_410_301, exchange=exchange)
+    app.config["ORDERFLOW_AGGREGATOR"] = aggregator
+
+    with app.test_client() as client:
+        response = client.get(
+            "/api/v1/data/orderflow",
+            query_string={
+                "symbol": symbol,
+                "exchange": exchange,
+                "interval": 60,
+                "tick_size": requested_tick_size,
+            },
+        )
+
+    data = response.get_json()["data"]
+    assert data["source_tick_size"] == 0.0001
+    assert data["tick_size"] == requested_tick_size
+    assert len(data["buckets"][0]["cells"]) == expected_cell_count
+    assert data["buckets"][0]["total_volume"] == 35
+    assert data["buckets"][0]["delta"] == -11
+
+
+def test_live_and_synthetic_time_labels_are_explicitly_ist_under_non_ist_host_timezone(
+    non_ist_host_timezone,
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    market_open_ist = 1_774_410_300  # 2026-03-25 09:15:00 Asia/Kolkata
+    monkeypatch.setattr(mod.time, "time", lambda: market_open_ist)
+
+    synthetic = mod._generate_synthetic_buckets("NIFTY", 300, 0.05, count=1)
+    live = mod._live_buckets_to_response(
+        [
+            SimpleNamespace(
+                timestamp_bin=market_open_ist,
+                price_level=100.0,
+                buy_volume=5,
+                sell_volume=3,
+                delta=2,
+            )
+        ],
+        "NIFTY",
+    )
+
+    assert synthetic[0]["time_label"] == "09:15:00"
+    assert live[0]["time_label"] == "09:15:00"
 
 
 def test_orderflow_synthetic_reports_requested_interval(app):

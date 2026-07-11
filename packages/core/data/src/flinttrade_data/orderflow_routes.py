@@ -26,16 +26,24 @@ import logging
 import math
 import time
 from collections import defaultdict
+from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, jsonify, request
 
 from .orderflow_aggregator import OrderFlowAggregator
 
 logger = logging.getLogger("flinttrade.data.orderflow_routes")
+_IST = ZoneInfo("Asia/Kolkata")
 
 orderflow_bp = Blueprint("orderflow", __name__, url_prefix="/api/v1")
+
+
+def _ist_time_label(timestamp: int | float) -> str:
+    """Format an epoch timestamp in IST regardless of the host timezone."""
+    return datetime.fromtimestamp(timestamp, tz=_IST).strftime("%H:%M:%S")
 
 # ---------------------------------------------------------------------------
 # Lazy import of the live aggregator — optional dependency
@@ -109,7 +117,7 @@ def _generate_synthetic_buckets(
 
     for i in range(count):
         bucket_ts = now_quantised - (count - 1 - i) * interval
-        time_label = time.strftime("%H:%M:%S", time.localtime(bucket_ts))
+        time_label = _ist_time_label(bucket_ts)
 
         mid += (rand() - 0.5) * tick_size * 80
         mid = round(mid / tick_size) * tick_size
@@ -232,7 +240,7 @@ def _live_buckets_to_response(
 
     for bin_start in sorted(groups):
         levels = groups[bin_start]
-        time_label = time.strftime("%H:%M:%S", time.localtime(bin_start))
+        time_label = _ist_time_label(bin_start)
         cells: dict[str, dict[str, int]] = {}
         max_vol = -1
         poc_price = 0.0

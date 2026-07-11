@@ -287,6 +287,27 @@ class TestQuery:
         assert data["truncated"] is True
         assert [tick["ltp"] for tick in data["ticks"]] == [3.0, 4.0]
 
+    def test_query_rechecks_storage_publication_after_acquiring_shutdown_lock(self, client, app):
+        class Storage:
+            def get_ticks(self, *_args, **_kwargs):
+                raise AssertionError("unpublished storage must not be reopened")
+
+        class UnpublishingLock:
+            def __enter__(self):
+                app.config.pop("TICK_STORAGE", None)
+
+            def __exit__(self, *_args):
+                return False
+
+        app.config["TICK_STORAGE"] = Storage()
+        app.config["TICK_STORAGE_LOCK"] = UnpublishingLock()
+
+        response = client.get(
+            "/api/v1/data/ticks?symbol=NIFTY&exchange=NSE_INDEX&start=2026-07-06&end=2026-07-06"
+        )
+
+        assert response.status_code == 409
+
 
 class TestWatchlist:
     def test_409_when_capture_disabled(self, client):

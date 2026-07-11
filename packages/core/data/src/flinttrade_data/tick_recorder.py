@@ -46,6 +46,10 @@ LtpSink = Callable[[str, str, float, int], None]
 _RETRYABLE_HANDSHAKE_STATUSES = frozenset({500, 502, 503, 504})
 _BIGINT_MIN = -(2**63)
 _BIGINT_MAX = 2**63 - 1
+_MAX_FRAME_TIMESTAMP_TEXT_LENGTH = 64
+_MIN_FRAME_TIMESTAMP_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
+_MAX_FRAME_TIMESTAMP_EPOCH = datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp()
+_MAX_FRAME_TIMESTAMP_AGE_SECONDS = 24 * 60 * 60
 
 
 def _optional_websocket_exception(name: str) -> type[BaseException] | None:
@@ -108,6 +112,78 @@ def _bigint_or_none(value: Any) -> int | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return number if _BIGINT_MIN <= number <= _BIGINT_MAX else None
+
+
+def _normalise_epoch_timestamp(value: Any) -> datetime | None:
+    """Parse a bounded epoch value in seconds, milliseconds, microseconds, or nanoseconds."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        epoch = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(epoch):
+        return None
+
+    magnitude = abs(epoch)
+    if magnitude >= 1e17:
+        epoch /= 1e9
+    elif magnitude >= 1e14:
+        epoch /= 1e6
+    elif magnitude >= 1e11:
+        epoch /= 1e3
+    if not _MIN_FRAME_TIMESTAMP_EPOCH <= epoch <= _MAX_FRAME_TIMESTAMP_EPOCH:
+        return None
+    return datetime.fromtimestamp(epoch, tz=timezone.utc)
+
+
+def _normalise_frame_timestamp(value: Any) -> datetime | None:
+    """Parse one bounded OpenAlgo epoch or timezone-aware ISO timestamp."""
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or len(text) > _MAX_FRAME_TIMESTAMP_TEXT_LENGTH:
+            return None
+        epoch_timestamp = _normalise_epoch_timestamp(text)
+        if epoch_timestamp is not None:
+            return epoch_timestamp
+        try:
+            parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            return None
+        parsed = parsed.astimezone(timezone.utc)
+        if not _MIN_FRAME_TIMESTAMP_EPOCH <= parsed.timestamp() <= _MAX_FRAME_TIMESTAMP_EPOCH:
+            return None
+        return parsed
+    return _normalise_epoch_timestamp(value)
+
+
+def _frame_timestamp(
+    frame: dict[str, Any],
+    payload: dict[str, Any],
+    received_at: datetime,
+) -> tuple[datetime, bool]:
+    """Return storage time plus whether source time is safe for order-flow state."""
+    def resolve(candidate: Any) -> tuple[datetime, bool]:
+        parsed = _normalise_frame_timestamp(candidate)
+        if parsed is None:
+            return received_at, False
+        age_seconds = (received_at - parsed).total_seconds()
+        if age_seconds < 0:
+            return received_at, False
+        if age_seconds <= _MAX_FRAME_TIMESTAMP_AGE_SECONDS:
+            return parsed, True
+        return received_at, False
+
+    payload_timestamp = payload.get("timestamp")
+    if payload_timestamp is not None:
+        return resolve(payload_timestamp)
+    if payload is not frame:
+        frame_timestamp = frame.get("timestamp")
+        if frame_timestamp is not None:
+            return resolve(frame_timestamp)
+    return received_at, True
 
 
 def _canonical_identity(exchange: Any, symbol: Any) -> tuple[str, str] | None:
@@ -512,6 +588,13 @@ class TickRecorder:
         event loop. The callback rechecks that the socket is still active before
         closing it, so callers can safely invoke this before or after ``run()``.
         """
+        # Watchlist routes call this only after the signal-hub transaction has
+        # committed. Pruning here preserves aggregator state when that earlier
+        # transaction rolls the recorder watchlist back.
+        with self._subscription_lock:
+            retain_identities = getattr(self._orderflow, "retain_identities", None)
+            if callable(retain_identities):
+                retain_identities(set(self._allowed_identities))
         with self._state_lock:
             loop = self._loop
             ws = self._active_ws
@@ -630,7 +713,10 @@ class TickRecorder:
         if handled:
             return reconnect
 
+        payload = data.get("data") if isinstance(data.get("data"), dict) else data
         identity = _canonical_identity(data.get("exchange"), data.get("symbol"))
+        if identity is None and payload is not data:
+            identity = _canonical_identity(payload.get("exchange"), payload.get("symbol"))
         if identity is None:
             return False
 
@@ -638,13 +724,19 @@ class TickRecorder:
         with self._subscription_lock:
             if identity not in self._allowed_identities:
                 return False
-            return self._process_allowed_tick(data, exchange=exchange, symbol=symbol)
+            return self._process_allowed_tick(data, payload=payload, exchange=exchange, symbol=symbol)
 
-    def _process_allowed_tick(self, data: dict[str, Any], *, exchange: str, symbol: str) -> bool:
+    def _process_allowed_tick(
+        self,
+        data: dict[str, Any],
+        *,
+        payload: dict[str, Any],
+        exchange: str,
+        symbol: str,
+    ) -> bool:
         """Buffer and dispatch one canonical frame admitted by the allowlist."""
-
-        payload = data.get("data") if isinstance(data.get("data"), dict) else data
-        ts = datetime.now(timezone.utc)
+        received_at = datetime.now(timezone.utc)
+        ts, orderflow_timestamp_trusted = _frame_timestamp(data, payload, received_at)
         mode = self._detect_mode(payload, data.get("mode"))
         cumulative_volume = _bigint_or_none(payload.get("volume"))
         persisted_volume = cumulative_volume if cumulative_volume is None or cumulative_volume >= 0 else None
@@ -683,7 +775,7 @@ class TickRecorder:
         # Feed the live order-flow aggregator (best-effort — must never break
         # tick recording). LTP + cumulative volume drive the footprint; bid/ask
         # sharpen the aggressor classification when present.
-        if self._orderflow is not None:
+        if self._orderflow is not None and orderflow_timestamp_trusted:
             ltp = payload.get("ltp")
             if ltp is not None and cumulative_volume is not None:
                 bid = payload.get("bid")
@@ -696,6 +788,7 @@ class TickRecorder:
                         exchange=exchange,
                         bid=float(bid) if bid is not None else None,
                         ask=float(ask) if ask is not None else None,
+                        timestamp=ts.timestamp(),
                     )
                 except Exception as exc:  # noqa: BLE001 - feeding never breaks recording
                     logger.debug(
