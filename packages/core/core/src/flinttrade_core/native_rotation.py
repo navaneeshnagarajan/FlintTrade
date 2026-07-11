@@ -55,6 +55,13 @@ class NativeSessionRefresher:
                 stored, or any selector's refresh fails (per-selector detail
                 also lands in ``NATIVE_SESSION_STATUS`` for the UI).
         """
+        from .native_account_routes import NATIVE_ACCOUNT_MUTATION_LOCK  # noqa: PLC0415
+
+        with NATIVE_ACCOUNT_MUTATION_LOCK:
+            self._refresh_token_locked(broker)
+
+    def _refresh_token_locked(self, broker: str) -> None:
+        """Run one broker refresh while native-account mutations are excluded."""
         import asyncio  # noqa: PLC0415
 
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
@@ -63,6 +70,9 @@ class NativeSessionRefresher:
             establish_native_session,
             should_keep_session_after_probe_error,
         )
+        from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
+
+        from .native_account_routes import _stored_native_account  # noqa: PLC0415
 
         app = self._app
         adapter = (app.config.get("NATIVE_ADAPTERS") or {}).get(broker)
@@ -78,14 +88,20 @@ class NativeSessionRefresher:
         if not rows:
             raise RuntimeError(f"no stored accounts for {broker!r}")
 
-        status: dict[str, Any] = app.config.setdefault("NATIVE_SESSION_STATUS", {})
         failures: list[str] = []
         for row in rows:
             account_id = str(row.get("account_id") or "")
             selector = f"{broker}:{account_id}"
+
+            def selector_still_exists() -> bool:
+                try:
+                    return _stored_native_account(store, broker, account_id) is not None
+                except Exception:  # noqa: BLE001 - unreadable state cannot authorise publication
+                    return False
+
             try:
-                credentials = store.retrieve_for(broker, account_id)
-                renewed_token = False
+                stored_credentials = store.retrieve_for(broker, account_id)
+                credentials = dict(stored_credentials)
                 # Renew-in-place when the broker supports it (Dhan RenewToken
                 # extends the 24h window without a fresh 2FA) — needs the still-
                 # live session; best-effort, falling back to a plain replay.
@@ -105,32 +121,69 @@ class NativeSessionRefresher:
                             )
                             if token:
                                 credentials = {**credentials, "access_token": token}
-                                renewed_token = True
                         except Exception as exc:  # noqa: BLE001 - fall back to replay
                             logger.info(
                                 "renew_token failed for %s (%s) — replaying vault credentials",
                                 broker, type(exc).__name__,
                             )
-                # verify=True: the token-replay logins (Upstox/IndMoney) build a
-                # Session without contacting the broker, so a DEAD token would
-                # report success. establish_native_session probes a cheap
-                # authenticated read and raises (dropping the session) on a hard
-                # auth failure — the SAME probe the interactive routes use.
-                asyncio.run(
+                # Authenticate and probe against a private registry. No shared
+                # session, status, or vault surface changes until the selector is
+                # revalidated after the broker call completes.
+                candidate_registry = BrokerRegistry()
+                candidate_session = asyncio.run(
                     establish_native_session(
-                        adapter, registry, credentials, broker, account_id,
-                        credential_store=store, verify=True,
+                        adapter,
+                        candidate_registry,
+                        credentials,
+                        broker,
+                        account_id,
+                        verify=True,
                     )
                 )
-                # Persist the renewed token: establish_native_session's write-back
-                # compares the replayable payload against the (already-merged)
-                # in-memory credentials and would skip the write, leaving the OLD
-                # token in the vault to be replayed next boot. Force the write.
-                if renewed_token:
+
+                replayable_credentials = credentials
+                replay = getattr(adapter, "replay_credentials", None)
+                if callable(replay):
                     try:
-                        store.update_credentials_for(broker, account_id, credentials)
-                    except Exception as exc:  # noqa: BLE001 - session is live regardless
-                        logger.warning("Renewed-token persist failed for %s (%s)", broker, type(exc).__name__)
+                        replayable = replay(dict(credentials), candidate_session)
+                        if isinstance(replayable, dict):
+                            replayable_credentials = replayable
+                    except Exception as exc:  # noqa: BLE001 - write-back remains best-effort
+                        logger.warning(
+                            "Replayable-credential preparation failed for %s (%s)",
+                            broker,
+                            type(exc).__name__,
+                        )
+
+                if not selector_still_exists():
+                    continue
+                if replayable_credentials != stored_credentials:
+                    try:
+                        store.update_credentials_for(
+                            broker,
+                            account_id,
+                            replayable_credentials,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - session can remain live
+                        logger.warning(
+                            "Refreshed-token persist failed for %s (%s)",
+                            broker,
+                            type(exc).__name__,
+                        )
+                        if not selector_still_exists():
+                            continue
+
+                if not selector_still_exists():
+                    continue
+                registry.put_session(broker, account_id, candidate_session)
+
+                if not selector_still_exists():
+                    try:
+                        registry.remove_session_for(broker, account_id)
+                    except Exception:  # noqa: BLE001 - selector is already removed
+                        pass
+                    continue
+                status: dict[str, Any] = app.config.setdefault("NATIVE_SESSION_STATUS", {})
                 status[selector] = "ok"
             except Exception as exc:  # noqa: BLE001 - per-selector isolation
                 message = (
@@ -138,6 +191,16 @@ class NativeSessionRefresher:
                     if should_keep_session_after_probe_error(exc)
                     else SESSION_INVALID_RELOGIN_MESSAGE
                 )
+                if not selector_still_exists():
+                    continue
+                if message == SESSION_INVALID_RELOGIN_MESSAGE:
+                    try:
+                        registry.remove_session_for(broker, account_id)
+                    except Exception:  # noqa: BLE001 - no prior session is fine
+                        pass
+                if not selector_still_exists():
+                    continue
+                status = app.config.setdefault("NATIVE_SESSION_STATUS", {})
                 status[selector] = message
                 failures.append(f"{broker}: {message}")
         if failures:

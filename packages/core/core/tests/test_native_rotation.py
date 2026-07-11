@@ -9,6 +9,7 @@ wires the rotator + admin routes + 08:05 IST jobs into the app factory.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
@@ -304,3 +305,107 @@ def test_live_token_probe_passes() -> None:
     app = _app(adapter, registry, store)
     NativeSessionRefresher(app).refresh_token("dhan")
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "ok"
+
+
+def test_refresh_and_removal_share_the_native_account_mutation_lock() -> None:
+    from flinttrade_core.native_account_routes import _CONNECT_LOCK
+
+    login_started = threading.Event()
+    release_login = threading.Event()
+    removal_attempted = threading.Event()
+    removal_finished = threading.Event()
+
+    class _BlockingAdapter(_Adapter):
+        async def login(self, credentials: dict[str, Any]) -> _Session:
+            login_started.set()
+            if not release_login.wait(2.0):
+                raise TimeoutError("test did not release refresh login")
+            return await super().login(credentials)
+
+    adapter = _BlockingAdapter()
+    registry = _Registry()
+    registry.sessions[("dhan", "111")] = _Session("old-token")
+    store = _Store({("dhan", "111"): {"access_token": "stored-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
+    refresh_errors: list[BaseException] = []
+
+    def refresh() -> None:
+        try:
+            NativeSessionRefresher(app).refresh_token("dhan")
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            refresh_errors.append(exc)
+
+    def remove() -> None:
+        removal_attempted.set()
+        with _CONNECT_LOCK:
+            store.rows.pop(("dhan", "111"), None)
+            registry.remove_session_for("dhan", "111")
+            app.config["NATIVE_SESSION_STATUS"].pop("dhan:111", None)
+        removal_finished.set()
+
+    refresh_thread = threading.Thread(target=refresh)
+    remove_thread = threading.Thread(target=remove)
+    refresh_thread.start()
+    assert login_started.wait(1.0)
+    remove_thread.start()
+    assert removal_attempted.wait(1.0)
+    removal_completed_during_refresh = removal_finished.wait(0.05)
+    release_login.set()
+    refresh_thread.join(2.0)
+    remove_thread.join(2.0)
+
+    assert removal_completed_during_refresh is False
+    assert refresh_thread.is_alive() is False
+    assert remove_thread.is_alive() is False
+    assert refresh_errors == []
+    assert ("dhan", "111") not in store.rows
+    assert ("dhan", "111") not in registry.sessions
+    assert "dhan:111" not in app.config["NATIVE_SESSION_STATUS"]
+
+
+def test_refresh_revalidates_selector_before_shared_publication() -> None:
+    login_started = threading.Event()
+    release_login = threading.Event()
+
+    class _BlockingRenewableAdapter(_Adapter):
+        def __init__(self) -> None:
+            super().__init__(renewable=True)
+
+        async def login(self, credentials: dict[str, Any]) -> _Session:
+            login_started.set()
+            if not release_login.wait(2.0):
+                raise TimeoutError("test did not release refresh login")
+            return await super().login(credentials)
+
+    adapter = _BlockingRenewableAdapter()
+    registry = _Registry()
+    registry.sessions[("dhan", "111")] = _Session("old-token")
+    store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
+    refresh_errors: list[BaseException] = []
+
+    def refresh() -> None:
+        try:
+            NativeSessionRefresher(app).refresh_token("dhan")
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            refresh_errors.append(exc)
+
+    refresh_thread = threading.Thread(target=refresh)
+    refresh_thread.start()
+    assert login_started.wait(1.0)
+
+    # Model a selector removed after the refresher's initial row snapshot by a
+    # separate process, whose in-process threading lock cannot be shared.
+    store.rows.pop(("dhan", "111"))
+    registry.remove_session_for("dhan", "111")
+    app.config["NATIVE_SESSION_STATUS"].pop("dhan:111")
+    release_login.set()
+    refresh_thread.join(2.0)
+
+    assert refresh_thread.is_alive() is False
+    assert refresh_errors == []
+    assert ("dhan", "111") not in store.rows
+    assert ("dhan", "111") not in registry.sessions
+    assert "dhan:111" not in app.config["NATIVE_SESSION_STATUS"]

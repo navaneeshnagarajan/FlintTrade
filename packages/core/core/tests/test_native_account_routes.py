@@ -14,7 +14,9 @@ fixture mints one and ``_h()`` attaches it; the dedicated G9 tests pin the
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import pytest
 
@@ -2410,8 +2412,53 @@ def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
 
     assert response.status_code == 502
     assert router.calls >= 1
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["BROKER_ROUTER_DRAINING"] is router
     assert app.config["CREDENTIAL_STORE"].list_accounts() == []
     assert _workspace_brokers(tmp_path) == {}
+
+
+def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client, monkeypatch):
+    c, app, tmp_path = client
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+    app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.01
+    app.config["NATIVE_SESSION_STATUS"] = {"unrelated:selector": "prior-live-status"}
+    status_before = dict(app.config["NATIVE_SESSION_STATUS"])
+    workspace_before = json.loads(json.dumps(_workspace_brokers(tmp_path)))
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _slow_probe(_self, _session):
+        await asyncio.sleep(1.0)
+        return {"available_balance": 0.0}
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
+
+    started = time.monotonic()
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "TIMEOUTCONNECT",
+            "credentials": {"access_token": "candidate"},
+        },
+    )
+    elapsed = time.monotonic() - started
+
+    assert response.status_code == 504
+    assert elapsed < 0.5
+    assert app.config["BROKER_ROUTER"] is router
+    assert router.calls == 0
+    assert app.config["CREDENTIAL_STORE"].list_accounts() == []
+    assert _workspace_brokers(tmp_path) == workspace_before
+    assert app.config.get("NATIVE_SESSION_STATUS") == status_before
+
+    import flinttrade_core.native_account_routes as routes
+
+    assert routes._CONNECT_LOCK.acquire(blocking=False) is True
+    routes._CONNECT_LOCK.release()
 
 
 def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
@@ -2442,6 +2489,57 @@ def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
     assert router.calls >= 1
     assert store.retrieve_for("upstox", "DRAINRELOGIN") == {"access_token": "prior"}
     assert registry.get_session_for("upstox", "DRAINRELOGIN") is prior_session
+
+
+def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "TIMEOUTRELOGIN",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "TIMEOUTRELOGIN")
+    selector = "upstox:TIMEOUTRELOGIN"
+    app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
+    router = _DrainRouter(True)
+    app.config["BROKER_ROUTER"] = router
+    app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.01
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _slow_probe(_self, _session):
+        await asyncio.sleep(1.0)
+        return {"available_balance": 0.0}
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
+
+    started = time.monotonic()
+    response = c.post(
+        "/api/v1/native/accounts/upstox/TIMEOUTRELOGIN/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+    elapsed = time.monotonic() - started
+
+    assert response.status_code == 504
+    assert elapsed < 0.5
+    assert app.config["BROKER_ROUTER"] is router
+    assert router.calls == 0
+    assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "TIMEOUTRELOGIN") is prior_session
+    assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+
+    import flinttrade_core.native_account_routes as routes
+
+    assert routes._CONNECT_LOCK.acquire(blocking=False) is True
+    routes._CONNECT_LOCK.release()
 
 
 def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
@@ -2494,6 +2592,7 @@ def test_relogin_does_not_persist_fresh_credentials_until_probe_succeeds(client,
 
     async def _probe_before_commit(_self, _session):
         assert app.config["BROKER_ROUTER"] is router
+        assert router.calls == 0
         assert store.retrieve_for("upstox", "STAGEREL") == {"access_token": "prior"}
         return {"available_balance": 0.0}
 
@@ -2544,7 +2643,8 @@ def test_failed_relogin_preserves_prior_registry_session(client, monkeypatch):
     )
 
     assert response.status_code == 502, response.get_json()
-    assert router.calls >= 1
+    assert app.config["BROKER_ROUTER"] is router
+    assert router.calls == 0
     assert store.retrieve_for("upstox", "RESTOREREL") == {"access_token": "prior"}
     assert registry.get_session_for("upstox", "RESTOREREL") is prior_session
     assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
@@ -2593,7 +2693,8 @@ def test_failed_existing_reconnect_never_calls_durable_store(client, monkeypatch
     )
 
     assert response.status_code == 502
-    assert router.calls >= 1
+    assert app.config["BROKER_ROUTER"] is router
+    assert router.calls == 0
     assert durable_store_calls == 0
     assert store.retrieve_for("upstox", "STAGERECONNECT") == {"access_token": "prior"}
     assert registry.get_session_for("upstox", "STAGERECONNECT") is prior_session
@@ -2761,9 +2862,124 @@ def test_relogin_fails_closed_when_final_router_rebuild_returns_false(client, mo
 
     assert response.status_code == 500
     assert router.calls >= 1
-    assert store.retrieve_for("upstox", "REBUILDREL") == {"access_token": "candidate"}
+    assert store.retrieve_for("upstox", "REBUILDREL") == {"access_token": "prior"}
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["REGISTRY"].get_session_for("upstox", "REBUILDREL") is prior_session
+
+
+def test_read_only_relogin_router_failure_restores_default_primary_and_credentials(
+    client,
+    monkeypatch,
+):
+    c, app, tmp_path = client
+    _configure_openalgo_bridge()
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "READONLYROLLBACK",
+            "credentials": {"access_token": "prior"},
+            "is_primary": True,
+        },
+    )
+    assert connected.status_code == 200
+    registry = app.config["REGISTRY"]
+    prior_session = registry.get_session_for("upstox", "READONLYROLLBACK")
+    import flinttrade_core.app as app_module
+
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: False)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/READONLYROLLBACK/login",
+        headers=_h(),
+        json={
+            "credentials": {
+                "access_token": "candidate",
+                "read_only": "true",
+                "token_scope": "analytics",
+            }
+        },
+    )
+
+    assert response.status_code == 500
+    assert _workspace_brokers(tmp_path)["execution"]["default"] == "upstox:READONLYROLLBACK"
+    row = next(
+        row
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+        if row["account_id"] == "READONLYROLLBACK"
+    )
+    assert row["is_primary"] is True
+    assert app.config["CREDENTIAL_STORE"].retrieve_for(
+        "upstox", "READONLYROLLBACK"
+    ) == {"access_token": "prior"}
+    assert registry.get_session_for("upstox", "READONLYROLLBACK") is prior_session
+
+
+def test_connect_router_publication_failure_rolls_back_vault_workspace_and_session(
+    client,
+    monkeypatch,
+):
+    c, app, tmp_path = client
+    prior_default = str(_workspace_brokers(tmp_path).get("execution", {}).get("default") or "")
+    import flinttrade_core.app as app_module
+
+    monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: False)
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "ROLLBACKCONNECT",
+            "credentials": {"access_token": "candidate"},
+            "is_primary": True,
+        },
+    )
+
+    assert response.status_code == 502
+    assert not any(
+        row["account_id"] == "ROLLBACKCONNECT"
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+    )
+    brokers = _workspace_brokers(tmp_path)
+    assert "upstox:ROLLBACKCONNECT" not in brokers.get("registered", [])
+    assert "ROLLBACKCONNECT" not in brokers.get("account_acls", {}).get("upstox", {})
+    assert str(brokers.get("execution", {}).get("default") or "") == prior_default
+    with pytest.raises(Exception):
+        app.config["REGISTRY"].get_session_for("upstox", "ROLLBACKCONNECT")
+
+
+def test_connect_registry_publication_failure_rolls_back_durable_state(client, monkeypatch):
+    c, app, tmp_path = client
+    registry = app.config["REGISTRY"]
+    prior_default = str(_workspace_brokers(tmp_path).get("execution", {}).get("default") or "")
+    monkeypatch.setattr(
+        registry,
+        "put_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("registry unavailable")),
+    )
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "ROLLBACKREGISTRY",
+            "credentials": {"access_token": "candidate"},
+            "is_primary": True,
+        },
+    )
+
+    assert response.status_code == 502
+    assert not any(
+        row["account_id"] == "ROLLBACKREGISTRY"
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+    )
+    brokers = _workspace_brokers(tmp_path)
+    assert "upstox:ROLLBACKREGISTRY" not in brokers.get("registered", [])
+    assert "ROLLBACKREGISTRY" not in brokers.get("account_acls", {}).get("upstox", {})
+    assert str(brokers.get("execution", {}).get("default") or "") == prior_default
 
 
 def test_set_primary_restores_vault_when_router_rebuild_returns_false(client, monkeypatch):
