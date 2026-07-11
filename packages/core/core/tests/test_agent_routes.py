@@ -9,6 +9,7 @@ agent actor id in workspace.json.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -295,6 +296,76 @@ def test_runtime_shutdown_requests_square_off_and_joins_agent(live_auth):
     with mod._RUNNER_LOCK:  # noqa: SLF001
         thread = mod._RUNNER.get("thread")  # noqa: SLF001
     assert thread is not None and not thread.is_alive()
+
+
+def test_runtime_shutdown_cannot_finish_before_registered_thread_starts(
+    live_auth,
+    monkeypatch,
+):
+    """Shutdown must not report success before a published thread can start."""
+    app = _make_app()
+    real_thread_type = threading.Thread
+    agent_start_entered = threading.Event()
+    allow_agent_start = threading.Event()
+    shutdown_event_set = threading.Event()
+    shutdown_finished = threading.Event()
+    started_after_shutdown: list[bool] = []
+    start_status: list[int] = []
+    shutdown_result: list[bool] = []
+
+    class _ObservedShutdownEvent(threading.Event):
+        def set(self) -> None:
+            super().set()
+            shutdown_event_set.set()
+
+    class _ControlledAgentThread(real_thread_type):
+        def start(self) -> None:
+            agent_start_entered.set()
+            if not allow_agent_start.wait(timeout=5.0):
+                raise AssertionError("test did not release the agent thread start")
+            started_after_shutdown.append(shutdown_finished.is_set())
+            super().start()
+
+    app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"] = _ObservedShutdownEvent()
+    monkeypatch.setattr(mod.threading, "Thread", _ControlledAgentThread)
+
+    def issue_start() -> None:
+        start_status.append(
+            app.test_client().post("/api/v1/ai/agent/start", json=_start_body()).status_code
+        )
+
+    def issue_shutdown() -> None:
+        shutdown_result.append(mod.shutdown_agent_runtime(app, timeout=1.0))
+        shutdown_finished.set()
+
+    start_request = real_thread_type(target=issue_start, name="test-agent-start-request")
+    start_request.start()
+    assert agent_start_entered.wait(timeout=5.0)
+
+    # A fixed start holds the runner lock across Thread.start(), forcing this
+    # shutdown to wait. On the buggy path the lock is already free, so wait for
+    # shutdown to return before releasing the delayed thread and expose the race.
+    acquired_runner_lock = mod._RUNNER_LOCK.acquire(blocking=False)  # noqa: SLF001
+    start_holds_runner_lock = not acquired_runner_lock
+    if acquired_runner_lock:
+        mod._RUNNER_LOCK.release()  # noqa: SLF001
+    shutdown_request = real_thread_type(target=issue_shutdown, name="test-agent-shutdown-request")
+    shutdown_request.start()
+    assert shutdown_event_set.wait(timeout=5.0)
+    if not start_holds_runner_lock:
+        assert shutdown_finished.wait(timeout=5.0)
+
+    allow_agent_start.set()
+    start_request.join(timeout=5.0)
+    shutdown_request.join(timeout=5.0)
+    assert not start_request.is_alive()
+    assert not shutdown_request.is_alive()
+
+    # Clean up the deliberately delayed legacy path before asserting red.
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is True
+    assert start_status == [202]
+    assert shutdown_result == [True]
+    assert started_after_shutdown == [False]
 
 
 def test_status_idle_shape(live_auth):

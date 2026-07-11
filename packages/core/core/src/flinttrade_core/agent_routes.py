@@ -446,7 +446,7 @@ def start_agent() -> tuple[Any, int]:
                 "cycle_interval_sec": cycle_interval,
             },
         })
-    session_thread.start()
+        session_thread.start()
 
     logger.info(
         "Agent session started | symbols=%s exchange=%s adapter=%s account=%s",
