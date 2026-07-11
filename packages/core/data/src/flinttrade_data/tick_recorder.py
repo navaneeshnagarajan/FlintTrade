@@ -11,6 +11,7 @@ Protocol:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import math
@@ -23,6 +24,7 @@ from typing import Any, Callable
 import websockets
 import websockets.exceptions
 
+from ._tick_contracts import MAX_SOURCE_CLOCK_SKEW_SECONDS
 from .storage import StorageManager
 
 logger = logging.getLogger("flinttrade.data.tick_recorder")
@@ -41,7 +43,9 @@ _MODE_LABELS = {
 }
 _NUMERIC_MODES = {1: MODE_LTP, 2: MODE_QUOTE, 3: MODE_DEPTH}
 
-LtpSink = Callable[[str, str, float, int, float], None]
+LegacyLtpSink = Callable[[str, str, float, int], None]
+TimestampedLtpSink = Callable[[str, str, float, int, float], None]
+LtpSink = LegacyLtpSink | TimestampedLtpSink
 
 _RETRYABLE_HANDSHAKE_STATUSES = frozenset({500, 502, 503, 504})
 _BIGINT_MIN = -(2**63)
@@ -50,12 +54,24 @@ _MAX_FRAME_TIMESTAMP_TEXT_LENGTH = 64
 _MIN_FRAME_TIMESTAMP_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
 _MAX_FRAME_TIMESTAMP_EPOCH = datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp()
 _MAX_FRAME_TIMESTAMP_AGE_SECONDS = 5 * 60
-# OpenAlgo and the local host can differ briefly around NTP corrections. Accept
-# up to five seconds of positive source skew; anything beyond it is observable
-# as a rejected future tick rather than being rewritten to receipt time.
-MAX_SOURCE_CLOCK_SKEW_SECONDS = 5.0
 MAX_WATCHLIST_INSTRUMENTS = 512
 _MISSING_TIMESTAMP = object()
+_LTP_SINK_PROBE_ARGS = ("NSE", "RELIANCE", 1.0, 0, 0.0)
+
+
+def _ltp_sink_positional_arity(sink: LtpSink) -> int:
+    """Resolve a supported sink contract once instead of retrying every tick."""
+    try:
+        signature = inspect.signature(sink)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("ltp_sink must expose a signature accepting four or five positional arguments") from exc
+    for arity in (5, 4):
+        try:
+            signature.bind(*_LTP_SINK_PROBE_ARGS[:arity])
+        except TypeError:
+            continue
+        return arity
+    raise TypeError("ltp_sink must accept four or five positional arguments")
 
 
 def _optional_websocket_exception(name: str) -> type[BaseException] | None:
@@ -339,6 +355,7 @@ class TickRecorder:
         self._redaction_keys = {api_key} if api_key else set()
         self._connection_revision = 0
         self._ltp_sink = ltp_sink
+        self._ltp_sink_arity = _ltp_sink_positional_arity(ltp_sink) if ltp_sink is not None else 0
         self._auth_response_timeout = auth_response_timeout
         # On a persistent write failure the buffer is RETAINED for retry (a
         # transient lock/disk error must not silently lose ticks), but capped so
@@ -972,7 +989,10 @@ class TickRecorder:
         except (TypeError, ValueError, OverflowError):
             volume_value = 0
         try:
-            self._ltp_sink(exchange, symbol, ltp_value, volume_value, source_timestamp)
+            if self._ltp_sink_arity == 5:
+                self._ltp_sink(exchange, symbol, ltp_value, volume_value, source_timestamp)
+            else:
+                self._ltp_sink(exchange, symbol, ltp_value, volume_value)
         except Exception as exc:  # noqa: BLE001 - callbacks must not interrupt recording
             logger.debug(
                 "LTP sink skipped for %s:%s: %s",

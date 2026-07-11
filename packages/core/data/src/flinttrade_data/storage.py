@@ -50,6 +50,8 @@ def _default_db_path() -> str:
 # Schema DDL
 # ---------------------------------------------------------------------------
 
+_SCHEMA_TICKS_SEQUENCE = "CREATE SEQUENCE IF NOT EXISTS ticks_ingest_seq START 1;"
+
 _SCHEMA_TICKS = """
 CREATE TABLE IF NOT EXISTS ticks (
     ts          TIMESTAMP NOT NULL,
@@ -66,8 +68,18 @@ CREATE TABLE IF NOT EXISTS ticks (
     ask         DOUBLE,
     oi          BIGINT,
     prev_close  DOUBLE,
-    depth_json  VARCHAR
+    depth_json  VARCHAR,
+    ingest_seq  BIGINT NOT NULL DEFAULT nextval('ticks_ingest_seq')
 );
+"""
+
+_MIGRATE_TICKS_INGEST_SEQUENCE = """
+ALTER TABLE ticks
+ADD COLUMN IF NOT EXISTS ingest_seq BIGINT DEFAULT nextval('ticks_ingest_seq');
+"""
+
+_REQUIRE_TICKS_INGEST_SEQUENCE = """
+ALTER TABLE ticks ALTER COLUMN ingest_seq SET NOT NULL;
 """
 
 _SCHEMA_TRADES = """
@@ -124,7 +136,7 @@ _ALL_SCHEMAS = [_SCHEMA_TICKS, _SCHEMA_TRADES, _SCHEMA_AUDIT, _SCHEMA_DAILY_SUMM
 
 # Indexes — without these, every query does a full table scan.
 _INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_ticks_sym_ex_ts ON ticks (symbol, exchange, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_ticks_sym_ex_ts_seq ON ticks (symbol, exchange, ts, ingest_seq)",
     "CREATE INDEX IF NOT EXISTS idx_trades_strategy_ts ON trades (strategy, ts)",
     "CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts ON trades (symbol, ts)",
     "CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades (ts)",
@@ -182,8 +194,16 @@ class StorageManager:
 
     def initialise(self) -> None:
         """Create all tables and indexes if they don't exist."""
+        self.connection.execute(_SCHEMA_TICKS_SEQUENCE)
         for ddl in _ALL_SCHEMAS:
             self.connection.execute(ddl)
+        self.connection.execute(_MIGRATE_TICKS_INGEST_SEQUENCE)
+        tick_columns = {
+            row[1]: row
+            for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()
+        }
+        if not tick_columns["ingest_seq"][3]:
+            self.connection.execute(_REQUIRE_TICKS_INGEST_SEQUENCE)
         for idx in _INDEXES:
             self.connection.execute(idx)
         logger.info("DuckDB schema initialised (tables + indexes)")
@@ -285,11 +305,11 @@ class StorageManager:
         """
         start, end = _ist_date_window(start_date, end_date)
         params: list[Any] = [symbol, exchange, start, end]
-        order_clause = "ORDER BY ts"
+        order_clause = "ORDER BY ts, ingest_seq"
         if limit is not None:
             if limit <= 0:
                 return []
-            order_clause = "ORDER BY ts DESC LIMIT ?"
+            order_clause = "ORDER BY ts DESC, ingest_seq DESC LIMIT ?"
             params.append(limit)
         result = self.connection.execute(
             f"""SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
@@ -314,7 +334,7 @@ class StorageManager:
                       volume, bid, ask, oi, prev_close, depth_json
                FROM ticks
                WHERE ts >= ? AND ts < ?
-               ORDER BY ts""",
+               ORDER BY ts, ingest_seq""",
             [start, end],
         )
         columns = [desc[0] for desc in result.description]

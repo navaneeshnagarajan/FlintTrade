@@ -597,6 +597,16 @@ class TestFeedMarketTick:
         assert freshness["last_tick_timestamp"] == self._TS
         assert freshness["last_tick_session"] != freshness["current_session"]
 
+    def test_freshness_accepts_recorder_future_skew_boundary(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS + 5.0)
+
+        freshness = agg.get_market_freshness("NIFTY", now=self._TS)
+
+        assert freshness["state"] == "live"
+        assert freshness["is_fresh"] is True
+        assert freshness["age_seconds"] == -5.0
+
     def test_uptick_records_incremental_buy_volume(self):
         agg = self._agg()
         agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
@@ -653,6 +663,20 @@ class TestFeedMarketTick:
         agg = self._agg()
 
         for offset, volume in enumerate((1000, 1100, 100, 125, 1125)):
+            agg.feed_market_tick(
+                "NIFTY",
+                100.0 + offset,
+                volume,
+                timestamp=self._TS + offset,
+            )
+
+        latest = agg.get_footprint("NIFTY")
+        assert sum(bucket.total_volume for bucket in latest) == 125
+
+    def test_ambiguous_old_counter_namespace_fails_closed_after_reset(self):
+        agg = self._agg()
+
+        for offset, volume in enumerate((1000, 1100, 100, 125, 2000)):
             agg.feed_market_tick(
                 "NIFTY",
                 100.0 + offset,

@@ -43,6 +43,8 @@ from itertools import islice
 from threading import RLock
 from typing import Any, Literal
 
+from ._tick_contracts import MAX_SOURCE_CLOCK_SKEW_SECONDS
+
 logger = logging.getLogger("flinttrade.data.orderflow_aggregator")
 
 # ---------------------------------------------------------------------------
@@ -498,6 +500,13 @@ class OrderFlowAggregator:
         """
         import time as _time
 
+        try:
+            ltp = float(ltp)
+        except (OverflowError, TypeError, ValueError):
+            return
+        if not math.isfinite(ltp) or ltp <= 0:
+            return
+
         tick_timestamp = timestamp if timestamp is not None else _time.time()
         session_date = _ist_session_date(tick_timestamp)
         identity = _instrument_identity(symbol, exchange)
@@ -557,6 +566,8 @@ class OrderFlowAggregator:
                     previous_normalised,
                     (new_offset, *offsets),
                 )
+                if normalised is None:
+                    return
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
                 self._normalised_volume[identity] = normalised
                 self._counter_offsets[identity] = offsets
@@ -587,6 +598,8 @@ class OrderFlowAggregator:
                 previous_normalised,
                 offsets,
             )
+            if normalised is None:
+                return
             self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
             self._normalised_volume[identity] = normalised
             self._counter_offsets[identity] = offsets
@@ -610,13 +623,13 @@ class OrderFlowAggregator:
         raw_volume: int,
         previous_normalised: int,
         offsets: tuple[int, ...],
-    ) -> tuple[int, tuple[int, ...]]:
+    ) -> tuple[int | None, tuple[int, ...]]:
         """Choose the least non-decreasing interpretation of a raw counter.
 
         A confirmed reset introduces another ``raw + offset`` namespace. If a
-        feed later recovers an earlier counter, selecting the smallest logical
-        value that does not move backwards avoids counting the same interval a
-        second time.
+        later raw value is monotonic under more than one namespace, its delta
+        is unknowable. Return ``None`` so the caller can leave every baseline
+        untouched rather than manufacturing volume from an arbitrary choice.
         """
         unique_offsets = tuple(dict.fromkeys(offsets))[:_MAX_COUNTER_EPOCHS] or (0,)
         candidates = [
@@ -624,6 +637,8 @@ class OrderFlowAggregator:
             for index, offset in enumerate(unique_offsets)
             if raw_volume + offset >= previous_normalised
         ]
+        if len(candidates) > 1:
+            return None, unique_offsets
         if candidates:
             normalised, _, selected_offset = min(candidates)
         else:
@@ -663,7 +678,7 @@ class OrderFlowAggregator:
         age_seconds = now_timestamp - last_timestamp
         if last_session != current_session:
             state = "stale"
-        elif age_seconds < 0 or age_seconds > LIVE_TICK_FRESHNESS_SECONDS:
+        elif age_seconds < -MAX_SOURCE_CLOCK_SKEW_SECONDS or age_seconds > LIVE_TICK_FRESHNESS_SECONDS:
             state = "delayed"
         else:
             state = "live"

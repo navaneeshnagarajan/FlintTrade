@@ -188,6 +188,54 @@ class TestStorageManager:
         assert [tick["ltp"] for tick in ticks] == [2503.0, 2504.0]
         storage.close()
 
+    def test_legacy_tick_schema_migrates_with_stable_same_timestamp_order(self, tmp_path):
+        import duckdb
+
+        from flinttrade_data.storage import StorageManager
+
+        db_path = tmp_path / "legacy-ticks.duckdb"
+        legacy = duckdb.connect(str(db_path))
+        legacy.execute(
+            """CREATE TABLE ticks (
+                ts TIMESTAMP NOT NULL,
+                symbol VARCHAR NOT NULL,
+                exchange VARCHAR NOT NULL,
+                mode VARCHAR NOT NULL,
+                ltp DOUBLE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE,
+                volume BIGINT,
+                bid DOUBLE,
+                ask DOUBLE,
+                oi BIGINT,
+                prev_close DOUBLE,
+                depth_json VARCHAR
+            )"""
+        )
+        timestamp = datetime(2026, 3, 16, 4, 0)
+        legacy.executemany(
+            "INSERT INTO ticks (ts, symbol, exchange, mode, ltp) VALUES (?, 'RELIANCE', 'NSE', 'ltp', ?)",
+            [(timestamp, 2500.0), (timestamp, 2501.0)],
+        )
+        legacy.close()
+
+        storage = StorageManager(str(db_path))
+        storage.initialise()
+        storage.insert_tick(timestamp, "RELIANCE", "NSE", "ltp", ltp=2502.0)
+
+        columns = {
+            row[1]: row
+            for row in storage.connection.execute("PRAGMA table_info('ticks')").fetchall()
+        }
+        ticks = storage.get_ticks("RELIANCE", "NSE", "2026-03-16", "2026-03-16", limit=2)
+
+        assert columns["ingest_seq"][3] is True
+        assert [tick["ltp"] for tick in ticks] == [2501.0, 2502.0]
+        assert all("ingest_seq" not in tick for tick in ticks)
+        storage.close()
+
     def test_insert_and_query_trade(self):
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 30, 0)
@@ -1764,6 +1812,30 @@ class TestTickRecorder:
         stored_timestamp = recorder._buffer[0][0]
         sink.assert_called_once_with("NSE", "RELIANCE", 2500.0, 1000, stored_timestamp.timestamp())
 
+    def test_legacy_four_argument_ltp_sink_receives_tick(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        calls = []
+
+        def legacy_sink(exchange, symbol, ltp, volume):
+            calls.append((exchange, symbol, ltp, volume))
+
+        recorder = TickRecorder(storage=MagicMock(), ltp_sink=legacy_sink)
+        self._allow(recorder, ("NSE", "RELIANCE"))
+
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
+
+        assert calls == [("NSE", "RELIANCE", 2500.0, 1000)]
+
+    def test_incompatible_ltp_sink_signature_is_rejected_at_construction(self):
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        def incompatible_sink(exchange, symbol):
+            return (exchange, symbol)
+
+        with pytest.raises(TypeError, match="four or five positional arguments"):
+            TickRecorder(storage=MagicMock(), ltp_sink=incompatible_sink)
+
     @pytest.mark.parametrize(
         "ltp",
         [None, "not-a-number", float("nan"), float("inf"), 10**400, 0.0, -1.0],
@@ -1781,6 +1853,22 @@ class TestTickRecorder:
         recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": ltp, "volume": 1000})
 
         sink.assert_not_called()
+
+    @pytest.mark.parametrize("ltp", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_ltp_cannot_advance_orderflow_volume_baseline(self, ltp):
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        aggregator = OrderFlowAggregator()
+        recorder = TickRecorder(storage=MagicMock(), orderflow_aggregator=aggregator)
+        recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
+
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2500.0, "volume": 1000})
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": ltp, "volume": 5000})
+        recorder._process_tick({"exchange": "NSE", "symbol": "RELIANCE", "ltp": 2501.0, "volume": 1100})
+
+        buckets = aggregator.get_footprint("RELIANCE", exchange="NSE")
+        assert sum(bucket.total_volume for bucket in buckets) == 100
 
     def test_malformed_numeric_fields_cannot_poison_the_persistence_batch(self):
         from flinttrade_data.storage import StorageManager
