@@ -1690,7 +1690,7 @@ def _wire_ml_signal_runtime(
         from flinttrade_ai.signal_retraining import (  # noqa: PLC0415
             RetrainConfig,
             SignalRetrainer,
-            select_retraining_roster,
+            plan_retraining_roster,
         )
 
         configured_retrain = app.config.get("ML_SIGNAL_RETRAIN_CONFIG")
@@ -1715,6 +1715,46 @@ def _wire_ml_signal_runtime(
             cancel_requested=retrain_cancel_event.is_set,
             market_session_provider=market_session_for,
         )
+        retry_jobs: set[str] = set()
+
+        def _schedule_retrain_retry(retry: Any, *, run_at: Any | None = None) -> None:
+            scheduled_at = run_at or retry.retry_at
+            job_name = (
+                "ml_signal_retrain_retry:"
+                f"{retry.target.exchange}:{retry.target.symbol}:"
+                f"{retry.session_date.isoformat()}:{int(scheduled_at.timestamp())}"
+            )
+
+            def _run_retry() -> list[Any]:
+                retry_jobs.discard(job_name)
+                if retrain_cancel_event.is_set():
+                    return []
+                results = retrainer.run_all(
+                    instruments=[retry.instrument],
+                    session_date=retry.session_date,
+                )
+                if any(not bool(getattr(result, "completed", True)) for result in results):
+                    from datetime import timedelta as _timedelta  # noqa: PLC0415
+
+                    _schedule_retrain_retry(
+                        retry,
+                        run_at=time_scheduler.now_ist() + _timedelta(minutes=1),
+                    )
+                return results
+
+            retry_jobs.add(job_name)
+            try:
+                cron.schedule_once(
+                    name=job_name,
+                    handler=_run_retry,
+                    run_at=scheduled_at,
+                    description=(
+                        "Retry canonical signal training after the dated effective session close"
+                    ),
+                )
+            except Exception:
+                retry_jobs.discard(job_name)
+                raise
 
         def _run_signal_retrain(*, roster: str = "regular") -> list[Any]:
             try:
@@ -1725,7 +1765,7 @@ def _wire_ml_signal_runtime(
                 session_date = now.date()
                 if roster == "late" and now.time().replace(tzinfo=None) < _wall_time(12):
                     session_date -= _timedelta(days=1)
-                instruments = select_retraining_roster(
+                plan = plan_retraining_roster(
                     pipeline.instruments,
                     roster=roster,
                     session_date=session_date,
@@ -1736,10 +1776,15 @@ def _wire_ml_signal_runtime(
                     ),
                     session_for=market_session_for,
                 )
-                return retrainer.run_all(
-                    instruments=instruments,
+                for retry in plan.retries:
+                    _schedule_retrain_retry(retry)
+                results = retrainer.run_all(
+                    instruments=plan.ready_instruments,
                     session_date=session_date,
                 )
+                if any(not bool(getattr(result, "completed", True)) for result in results):
+                    logger.info("Signal retraining remains pending on its active fetch owner")
+                return results
             except Exception as exc:  # noqa: BLE001 - scheduler and app must remain available
                 logger.warning("Scheduled signal retraining failed: %s", exc)
                 return []
@@ -1780,6 +1825,7 @@ def _wire_ml_signal_runtime(
             "ml_signal_retrain_late",
         )
         app.config["ML_SIGNAL_RETRAIN_CANCEL_EVENT"] = retrain_cancel_event
+        app.config["ML_SIGNAL_RETRAIN_RETRY_JOBS"] = retry_jobs
     return True
 
 
@@ -4326,6 +4372,28 @@ class FlintTradeApp:
                 set_event = getattr(shutdown_event, "set", None)
                 if callable(set_event):
                     attempt(label, set_event)
+
+            retrainer = flask_app.config.get("ML_SIGNAL_RETRAINER")
+            wait_for_fetch_owner = getattr(retrainer, "wait_for_fetch_owner", None)
+            if callable(wait_for_fetch_owner):
+                raw_retrain_timeout = flask_app.config.get(
+                    "ML_SIGNAL_RETRAIN_SHUTDOWN_TIMEOUT_SECONDS",
+                    30.0,
+                )
+                try:
+                    retrain_timeout = max(0.0, float(raw_retrain_timeout))
+                except (TypeError, ValueError):
+                    retrain_timeout = 30.0
+                try:
+                    retrain_stopped = await asyncio.to_thread(
+                        wait_for_fetch_owner,
+                        timeout=retrain_timeout,
+                    )
+                except Exception as exc:  # noqa: BLE001 - retain dependencies for retry
+                    errors.append(("signal retraining fetch owner", type(exc).__name__))
+                else:
+                    if not retrain_stopped:
+                        errors.append(("signal retraining fetch owner", "TimeoutError"))
 
             from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
             from .smart_order_routes import shutdown_smart_order_jobs  # noqa: PLC0415

@@ -676,8 +676,11 @@ async def test_shutdown_cancels_retraining_before_waiting_for_cron() -> None:
     """Cron's blocking shutdown must see cooperative ML cancellation first."""
     app = _runtime_app()
     cancel_event = threading.Event()
+    retrainer = MagicMock()
+    retrainer.wait_for_fetch_owner.return_value = True
     flask_app = Flask("retrain-cancellation")
     flask_app.config["ML_SIGNAL_RETRAIN_CANCEL_EVENT"] = cancel_event
+    flask_app.config["ML_SIGNAL_RETRAINER"] = retrainer
     app._flask_app = flask_app
 
     def stop_cron() -> None:
@@ -687,7 +690,29 @@ async def test_shutdown_cancels_retraining_before_waiting_for_cron() -> None:
 
     await app.stop()
 
+    retrainer.wait_for_fetch_owner.assert_called_once_with(timeout=30.0)
     app.cron.stop.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_retains_dependencies_while_retraining_fetch_is_alive() -> None:
+    app = _runtime_app()
+    flask_app = Flask("retrain-owner-timeout")
+    retrainer = MagicMock()
+    retrainer.wait_for_fetch_owner.return_value = False
+    flask_app.config.update(
+        ML_SIGNAL_RETRAIN_CANCEL_EVENT=threading.Event(),
+        ML_SIGNAL_RETRAINER=retrainer,
+        ML_SIGNAL_RETRAIN_SHUTDOWN_TIMEOUT_SECONDS=0.01,
+    )
+    app._flask_app = flask_app
+
+    with pytest.raises(RuntimeError, match="signal retraining fetch owner"):
+        await app.stop()
+
+    retrainer.wait_for_fetch_owner.assert_called_once_with(timeout=0.01)
+    app.client.close.assert_not_awaited()
+    app.audit.close.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -1215,6 +1215,51 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     assert app.config["ML_SIGNAL_JOB"] == "ml_signal_cycle"
 
 
+def test_runtime_schedules_and_runs_dated_late_session_retry(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flask import Flask
+
+    from flinttrade_core.app import _wire_ml_signal_runtime
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    session_date = date(2026, 4, 17)
+    retry_at = datetime(2026, 4, 18, 0, 45, tzinfo=ist)
+    app = Flask(__name__)
+    pipeline = MagicMock()
+    pipeline.model_path = str(tmp_path / "signal_model.joblib")
+    pipeline.instruments = [{"symbol": "GOLDM", "exchange": "MCX"}]
+    app.config["ML_SIGNAL_PIPELINE"] = pipeline
+    cron = MagicMock()
+    time_scheduler = MagicMock()
+    time_scheduler.now_ist.return_value = datetime(2026, 4, 18, 0, 30, tzinfo=ist)
+    time_scheduler.get_schedule.return_value = MagicMock(is_24x7=False)
+    time_scheduler.get_market_session.return_value = (time(18, 0), time(0, 45))
+
+    assert _wire_ml_signal_runtime(app, cron, time_scheduler) is True
+    calls = {call.args[0]: call for call in cron.register.call_args_list}
+    late_handler = calls["ml_signal_retrain_late"].kwargs["handler"]
+    assert late_handler() == []
+
+    cron.schedule_once.assert_called_once()
+    retry_call = cron.schedule_once.call_args
+    assert retry_call.kwargs["run_at"] == retry_at
+    assert "MCX" in retry_call.kwargs["name"]
+    assert "GOLDM" in retry_call.kwargs["name"]
+    assert app.config["ML_SIGNAL_RETRAIN_RETRY_JOBS"] == {retry_call.kwargs["name"]}
+
+    retrainer = app.config["ML_SIGNAL_RETRAINER"]
+    completed = MagicMock(completed=True)
+    retrainer.run_all = MagicMock(return_value=[completed])
+    retry_call.kwargs["handler"]()
+
+    retrainer.run_all.assert_called_once_with(
+        instruments=[{"symbol": "GOLDM", "exchange": "MCX"}],
+        session_date=session_date,
+    )
+    assert app.config["ML_SIGNAL_RETRAIN_RETRY_JOBS"] == set()
+
+
 def test_retrainer_reads_the_pipeline_roster_at_execution_time(tmp_path: Path) -> None:
     from unittest.mock import MagicMock
 

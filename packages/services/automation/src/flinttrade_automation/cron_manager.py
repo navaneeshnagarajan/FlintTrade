@@ -678,6 +678,44 @@ class CronManager:
         self._jobs[name] = job
         logger.info("Registered job: %s (%s)", name, job.trigger_type)
 
+    def schedule_once(
+        self,
+        name: str,
+        *,
+        handler: Callable[[], Any],
+        run_at: datetime,
+        description: str = "",
+    ) -> None:
+        """Register one timezone-aware date job, including after scheduler start."""
+        if not isinstance(run_at, datetime) or run_at.tzinfo is None or run_at.utcoffset() is None:
+            raise ValueError("run_at must be a timezone-aware datetime")
+        previous = self._jobs.get(name)
+        job = JobDefinition(
+            name=name,
+            description=description,
+            handler=handler,
+            trigger_type="date",
+            trigger_args={"run_date": run_at},
+        )
+        self._jobs[name] = job
+        if self._scheduler is not None and self._running:
+            try:
+                self._scheduler.add_job(
+                    self._run_once_job,
+                    "date",
+                    args=[name],
+                    id=name,
+                    run_date=run_at,
+                    replace_existing=True,
+                )
+            except Exception:
+                if previous is None:
+                    self._jobs.pop(name, None)
+                else:
+                    self._jobs[name] = previous
+                raise
+        logger.info("Registered one-shot job: %s at %s", name, run_at.isoformat())
+
     def register_defaults(self, handlers: dict[str, Callable[[], Any]]) -> None:
         """Register all default jobs that have matching handlers."""
         for name, config in DEFAULT_JOBS.items():
@@ -817,6 +855,15 @@ class CronManager:
         if success:
             logger.info("Job '%s' completed in %.1fs", name, duration)
 
+    def _run_once_job(self, name: str) -> None:
+        """Execute and retire one exact registered date-job generation."""
+        job = self._jobs.get(name)
+        try:
+            self._run_job(name)
+        finally:
+            if self._jobs.get(name) is job:
+                self._jobs.pop(name, None)
+
     # ------------------------------------------------------------------
     # Start / Stop
     # ------------------------------------------------------------------
@@ -840,6 +887,11 @@ class CronManager:
             elif trigger == "interval":
                 scheduler.add_job(
                     self._run_job, "interval", args=[name],
+                    id=name, **kwargs, replace_existing=True,
+                )
+            elif trigger == "date":
+                scheduler.add_job(
+                    self._run_once_job, "date", args=[name],
                     id=name, **kwargs, replace_existing=True,
                 )
 

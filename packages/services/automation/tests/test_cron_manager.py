@@ -164,6 +164,43 @@ class TestCronManagerRegistration:
         assert len(first) == 1
         assert len(second) == 2
 
+    def test_schedule_once_installs_date_job_on_running_scheduler(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        cron = CronManager()
+        cron._scheduler = MagicMock()
+        cron._running = True
+        handler = MagicMock()
+        run_at = datetime(2026, 4, 18, 0, 45, tzinfo=IST)
+
+        cron.schedule_once("late-retrain", handler=handler, run_at=run_at)
+
+        cron._scheduler.add_job.assert_called_once_with(
+            cron._run_once_job,
+            "date",
+            args=["late-retrain"],
+            id="late-retrain",
+            run_date=run_at,
+            replace_existing=True,
+        )
+        assert cron.list_jobs()[0]["trigger_type"] == "date"
+
+    def test_one_shot_job_removes_registry_entry_after_execution(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        cron = CronManager()
+        handler = MagicMock()
+        cron.schedule_once(
+            "late-retrain",
+            handler=handler,
+            run_at=datetime(2026, 4, 18, 0, 45, tzinfo=IST),
+        )
+
+        cron._run_once_job("late-retrain")
+
+        handler.assert_called_once_with()
+        assert cron.list_jobs() == []
+
 
 # ---------------------------------------------------------------------------
 # CronManager — job control (pause/resume/enable/disable)
