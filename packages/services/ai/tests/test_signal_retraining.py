@@ -814,6 +814,31 @@ def test_runtime_wires_post_market_retraining_through_the_existing_cron_manager(
     assert app.config["ML_SIGNAL_JOB"] == "ml_signal_cycle"
 
 
+def test_retrainer_reads_the_pipeline_roster_at_execution_time(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from flinttrade_ai.pipeline import SignalPipeline
+    from flinttrade_ai.signal_retraining import RetrainConfig, SignalRetrainer
+
+    pipeline = SignalPipeline(
+        model_path=str(tmp_path / "signal_model.joblib"),
+        instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+    )
+    retrainer = SignalRetrainer(
+        RetrainConfig(model_dir=tmp_path),
+        instruments=pipeline.instruments,
+        data_fetcher=MagicMock(),
+        pipeline=pipeline,
+        instrument_provider=pipeline.instrument_snapshot,
+    )
+    retrainer.run_once = MagicMock(return_value=MagicMock())
+    pipeline.update_instruments(["NSE:RELIANCE"])
+
+    retrainer.run_all()
+
+    retrainer.run_once.assert_called_once_with("RELIANCE", "NSE")
+
+
 def test_runtime_threads_configurable_label_policy_into_scheduled_retrainer(tmp_path: Path) -> None:
     from unittest.mock import MagicMock
 

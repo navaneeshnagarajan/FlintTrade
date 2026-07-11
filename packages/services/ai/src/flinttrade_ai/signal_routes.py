@@ -51,6 +51,14 @@ def configure_signal_sources(
             app.config["ML_SIGNAL_PIPELINE"] = ml_pipeline
         except Exception as exc:  # noqa: BLE001 - optional ML cannot prevent app boot
             logger.warning("Scheduled ML signal source unavailable: %s", exc)
+    if ml_pipeline is not None:
+        try:
+            pipeline.set_instrument_observer(ml_pipeline.update_instruments)
+        except Exception as exc:  # noqa: BLE001 - an unsynchronised ML source must stay disabled
+            pipeline.set_instrument_observer(None)
+            app.config.pop("ML_SIGNAL_PIPELINE", None)
+            ml_pipeline = None
+            logger.warning("Scheduled ML signal roster unavailable: %s", exc)
     return pipeline, ml_pipeline
 
 

@@ -14,7 +14,7 @@ import logging
 import math
 import threading
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -152,6 +152,7 @@ class LiveSignalPipeline:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._sequence = 0
+        self._instrument_observer: Callable[[list[str]], Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -544,6 +545,9 @@ class LiveSignalPipeline:
                 or candidate_config.thresholds != self._config.thresholds
             )
             if state_config_changed:
+                instruments_changed = set(candidate_config.instruments) != set(self._config.instruments)
+                if instruments_changed and self._instrument_observer is not None:
+                    self._instrument_observer(list(candidate_config.instruments))
                 self._config = candidate_config
                 # Indicator state belongs to the old configuration; shared event
                 # history and its monotonic IDs remain valid across the update.
@@ -553,6 +557,16 @@ class LiveSignalPipeline:
             snapshot = SignalConfig.from_dict(candidate_config.to_dict())
         logger.info("Signal pipeline config updated: %s", snapshot.to_dict())
         return snapshot
+
+    def set_instrument_observer(
+        self,
+        observer: Callable[[list[str]], Any] | None,
+    ) -> None:
+        """Bind the scheduled-roster observer and synchronise it immediately."""
+        with self._lock:
+            if observer is not None:
+                observer(list(self._config.instruments))
+            self._instrument_observer = observer
 
     def get_config(self) -> SignalConfig:
         """Return an isolated, validated snapshot of the current configuration."""

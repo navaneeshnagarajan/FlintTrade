@@ -337,11 +337,13 @@ class SignalRetrainer:
         instruments: list[dict[str, str]],
         data_fetcher: DataFetcher,
         pipeline: Any | None = None,
+        instrument_provider: Callable[[], list[dict[str, str]]] | None = None,
     ) -> None:
         self.config = config
         self.instruments = [dict(instrument) for instrument in instruments]
         self._data_fetcher = data_fetcher
         self._pipeline = pipeline
+        self._instrument_provider = instrument_provider
         self._history: deque[RetrainResult] = deque(maxlen=config.max_history)
         self._history_lock = threading.Lock()
         self._promotion_lock = threading.Lock()
@@ -467,7 +469,12 @@ class SignalRetrainer:
     def run_all(self) -> list[RetrainResult]:
         """Retrain every pipeline instrument, continuing after any failure."""
         results: list[RetrainResult] = []
-        for instrument in self.instruments:
+        instruments = (
+            self._instrument_provider()
+            if self._instrument_provider is not None
+            else [dict(instrument) for instrument in self.instruments]
+        )
+        for instrument in instruments:
             symbol = str(instrument.get("symbol", ""))
             exchange = str(instrument.get("exchange", ""))
             try:

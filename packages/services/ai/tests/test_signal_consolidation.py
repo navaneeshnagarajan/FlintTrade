@@ -379,6 +379,25 @@ def test_configure_signal_sources_wires_one_hub_and_ml_sink() -> None:
         openalgo_client=openalgo_client,
         signal_sink=first_hub.ingest_ml_cycle,
     )
+    assert ml_pipeline.update_instruments.call_count == 2
+    ml_pipeline.update_instruments.assert_called_with(first_hub.get_config().instruments)
+
+
+def test_non_default_live_roster_drives_the_installed_ml_job(monkeypatch, tmp_path) -> None:
+    from flinttrade_ai.signal_routes import configure_signal_sources, make_ml_signal_job
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    app = Flask(__name__)
+    hub, ml_pipeline = configure_signal_sources(app, MagicMock())
+    assert ml_pipeline is not None
+    hub.update_config(instruments=["NSE:RELIANCE"])
+    ml_pipeline.fetch_bars = MagicMock(return_value=_bars())
+    ml_pipeline._generator_for = MagicMock(return_value=MagicMock(is_trained=False))
+
+    results = make_ml_signal_job(ml_pipeline, lambda: True)()
+
+    assert list(results) == ["NSE:RELIANCE"]
+    ml_pipeline.fetch_bars.assert_called_once_with("RELIANCE", "NSE")
 
 
 def test_ml_signal_job_runs_only_when_market_is_open() -> None:

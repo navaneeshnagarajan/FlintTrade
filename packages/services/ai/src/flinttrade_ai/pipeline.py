@@ -13,7 +13,32 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .signal_models import normalise_instrument_identity
+
 logger = logging.getLogger("flinttrade.ai.pipeline")
+
+
+def _normalise_scheduled_instruments(
+    instruments: list[dict[str, Any] | str],
+) -> list[dict[str, str]]:
+    """Return a deduplicated scheduled roster from qualified identities."""
+    normalised: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for instrument in instruments:
+        if isinstance(instrument, str):
+            identity = normalise_instrument_identity(instrument)
+        elif isinstance(instrument, dict):
+            identity = normalise_instrument_identity(
+                f"{instrument.get('exchange', '')}:{instrument.get('symbol', '')}"
+            )
+        else:
+            raise ValueError("scheduled instruments must be mappings or EXCHANGE:SYMBOL strings")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        exchange, symbol = identity.split(":", 1)
+        normalised.append({"symbol": symbol, "exchange": exchange})
+    return normalised
 
 
 def _legacy_state_dir() -> Path:
@@ -120,7 +145,8 @@ class SignalPipeline:
                 default_model_path,
             )
         self.model_path = model_path or str(default_model_path)
-        self.instruments = (
+        self._instrument_lock = threading.RLock()
+        self._instruments = _normalise_scheduled_instruments(
             instruments
             if instruments is not None
             else [
@@ -137,6 +163,31 @@ class SignalPipeline:
         self._turbulence_threshold: float = turbulence_threshold
         self._turbulence_window: int = turbulence_window
         self._signal_sink = signal_sink
+
+    @property
+    def instruments(self) -> list[dict[str, str]]:
+        """Return an isolated snapshot of the scheduled instrument roster."""
+        return self.instrument_snapshot()
+
+    def instrument_snapshot(self) -> list[dict[str, str]]:
+        """Return the current roster without exposing live mutable state."""
+        with self._instrument_lock:
+            return [dict(instrument) for instrument in self._instruments]
+
+    def update_instruments(self, instruments: list[dict[str, Any] | str]) -> list[dict[str, str]]:
+        """Atomically replace the scheduled roster from canonical identities."""
+        candidate = _normalise_scheduled_instruments(instruments)
+        with self._instrument_lock:
+            self._instruments = candidate
+            snapshot = [dict(instrument) for instrument in candidate]
+        allowed = {(instrument["exchange"], instrument["symbol"]) for instrument in snapshot}
+        with self._generator_lock:
+            self._symbol_generators = {
+                identity: generator
+                for identity, generator in self._symbol_generators.items()
+                if identity in allowed
+            }
+        return snapshot
 
     def _ensure_generator(self) -> None:
         """Lazy-load signal generator with trained model."""
