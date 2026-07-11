@@ -146,6 +146,114 @@ def _resolve_backend_port() -> int:
     return port
 
 
+class _RuntimeRequestAdmission:
+    """One idempotently releasable request admitted by the runtime tracker."""
+
+    def __init__(self, tracker: _RuntimeRequestTracker) -> None:
+        self._tracker = tracker
+        self._lock = threading.Lock()
+        self._released = False
+
+    def release(self) -> None:
+        """Release this admission exactly once, including response-close races."""
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        self._tracker._release()  # noqa: SLF001 - admission is the tracker's token
+
+
+class _RuntimeRequestTracker:
+    """Serialise shutdown admission with draining of already-running requests."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._accepting = True
+        self._active = 0
+
+    def try_admit(self) -> _RuntimeRequestAdmission | None:
+        """Admit one request unless shutdown has closed the admission gate."""
+        with self._condition:
+            if not self._accepting:
+                return None
+            self._active += 1
+        return _RuntimeRequestAdmission(self)
+
+    def stop_admitting(self) -> None:
+        """Atomically close admission before shutdown begins waiting."""
+        with self._condition:
+            self._accepting = False
+
+    def wait_for_idle(self, timeout: float) -> bool:
+        """Wait up to ``timeout`` seconds for every admitted request to leave."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            while self._active:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(remaining)
+            return True
+
+    def _release(self) -> None:
+        with self._condition:
+            if self._active <= 0:  # pragma: no cover - defensive token invariant
+                return
+            self._active -= 1
+            if self._active == 0:
+                self._condition.notify_all()
+
+
+def _install_runtime_request_tracking(app: Flask) -> _RuntimeRequestTracker:
+    """Install request admission/draining hooks and return their shared tracker."""
+    tracker = _RuntimeRequestTracker()
+    app.config["RUNTIME_ACCEPTING_REQUESTS"] = True
+    app.config["RUNTIME_REQUEST_TRACKER"] = tracker
+
+    @app.before_request
+    def _require_running_runtime() -> Any:
+        """Reject every request before it can touch dependencies being closed."""
+        admission = (
+            tracker.try_admit()
+            if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True)
+            else None
+        )
+        if admission is not None:
+            _flask_g._runtime_request_admission = admission
+            return None
+        response = jsonify({
+            "status": "error",
+            "message": "Application is shutting down",
+        })
+        response.status_code = 503
+        response.headers["Retry-After"] = "1"
+        return response
+
+    @app.after_request
+    def _release_completed_runtime_request(response: Any) -> Any:
+        admission = getattr(_flask_g, "_runtime_request_admission", None)
+        if admission is None:
+            return response
+        if response.is_streamed:
+            # SSE/file iterators may outlive Flask's request dispatch. Their
+            # dependencies remain owned until the WSGI server closes the body.
+            response.call_on_close(admission.release)
+            _flask_g._runtime_request_release_deferred = True
+        else:
+            admission.release()
+        return response
+
+    @app.teardown_request
+    def _release_failed_runtime_request(_error: BaseException | None) -> None:
+        admission = getattr(_flask_g, "_runtime_request_admission", None)
+        if admission is not None and not getattr(
+            _flask_g, "_runtime_request_release_deferred", False
+        ):
+            admission.release()
+
+    return tracker
+
+
 def _rag_auto_index_enabled() -> bool:
     """Return whether startup should auto-index docs into the RAG store."""
     raw = os.environ.get("FLINTTRADE_RAG_AUTO_INDEX", "")
@@ -1525,21 +1633,8 @@ def create_flask_app(
         )
     app.config["_FRONTEND_AVAILABLE"] = _frontend_available
     app.config["_DIST_PATH"] = _dist_path
-    app.config["RUNTIME_ACCEPTING_REQUESTS"] = True
+    _install_runtime_request_tracking(app)
     _tick_capture_lifecycle_lock(app)
-
-    @app.before_request
-    def _require_running_runtime() -> Any:
-        """Reject every request before it can touch dependencies being closed."""
-        if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
-            return None
-        response = jsonify({
-            "status": "error",
-            "message": "Application is shutting down",
-        })
-        response.status_code = 503
-        response.headers["Retry-After"] = "1"
-        return response
 
     # ------------------------------------------------------------------
     # Structured logging — ONE pipeline for both structlog calls and
@@ -3713,7 +3808,12 @@ class FlintTradeApp:
         """Run one complete, best-effort shutdown attempt."""
         self._stop_started = True
         flask_app = getattr(self, "_flask_app", None)
+        request_tracker = None
         if flask_app is not None:
+            request_tracker = flask_app.config.get("RUNTIME_REQUEST_TRACKER")
+            stop_admitting = getattr(request_tracker, "stop_admitting", None)
+            if callable(stop_admitting):
+                stop_admitting()
             flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
         logger.info("FlintTrade shutting down...")
         errors: list[tuple[str, str]] = []
@@ -3731,6 +3831,30 @@ class FlintTradeApp:
                 await callback()
             except Exception as exc:  # noqa: BLE001 - shutdown must continue
                 errors.append((label, type(exc).__name__))
+
+        if request_tracker is not None:
+            raw_timeout = flask_app.config.get(
+                "RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS", 60.0
+            )
+            try:
+                drain_timeout = max(0.0, float(raw_timeout))
+            except (TypeError, ValueError):
+                drain_timeout = 60.0
+            wait_for_idle = getattr(request_tracker, "wait_for_idle", None)
+            drained = bool(
+                await asyncio.to_thread(wait_for_idle, drain_timeout)
+                if callable(wait_for_idle)
+                else True
+            )
+            if not drained:
+                # Do not close any dependency while a handler still owns it. A
+                # later stop() retry can complete teardown after the request
+                # leaves; the process exits non-zero if it never does.
+                self._stop_event.set()
+                logger.error("FlintTrade shutdown timed out draining active requests")
+                raise RuntimeError(
+                    "shutdown encountered errors: active requests (TimeoutError)"
+                )
 
         retrain_cancel_event = (
             flask_app.config.get("ML_SIGNAL_RETRAIN_CANCEL_EVENT")

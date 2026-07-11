@@ -116,6 +116,87 @@ def test_runtime_admission_closes_before_authentication(
     }
 
 
+@pytest.mark.asyncio
+async def test_shutdown_drains_admitted_request_before_closing_dependencies() -> None:
+    """An admitted handler retains dependency ownership until it returns."""
+    from flinttrade_core.app import _install_runtime_request_tracking
+
+    runtime = _runtime_app()
+    flask_app = Flask("request-drain")
+    _install_runtime_request_tracking(flask_app)
+    runtime._flask_app = flask_app
+    request_started = threading.Event()
+    release_request = threading.Event()
+    response_status: list[int] = []
+
+    @flask_app.get("/blocking")
+    def blocking_request() -> tuple[str, int]:
+        request_started.set()
+        release_request.wait(timeout=2.0)
+        return "done", 200
+
+    def make_request() -> None:
+        response = flask_app.test_client().get("/blocking")
+        response_status.append(response.status_code)
+
+    request_thread = threading.Thread(target=make_request, daemon=True)
+    request_thread.start()
+    assert await asyncio.to_thread(request_started.wait, 1.0)
+
+    stop_task = asyncio.create_task(runtime.stop())
+    await asyncio.sleep(0.05)
+    runtime.scheduler.stop_all.assert_not_awaited()
+    rejected = flask_app.test_client().get("/blocking")
+    assert rejected.status_code == 503
+
+    release_request.set()
+    await asyncio.wait_for(stop_task, timeout=1.0)
+    request_thread.join(timeout=1.0)
+
+    assert response_status == [200]
+    runtime.scheduler.stop_all.assert_awaited_once_with()
+    runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_request_drain_timeout_leaves_dependencies_open_for_retry() -> None:
+    """A stuck request fails shutdown without tearing down state beneath it."""
+    from flinttrade_core.app import _install_runtime_request_tracking
+
+    runtime = _runtime_app()
+    flask_app = Flask("request-drain-timeout")
+    _install_runtime_request_tracking(flask_app)
+    flask_app.config["RUNTIME_REQUEST_DRAIN_TIMEOUT_SECONDS"] = 0.02
+    runtime._flask_app = flask_app
+    request_started = threading.Event()
+    release_request = threading.Event()
+
+    @flask_app.get("/blocking")
+    def blocking_request() -> tuple[str, int]:
+        request_started.set()
+        release_request.wait(timeout=2.0)
+        return "done", 200
+
+    request_thread = threading.Thread(
+        target=lambda: flask_app.test_client().get("/blocking"),
+        daemon=True,
+    )
+    request_thread.start()
+    assert await asyncio.to_thread(request_started.wait, 1.0)
+
+    with pytest.raises(RuntimeError, match="active requests"):
+        await runtime.stop()
+
+    runtime.scheduler.stop_all.assert_not_awaited()
+    runtime.client.close.assert_not_awaited()
+    release_request.set()
+    request_thread.join(timeout=1.0)
+
+    await runtime.stop()
+    runtime.scheduler.stop_all.assert_awaited_once_with()
+    runtime.client.close.assert_awaited_once_with()
+
+
 def test_run_propagates_background_shutdown_failure() -> None:
     """The process must not exit successfully after a failed signal shutdown."""
     from flinttrade_core.app import FlintTradeApp
