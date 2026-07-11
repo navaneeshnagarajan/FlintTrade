@@ -141,6 +141,43 @@ class TestParseCronExpr:
 class TestScheduleLifecycle:
     """Tests that do not require APScheduler to be running."""
 
+    def test_exposes_injected_time_scheduler_for_runtime_calendar_sharing(self) -> None:
+        time_scheduler = TimeScheduler()
+
+        sched = CronStrategyScheduler(time_scheduler=time_scheduler)
+
+        assert sched.time_scheduler is time_scheduler
+
+    def test_start_registers_callback_scheduled_before_start(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        fired: list[bool] = []
+        pending_job_id = sched.schedule(
+            "deferred",
+            "30 9 * * 1-5",
+            lambda: fired.append(True),
+        )
+        backend = MagicMock()
+
+        with (
+            patch(
+                "apscheduler.schedulers.background.BackgroundScheduler",
+                return_value=backend,
+            ),
+            patch.object(
+                sched,
+                "_add_apscheduler_job",
+                return_value="deferred",
+            ) as add_job,
+        ):
+            sched.start()
+
+        assert pending_job_id == "pending:deferred"
+        add_job.assert_called_once()
+        registered_callback = add_job.call_args.args[2]
+        registered_callback()
+        assert fired == [True]
+        assert sched.get_schedule("deferred").job_id == "deferred"
+
     def test_schedule_stores_config(self) -> None:
         sched = _make_scheduler()
         fired: list[bool] = []
@@ -344,6 +381,51 @@ class TestMarketHoursGate:
 
         assert fired == [True]
         assert config.last_skipped_reason == ""
+
+    def test_symbol_scoped_schedule_carries_symbol_into_market_gate(self) -> None:
+        time_scheduler = TimeScheduler()
+        time_scheduler.set_holidays(
+            {
+                "data": [
+                    {
+                        "date": "2026-12-12",
+                        "holiday_type": "SPECIAL_SESSION",
+                        "closed_exchanges": ["CDS"],
+                        "open_exchanges": [
+                            {
+                                "exchange": "CDS",
+                                "symbols": ["EURUSD"],
+                                "start_time": "18:00:30",
+                                "end_time": "19:00:45",
+                            }
+                        ],
+                    }
+                ]
+            },
+            year="2026",
+        )
+        scheduler = CronStrategyScheduler(time_scheduler=time_scheduler)
+        fired: list[bool] = []
+        scheduler.schedule(
+            "currency-special",
+            "1 18 * * *",
+            lambda: fired.append(True),
+            exchange="CDS",
+            symbol="eurusd29jul26fut",
+        )
+        config = scheduler.get_schedule("currency-special")
+        gated = scheduler._make_gated_callback(
+            config.strategy_id,
+            lambda: fired.append(True),
+            config,
+        )
+
+        with patch("flinttrade_engine.scheduler.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 12, 12, 18, 1, tzinfo=_IST)
+            gated()
+
+        assert config.symbol == "EURUSD29JUL26FUT"
+        assert fired == [True]
 
     # --- Holiday skip ---
 

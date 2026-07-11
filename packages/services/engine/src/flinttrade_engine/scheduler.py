@@ -93,6 +93,8 @@ _CALENDAR_EXCHANGE_ALIASES = {
     "MCX_INDEX": "MCX",
 }
 
+_MAX_CROSS_MIDNIGHT_SESSION_DURATION = timedelta(hours=12)
+
 
 def _is_cds_cross_currency(symbol: str | None) -> bool:
     value = str(symbol or "").strip().upper()
@@ -293,10 +295,14 @@ class TimeScheduler:
             opens_at = session_midnight.replace(
                 hour=market_open.hour,
                 minute=market_open.minute,
+                second=market_open.second,
+                microsecond=market_open.microsecond,
             )
             closes_at = session_midnight.replace(
                 hour=market_close.hour,
                 minute=market_close.minute,
+                second=market_close.second,
+                microsecond=market_close.microsecond,
             )
             if market_close < market_open:
                 closes_at += timedelta(days=1)
@@ -421,7 +427,21 @@ class TimeScheduler:
                 )
                 start = _calendar_time(raw_session.get("start_time"))
                 end = _calendar_time(raw_session.get("end_time"))
-                if start is None or end is None or end == start:
+                cross_midnight_duration = (
+                    datetime.combine(date.min + timedelta(days=1), end)
+                    - datetime.combine(date.min, start)
+                    if start is not None and end is not None and end < start
+                    else None
+                )
+                if (
+                    start is None
+                    or end is None
+                    or end == start
+                    or (
+                        cross_midnight_duration is not None
+                        and cross_midnight_duration > _MAX_CROSS_MIDNIGHT_SESSION_DURATION
+                    )
+                ):
                     if session_exchange:
                         calendar_day.closed_exchanges.add(session_exchange)
                     continue
@@ -752,6 +772,7 @@ class CronScheduleConfig:
         cron_expr: Standard 5-field cron expression (minute hour dom month dow).
             E.g. ``"30 9 * * 1-5"`` = 09:30 IST on weekdays.
         exchange: Exchange code used for market-hours and holiday gating.
+        symbol: Optional instrument symbol used by symbol-scoped sessions.
         job_id: APScheduler job ID (set after scheduling).
         last_skipped_reason: Human-readable reason the last fire was skipped,
             or empty string if the last fire executed successfully.
@@ -760,6 +781,7 @@ class CronScheduleConfig:
     strategy_id: str
     cron_expr: str
     exchange: str = "NSE"
+    symbol: str = ""
     job_id: str = ""
     last_skipped_reason: str = field(default="")
 
@@ -818,6 +840,7 @@ class CronStrategyScheduler:
         self._check_market = market_hours_check
         # strategy_id -> CronScheduleConfig
         self._schedules: dict[str, CronScheduleConfig] = {}
+        self._callbacks: dict[str, Callable[[], None]] = {}
         self._scheduler: Any = None  # APScheduler BackgroundScheduler
         self._running = False
 
@@ -841,6 +864,16 @@ class CronStrategyScheduler:
                 "apscheduler and pytz are required — pip install apscheduler pytz"
             ) from exc
 
+        for strategy_id, config in self._schedules.items():
+            callback = self._callbacks.get(strategy_id)
+            if callback is None:
+                continue
+            config.job_id = self._add_apscheduler_job(
+                strategy_id,
+                self._parse_cron_expr(config.cron_expr),
+                callback,
+            )
+
         self._scheduler.start()
         self._running = True
         logger.info("CronStrategyScheduler started (IST)")
@@ -857,6 +890,11 @@ class CronStrategyScheduler:
         """True if the background scheduler thread is active."""
         return self._running
 
+    @property
+    def time_scheduler(self) -> TimeScheduler:
+        """Return the shared market-calendar owner used by cron gates."""
+        return self._time_scheduler
+
     # ------------------------------------------------------------------
     # Schedule / unschedule
     # ------------------------------------------------------------------
@@ -867,6 +905,7 @@ class CronStrategyScheduler:
         cron_expr: str,
         callback: Callable[[], None],
         exchange: str = "NSE",
+        symbol: str = "",
     ) -> str:
         """Register a strategy callback on a cron expression.
 
@@ -881,6 +920,7 @@ class CronStrategyScheduler:
             callback: Zero-argument callable to invoke when the cron fires.
             exchange: Exchange code (``"NSE"``, ``"MCX"``, etc.) used to look
                 up trading hours and holidays for gating.
+            symbol: Optional instrument symbol for symbol-scoped sessions.
 
         Returns:
             The APScheduler job ID string.
@@ -901,10 +941,12 @@ class CronStrategyScheduler:
             strategy_id=strategy_id,
             cron_expr=cron_expr,
             exchange=exchange.upper(),
+            symbol=symbol.strip().upper(),
         )
         self._schedules[strategy_id] = config
 
         wrapped = self._make_gated_callback(strategy_id, callback, config)
+        self._callbacks[strategy_id] = wrapped
 
         if self._running and self._scheduler is not None:
             job_id = self._add_apscheduler_job(strategy_id, _parts, wrapped)
@@ -936,6 +978,7 @@ class CronStrategyScheduler:
         config = self._schedules.pop(strategy_id, None)
         if config is None:
             return False
+        self._callbacks.pop(strategy_id, None)
 
         if self._running and self._scheduler is not None and config.job_id:
             try:
@@ -973,6 +1016,7 @@ class CronStrategyScheduler:
                     "strategy_id": sid,
                     "cron_expr": cfg.cron_expr,
                     "exchange": cfg.exchange,
+                    "symbol": cfg.symbol,
                     "job_id": cfg.job_id,
                     "last_skipped_reason": cfg.last_skipped_reason,
                     "next_fire_time": next_fire,
@@ -1042,9 +1086,18 @@ class CronStrategyScheduler:
             now_ist = time_scheduler.now_ist()
             today = now_ist.date()
             exchange = config.exchange
+            symbol = config.symbol or None
             sched = EXCHANGE_SCHEDULES.get(exchange)
-            if not time_scheduler.is_market_open(exchange, at=now_ist):
-                session = time_scheduler.get_market_session(exchange, on=today)
+            if not time_scheduler.is_market_open(
+                exchange,
+                at=now_ist,
+                symbol=symbol,
+            ):
+                session = time_scheduler.get_market_session(
+                    exchange,
+                    on=today,
+                    symbol=symbol,
+                )
                 if sched is None:
                     reason = f"unknown exchange {exchange!r}"
                 elif session is None and today.weekday() >= 5:
@@ -1056,8 +1109,8 @@ class CronStrategyScheduler:
                     now_t = now_ist.time().replace(tzinfo=None)
                     reason = (
                         f"outside market hours for {exchange} "
-                        f"({open_t.strftime('%H:%M')}-{close_t.strftime('%H:%M')} IST), "
-                        f"current={now_t.strftime('%H:%M')}"
+                        f"({open_t.strftime('%H:%M:%S')}-{close_t.strftime('%H:%M:%S')} IST), "
+                        f"current={now_t.strftime('%H:%M:%S')}"
                     )
                 config.last_skipped_reason = reason
                 logger.debug("Cron skip [%s]: %s", strategy_id, reason)
