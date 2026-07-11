@@ -26,6 +26,8 @@ import sys
 import textwrap
 import threading
 import time
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -129,6 +131,26 @@ def test_application_refuses_to_promote_another_launch_record(
 
 
 @pytest.mark.unit
+def test_application_token_comparisons_do_not_normalise_whitespace(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    token = "a" * 64
+    pending = f"v2\n1234\npending\n77\n{token}\n"
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text(pending, encoding="utf-8")
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": f" {token} ",
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+
+    assert entry.promote_application_pid_record(environ=environ, pid=5678) is False
+    assert entry.clear_pending_application_pid_record(environ=environ) is False
+    assert record.read_text(encoding="utf-8") == pending
+
+
+@pytest.mark.unit
 def test_backend_boot_refuses_untracked_application_pid(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -137,6 +159,83 @@ def test_backend_boot_refuses_untracked_application_pid(
 
     with pytest.raises(SystemExit, match="application PID record promotion failed"):
         entry.require_application_pid_record()
+
+
+@pytest.mark.unit
+def test_promotion_failure_clears_exact_pending_record_before_refusing_boot(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    token = "a" * 64
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text(f"v2\n1234\npending\n77\n{token}\n", encoding="utf-8")
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+    stream = io.StringIO()
+    monkeypatch.setattr(entry, "promote_application_pid_record", lambda **_kwargs: False)
+
+    with pytest.raises(SystemExit, match="application PID record promotion failed"):
+        entry.require_application_pid_record(environ=environ, stream=stream)
+
+    assert record.exists() is False
+    assert stream.getvalue() == (f"FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={token} reason=promotion-failed\n")
+
+
+@pytest.mark.unit
+def test_promotion_failure_ack_survives_a_transient_python_cleanup_failure(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "a" * 64
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": "/temporarily/unavailable/desktop_backend.pid",
+    }
+    stream = io.StringIO()
+    monkeypatch.setattr(entry, "promote_application_pid_record", lambda **_kwargs: False)
+    monkeypatch.setattr(entry, "clear_pending_application_pid_record", lambda **_kwargs: False)
+
+    with pytest.raises(SystemExit, match="application PID record promotion failed"):
+        entry.require_application_pid_record(environ=environ, stream=stream)
+
+    assert stream.getvalue() == (f"FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={token} reason=promotion-failed\n")
+
+
+@pytest.mark.unit
+def test_promotion_and_pending_cleanup_share_the_record_transition_guard(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    token = "a" * 64
+    record = tmp_path / "desktop_backend.pid"
+    pending = f"v2\n1234\npending\n77\n{token}\n"
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+    guarded: list[Path] = []
+
+    @contextmanager
+    def record_guard(path: Path) -> Iterator[None]:
+        guarded.append(path)
+        yield
+
+    monkeypatch.setattr(entry, "_record_transition_guard", record_guard)
+
+    record.write_text(pending, encoding="utf-8")
+    assert entry.promote_application_pid_record(environ=environ, pid=5678) is True
+    assert guarded == [record]
+
+    record.write_text(pending, encoding="utf-8")
+    assert entry.clear_pending_application_pid_record(environ=environ) is True
+    assert guarded == [record, record]
 
 
 @pytest.mark.unit
@@ -223,22 +322,146 @@ def test_stdin_shutdown_command_requests_graceful_exit(entry: ModuleType) -> Non
 
 
 @pytest.mark.unit
-def test_stdin_force_exit_targets_the_exact_python_application(
+def test_force_exit_requires_complete_owned_tree_termination(entry: ModuleType) -> None:
+    exits: list[int] = []
+    attempts: list[str] = []
+
+    assert (
+        entry._force_exit_owned_process_tree(
+            lambda: attempts.append("terminate") or True,
+            exit_process=exits.append,
+        )
+        is True
+    )
+    assert attempts == ["terminate"]
+    assert exits == [1]
+
+    exits.clear()
+    assert (
+        entry._force_exit_owned_process_tree(
+            lambda: attempts.append("retain") or False,
+            exit_process=exits.append,
+        )
+        is False
+    )
+    assert attempts == ["terminate", "retain"]
+    assert exits == []
+
+    assert entry._force_exit_owned_process_tree(None, exit_process=exits.append) is False
+    assert exits == []
+
+
+@pytest.mark.unit
+def test_force_handler_retains_state_without_pending_proof_or_tree_containment(
+    entry: ModuleType,
+) -> None:
+    exits: list[int] = []
+
+    assert (
+        entry._handle_force_exit(
+            None,
+            environ={},
+            exit_process=exits.append,
+        )
+        is False
+    )
+    assert exits == []
+
+
+@pytest.mark.unit
+def test_posix_owned_tree_terminator_targets_only_the_current_process_group(entry: ModuleType) -> None:
+    calls: list[object] = []
+    terminator = entry._prepare_posix_owned_process_tree(
+        getpid=lambda: 5678,
+        set_process_group=lambda: calls.append("claim"),
+        get_process_group=lambda: 5678,
+        kill_process_group=lambda pid, sig: calls.append((pid, sig)),
+    )
+
+    assert terminator is not None
+    assert terminator() is True
+    assert calls == ["claim", (5678, signal.SIGKILL)]
+
+    changed_group = entry._prepare_posix_owned_process_tree(
+        getpid=lambda: 5678,
+        set_process_group=lambda: None,
+        get_process_group=lambda: 9999,
+        kill_process_group=lambda *_args: pytest.fail("a foreign process group must not be signalled"),
+    )
+    assert changed_group is None
+
+
+@pytest.mark.unit
+def test_windows_owned_tree_terminator_targets_only_the_current_process(entry: ModuleType) -> None:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    terminator = entry._prepare_windows_owned_process_tree(getpid=lambda: 5678, run=run)
+
+    assert terminator() is True
+    assert commands == [["taskkill", "/PID", "5678", "/T", "/F"]]
+
+    failed = entry._prepare_windows_owned_process_tree(
+        getpid=lambda: 5678,
+        run=lambda command, **_kwargs: subprocess.CompletedProcess(command, 1, "", "denied"),
+    )
+    assert failed() is False
+
+
+@pytest.mark.unit
+def test_stdin_force_exit_targets_the_complete_owned_process_tree(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requested = threading.Event()
     exit_codes: list[int] = []
+    tree_terminations: list[str] = []
     monkeypatch.setattr(entry.os, "_exit", exit_codes.append)
 
     thread = entry.start_stdin_shutdown_listener(
         requested.set,
         stream=io.StringIO("FLINTTRADE_FORCE_EXIT\n"),
+        terminate_owned_tree=lambda: tree_terminations.append("terminate") or True,
     )
 
     thread.join(timeout=1)
+    assert tree_terminations == ["terminate"]
     assert exit_codes == [1]
     assert requested.is_set() is False
+
+
+@pytest.mark.unit
+def test_pending_force_exit_clears_exact_record_and_acknowledges_before_exit(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    token = "a" * 64
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text(f"v2\n1234\npending\n77\n{token}\n", encoding="utf-8")
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+    stream = io.StringIO()
+    exits: list[int] = []
+
+    assert (
+        entry._handle_force_exit(
+            lambda: pytest.fail("a pre-import pending application has no backend tree to terminate"),
+            environ=environ,
+            stream=stream,
+            exit_process=exits.append,
+        )
+        is True
+    )
+
+    assert record.exists() is False
+    assert stream.getvalue() == f"FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={token} reason=force-exit\n"
+    assert exits == [1]
 
 
 @pytest.mark.unit
@@ -253,6 +476,7 @@ def test_stdin_listener_keeps_force_fallback_after_graceful_request(
     thread = entry.start_stdin_shutdown_listener(
         requested.set,
         stream=io.StringIO(f"{entry.SHUTDOWN_COMMAND}\n{entry.FORCE_EXIT_COMMAND}\n"),
+        terminate_owned_tree=lambda: True,
     )
 
     thread.join(timeout=1)
@@ -270,6 +494,34 @@ def test_stdin_eof_requests_graceful_exit_for_a_dead_parent(entry: ModuleType) -
 
 
 @pytest.mark.unit
+def test_stdin_eof_uses_orphan_tree_fallback(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def request_shutdown() -> None:
+        pass
+
+    def terminate_owned_tree() -> bool:
+        return True
+
+    orphaned: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        entry,
+        "_exit_orphaned",
+        lambda request, terminate_tree: orphaned.append((request, terminate_tree)),
+    )
+
+    thread = entry.start_stdin_shutdown_listener(
+        request_shutdown,
+        stream=io.StringIO(""),
+        terminate_owned_tree=terminate_owned_tree,
+    )
+
+    thread.join(timeout=1)
+    assert orphaned == [(request_shutdown, terminate_owned_tree)]
+
+
+@pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX liveness checks")
 def test_posix_parent_alive_probes(entry: ModuleType) -> None:
     # kill(pid, 0) path: this process is alive.
@@ -284,26 +536,97 @@ def test_posix_parent_alive_probes(entry: ModuleType) -> None:
 
 
 @pytest.mark.unit
+def test_posix_parent_identity_rejects_shell_pid_reuse_in_pyinstaller_topology(
+    entry: ModuleType,
+) -> None:
+    original = "/Applications/FlintTrade.app/Contents/MacOS/FlintTrade\t77\tFri Jul 11 10:11:12 2026"
+    reused = "/usr/bin/python3 unrelated.py\t77\tFri Jul 11 10:11:13 2026"
+
+    assert (
+        entry._posix_parent_alive(
+            77,
+            track_reparent=False,
+            expected_identity=original,
+            identity_lookup=lambda _pid: original,
+        )
+        is True
+    )
+    assert (
+        entry._posix_parent_alive(
+            77,
+            track_reparent=False,
+            expected_identity=original,
+            identity_lookup=lambda _pid: reused,
+        )
+        is False
+    )
+
+
+@pytest.mark.unit
+def test_posix_parent_identity_parser_matches_rust_process_identity(entry: ModuleType) -> None:
+    output = "77 Fri Jul 11 10:11:12 2026 /Applications/FlintTrade.app/Contents/MacOS/FlintTrade --runtime-flag"
+
+    assert entry._parse_posix_process_identity(output, 77) == (
+        "/Applications/FlintTrade.app/Contents/MacOS/FlintTrade --runtime-flag\t77\tFri Jul 11 10:11:12 2026"
+    )
+    assert entry._parse_posix_process_identity(output, 88) is None
+    assert entry._parse_posix_process_identity("", 77) is None
+
+
+@pytest.mark.unit
 def test_posix_watcher_returns_after_first_orphan_request(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[object] = []
+    calls: list[tuple[object, object]] = []
     request_shutdown = object()
+    terminate_owned_tree = object()
 
     monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(entry, "_posix_parent_alive", lambda *_args, **_kwargs: False)
 
-    def exit_once(request: object) -> None:
-        calls.append(request)
+    def exit_once(request: object, terminate_tree: object) -> None:
+        calls.append((request, terminate_tree))
         if len(calls) > 1:
             raise AssertionError("watcher requested orphan shutdown more than once")
 
     monkeypatch.setattr(entry, "_exit_orphaned", exit_once)
 
-    entry._watch_parent_posix(1234, request_shutdown)
+    entry._watch_parent_posix(1234, request_shutdown, terminate_owned_tree)
 
-    assert calls == [request_shutdown]
+    assert calls == [(request_shutdown, terminate_owned_tree)]
+
+
+@pytest.mark.unit
+def test_posix_watcher_polls_the_spawn_time_shell_identity_for_pyinstaller_child(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell_identity = "/Applications/FlintTrade.app/Contents/MacOS/FlintTrade\t77\tstable-start"
+    probes: list[tuple[int, bool, str | None]] = []
+    orphaned: list[object] = []
+    request_shutdown = object()
+
+    monkeypatch.setattr(entry.os, "getppid", lambda: 1234)
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+
+    def parent_alive(
+        pid: int,
+        *,
+        track_reparent: bool,
+        expected_identity: str | None = None,
+        **_kwargs: object,
+    ) -> bool:
+        probes.append((pid, track_reparent, expected_identity))
+        return False
+
+    monkeypatch.setattr(entry, "_posix_parent_alive", parent_alive)
+    monkeypatch.setattr(entry, "_exit_orphaned", lambda request, _tree: orphaned.append(request))
+
+    entry._watch_parent_posix(77, request_shutdown, parent_identity=shell_identity)
+
+    assert probes == [(77, False, shell_identity)]
+    assert orphaned == [request_shutdown]
 
 
 @pytest.mark.integration
@@ -322,7 +645,9 @@ def test_sidecar_exits_when_parent_dies(tmp_path: Path) -> None:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         mod.POLL_INTERVAL_SECONDS = 0.1
-        assert mod.start_parent_watchdog() is not None
+        terminate_owned_tree = mod._prepare_owned_process_tree()
+        assert terminate_owned_tree is not None
+        assert mod.start_parent_watchdog(terminate_owned_tree=terminate_owned_tree) is not None
         print("SIDECAR_READY", flush=True)
         time.sleep(60)  # the watchdog must exit us long before this
         """

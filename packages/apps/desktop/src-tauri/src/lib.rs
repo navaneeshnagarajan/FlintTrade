@@ -36,7 +36,7 @@
 //!   thread and exits cleanly when the shell dies.
 //! * **Graceful stop on exit** — stdin asks Python to unwind Waitress, flush
 //!   tick capture, and close DuckDB. If that wedges, a second command on the
-//!   same inherited pipe hard-stops that exact Python application.
+//!   same inherited pipe hard-stops that exact Python application tree.
 //!
 //! A small splash window covers steps 1–2 so the user sees immediate feedback.
 //!
@@ -53,7 +53,8 @@
 
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use fs2::FileExt;
 use tauri::menu::{Menu, MenuEvent, MenuItem};
@@ -70,6 +71,13 @@ const READY_SENTINEL: &str = "FLINTTRADE_BACKEND_READY";
 /// PyInstaller one-file builds may have a short-lived bootloader PID distinct
 /// from this process, so recovery ownership is incomplete until this arrives.
 const APPLICATION_PID_SENTINEL: &str = "FLINTTRADE_BACKEND_PID";
+
+/// Stdout proof that Python will exit before importing a backend tree, making
+/// only this launch's exact pending record safe for guarded cleanup.
+const PENDING_RECORD_EXIT_ACK_SENTINEL: &str = "FLINTTRADE_BACKEND_PENDING_EXIT_ACK";
+
+/// Stable POSIX shell command/PID/start identity captured before sidecar spawn.
+const PARENT_IDENTITY_ENV: &str = "FLINTTRADE_PARENT_IDENTITY";
 
 /// Stdout prefix the backend prints to raise a native desktop notification.
 /// Format: ``FLINTTRADE_NOTIFY\t<title>\t<body>`` (tab-delimited, one line).
@@ -99,8 +107,8 @@ const SIDECAR_PROCESS_MARKER: &str = "flinttrade-backend";
 /// unwinds Waitress, flushes pending ticks, and closes DuckDB before exiting.
 const SIDECAR_SHUTDOWN_COMMAND: &[u8] = b"FLINTTRADE_SHUTDOWN\n";
 
-/// Exact-pipe hard-stop command handled inside the Python application. This
-/// avoids sending a terminating signal to any PID recovered from disk.
+/// Exact-pipe hard-stop command handled inside the Python application. Python
+/// terminates its contained tree, avoiding signals to PIDs recovered from disk.
 const SIDECAR_FORCE_EXIT_COMMAND: &[u8] = b"FLINTTRADE_FORCE_EXIT\n";
 
 /// Maximum wait for Python's 60s request drain plus background cleanup before
@@ -197,6 +205,8 @@ struct ReapRecord {
 struct ManagedSidecar {
     child: CommandChild,
     record: SidecarRecord,
+    pending_exit_acknowledged: Arc<AtomicBool>,
+    shutdown_identity_tracker: ShutdownProcessIdentityTracker,
 }
 
 /// Holds the spawned backend child and its exact recovery record so cleanup
@@ -840,6 +850,14 @@ pub fn run() {
                     "could not resolve workspace directory for sidecar record",
                 )
             })?;
+            #[cfg(unix)]
+            let parent_identity =
+                required_parent_identity_with(shell_pid, process_command_line).map_err(|error| {
+                    std::io::Error::new(
+                        error.kind(),
+                        format!("could not confirm desktop shell identity for watchdog: {error}"),
+                    )
+                })?;
 
             // Spawn the backend sidecar on an OS-chosen loopback port so the app
             // never collides with another local FlintTrade or service.
@@ -858,6 +876,8 @@ pub fn run() {
                 // before announcing its real application PID on stdout.
                 .env("FLINTTRADE_SIDECAR_RECORD_PATH", &sidecar_record_path)
                 .env("FLINTTRADE_LAUNCH_TOKEN", &launch_token);
+            #[cfg(unix)]
+            let command = command.env(PARENT_IDENTITY_ENV, parent_identity);
             let (mut rx, mut child) = command.spawn()?;
             let sidecar_pid = child.pid();
             let sidecar_record = SidecarRecord {
@@ -866,6 +886,7 @@ pub fn run() {
                 shell_pid,
                 launch_token,
             };
+            let pending_exit_acknowledged = Arc::new(AtomicBool::new(false));
             // Record the sidecar identity so the *next* launch can reap it if
             // this shell dies without running its kill-on-exit cleanup.
             if let Err(error) = write_sidecar_record(&sidecar_record) {
@@ -881,6 +902,8 @@ pub fn run() {
                 *state.0.lock().unwrap() = Some(ManagedSidecar {
                     child,
                     record: sidecar_record.clone(),
+                    pending_exit_acknowledged: Arc::clone(&pending_exit_acknowledged),
+                    shutdown_identity_tracker: ShutdownProcessIdentityTracker::default(),
                 });
             }
 
@@ -899,6 +922,12 @@ pub fn run() {
                             let chunk = String::from_utf8_lossy(&bytes);
                             if sidecar_record.application_pid.is_none() {
                                 pid_buffer.push_str(&chunk);
+                                if output_has_pending_record_exit_ack(
+                                    &pid_buffer,
+                                    &sidecar_record.launch_token,
+                                ) {
+                                    pending_exit_acknowledged.store(true, Ordering::Release);
+                                }
                                 if let Some(application_pid) = parse_application_pid(&pid_buffer) {
                                     match confirm_application_process(application_pid).and_then(|()| {
                                         promote_sidecar_record(&sidecar_record, application_pid)
@@ -949,6 +978,18 @@ pub fn run() {
                         }
                         CommandEvent::Terminated(payload) => {
                             eprintln!("[flinttrade] backend terminated: {payload:?}");
+                            if pending_record_cleanup_allowed(
+                                &sidecar_record,
+                                if pending_exit_acknowledged.load(Ordering::Acquire) {
+                                    PendingRecordExitProof::ApplicationAcknowledged
+                                } else {
+                                    PendingRecordExitProof::None
+                                },
+                                ProcessLiveness::Dead,
+                            ) {
+                                finalise_terminated_backend(&handle, &sidecar_record);
+                                break;
+                            }
                             match process_tree_liveness(&sidecar_record) {
                                 ProcessLiveness::Dead => {
                                     finalise_terminated_backend(&handle, &sidecar_record);
@@ -1037,6 +1078,33 @@ fn parse_application_pid(buffer: &str) -> Option<u32> {
         }
     }
     None
+}
+
+/// Accept only a complete application-level pending-record acknowledgement for
+/// this launch. Tokens are compared byte-for-byte and trailing fields fail.
+fn parse_pending_record_exit_ack(line: &str, expected_token: &str) -> bool {
+    let mut fields = line.split_whitespace();
+    if fields.next() != Some(PENDING_RECORD_EXIT_ACK_SENTINEL) {
+        return false;
+    }
+    if fields.next().and_then(|field| field.strip_prefix("token=")) != Some(expected_token) {
+        return false;
+    }
+    if !matches!(
+        fields
+            .next()
+            .and_then(|field| field.strip_prefix("reason=")),
+        Some("promotion-failed" | "force-exit")
+    ) {
+        return false;
+    }
+    fields.next().is_none()
+}
+
+fn output_has_pending_record_exit_ack(buffer: &str, expected_token: &str) -> bool {
+    buffer
+        .lines()
+        .any(|line| parse_pending_record_exit_ack(line, expected_token))
 }
 
 /// Whether an in-webview navigation target may load in the privileged main
@@ -1420,6 +1488,7 @@ fn kill_backend(app: &AppHandle) {
                     SIDECAR_PENDING_HANDSHAKE_POLLS,
                     SIDECAR_SHUTDOWN_POLLS,
                     record_path.as_deref(),
+                    &mut managed.shutdown_identity_tracker,
                 )
             {
                 remove_sidecar_record(&managed.record);
@@ -1454,7 +1523,7 @@ fn kill_backend(app: &AppHandle) {
             // This handle belongs to the exact launcher spawned in this
             // process. Killing it is safe, but it is not sufficient for a
             // PyInstaller application child; the exact inherited stdin pipe
-            // above is what hard-stops that Python process.
+            // above is what hard-stops that Python-owned process tree.
             if let Err(error) = managed.child.kill() {
                 eprintln!("[flinttrade] backend launcher hard-kill request failed: {error}");
             }
@@ -1463,16 +1532,23 @@ fn kill_backend(app: &AppHandle) {
                 SIDECAR_KILL_CONFIRM_POLLS,
                 SIDECAR_KILL_CONFIRM_POLLS,
                 record_path.as_deref(),
+                &mut managed.shutdown_identity_tracker,
             ) {
                 remove_sidecar_record(&managed.record);
             } else if pending_record_cleanup_allowed(
                 &managed.record,
-                force_exit_written,
+                if managed.pending_exit_acknowledged.load(Ordering::Acquire) {
+                    PendingRecordExitProof::ApplicationAcknowledged
+                } else if force_exit_written {
+                    PendingRecordExitProof::PipeWriteAccepted
+                } else {
+                    PendingRecordExitProof::None
+                },
                 process_liveness(managed.record.sidecar_pid),
             ) {
-                // Python starts its exact-pipe listener before mandatory PID
-                // promotion and refuses backend boot if that record vanishes.
-                // Compare-and-delete prevents touching a concurrent promotion.
+                // Python acknowledged only after removing this exact pending
+                // record before backend import. The launcher is also dead, so
+                // no untracked PyInstaller application tree can remain.
                 remove_sidecar_record(&managed.record);
             } else {
                 eprintln!(
@@ -1525,24 +1601,32 @@ fn wait_for_sidecar_shutdown(
     pending_polls: usize,
     confirmed_polls: usize,
     record_path: Option<&Path>,
+    identity_tracker: &mut ShutdownProcessIdentityTracker,
 ) -> bool {
     wait_for_sidecar_shutdown_with(
         record,
         pending_polls,
         confirmed_polls,
         |expected| record_path.and_then(|path| refresh_sidecar_record_at(path, expected)),
-        process_tree_liveness,
+        |current| identity_tracker.process_tree_liveness(current),
         || std::thread::sleep(std::time::Duration::from_millis(100)),
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingRecordExitProof {
+    None,
+    PipeWriteAccepted,
+    ApplicationAcknowledged,
+}
+
 fn pending_record_cleanup_allowed(
     record: &SidecarRecord,
-    force_exit_written: bool,
+    proof: PendingRecordExitProof,
     launcher_liveness: ProcessLiveness,
 ) -> bool {
     record.application_pid.is_none()
-        && force_exit_written
+        && proof == PendingRecordExitProof::ApplicationAcknowledged
         && launcher_liveness == ProcessLiveness::Dead
 }
 
@@ -1669,7 +1753,7 @@ fn parse_sidecar_record(contents: &str) -> Option<SidecarRecord> {
         .parse::<u32>()
         .ok()
         .filter(|pid| *pid > 0)?;
-    let launch_token = lines.next()?.trim().to_string();
+    let launch_token = lines.next()?.to_string();
     if lines.next().is_some() || !valid_launch_token(&launch_token) {
         return None;
     }
@@ -1695,7 +1779,7 @@ fn parse_v1_sidecar_record(contents: &str) -> Option<ReapRecord> {
         .parse::<u32>()
         .ok()
         .filter(|pid| *pid > 0)?;
-    let launch_token = lines.next()?.trim();
+    let launch_token = lines.next()?;
     if lines.next().is_some() || !valid_launch_token(launch_token) {
         return None;
     }
@@ -1856,6 +1940,18 @@ fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
     Ok(parse_windows_process_identity(&text, pid))
 }
 
+fn required_parent_identity_with<I>(pid: u32, identity: I) -> std::io::Result<String>
+where
+    I: FnOnce(u32) -> std::io::Result<Option<String>>,
+{
+    identity(pid)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("desktop shell pid {pid} disappeared during identity lookup"),
+        )
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProcessLiveness {
     Alive,
@@ -1942,6 +2038,95 @@ fn process_tree_liveness(record: &SidecarRecord) -> ProcessLiveness {
     }
 }
 
+#[derive(Debug, Default)]
+struct TrackedProcessIdentity {
+    pid: Option<u32>,
+    identity: Option<String>,
+}
+
+impl TrackedProcessIdentity {
+    fn observe_with<L, I>(
+        &mut self,
+        pid: u32,
+        liveness: &mut L,
+        identity: &mut I,
+    ) -> ProcessLiveness
+    where
+        L: FnMut(u32) -> ProcessLiveness,
+        I: FnMut(u32) -> std::io::Result<Option<String>>,
+    {
+        if self.pid != Some(pid) {
+            self.pid = Some(pid);
+            self.identity = None;
+        }
+        if liveness(pid) == ProcessLiveness::Dead {
+            return ProcessLiveness::Dead;
+        }
+        match identity(pid) {
+            Ok(Some(current)) => match self.identity.as_ref() {
+                Some(expected) if expected == &current => ProcessLiveness::Alive,
+                Some(_) => ProcessLiveness::Dead,
+                None if looks_like_backend_sidecar(&current) => {
+                    self.identity = Some(current);
+                    ProcessLiveness::Alive
+                }
+                None => ProcessLiveness::Dead,
+            },
+            Ok(None) | Err(_) => match liveness(pid) {
+                ProcessLiveness::Dead => ProcessLiveness::Dead,
+                ProcessLiveness::Alive | ProcessLiveness::Unknown => ProcessLiveness::Unknown,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ShutdownProcessIdentityTracker {
+    launcher: TrackedProcessIdentity,
+    application: TrackedProcessIdentity,
+}
+
+impl ShutdownProcessIdentityTracker {
+    fn process_tree_liveness_with<L, I>(
+        &mut self,
+        record: &SidecarRecord,
+        mut liveness: L,
+        mut identity: I,
+    ) -> ProcessLiveness
+    where
+        L: FnMut(u32) -> ProcessLiveness,
+        I: FnMut(u32) -> std::io::Result<Option<String>>,
+    {
+        let Some(application_pid) = record.application_pid else {
+            return ProcessLiveness::Unknown;
+        };
+        let launcher = self
+            .launcher
+            .observe_with(record.sidecar_pid, &mut liveness, &mut identity);
+        let application = if application_pid == record.sidecar_pid {
+            launcher
+        } else {
+            self.application
+                .observe_with(application_pid, &mut liveness, &mut identity)
+        };
+        if matches!(launcher, ProcessLiveness::Alive)
+            || matches!(application, ProcessLiveness::Alive)
+        {
+            ProcessLiveness::Alive
+        } else if matches!(launcher, ProcessLiveness::Unknown)
+            || matches!(application, ProcessLiveness::Unknown)
+        {
+            ProcessLiveness::Unknown
+        } else {
+            ProcessLiveness::Dead
+        }
+    }
+
+    fn process_tree_liveness(&mut self, record: &SidecarRecord) -> ProcessLiveness {
+        self.process_tree_liveness_with(record, process_liveness, process_command_line)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordedApplicationExit {
     ConfirmedDead,
@@ -1967,8 +2152,7 @@ where
     let initial_identity = match identity(application_pid) {
         Ok(Some(value)) if looks_like_backend_sidecar(&value) => value,
         Ok(Some(_)) => return RecordedApplicationExit::ConfirmedReused,
-        Ok(None) => return RecordedApplicationExit::ConfirmedDead,
-        Err(_) => {
+        Ok(None) | Err(_) => {
             return if liveness(application_pid) == ProcessLiveness::Dead {
                 RecordedApplicationExit::ConfirmedDead
             } else {
@@ -2111,20 +2295,25 @@ fn remove_reaped_record(
     expected_contents: &str,
     outcome: ReapOutcome,
 ) -> Result<ReapOutcome, ReapError> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) if contents == expected_contents => {}
-        Ok(_) => return Err(ReapError::RecordChanged),
-        Err(error) => {
-            return Err(ReapError::RecordRemoval {
-                message: error.to_string(),
-            });
+    with_sidecar_record_transition_guard(path, || {
+        match std::fs::read_to_string(path) {
+            Ok(contents) if contents == expected_contents => {}
+            Ok(_) => return Err(ReapError::RecordChanged),
+            Err(error) => {
+                return Err(ReapError::RecordRemoval {
+                    message: error.to_string(),
+                });
+            }
         }
-    }
-    std::fs::remove_file(path)
-        .map(|()| outcome)
-        .map_err(|error| ReapError::RecordRemoval {
-            message: error.to_string(),
-        })
+        std::fs::remove_file(path)
+            .map(|()| outcome)
+            .map_err(|error| ReapError::RecordRemoval {
+                message: error.to_string(),
+            })
+    })
+    .map_err(|error| ReapError::RecordRemoval {
+        message: error.to_string(),
+    })?
 }
 
 fn inspect_live_sidecar<L, I>(
@@ -2433,25 +2622,27 @@ fn promote_sidecar_record_at(
         application_pid: Some(application_pid),
         ..expected.clone()
     };
-    let serialised = format_sidecar_record(&promoted);
-    let current = std::fs::read_to_string(path)?;
-    if current == serialised {
-        return Ok(promoted);
-    }
-    if current != format_sidecar_record(expected) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "sidecar recovery record changed before application PID promotion",
-        ));
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(path)?;
-    file.write_all(serialised.as_bytes())?;
-    file.sync_all()?;
-    harden_file(path);
-    Ok(promoted)
+    with_sidecar_record_transition_guard(path, || {
+        let serialised = format_sidecar_record(&promoted);
+        let current = std::fs::read_to_string(path)?;
+        if current == serialised {
+            return Ok(promoted.clone());
+        }
+        if current != format_sidecar_record(expected) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "sidecar recovery record changed before application PID promotion",
+            ));
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)?;
+        file.write_all(serialised.as_bytes())?;
+        file.sync_all()?;
+        harden_file(path);
+        Ok(promoted.clone())
+    })?
 }
 
 fn write_sidecar_record(record: &SidecarRecord) -> std::io::Result<()> {
@@ -2498,16 +2689,60 @@ fn refresh_sidecar_record_at(path: &Path, expected: &SidecarRecord) -> Option<Si
 /// instance lock prevents a successor shell from replacing the record between
 /// comparison and removal.
 fn remove_sidecar_record_at(path: &Path, expected: &SidecarRecord) -> std::io::Result<bool> {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    if parse_sidecar_record(&contents).as_ref() != Some(expected) {
-        return Ok(false);
+    with_sidecar_record_transition_guard(path, || {
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        if parse_sidecar_record(&contents).as_ref() != Some(expected) {
+            return Ok(false);
+        }
+        std::fs::remove_file(path)?;
+        Ok(true)
+    })?
+}
+
+fn sidecar_record_transition_guard_path(path: &Path) -> std::io::Result<PathBuf> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sidecar record path has no parent directory",
+        )
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sidecar record path has no valid file name",
+            )
+        })?;
+    Ok(parent.join(format!(".{file_name}.lock")))
+}
+
+fn with_sidecar_record_transition_guard<T, F>(path: &Path, operation: F) -> std::io::Result<T>
+where
+    F: FnOnce() -> T,
+{
+    let guard_path = sidecar_record_transition_guard_path(path)?;
+    let mut guard = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&guard_path)?;
+    if guard.metadata()?.len() == 0 {
+        guard.write_all(&[0])?;
+        guard.sync_all()?;
+        guard.seek(SeekFrom::Start(0))?;
     }
-    std::fs::remove_file(path)?;
-    Ok(true)
+    harden_file(&guard_path);
+    guard.lock_exclusive()?;
+    let result = operation();
+    FileExt::unlock(&guard)?;
+    Ok(result)
 }
 
 fn remove_sidecar_record(expected: &SidecarRecord) {
@@ -2643,6 +2878,37 @@ mod tests {
             parse_application_pid("FLINTTRADE_BACKEND_PID pid=nope"),
             None
         );
+    }
+
+    #[test]
+    fn pending_record_exit_ack_requires_the_exact_launch_token() {
+        let token = "a".repeat(64);
+        let exact =
+            format!("FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={token} reason=promotion-failed");
+
+        assert!(parse_pending_record_exit_ack(&exact, &token));
+        assert!(!parse_pending_record_exit_ack(&exact, &"b".repeat(64)));
+        assert!(!parse_pending_record_exit_ack(
+            &format!("{exact} trailing"),
+            &token
+        ));
+        assert!(!parse_pending_record_exit_ack(
+            &format!(
+                "FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={} reason=promotion-failed",
+                token.to_ascii_uppercase()
+            ),
+            &token
+        ));
+    }
+
+    #[test]
+    fn pending_record_exit_ack_waits_for_a_complete_fragmented_line() {
+        let token = "a".repeat(64);
+        let mut buffer = "FLINTTRADE_BACKEND_PENDING_EXIT_ACK token=".to_string();
+
+        assert!(!output_has_pending_record_exit_ack(&buffer, &token));
+        buffer.push_str(&format!("{token} reason=promotion-failed\n"));
+        assert!(output_has_pending_record_exit_ack(&buffer, &token));
     }
 
     #[test]
@@ -3423,6 +3689,79 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_record_cleanup_waits_for_promotion_guard_and_rechecks_contents() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-record-removal-race-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(SIDECAR_PID_FILE);
+        let pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let promoted = SidecarRecord {
+            application_pid: Some(5678),
+            ..pending.clone()
+        };
+        std::fs::write(&path, format_sidecar_record(&pending)).unwrap();
+
+        let guard_path = sidecar_record_transition_guard_path(&path).unwrap();
+        let guard = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(guard_path)
+            .unwrap();
+        guard.lock_exclusive().unwrap();
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let cleanup_path = path.clone();
+        let cleanup_record = pending.clone();
+        let cleanup = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            result_tx
+                .send(remove_sidecar_record_at(&cleanup_path, &cleanup_record))
+                .unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(result_rx
+            .recv_timeout(std::time::Duration::from_millis(250))
+            .is_err());
+
+        std::fs::write(&path, format_sidecar_record(&promoted)).unwrap();
+        FileExt::unlock(&guard).unwrap();
+        assert!(!result_rx.recv().unwrap().unwrap());
+        cleanup.join().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format_sidecar_record(&promoted)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn record_transition_guard_initialises_the_shared_lock_byte() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-record-guard-byte-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(SIDECAR_PID_FILE);
+
+        with_sidecar_record_transition_guard(&path, || ()).unwrap();
+
+        let guard_path = sidecar_record_transition_guard_path(&path).unwrap();
+        assert!(std::fs::metadata(guard_path).unwrap().len() >= 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn backend_recovery_is_only_shown_for_unexpected_termination() {
         assert!(!should_show_backend_recovery(true));
         assert!(should_show_backend_recovery(false));
@@ -3642,6 +3981,37 @@ mod tests {
     }
 
     #[test]
+    fn terminated_launcher_none_identity_requires_a_fresh_dead_liveness_probe() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                |_| ProcessLiveness::Alive,
+                |_| Ok(None),
+                || panic!("an unconfirmed initial identity must not enter the poll loop"),
+            ),
+            RecordedApplicationExit::Unresolved
+        );
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                |_| ProcessLiveness::Dead,
+                |_| Ok(None),
+                || panic!("a confirmed-dead application must not be polled"),
+            ),
+            RecordedApplicationExit::ConfirmedDead
+        );
+    }
+
+    #[test]
     fn pending_shutdown_uses_short_handshake_budget() {
         assert!(SIDECAR_PENDING_HANDSHAKE_POLLS < SIDECAR_SHUTDOWN_POLLS);
     }
@@ -3716,7 +4086,43 @@ mod tests {
     }
 
     #[test]
-    fn pending_record_cleanup_requires_exact_pipe_stop_and_dead_launcher() {
+    fn shutdown_identity_tracker_treats_pid_reuse_as_owned_process_exit() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(1234),
+            shell_pid: 77,
+            launch_token: "a".repeat(64),
+        };
+        let identities = std::cell::RefCell::new(std::collections::VecDeque::from([
+            Ok(Some(
+                "flinttrade-backend\t1234\tFri Jul 11 10:11:12 2026".to_string(),
+            )),
+            Ok(Some(
+                "flinttrade-backend\t1234\tFri Jul 11 10:11:13 2026".to_string(),
+            )),
+        ]));
+        let mut tracker = ShutdownProcessIdentityTracker::default();
+
+        assert_eq!(
+            tracker.process_tree_liveness_with(
+                &record,
+                |_| ProcessLiveness::Alive,
+                |_| identities.borrow_mut().pop_front().unwrap(),
+            ),
+            ProcessLiveness::Alive
+        );
+        assert_eq!(
+            tracker.process_tree_liveness_with(
+                &record,
+                |_| ProcessLiveness::Alive,
+                |_| identities.borrow_mut().pop_front().unwrap(),
+            ),
+            ProcessLiveness::Dead
+        );
+    }
+
+    #[test]
+    fn pending_record_cleanup_requires_application_ack_and_dead_launcher() {
         let pending = SidecarRecord {
             sidecar_pid: 1234,
             application_pid: None,
@@ -3728,24 +4134,29 @@ mod tests {
             ..pending.clone()
         };
 
+        assert!(!pending_record_cleanup_allowed(
+            &pending,
+            PendingRecordExitProof::PipeWriteAccepted,
+            ProcessLiveness::Dead
+        ));
         assert!(pending_record_cleanup_allowed(
             &pending,
-            true,
+            PendingRecordExitProof::ApplicationAcknowledged,
             ProcessLiveness::Dead
         ));
         assert!(!pending_record_cleanup_allowed(
             &pending,
-            false,
+            PendingRecordExitProof::None,
             ProcessLiveness::Dead
         ));
         assert!(!pending_record_cleanup_allowed(
             &pending,
-            true,
+            PendingRecordExitProof::ApplicationAcknowledged,
             ProcessLiveness::Unknown
         ));
         assert!(!pending_record_cleanup_allowed(
             &promoted,
-            true,
+            PendingRecordExitProof::ApplicationAcknowledged,
             ProcessLiveness::Dead
         ));
     }
@@ -3935,6 +4346,28 @@ mod tests {
             "/opt/FlintTrade/flinttrade-backend --port 0"
         ));
         assert!(!looks_like_desktop_shell("/usr/bin/python3 unrelated.py"));
+    }
+
+    #[test]
+    fn posix_watchdog_parent_identity_must_be_confirmed_before_spawn() {
+        let identity = "/Applications/FlintTrade.app/Contents/MacOS/FlintTrade\t77\tstable-start";
+
+        assert_eq!(
+            required_parent_identity_with(77, |_| Ok(Some(identity.to_string()))).unwrap(),
+            identity
+        );
+        assert_eq!(
+            required_parent_identity_with(77, |_| Ok(None))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            required_parent_identity_with(77, |_| Err(std::io::Error::other("lookup failed")))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::Other
+        );
     }
 
     #[test]
