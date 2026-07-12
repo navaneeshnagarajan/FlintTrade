@@ -61,6 +61,26 @@ def _cron_scheduler_required() -> tuple[Any, Response | None]:
     return scheduler, None
 
 
+def shutdown_strategy_runtime(app: Any) -> list[str]:
+    """Stop every uploaded strategy process owned by a Flask application.
+
+    The process-level application owner should call this during graceful
+    shutdown after request admission has closed. Cron shutdown remains owned
+    by the parent's existing ``CRON_SCHEDULER`` lifecycle.
+
+    Args:
+        app: Flask application carrying ``STRATEGY_RUNNER`` in ``config``.
+
+    Returns:
+        Strategy IDs stopped by the runner, or an empty list when no runner is
+        configured.
+    """
+    runner = app.config.get("STRATEGY_RUNNER")
+    if runner is None:
+        return []
+    return runner.stop_all()
+
+
 # ---------------------------------------------------------------------------
 # Upload
 # ---------------------------------------------------------------------------
@@ -373,13 +393,16 @@ def create_strategy_schedule(strategy_id: str) -> Response:
 
         {
             "cron": "30 9 * * 1-5",
-            "exchange": "NSE"
+            "exchange": "NSE",
+            "symbol": "RELIANCE"
         }
 
     ``cron`` must be a valid 5-field expression (minute hour dom month dow)
     that will be evaluated in IST (Asia/Kolkata).
 
     ``exchange`` is optional and defaults to ``"NSE"``.
+
+    ``symbol`` is optional and is retained for symbol-scoped market sessions.
 
     Args:
         strategy_id: UUID of the strategy to schedule.
@@ -405,6 +428,7 @@ def create_strategy_schedule(strategy_id: str) -> Response:
     body: dict[str, Any] = request.get_json(silent=True) or {}
     cron_expr: str = (body.get("cron") or "").strip()
     exchange: str = (body.get("exchange") or "NSE").strip().upper()
+    symbol: str = str(body.get("symbol") or "").strip().upper()
 
     if not cron_expr:
         return jsonify({"status": "error", "message": "cron expression is required"}), 400
@@ -441,6 +465,7 @@ def create_strategy_schedule(strategy_id: str) -> Response:
             cron_expr=cron_expr,
             callback=_strategy_start_callback,
             exchange=exchange,
+            symbol=symbol,
         )
     except ValueError:
         return jsonify({"status": "error", "message": "Cron expression expected 5 fields"}), 400
@@ -457,6 +482,7 @@ def create_strategy_schedule(strategy_id: str) -> Response:
                     "strategy_id": strategy_id,
                     "cron": cron_expr,
                     "exchange": exchange,
+                    "symbol": symbol,
                     "job_id": job_id,
                 },
             }
@@ -492,7 +518,7 @@ def list_scheduled_strategies() -> Response:
 
     Returns:
         JSON with a ``schedules`` list.  Each entry contains:
-        ``strategy_id``, ``cron``, ``exchange``, ``job_id``,
+        ``strategy_id``, ``cron``, ``exchange``, ``symbol``, ``job_id``,
         ``last_skipped_reason``, ``next_fire_time``.
     """
     cron_scheduler, err = _cron_scheduler_required()
@@ -507,6 +533,7 @@ def list_scheduled_strategies() -> Response:
             "strategy_id": j["strategy_id"],
             "cron": j["cron_expr"],
             "exchange": j["exchange"],
+            "symbol": j["symbol"],
             "job_id": j["job_id"],
             "last_skipped_reason": j["last_skipped_reason"],
             "next_fire_time": j["next_fire_time"],

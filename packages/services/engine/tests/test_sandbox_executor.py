@@ -389,6 +389,59 @@ class TestSubprocessIsolation:
     the boundary contracts that the in-thread fallback CANNOT enforce.
     """
 
+    def test_posix_child_uses_private_process_group_inside_managed_tree(self):
+        """Local timeout containment coexists with the desktop tree guardian."""
+        body = (
+            b'{"success":true,"signals":[],"stdout":"","error":"",'
+            b'"error_type":"","timed_out":false}'
+        )
+        frame = len(body).to_bytes(8, "big") + body
+        proc = MagicMock()
+        proc.communicate.return_value = (frame, b"")
+        proc.returncode = 0
+
+        with patch.object(mod.subprocess, "Popen", return_value=proc) as popen:
+            result = SandboxExecutor().run("")
+
+        assert result.success is True
+        assert popen.call_args.kwargs["start_new_session"] is True
+
+    def test_timeout_kill_signals_only_the_private_child_process_group(self):
+        """POSIX timeout atomically kills the isolated sandbox tree."""
+        proc = MagicMock()
+        proc.pid = 123
+        with (
+            patch.object(mod.sys, "platform", "darwin"),
+            patch.object(mod.os, "getpgid", return_value=123),
+            patch.object(mod.os, "killpg") as killpg,
+        ):
+            mod._kill_process_tree(proc)
+
+        killpg.assert_called_once_with(123, mod.signal.SIGKILL)
+        proc.kill.assert_not_called()
+
+    def test_timeout_kill_reaps_discovered_descendants_when_group_signal_fails(self):
+        """Identity discovery remains the fallback when group signalling fails."""
+        proc = MagicMock()
+        proc.pid = 123
+        first_child = MagicMock()
+        second_child = MagicMock()
+        fake_psutil = MagicMock()
+        fake_psutil.Process.return_value.children.return_value = [first_child, second_child]
+
+        with (
+            patch.object(mod.sys, "platform", "darwin"),
+            patch.object(mod.os, "getpgid", return_value=123),
+            patch.object(mod.os, "killpg", side_effect=OSError("injected")),
+            patch.object(mod, "_psutil", fake_psutil, create=True),
+        ):
+            mod._kill_process_tree(proc)
+
+        first_child.kill.assert_called_once_with()
+        second_child.kill.assert_called_once_with()
+        fake_psutil.wait_procs.assert_called_once_with([first_child, second_child], timeout=1)
+        proc.kill.assert_called_once_with()
+
     def test_subprocess_signal_capture_round_trips(self):
         """A signal emitted in the child reaches the parent unchanged."""
         executor = SandboxExecutor()  # use_subprocess=True default

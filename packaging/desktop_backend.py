@@ -15,10 +15,17 @@ because it is desktop-shell behaviour: plain CLI/``make start`` runs never set
 the variable and are unaffected.
 
 PyInstaller one-file builds run this Python application below a separate
-bootloader process. Before importing the backend, this wrapper promotes the
-shell's exact tokenised recovery record to ``os.getpid()`` and announces that
-PID on stdout. Graceful and forced shutdown commands both stay on the inherited
-stdin pipe, so Rust never needs to terminate a PID recovered from disk.
+bootloader process. Before importing the backend, this wrapper creates
+platform containment, promotes the shell's exact boot-bound recovery record to
+the backend leader PID, and announces that PID on stdout. On POSIX an external
+guardian remains alive until same-group and tracked new-session descendants are
+gone. On Windows a non-breakaway Job Object kills its complete tree when the
+last application handle closes.
+
+The frozen executable also exposes one explicit child mode for uploaded
+strategies. It is dispatched before sidecar control starts, strips desktop
+ownership variables, and replaces inherited stdin with the null device so a
+worker cannot consume shell shutdown commands or re-enter backend startup.
 
 The real serving logic lives in :mod:`flinttrade_core.desktop`.
 """
@@ -42,7 +49,28 @@ PARENT_IDENTITY_ENV = "FLINTTRADE_PARENT_IDENTITY"
 
 #: Exact recovery record path and launch token supplied by the Tauri shell.
 SIDECAR_RECORD_PATH_ENV = "FLINTTRADE_SIDECAR_RECORD_PATH"
+BOOT_ID_ENV = "FLINTTRADE_BOOT_ID"
 LAUNCH_TOKEN_ENV = "FLINTTRADE_LAUNCH_TOKEN"
+SIDECAR_RECORD_VERSION = "v3"
+
+#: Frozen-child execution contract published to backend code.
+PACKAGED_CHILD_EXECUTABLE_ENV = "FLINTTRADE_PACKAGED_CHILD_EXECUTABLE"
+PACKAGED_CHILD_ARG_ENV = "FLINTTRADE_PACKAGED_CHILD_ARG"
+PACKAGED_CHILD_ARG = "--flinttrade-uploaded-strategy-child"
+
+#: Variables that belong only to the desktop sidecar control process. A
+#: packaged worker must not inherit them and impersonate the backend.
+DESKTOP_CONTROL_ENV = frozenset(
+    {
+        PARENT_PID_ENV,
+        PARENT_IDENTITY_ENV,
+        SIDECAR_RECORD_PATH_ENV,
+        BOOT_ID_ENV,
+        LAUNCH_TOKEN_ENV,
+        PACKAGED_CHILD_EXECUTABLE_ENV,
+        PACKAGED_CHILD_ARG_ENV,
+    }
+)
 
 #: How often (seconds) the POSIX watchdog polls for parent liveness.
 POLL_INTERVAL_SECONDS = 2.0
@@ -70,7 +98,71 @@ SIGNAL_RELAY_POLL_SECONDS = 0.05
 RECORD_PUBLISH_WAIT_SECONDS = 2.0
 RECORD_PUBLISH_POLL_SECONDS = 0.01
 
+#: Poll cadence for the external POSIX containment guardian.
+POSIX_GUARDIAN_POLL_SECONDS = 0.05
+POSIX_GUARDIAN_KILL_SECONDS = 5.0
+
 _RECORD_TRANSITION_THREAD_LOCK = threading.Lock()
+
+
+def _valid_hex_identity(value: str, *, minimum: int, maximum: int) -> bool:
+    return (
+        minimum <= len(value) <= maximum
+        and len(value) % 2 == 0
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
+def publish_packaged_child_contract(
+    *,
+    environ: dict[str, str] | None = None,
+    executable: str | None = None,
+    frozen: bool | None = None,
+) -> bool:
+    """Publish the frozen executable + mode argument used for safe child work."""
+    env = os.environ if environ is None else environ
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if not is_frozen:
+        return False
+    env[PACKAGED_CHILD_EXECUTABLE_ENV] = sys.executable if executable is None else executable
+    env[PACKAGED_CHILD_ARG_ENV] = PACKAGED_CHILD_ARG
+    return True
+
+
+def dispatch_packaged_child_mode(
+    *,
+    argv: list[str] | None = None,
+    dispatcher: Callable[[list[str]], bool] | None = None,
+) -> bool:
+    """Run an explicit frozen child before sidecar control threads can start.
+
+    The entrypoint enforces a detached stdin even if a caller forgets to do so,
+    and removes every sidecar-control variable before importing engine code.
+    """
+    arguments = list(sys.argv if argv is None else argv)
+    if len(arguments) < 2 or arguments[1] != PACKAGED_CHILD_ARG:
+        return False
+
+    for name in DESKTOP_CONTROL_ENV:
+        os.environ.pop(name, None)
+
+    if dispatcher is None:
+        from flinttrade_engine.strategy_runner import (  # noqa: PLC0415 - child-only import
+            dispatch_frozen_strategy_child,
+        )
+
+        dispatcher = dispatch_frozen_strategy_child
+
+    original_stdin = sys.stdin
+    with open(os.devnull, encoding="utf-8") as detached_stdin:
+        sys.stdin = detached_stdin
+        try:
+            handled = dispatcher(arguments)
+        finally:
+            sys.stdin = original_stdin
+    if not handled:
+        raise RuntimeError("packaged child dispatcher rejected the recognised child mode")
+    return True
 
 
 class _ShutdownCoordinator:
@@ -222,6 +314,41 @@ def _record_transition_guard(path: Path) -> Iterator[None]:
             _unlock_record_guard_file(guard_file)
 
 
+def _sync_parent_directory(path: Path) -> None:
+    """Persist a record rename on filesystems that permit directory fsync."""
+    if os.name == "nt":
+        return
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _atomically_replace_record(path: Path, expected: bytes, replacement: bytes, token: str) -> bool:
+    """Replace one exact record without exposing truncate/write crash states."""
+    temporary = path.with_name(f".{path.name}.{token}.{os.getpid()}.tmp")
+    try:
+        if path.read_bytes() != expected:
+            return False
+        with temporary.open("xb") as record_file:
+            record_file.write(replacement)
+            record_file.flush()
+            os.fsync(record_file.fileno())
+        if os.name != "nt":
+            os.chmod(temporary, 0o600)
+        if path.read_bytes() != expected:
+            return False
+        os.replace(temporary, path)
+        _sync_parent_directory(path)
+        return True
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def promote_application_pid_record(
     *,
     environ: dict[str, str] | None = None,
@@ -232,14 +359,15 @@ def promote_application_pid_record(
     env = os.environ if environ is None else environ
     raw_path = (env.get(SIDECAR_RECORD_PATH_ENV) or "").strip()
     launch_token = env.get(LAUNCH_TOKEN_ENV) or ""
+    boot_id = env.get(BOOT_ID_ENV) or ""
     shell_pid = _parent_pid_from_env(env)
     application_pid = os.getpid() if pid is None else pid
     if (
         not raw_path
         or shell_pid is None
         or application_pid <= 0
-        or len(launch_token) != 64
-        or any(character not in "0123456789abcdefABCDEF" for character in launch_token)
+        or not _valid_hex_identity(boot_id, minimum=16, maximum=512)
+        or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
     ):
         return False
 
@@ -256,7 +384,7 @@ def promote_application_pid_record(
                     return False
 
                 lines = contents.splitlines()
-                if len(lines) != 5 or lines[0].strip() != "v2":
+                if len(lines) != 6 or lines[0].strip() != SIDECAR_RECORD_VERSION:
                     return False
                 try:
                     launcher_pid = int(lines[1].strip())
@@ -267,19 +395,17 @@ def promote_application_pid_record(
                     launcher_pid <= 0
                     or lines[2].strip() != "pending"
                     or recorded_shell_pid != shell_pid
-                    or lines[4] != launch_token
+                    or lines[4] != boot_id
+                    or lines[5] != launch_token
                 ):
                     return False
 
-                promoted = f"v2\n{launcher_pid}\n{application_pid}\n{shell_pid}\n{launch_token}\n".encode("ascii")
-                with path.open("r+b") as record_file:
-                    if record_file.read() != contents_bytes:
-                        return False
-                    record_file.seek(0)
-                    record_file.write(promoted)
-                    record_file.truncate()
-                    record_file.flush()
-                    os.fsync(record_file.fileno())
+                promoted = (
+                    f"{SIDECAR_RECORD_VERSION}\n{launcher_pid}\n{application_pid}\n"
+                    f"{shell_pid}\n{boot_id}\n{launch_token}\n"
+                ).encode("ascii")
+                if not _atomically_replace_record(path, contents_bytes, promoted, launch_token):
+                    return False
         except FileNotFoundError:
             if time.monotonic() >= deadline:
                 return False
@@ -298,12 +424,13 @@ def clear_pending_application_pid_record(
     env = os.environ if environ is None else environ
     raw_path = (env.get(SIDECAR_RECORD_PATH_ENV) or "").strip()
     launch_token = env.get(LAUNCH_TOKEN_ENV) or ""
+    boot_id = env.get(BOOT_ID_ENV) or ""
     shell_pid = _parent_pid_from_env(env)
     if (
         not raw_path
         or shell_pid is None
-        or len(launch_token) != 64
-        or any(character not in "0123456789abcdefABCDEF" for character in launch_token)
+        or not _valid_hex_identity(boot_id, minimum=16, maximum=512)
+        or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
     ):
         return False
 
@@ -312,7 +439,7 @@ def clear_pending_application_pid_record(
         with _record_transition_guard(path):
             contents = path.read_text(encoding="utf-8")
             lines = contents.splitlines()
-            if len(lines) != 5 or lines[0].strip() != "v2":
+            if len(lines) != 6 or lines[0].strip() != SIDECAR_RECORD_VERSION:
                 return False
             try:
                 launcher_pid = int(lines[1].strip())
@@ -323,7 +450,8 @@ def clear_pending_application_pid_record(
                 launcher_pid <= 0
                 or lines[2].strip() != "pending"
                 or recorded_shell_pid != shell_pid
-                or lines[4] != launch_token
+                or lines[4] != boot_id
+                or lines[5] != launch_token
             ):
                 return False
             path.unlink()
@@ -381,73 +509,470 @@ def _force_exit_owned_process_tree(
     return True
 
 
-def _prepare_posix_owned_process_tree(
-    *,
-    getpid: Callable[[], int] | None = None,
-    set_process_group: Callable[[], object] | None = None,
-    get_process_group: Callable[[], int] | None = None,
-    kill_process_group: Callable[[int, int], object] | None = None,
-) -> Callable[[], bool] | None:
-    """Contain this application and future descendants in its own POSIX group."""
-    current_pid = os.getpid if getpid is None else getpid
-    claim_group = (lambda: os.setpgid(0, 0)) if set_process_group is None else set_process_group
-    current_group = os.getpgrp if get_process_group is None else get_process_group
-    kill_group = os.killpg if kill_process_group is None else kill_process_group
-    application_pid = current_pid()
+class _PosixProcess:
+    """One process-table row used by the external containment guardian."""
+
+    __slots__ = ("pid", "ppid", "pgid", "sid", "start_token")
+
+    def __init__(self, *, pid: int, ppid: int, pgid: int, sid: int, start_token: str) -> None:
+        self.pid = pid
+        self.ppid = ppid
+        self.pgid = pgid
+        self.sid = sid
+        self.start_token = start_token
+
+
+def _posix_pid_alive(pid: int) -> bool:
     try:
-        claim_group()
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _read_posix_process_table(
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> dict[int, _PosixProcess]:
+    """Snapshot PID ancestry and process groups without trusting command text."""
+    run_command = subprocess.run if run is None else run
+    result = run_command(
+        ["ps", "-axo", "pid=,ppid=,pgid="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(f"ps process-tree query exited with status {result.returncode}: {result.stderr.strip()}")
+    processes: dict[int, _PosixProcess] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 3:
+            continue
+        try:
+            pid, ppid, pgid = (int(value) for value in fields)
+        except ValueError:
+            continue
+        if pid <= 0 or ppid < 0 or pgid <= 0:
+            continue
+        processes[pid] = _PosixProcess(
+            pid=pid,
+            ppid=ppid,
+            pgid=pgid,
+            # A newly-created POSIX session starts with SID == PGID == PID.
+            # PGID is enough for discovery; the field keeps that relationship
+            # explicit in tests and future platform-specific snapshots.
+            sid=pgid,
+            start_token="",
+        )
+    return processes
+
+
+def _discover_posix_owned_processes(
+    processes: dict[int, _PosixProcess],
+    *,
+    application_pid: int,
+    application_group: int,
+    tracked: dict[int, str],
+    guardian_pid: int | None = None,
+    tracked_groups: set[int] | None = None,
+) -> dict[int, str]:
+    """Expand exact tracked PIDs through ancestry and owned process groups."""
+    owned: dict[int, str] = {}
+    for pid, start_token in tracked.items():
+        process = processes.get(pid)
+        if process is not None and (not process.start_token or process.start_token == start_token):
+            owned[pid] = start_token
+    if application_pid in processes:
+        owned.setdefault(application_pid, processes[application_pid].start_token)
+    if guardian_pid is not None:
+        for pid, process in processes.items():
+            if process.ppid == guardian_pid:
+                owned.setdefault(pid, process.start_token)
+
+    changed = True
+    while changed:
+        changed = False
+        owned_groups = {application_group, *(tracked_groups or set())}
+        owned_groups.update(
+            process.pgid
+            for pid, process in processes.items()
+            if pid in owned and process.pid == process.pgid
+        )
+        for pid, process in processes.items():
+            if pid in owned:
+                continue
+            if process.ppid in owned or process.pgid in owned_groups:
+                owned[pid] = process.start_token
+                changed = True
+    return owned
+
+
+def _refresh_posix_owned_processes(
+    application_pid: int,
+    application_group: int,
+    tracked: dict[int, str],
+    tracked_groups: set[int] | None = None,
+) -> tuple[dict[int, _PosixProcess], dict[int, str]]:
+    processes = _read_posix_process_table()
+    discovered = _discover_posix_owned_processes(
+        processes,
+        application_pid=application_pid,
+        application_group=application_group,
+        tracked=tracked,
+        guardian_pid=os.getpid(),
+        tracked_groups=tracked_groups,
+    )
+    refreshed: dict[int, str] = {}
+    for pid in discovered:
+        expected = tracked.get(pid)
+        try:
+            start_token = _posix_process_start_token(pid)
+        except OSError:
+            if expected is not None:
+                refreshed[pid] = expected
+                continue
+            raise
+        if start_token is None:
+            continue
+        if expected is not None and expected != start_token:
+            continue
+        refreshed[pid] = start_token
+        # Persist only groups proved to have been created by an owned group
+        # leader. Immediately after fork the application can briefly inherit
+        # the launcher's group before it calls setpgid(); remembering that
+        # inherited PGID would make unrelated launcher processes look owned.
+        if tracked_groups is not None and processes[pid].pid == processes[pid].pgid:
+            tracked_groups.add(processes[pid].pgid)
+    return processes, refreshed
+
+
+def _reap_guardian_children() -> None:
+    while True:
+        try:
+            pid, _status = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid <= 0:
+            return
+
+
+def _terminate_posix_owned_processes(
+    application_pid: int,
+    application_group: int,
+    tracked: dict[int, str],
+    tracked_groups: set[int],
+) -> bool:
+    """Kill and confirm every still-identical process owned by the backend."""
+    deadline = time.monotonic() + POSIX_GUARDIAN_KILL_SECONDS
+    sent_group_kill = False
+    while time.monotonic() < deadline:
+        try:
+            processes, tracked = _refresh_posix_owned_processes(
+                application_pid,
+                application_group,
+                tracked,
+                tracked_groups,
+            )
+        except OSError:
+            time.sleep(POSIX_GUARDIAN_POLL_SECONDS)
+            continue
+
+        if not tracked:
+            _reap_guardian_children()
+            return True
+
+        if not sent_group_kill:
+            try:
+                os.killpg(application_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                print(f"[desktop-sidecar] process-group cleanup failed: {exc}", file=sys.stderr, flush=True)
+            sent_group_kill = True
+
+        for pid, expected_start in tuple(tracked.items()):
+            process = processes.get(pid)
+            if process is None:
+                continue
+            try:
+                current_start = _posix_process_start_token(pid)
+            except OSError:
+                continue
+            if current_start != expected_start:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                print(f"[desktop-sidecar] descendant cleanup failed for pid {pid}: {exc}", file=sys.stderr, flush=True)
+        _reap_guardian_children()
+        time.sleep(POSIX_GUARDIAN_POLL_SECONDS)
+    return False
+
+
+def _wait_status_exit_code(status: int) -> int:
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return 1
+
+
+def _enable_linux_child_subreaper() -> bool:
+    if not sys.platform.startswith("linux"):
+        return True
+    import ctypes  # noqa: PLC0415 - Linux-only
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    prctl = libc.prctl
+    prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+    prctl.restype = ctypes.c_int
+    return prctl(36, 1, 0, 0, 0) == 0  # PR_SET_CHILD_SUBREAPER
+
+
+def _run_posix_containment_guardian(application_pid: int, control_fd: int) -> None:
+    """Remain outside the backend group until its complete owned tree is gone."""
+    try:
+        os.close(0)
     except OSError:
-        if current_group() != application_pid:
+        pass
+    os.set_blocking(control_fd, False)
+    force_requested = False
+
+    def request_force(_signum: int, _frame: object) -> None:
+        nonlocal force_requested
+        force_requested = True
+
+    signal.signal(signal.SIGTERM, request_force)
+    signal.signal(signal.SIGINT, request_force)
+
+    tracked: dict[int, str] = {}
+    tracked_groups = {application_pid}
+    status: int | None = None
+    while status is None and not force_requested:
+        try:
+            _processes, tracked = _refresh_posix_owned_processes(
+                application_pid,
+                application_pid,
+                tracked,
+                tracked_groups,
+            )
+        except OSError as exc:
+            print(f"[desktop-sidecar] containment snapshot failed: {exc}", file=sys.stderr, flush=True)
+        try:
+            command = os.read(control_fd, 64)
+        except BlockingIOError:
+            command = b""
+        except OSError:
+            command = b""
+        if b"force" in command:
+            force_requested = True
+            break
+        try:
+            waited_pid, waited_status = os.waitpid(application_pid, os.WNOHANG)
+        except ChildProcessError:
+            waited_pid, waited_status = application_pid, 1 << 8
+        if waited_pid == application_pid:
+            status = waited_status
+            break
+        time.sleep(POSIX_GUARDIAN_POLL_SECONDS)
+
+    if force_requested:
+        try:
+            os.kill(application_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            print(f"[desktop-sidecar] backend leader cleanup failed: {exc}", file=sys.stderr, flush=True)
+        try:
+            _pid, status = os.waitpid(application_pid, 0)
+        except ChildProcessError:
+            status = 1 << 8
+
+    exit_code = _wait_status_exit_code(status if status is not None else 1 << 8)
+    while not _terminate_posix_owned_processes(
+        application_pid,
+        application_pid,
+        tracked,
+        tracked_groups,
+    ):
+        print(
+            "[desktop-sidecar] process-tree cleanup remains unresolved; guardian is retaining recovery state",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(POSIX_GUARDIAN_POLL_SECONDS)
+    os.close(control_fd)
+    os._exit(exit_code)
+
+
+def _prepare_posix_owned_process_tree() -> Callable[[], bool] | None:
+    """Fork an external guardian, then isolate the backend leader in a group."""
+    if not _enable_linux_child_subreaper():
+        return None
+    read_fd, write_fd = os.pipe()
+    try:
+        application_pid = os.fork()
+    except OSError:
+        os.close(read_fd)
+        os.close(write_fd)
+        return None
+    if application_pid > 0:
+        os.close(write_fd)
+        _run_posix_containment_guardian(application_pid, read_fd)
+        raise AssertionError("POSIX containment guardian returned")
+
+    os.close(read_fd)
+    os.set_inheritable(write_fd, False)
+    child_pid = os.getpid()
+    try:
+        os.setpgid(0, 0)
+    except OSError:
+        if os.getpgrp() != child_pid:
+            os.close(write_fd)
             return None
-    if current_group() != application_pid:
+    if os.getpgrp() != child_pid:
+        os.close(write_fd)
         return None
 
+    requested = False
+
     def terminate() -> bool:
-        if current_pid() != application_pid or current_group() != application_pid:
+        nonlocal requested
+        if requested or os.getpid() != child_pid or os.getpgrp() != child_pid:
             return False
-        kill_group(application_pid, signal.SIGKILL)
+        try:
+            os.write(write_fd, b"force\n")
+        except OSError:
+            return False
+        requested = True
         return True
 
     return terminate
 
 
+class _WindowsJobApi:
+    """Small ctypes wrapper for a non-breakaway kill-on-close Job Object."""
+
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x0000_2000
+    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+
+    def __init__(self) -> None:
+        import ctypes  # noqa: PLC0415 - Windows-only
+
+        self._ctypes = ctypes
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        self._kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+        self._kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        self._kernel32.SetInformationJobObject.restype = ctypes.c_int
+        self._kernel32.SetInformationJobObject.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
+        self._kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+        self._kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        self._kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        self._kernel32.CloseHandle.restype = ctypes.c_int
+        self._kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    def create_job(self) -> int:
+        return int(self._kernel32.CreateJobObjectW(None, None) or 0)
+
+    def enable_kill_on_close(self, handle: int) -> bool:
+        ctypes = self._ctypes
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("read_operations", ctypes.c_uint64),
+                ("write_operations", ctypes.c_uint64),
+                ("other_operations", ctypes.c_uint64),
+                ("read_bytes", ctypes.c_uint64),
+                ("write_bytes", ctypes.c_uint64),
+                ("other_bytes", ctypes.c_uint64),
+            ]
+
+        class BasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("per_process_user_time_limit", ctypes.c_int64),
+                ("per_job_user_time_limit", ctypes.c_int64),
+                ("limit_flags", ctypes.c_uint32),
+                ("minimum_working_set_size", ctypes.c_size_t),
+                ("maximum_working_set_size", ctypes.c_size_t),
+                ("active_process_limit", ctypes.c_uint32),
+                ("affinity", ctypes.c_size_t),
+                ("priority_class", ctypes.c_uint32),
+                ("scheduling_class", ctypes.c_uint32),
+            ]
+
+        class ExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("basic_limit_information", BasicLimitInformation),
+                ("io_info", IoCounters),
+                ("process_memory_limit", ctypes.c_size_t),
+                ("job_memory_limit", ctypes.c_size_t),
+                ("peak_process_memory_used", ctypes.c_size_t),
+                ("peak_job_memory_used", ctypes.c_size_t),
+            ]
+
+        information = ExtendedLimitInformation()
+        information.basic_limit_information.limit_flags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        return bool(
+            self._kernel32.SetInformationJobObject(
+                ctypes.c_void_p(handle),
+                self.JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                ctypes.byref(information),
+                ctypes.sizeof(information),
+            )
+        )
+
+    def assign_current_process(self, handle: int) -> bool:
+        return bool(
+            self._kernel32.AssignProcessToJobObject(
+                self._ctypes.c_void_p(handle),
+                self._kernel32.GetCurrentProcess(),
+            )
+        )
+
+    def close_handle(self, handle: int) -> bool:
+        return bool(self._kernel32.CloseHandle(self._ctypes.c_void_p(handle)))
+
+
 def _prepare_windows_owned_process_tree(
     *,
-    getpid: Callable[[], int] | None = None,
-    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
-) -> Callable[[], bool]:
-    """Return a terminator for this live Windows application and descendants."""
-    current_pid = os.getpid if getpid is None else getpid
-    run_command = subprocess.run if run is None else run
-    application_pid = current_pid()
+    api: object | None = None,
+) -> Callable[[], bool] | None:
+    """Assign the application to a complete-tree kill-on-close Job Object."""
+    job_api = _WindowsJobApi() if api is None else api
+    handle = job_api.create_job()
+    if not handle:
+        return None
+    if not job_api.enable_kill_on_close(handle):
+        job_api.close_handle(handle)
+        return None
+    if not job_api.assign_current_process(handle):
+        job_api.close_handle(handle)
+        return None
+    active_handle: int | None = handle
 
     def terminate() -> bool:
-        if current_pid() != application_pid:
+        nonlocal active_handle
+        if active_handle is None:
             return False
-        try:
-            result = run_command(
-                ["taskkill", "/PID", str(application_pid), "/T", "/F"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError as exc:
-            print(f"[desktop-sidecar] taskkill could not start: {exc}", file=sys.stderr, flush=True)
-            return False
-        if result.returncode != 0:
-            print(
-                f"[desktop-sidecar] taskkill failed; retaining recovery state: {result.stderr.strip()}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return False
-        return True
+        handle_to_close = active_handle
+        active_handle = None
+        return bool(job_api.close_handle(handle_to_close))
 
     return terminate
 
 
 def _prepare_owned_process_tree() -> Callable[[], bool] | None:
-    """Prepare complete-tree termination before backend imports spawn children."""
+    """Prepare kernel/external containment before backend imports spawn children."""
     if os.name == "nt":
         return _prepare_windows_owned_process_tree()
     return _prepare_posix_owned_process_tree()
@@ -501,20 +1026,94 @@ def _exit_orphaned(
     ).start()
 
 
-def _parse_posix_process_identity(text: str, expected_pid: int) -> str | None:
-    """Normalise ``ps`` output to Rust's command/PID/start identity format."""
-    fields = text.split()
-    if len(fields) < 7:
+def _linux_process_start_token(pid: int) -> str | None:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except FileNotFoundError:
+        return None
+    closing_paren = stat.rfind(")")
+    if closing_paren < 0:
+        raise OSError(f"could not parse /proc/{pid}/stat")
+    fields_after_comm = stat[closing_paren + 2 :].split()
+    if len(fields_after_comm) <= 19 or not fields_after_comm[19].isdigit():
+        raise OSError(f"could not read process start ticks for pid {pid}")
+    return f"linux-start-ticks:{fields_after_comm[19]}"
+
+
+def _macos_process_start_token(pid: int) -> str | None:
+    import ctypes  # noqa: PLC0415 - macOS-only
+
+    class ProcBsdInfo(ctypes.Structure):
+        _fields_ = [
+            ("pbi_flags", ctypes.c_uint32),
+            ("pbi_status", ctypes.c_uint32),
+            ("pbi_xstatus", ctypes.c_uint32),
+            ("pbi_pid", ctypes.c_uint32),
+            ("pbi_ppid", ctypes.c_uint32),
+            ("pbi_uid", ctypes.c_uint32),
+            ("pbi_gid", ctypes.c_uint32),
+            ("pbi_ruid", ctypes.c_uint32),
+            ("pbi_rgid", ctypes.c_uint32),
+            ("pbi_svuid", ctypes.c_uint32),
+            ("pbi_svgid", ctypes.c_uint32),
+            ("rfu_1", ctypes.c_uint32),
+            ("pbi_comm", ctypes.c_char * 16),
+            ("pbi_name", ctypes.c_char * 32),
+            ("pbi_nfiles", ctypes.c_uint32),
+            ("pbi_pgid", ctypes.c_uint32),
+            ("pbi_pjobc", ctypes.c_uint32),
+            ("e_tdev", ctypes.c_uint32),
+            ("e_tpgid", ctypes.c_uint32),
+            ("pbi_nice", ctypes.c_int32),
+            ("pbi_start_tvsec", ctypes.c_uint64),
+            ("pbi_start_tvusec", ctypes.c_uint64),
+        ]
+
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    proc_pidinfo = libproc.proc_pidinfo
+    proc_pidinfo.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    proc_pidinfo.restype = ctypes.c_int
+    info = ProcBsdInfo()
+    size = ctypes.sizeof(info)
+    read = proc_pidinfo(pid, 3, 0, ctypes.byref(info), size)  # PROC_PIDTBSDINFO
+    if read == 0:
+        error = ctypes.get_errno()
+        if error == 3:  # ESRCH
+            return None
+        raise OSError(error, f"proc_pidinfo failed for pid {pid}")
+    if read != size or info.pbi_pid != pid or info.pbi_start_tvsec == 0:
+        raise OSError(f"proc_pidinfo returned incomplete identity for pid {pid}")
+    return f"macos-start-time:{info.pbi_start_tvsec}:{info.pbi_start_tvusec}"
+
+
+def _posix_process_start_token(pid: int) -> str | None:
+    """Read a kernel-resolution process start token or fail closed."""
+    if sys.platform.startswith("linux"):
+        return _linux_process_start_token(pid)
+    if sys.platform == "darwin":
+        return _macos_process_start_token(pid)
+    raise OSError(f"high-resolution process identity is unsupported on {sys.platform}")
+
+
+def _parse_posix_process_identity(text: str, expected_pid: int, start_token: str) -> str | None:
+    """Normalise ``ps`` command output with a kernel-resolution start token."""
+    fields = text.strip().split(maxsplit=1)
+    if len(fields) != 2:
         return None
     try:
         pid = int(fields[0])
     except ValueError:
         return None
-    started_at = " ".join(fields[1:6])
-    command = " ".join(fields[6:])
-    if pid != expected_pid or not command:
+    command = fields[1].strip()
+    if pid != expected_pid or not command or not start_token:
         return None
-    return f"{command}\t{pid}\t{started_at}"
+    return f"{command}\t{pid}\t{start_token}"
 
 
 def _posix_process_identity(
@@ -522,10 +1121,13 @@ def _posix_process_identity(
     *,
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
-    """Read one POSIX process's stable command, PID, and start identity."""
+    """Read command, PID, and a kernel-resolution process start identity."""
     run_command = subprocess.run if run is None else run
+    before = _posix_process_start_token(pid)
+    if before is None:
+        return None
     result = run_command(
-        ["ps", "-p", str(pid), "-o", "pid=", "-o", "lstart=", "-o", "args="],
+        ["ps", "-p", str(pid), "-o", "pid=", "-o", "args="],
         capture_output=True,
         text=True,
         check=False,
@@ -534,7 +1136,10 @@ def _posix_process_identity(
         if not result.stdout.strip():
             return None
         raise OSError(f"ps exited with status {result.returncode}: {result.stderr.strip()}")
-    return _parse_posix_process_identity(result.stdout, pid)
+    after = _posix_process_start_token(pid)
+    if after is None or after != before:
+        return None
+    return _parse_posix_process_identity(result.stdout, pid, before)
 
 
 def _posix_parent_alive(
@@ -555,9 +1160,7 @@ def _posix_parent_alive(
             using ``kill(pid, 0)`` only as an indeterminate fallback.
 
     Returns:
-        True while the shell appears alive. Indeterminate errors report
-        "alive" — a spurious backend self-kill is worse than a lingering one
-        (the reap-on-launch layer still cleans that up).
+        True only while the exact shell identity remains confirmable.
     """
     if track_reparent:
         return os.getppid() == parent_pid
@@ -566,9 +1169,10 @@ def _posix_parent_alive(
         try:
             current_identity = lookup(parent_pid)
         except OSError:
-            return True
+            return False
         if current_identity is not None:
             return current_identity == expected_identity
+        return False
     try:
         os.kill(parent_pid, 0)
     except ProcessLookupError:
@@ -738,8 +1342,14 @@ def start_stdin_shutdown_listener(
 
 
 if __name__ == "__main__":
+    if dispatch_packaged_child_mode():
+        raise SystemExit(0)
+    publish_packaged_child_contract()
+
     shutdown = _ShutdownCoordinator()
     terminate_owned_tree = _prepare_owned_process_tree()
+    if terminate_owned_tree is None:
+        raise SystemExit("complete process-tree containment is unavailable; refusing backend boot")
 
     # Start the watchdog before the (heavy) backend import so a shell that
     # dies during boot still gets its sidecar cleaned up promptly.

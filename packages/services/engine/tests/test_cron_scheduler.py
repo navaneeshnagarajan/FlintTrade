@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -101,7 +102,7 @@ class TestParseCronExpr:
             "hour": "9",
             "day": "*",
             "month": "*",
-            "day_of_week": "1-5",
+            "day_of_week": "0-4",
         }
 
     def test_valid_every_minute(self) -> None:
@@ -113,7 +114,40 @@ class TestParseCronExpr:
         parts = CronStrategyScheduler._parse_cron_expr("0 15 * * 1,2,3,4,5")
         assert parts["minute"] == "0"
         assert parts["hour"] == "15"
-        assert parts["day_of_week"] == "1,2,3,4,5"
+        assert parts["day_of_week"] == "0,1,2,3,4"
+
+    @pytest.mark.parametrize(("standard", "apscheduler"), [("0", "6"), ("7", "6"), ("1", "0")])
+    def test_numeric_weekdays_translate_from_sunday_zero(
+        self,
+        standard: str,
+        apscheduler: str,
+    ) -> None:
+        parts = CronStrategyScheduler._parse_cron_expr(f"0 9 * * {standard}")
+        assert parts["day_of_week"] == apscheduler
+
+    @pytest.mark.parametrize(
+        ("standard", "apscheduler"),
+        [
+            ("0-6", "6,0,1,2,3,4,5"),
+            ("1-7", "0-6"),
+            ("*/2", "6,1,3,5"),
+            ("0/2", "6,1,3,5"),
+            ("mon,3", "mon,2"),
+        ],
+    )
+    def test_numeric_weekday_ranges_and_steps_preserve_standard_semantics(
+        self,
+        standard: str,
+        apscheduler: str,
+    ) -> None:
+        parts = CronStrategyScheduler._parse_cron_expr(f"0 9 * * {standard}")
+        assert parts["day_of_week"] == apscheduler
+        CronStrategyScheduler._build_cron_trigger(parts)
+
+    @pytest.mark.parametrize("weekday", ["8", "5-1"])
+    def test_invalid_numeric_weekday_fails_closed(self, weekday: str) -> None:
+        with pytest.raises(ValueError):
+            CronStrategyScheduler._parse_cron_expr(f"0 9 * * {weekday}")
 
     def test_too_few_fields_raises(self) -> None:
         with pytest.raises(ValueError, match="expected 5 fields"):
@@ -242,6 +276,209 @@ class TestScheduleLifecycle:
         sched.schedule("sd", "30 9 * * 1-5", lambda: None)
         sched.schedule("sd", "0 15 * * 1-5", lambda: None)
         assert sched.get_schedule("sd").cron_expr == "0 15 * * 1-5"
+
+    def test_invalid_running_replacement_preserves_removable_old_job(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.add_job.return_value.id = "atomic"
+        sched._scheduler = backend
+        sched._running = True
+
+        def old_callback() -> None:
+            pass
+
+        sched.schedule("atomic", "30 9 * * 1-5", old_callback)
+        old_config = sched.get_schedule("atomic")
+        old_wrapped = sched._callbacks["atomic"]
+
+        with pytest.raises(ValueError):
+            sched.schedule("atomic", "99 9 * * 1-5", lambda: None)
+
+        assert sched.get_schedule("atomic") is old_config
+        assert sched._callbacks["atomic"] is old_wrapped
+        assert sched.unschedule("atomic") is True
+        backend.remove_job.assert_called_once_with("atomic")
+
+    def test_queued_callback_does_not_run_after_unschedule(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.add_job.return_value.id = "queued"
+        sched._scheduler = backend
+        sched._running = True
+        fired: list[str] = []
+        sched.schedule("queued", "30 9 * * 1-5", lambda: fired.append("fired"))
+        queued_callback = sched._callbacks["queued"]
+
+        sched.unschedule("queued")
+        queued_callback()
+
+        assert fired == []
+
+    def test_queued_callback_does_not_run_after_stop(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.add_job.return_value.id = "stopped"
+        sched._scheduler = backend
+        sched._running = True
+        fired: list[str] = []
+        sched.schedule("stopped", "30 9 * * 1-5", lambda: fired.append("fired"))
+        queued_callback = sched._callbacks["stopped"]
+
+        sched.stop()
+        queued_callback()
+
+        assert fired == []
+
+    def test_failed_backend_shutdown_remains_owned_and_retryable(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.shutdown.side_effect = [RuntimeError("backend busy"), None]
+        sched._scheduler = backend
+        sched._running = True
+
+        with pytest.raises(RuntimeError, match="backend busy"):
+            sched.stop()
+
+        assert sched.running is False
+        assert sched._scheduler is backend
+        with pytest.raises(RuntimeError, match="previous backend"):
+            sched.start()
+
+        sched.stop()
+
+        assert sched._scheduler is None
+        assert backend.shutdown.call_count == 2
+
+    def test_stop_waits_for_already_admitted_callback(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.add_job.return_value.id = "running"
+        sched._scheduler = backend
+        sched._running = True
+        callback_entered = threading.Event()
+        release_callback = threading.Event()
+        stop_finished = threading.Event()
+
+        def slow_callback() -> None:
+            callback_entered.set()
+            assert release_callback.wait(timeout=2)
+
+        sched.schedule("running", "30 9 * * 1-5", slow_callback)
+        queued_callback = sched._callbacks["running"]
+        callback_thread = threading.Thread(target=queued_callback)
+        stop_thread = threading.Thread(target=lambda: (sched.stop(), stop_finished.set()))
+        callback_thread.start()
+        assert callback_entered.wait(timeout=2)
+        stop_thread.start()
+
+        try:
+            assert not stop_finished.wait(timeout=0.1)
+        finally:
+            release_callback.set()
+            callback_thread.join(timeout=2)
+            stop_thread.join(timeout=2)
+
+        assert stop_finished.is_set()
+        assert not callback_thread.is_alive()
+        assert not stop_thread.is_alive()
+        backend.shutdown.assert_called_once_with(wait=False)
+
+    def test_callback_drain_timeout_retains_backend_for_stop_retry(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.add_job.return_value.id = "running"
+        sched._scheduler = backend
+        sched._running = True
+        callback_entered = threading.Event()
+        release_callback = threading.Event()
+
+        def slow_callback() -> None:
+            callback_entered.set()
+            assert release_callback.wait(timeout=2)
+
+        sched.schedule("running", "30 9 * * 1-5", slow_callback)
+        callback_thread = threading.Thread(target=sched._callbacks["running"])
+        callback_thread.start()
+        assert callback_entered.wait(timeout=2)
+
+        try:
+            with pytest.raises(RuntimeError, match="callbacks did not stop"):
+                sched.stop(timeout=0.01)
+        finally:
+            release_callback.set()
+            callback_thread.join(timeout=2)
+
+        assert sched._scheduler is backend
+        with pytest.raises(RuntimeError, match="previous backend"):
+            sched.start()
+
+        sched.stop(timeout=1.0)
+
+        assert sched._scheduler is None
+        backend.shutdown.assert_called_once_with(wait=False)
+
+    def test_queued_callback_from_replaced_generation_does_not_run(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        backend = MagicMock()
+        backend.add_job.return_value.id = "generation"
+        sched._scheduler = backend
+        sched._running = True
+        fired: list[str] = []
+        sched.schedule("generation", "30 9 * * 1-5", lambda: fired.append("old"))
+        old_callback = sched._callbacks["generation"]
+        sched.schedule("generation", "0 10 * * 1-5", lambda: fired.append("new"))
+        new_callback = sched._callbacks["generation"]
+
+        old_callback()
+        new_callback()
+
+        assert fired == ["new"]
+
+    def test_concurrent_replacements_serialize_backend_and_state_commit(self) -> None:
+        sched = _make_scheduler(check_market=False)
+        sched._scheduler = MagicMock()
+        sched._running = True
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        second_entered = threading.Event()
+        call_count = 0
+        call_count_lock = threading.Lock()
+        errors: list[Exception] = []
+
+        def add_job(*_args: Any) -> str:
+            nonlocal call_count
+            with call_count_lock:
+                call_count += 1
+                current_call = call_count
+            if current_call == 1:
+                first_entered.set()
+                assert release_first.wait(timeout=2)
+            else:
+                second_entered.set()
+            return "concurrent"
+
+        def replace(cron_expr: str) -> None:
+            try:
+                sched.schedule("concurrent", cron_expr, lambda: None)
+            except Exception as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        with patch.object(sched, "_add_apscheduler_job", side_effect=add_job):
+            first = threading.Thread(target=replace, args=("30 9 * * 1-5",))
+            second = threading.Thread(target=replace, args=("0 10 * * 1-5",))
+            first.start()
+            assert first_entered.wait(timeout=2)
+            second.start()
+
+            assert not second_entered.wait(timeout=0.1)
+            release_first.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert errors == []
+        assert sched.get_schedule("concurrent").cron_expr == "0 10 * * 1-5"
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +901,23 @@ class TestCronRestEndpoints:
         )
         assert resp.status_code == 201
         assert resp.get_json()["data"]["exchange"] == "MCX"
+
+    def test_create_and_list_schedule_preserves_symbol(self, client, flask_app) -> None:
+        resp = client.post(
+            "/api/v1/strategies/strat-001/schedule",
+            json={
+                "cron": "0 9 * * 1-5",
+                "exchange": "CDS",
+                "symbol": "eurusd29jul26fut",
+            },
+        )
+
+        assert resp.status_code == 201
+        assert resp.get_json()["data"]["symbol"] == "EURUSD29JUL26FUT"
+        assert flask_app.config["CRON_SCHEDULER"].get_schedule("strat-001").symbol == "EURUSD29JUL26FUT"
+
+        listed = client.get("/api/v1/strategies/scheduled").get_json()["data"]["schedules"]
+        assert listed[0]["symbol"] == "EURUSD29JUL26FUT"
 
     def test_create_schedule_missing_cron(self, client) -> None:
         resp = client.post(

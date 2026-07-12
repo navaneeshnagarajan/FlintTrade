@@ -10,8 +10,11 @@ All times are in IST (Asia/Kolkata, UTC+5:30).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import math
+import threading
+import time as _time
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Callable
@@ -25,6 +28,13 @@ logger = logging.getLogger("flinttrade.engine.scheduler")
 
 # IST is UTC+5:30
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+async def _await_if_needed(result: Any) -> Any:
+    """Await a strategy hook result when the implementation is asynchronous."""
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +603,7 @@ class StrategyRunner:
         """Start the strategy and begin the tick loop."""
         if self._running:
             return
-        self.strategy.start()
+        await _await_if_needed(self.strategy.start())
         self._running = True
         self._task = asyncio.ensure_future(self._run_loop())
         logger.info("StrategyRunner started: %s on %s", self.strategy.name, self.strategy.exchange)
@@ -601,14 +611,15 @@ class StrategyRunner:
     async def stop(self) -> None:
         """Stop the strategy and cancel the tick loop."""
         self._running = False
-        self.strategy.stop()
-        if self._task and not self._task.done():
-            self._task.cancel()
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            task.cancel()
             try:
-                await self._task
+                await task
             except asyncio.CancelledError:
                 pass
-        self._task = None
+        await _await_if_needed(self.strategy.stop())
         logger.info("StrategyRunner stopped: %s (ticks=%d)", self.strategy.name, self._tick_count)
 
     def pause(self) -> None:
@@ -656,7 +667,7 @@ class StrategyRunner:
             return
 
         # Deliver tick to strategy
-        self.strategy.on_tick(quote)
+        await _await_if_needed(self.strategy.on_tick(quote))
         self._tick_count += 1
 
     async def _handle_square_off(self) -> None:
@@ -670,12 +681,12 @@ class StrategyRunner:
         # Call on_square_off if the strategy implements it
         if hasattr(self.strategy, "on_square_off") and callable(self.strategy.on_square_off):
             try:
-                self.strategy.on_square_off()
+                await _await_if_needed(self.strategy.on_square_off())
             except Exception as exc:
                 logger.error("on_square_off failed for %s: %s", self.strategy.name, exc)
 
         self._running = False
-        self.strategy.stop()
+        await _await_if_needed(self.strategy.stop())
 
 
 # ---------------------------------------------------------------------------
@@ -729,9 +740,16 @@ class StrategyScheduler:
             await runner.start()
 
     async def stop_all(self) -> None:
-        """Stop all registered runners."""
-        for runner in self._runners.values():
-            await runner.stop()
+        """Stop every registered runner and report any failures together."""
+        errors: list[Exception] = []
+        for name, runner in self._runners.items():
+            try:
+                await runner.stop()
+            except Exception as exc:
+                logger.exception("Failed to stop strategy runner %s", name)
+                errors.append(exc)
+        if errors:
+            raise ExceptionGroup("One or more strategy runners failed to stop", errors)
 
     async def stop_one(self, strategy_name: str) -> None:
         """Stop a single runner by strategy name."""
@@ -763,6 +781,70 @@ class StrategyScheduler:
 # ---------------------------------------------------------------------------
 
 
+def _translate_standard_cron_weekdays(expression: str) -> str:
+    """Translate Sunday-zero cron weekdays to APScheduler's Monday-zero form.
+
+    Named weekdays already have the same meaning in both formats. Numeric
+    terms are expanded before translation so Sunday-containing ranges and
+    stepped expressions retain their standard cron semantics.
+    """
+    if expression == "*":
+        return expression
+
+    translated_terms: list[str] = []
+    for term in expression.split(","):
+        if any(character.isalpha() for character in term):
+            translated_terms.append(term)
+            continue
+
+        base, separator, raw_step = term.partition("/")
+        try:
+            step = int(raw_step) if separator else 1
+        except ValueError as exc:
+            raise ValueError(f"Invalid cron weekday step {raw_step!r}") from exc
+        if step <= 0:
+            raise ValueError("Cron weekday step must be positive")
+
+        if base == "*":
+            standard_days = list(range(0, 7, step))
+        elif "-" in base:
+            raw_start, raw_end = base.split("-", 1)
+            try:
+                start, end = int(raw_start), int(raw_end)
+            except ValueError as exc:
+                raise ValueError(f"Invalid numeric cron weekday term {term!r}") from exc
+            if start > end:
+                raise ValueError(f"Invalid descending cron weekday range {base!r}")
+            standard_days = list(range(start, end + 1, step))
+        else:
+            try:
+                start = int(base)
+            except ValueError as exc:
+                raise ValueError(f"Invalid numeric cron weekday term {term!r}") from exc
+            end = 7 if separator else start
+            standard_days = list(range(start, end + 1, step))
+
+        if not standard_days or any(day < 0 or day > 7 for day in standard_days):
+            raise ValueError(f"Cron weekday values must be between 0 and 7: {term!r}")
+
+        apscheduler_days: list[int] = []
+        for day in standard_days:
+            translated = 6 if day in {0, 7} else day - 1
+            if translated not in apscheduler_days:
+                apscheduler_days.append(translated)
+
+        if (
+            len(apscheduler_days) > 1
+            and not separator
+            and apscheduler_days == list(range(apscheduler_days[0], apscheduler_days[-1] + 1))
+        ):
+            translated_terms.append(f"{apscheduler_days[0]}-{apscheduler_days[-1]}")
+        else:
+            translated_terms.append(",".join(str(day) for day in apscheduler_days))
+
+    return ",".join(translated_terms)
+
+
 @dataclass
 class CronScheduleConfig:
     """Metadata for a cron-scheduled strategy callback.
@@ -773,6 +855,7 @@ class CronScheduleConfig:
             E.g. ``"30 9 * * 1-5"`` = 09:30 IST on weekdays.
         exchange: Exchange code used for market-hours and holiday gating.
         symbol: Optional instrument symbol used by symbol-scoped sessions.
+        generation: Monotonic callback generation used to reject stale jobs.
         job_id: APScheduler job ID (set after scheduling).
         last_skipped_reason: Human-readable reason the last fire was skipped,
             or empty string if the last fire executed successfully.
@@ -782,6 +865,7 @@ class CronScheduleConfig:
     cron_expr: str
     exchange: str = "NSE"
     symbol: str = ""
+    generation: int = field(default=0, repr=False)
     job_id: str = ""
     last_skipped_reason: str = field(default="")
 
@@ -841,8 +925,13 @@ class CronStrategyScheduler:
         # strategy_id -> CronScheduleConfig
         self._schedules: dict[str, CronScheduleConfig] = {}
         self._callbacks: dict[str, Callable[[], None]] = {}
+        self._next_generation = 0
         self._scheduler: Any = None  # APScheduler BackgroundScheduler
         self._running = False
+        self._lifecycle_lock = threading.RLock()
+        self._callback_condition = threading.Condition(self._lifecycle_lock)
+        self._callbacks_in_flight = 0
+        self._backend_shutdown_requested = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -850,45 +939,97 @@ class CronStrategyScheduler:
 
     def start(self) -> None:
         """Start the underlying APScheduler background thread."""
-        if self._running:
-            return
-        try:
-            from apscheduler.schedulers.background import BackgroundScheduler
-            import pytz as _pytz  # pytz required by APScheduler for named TZ
-            self._scheduler = BackgroundScheduler(
-                timezone=_pytz.timezone(_IST_PYTZ_NAME),
-                daemon=True,
-            )
-        except ImportError as exc:
-            raise ImportError(
-                "apscheduler and pytz are required — pip install apscheduler pytz"
-            ) from exc
+        with self._lifecycle_lock:
+            if self._running:
+                return
+            if self._scheduler is not None:
+                raise RuntimeError(
+                    "CronStrategyScheduler cannot restart until the previous backend stops"
+                )
+            try:
+                from apscheduler.schedulers.background import BackgroundScheduler
+                import pytz as _pytz  # pytz required by APScheduler for named TZ
+                self._scheduler = BackgroundScheduler(
+                    timezone=_pytz.timezone(_IST_PYTZ_NAME),
+                    daemon=True,
+                )
+                self._backend_shutdown_requested = False
+            except ImportError as exc:
+                raise ImportError(
+                    "apscheduler and pytz are required — pip install apscheduler pytz"
+                ) from exc
 
-        for strategy_id, config in self._schedules.items():
-            callback = self._callbacks.get(strategy_id)
-            if callback is None:
-                continue
-            config.job_id = self._add_apscheduler_job(
-                strategy_id,
-                self._parse_cron_expr(config.cron_expr),
-                callback,
-            )
+            start_attempted = False
+            try:
+                for strategy_id, config in self._schedules.items():
+                    callback = self._callbacks.get(strategy_id)
+                    if callback is None:
+                        continue
+                    config.job_id = self._add_apscheduler_job(
+                        strategy_id,
+                        self._parse_cron_expr(config.cron_expr),
+                        callback,
+                    )
 
-        self._scheduler.start()
-        self._running = True
+                # Revoke queued callbacks before shutdown by flipping this flag
+                # in stop(). Set it before start() so an immediately due job is
+                # valid once the lifecycle lock is released.
+                self._running = True
+                start_attempted = True
+                self._scheduler.start()
+            except Exception:
+                self._running = False
+                backend = self._scheduler
+                if backend is not None and start_attempted:
+                    try:
+                        backend.shutdown(wait=False)
+                    except Exception:
+                        logger.exception("CronStrategyScheduler startup rollback failed")
+                    else:
+                        self._scheduler = None
+                        self._backend_shutdown_requested = False
+                elif not start_attempted:
+                    self._scheduler = None
+                    self._backend_shutdown_requested = False
+                raise
         logger.info("CronStrategyScheduler started (IST)")
 
-    def stop(self) -> None:
-        """Shut down the background scheduler gracefully."""
-        if self._scheduler and self._running:
-            self._scheduler.shutdown(wait=False)
+    def stop(self, *, timeout: float = 30.0) -> None:
+        """Revoke queued jobs and wait for every admitted callback to finish."""
+        deadline = _time.monotonic() + max(0.0, float(timeout))
+        with self._callback_condition:
+            backend = self._scheduler
+            if backend is None:
+                self._running = False
+                return
+            # APScheduler may already have submitted a callback to its worker
+            # pool. Revoke it before asking the backend to stop. The backend
+            # remains owned if shutdown raises, allowing a later stop retry and
+            # preventing start() from orphaning a live scheduler thread.
             self._running = False
+            if not self._backend_shutdown_requested:
+                try:
+                    backend.shutdown(wait=False)
+                except Exception:
+                    self._backend_shutdown_requested = False
+                    raise
+                self._backend_shutdown_requested = True
+            while self._callbacks_in_flight:
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        "CronStrategyScheduler callbacks did not stop before the deadline"
+                    )
+                self._callback_condition.wait(timeout=remaining)
+            self._scheduler = None
+            self._backend_shutdown_requested = False
             logger.info("CronStrategyScheduler stopped")
 
     @property
     def running(self) -> bool:
         """True if the background scheduler thread is active."""
-        return self._running
+        with self._lifecycle_lock:
+            return self._running
 
     @property
     def time_scheduler(self) -> TimeScheduler:
@@ -926,35 +1067,48 @@ class CronStrategyScheduler:
             The APScheduler job ID string.
 
         Raises:
-            ValueError: If the cron expression cannot be parsed or the
-                scheduler has not been started.
-            RuntimeError: If the scheduler is not running — call :meth:`start`
-                first, or use :meth:`schedule_lazy` to defer the APScheduler
-                registration until :meth:`start` is called.
+            ValueError: If the strategy ID or cron expression is invalid.
+            ImportError: If APScheduler or pytz is unavailable.
         """
         if not strategy_id:
             raise ValueError("strategy_id must be a non-empty string")
 
-        _parts = self._parse_cron_expr(cron_expr)  # raises ValueError on bad expr
+        cron_parts = self._parse_cron_expr(cron_expr)
+        # Parse every field with APScheduler before touching the active maps.
+        # A five-field expression can still be invalid (for example minute 99).
+        self._build_cron_trigger(cron_parts)
 
-        config = CronScheduleConfig(
-            strategy_id=strategy_id,
-            cron_expr=cron_expr,
-            exchange=exchange.upper(),
-            symbol=symbol.strip().upper(),
-        )
-        self._schedules[strategy_id] = config
+        with self._lifecycle_lock:
+            generation = self._next_generation + 1
+            self._next_generation = generation
 
-        wrapped = self._make_gated_callback(strategy_id, callback, config)
-        self._callbacks[strategy_id] = wrapped
+            config = CronScheduleConfig(
+                strategy_id=strategy_id,
+                cron_expr=cron_expr,
+                exchange=exchange.upper(),
+                symbol=symbol.strip().upper(),
+                generation=generation,
+            )
+            wrapped = self._make_gated_callback(
+                strategy_id,
+                callback,
+                config,
+                generation=generation,
+            )
 
-        if self._running and self._scheduler is not None:
-            job_id = self._add_apscheduler_job(strategy_id, _parts, wrapped)
-            config.job_id = job_id
-        else:
-            # Scheduler not started yet — store for deferred registration.
-            # job_id will be assigned once start() is called.
-            config.job_id = f"pending:{strategy_id}"
+            if self._running and self._scheduler is not None:
+                # APScheduler's replace_existing operation and the in-memory
+                # commit are one serialised lifecycle transaction. If the
+                # backend rejects the replacement, the old maps remain intact.
+                job_id = self._add_apscheduler_job(strategy_id, cron_parts, wrapped)
+                config.job_id = job_id
+            else:
+                # Scheduler not started yet — store for deferred registration.
+                # job_id will be assigned once start() is called.
+                config.job_id = f"pending:{strategy_id}"
+
+            self._schedules[strategy_id] = config
+            self._callbacks[strategy_id] = wrapped
 
         logger.info(
             "Scheduled strategy '%s' with cron '%s' on %s (job_id=%s)",
@@ -975,16 +1129,17 @@ class CronStrategyScheduler:
             ``True`` if the schedule existed and was removed, ``False``
             if no schedule was found for this strategy.
         """
-        config = self._schedules.pop(strategy_id, None)
-        if config is None:
-            return False
-        self._callbacks.pop(strategy_id, None)
+        with self._lifecycle_lock:
+            config = self._schedules.pop(strategy_id, None)
+            if config is None:
+                return False
+            self._callbacks.pop(strategy_id, None)
 
-        if self._running and self._scheduler is not None and config.job_id:
-            try:
-                self._scheduler.remove_job(config.job_id)
-            except Exception:
-                logger.debug("APScheduler job '%s' not found during removal", config.job_id)
+            if self._running and self._scheduler is not None and config.job_id:
+                try:
+                    self._scheduler.remove_job(config.job_id)
+                except Exception:
+                    logger.debug("APScheduler job '%s' not found during removal", config.job_id)
 
         logger.info("Unscheduled strategy '%s'", strategy_id)
         return True
@@ -998,35 +1153,37 @@ class CronStrategyScheduler:
 
         Returns:
             List of dicts with keys: ``strategy_id``, ``cron_expr``,
-            ``exchange``, ``job_id``, ``last_skipped_reason``,
+            ``exchange``, ``symbol``, ``job_id``, ``last_skipped_reason``,
             ``next_fire_time`` (ISO string or empty).
         """
-        result: list[dict[str, Any]] = []
-        for sid, cfg in self._schedules.items():
-            next_fire = ""
-            if self._running and self._scheduler is not None and cfg.job_id:
-                try:
-                    job = self._scheduler.get_job(cfg.job_id)
-                    if job and job.next_run_time:
-                        next_fire = job.next_run_time.isoformat()
-                except Exception:
-                    pass
-            result.append(
-                {
-                    "strategy_id": sid,
-                    "cron_expr": cfg.cron_expr,
-                    "exchange": cfg.exchange,
-                    "symbol": cfg.symbol,
-                    "job_id": cfg.job_id,
-                    "last_skipped_reason": cfg.last_skipped_reason,
-                    "next_fire_time": next_fire,
-                }
-            )
-        return result
+        with self._lifecycle_lock:
+            result: list[dict[str, Any]] = []
+            for sid, cfg in self._schedules.items():
+                next_fire = ""
+                if self._running and self._scheduler is not None and cfg.job_id:
+                    try:
+                        job = self._scheduler.get_job(cfg.job_id)
+                        if job and job.next_run_time:
+                            next_fire = job.next_run_time.isoformat()
+                    except Exception:
+                        pass
+                result.append(
+                    {
+                        "strategy_id": sid,
+                        "cron_expr": cfg.cron_expr,
+                        "exchange": cfg.exchange,
+                        "symbol": cfg.symbol,
+                        "job_id": cfg.job_id,
+                        "last_skipped_reason": cfg.last_skipped_reason,
+                        "next_fire_time": next_fire,
+                    }
+                )
+            return result
 
     def get_schedule(self, strategy_id: str) -> CronScheduleConfig | None:
         """Return the schedule config for a strategy, or None."""
-        return self._schedules.get(strategy_id)
+        with self._lifecycle_lock:
+            return self._schedules.get(strategy_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -1059,7 +1216,7 @@ class CronStrategyScheduler:
             "hour": hour,
             "day": dom,
             "month": month,
-            "day_of_week": dow,
+            "day_of_week": _translate_standard_cron_weekdays(dow),
         }
 
     def _make_gated_callback(
@@ -1067,6 +1224,8 @@ class CronStrategyScheduler:
         strategy_id: str,
         callback: Callable[[], None],
         config: CronScheduleConfig,
+        *,
+        generation: int | None = None,
     ) -> Callable[[], None]:
         """Wrap ``callback`` with market-hours / holiday gate logic.
 
@@ -1078,7 +1237,23 @@ class CronStrategyScheduler:
         """
         time_scheduler = self._time_scheduler
 
-        def gated() -> None:
+        def is_current_generation() -> bool:
+            if generation is not None:
+                active = self._schedules.get(strategy_id)
+                if (
+                    not self._running
+                    or active is not config
+                    or active.generation != generation
+                ):
+                    logger.debug(
+                        "Cron skip [%s]: stale or stopped generation %d",
+                        strategy_id,
+                        generation,
+                    )
+                    return False
+            return True
+
+        def run_gated() -> None:
             if not self._check_market:
                 callback()
                 return
@@ -1124,6 +1299,23 @@ class CronStrategyScheduler:
             except Exception as exc:
                 logger.error("Cron callback error [%s]: %s", strategy_id, exc)
 
+        def gated() -> None:
+            # Admission is serialised with stop/unschedule/replacement, but the
+            # user callback runs outside the lifecycle lock. stop() revokes
+            # callbacks that have not reached this point and waits for every
+            # callback admitted here before releasing backend ownership.
+            with self._callback_condition:
+                if not is_current_generation():
+                    return
+                self._callbacks_in_flight += 1
+            try:
+                run_gated()
+            finally:
+                with self._callback_condition:
+                    self._callbacks_in_flight -= 1
+                    if self._callbacks_in_flight == 0:
+                        self._callback_condition.notify_all()
+
         return gated
 
     def _add_apscheduler_job(
@@ -1142,13 +1334,7 @@ class CronStrategyScheduler:
         Returns:
             The job ID string used by APScheduler.
         """
-        from apscheduler.triggers.cron import CronTrigger
-        import pytz as _pytz
-
-        trigger = CronTrigger(
-            timezone=_pytz.timezone(_IST_PYTZ_NAME),
-            **cron_parts,
-        )
+        trigger = self._build_cron_trigger(cron_parts)
         job = self._scheduler.add_job(
             func=wrapped_callback,
             trigger=trigger,
@@ -1156,3 +1342,14 @@ class CronStrategyScheduler:
             replace_existing=True,
         )
         return job.id
+
+    @staticmethod
+    def _build_cron_trigger(cron_parts: dict[str, str]) -> Any:
+        """Build and validate an APScheduler cron trigger in IST."""
+        from apscheduler.triggers.cron import CronTrigger
+        import pytz as _pytz
+
+        return CronTrigger(
+            timezone=_pytz.timezone(_IST_PYTZ_NAME),
+            **cron_parts,
+        )

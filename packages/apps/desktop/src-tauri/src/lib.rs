@@ -19,7 +19,7 @@
 //!
 //! The graceful exit path (4) only runs on a normal quit. A shell crash or
 //! force-quit would otherwise orphan the backend, and repeated launches would
-//! accumulate duplicates. Four layers close that hole:
+//! accumulate duplicates. Five layers close that hole:
 //!
 //! * **Kernel instance lock** — each workspace has one advisory lock file. The
 //!   shell holds the exclusive OS lock for its full process lifetime; the PID
@@ -27,16 +27,20 @@
 //! * **Fail-closed recovery on launch** — the shell records both the spawned
 //!   PyInstaller launcher PID and the real Python application PID (plus its
 //!   own) in ``desktop_backend.pid`` with a per-launch token. Python publishes
-//!   its PID before backend imports. Recovery waits for the watchdog and only
-//!   clears records after every confirmed process is dead or reused; it never
-//!   sends a terminating signal to a PID loaded from disk.
+//!   its PID before backend imports. Current records also carry the OS boot
+//!   identity, allowing a pending record from an earlier boot to be cleared
+//!   without probing recycled PIDs. Recovery otherwise waits for containment
+//!   and only clears after every confirmed process is dead or reused.
 //! * **Parent-liveness watchdog** — the shell passes its PID via
 //!   ``FLINTTRADE_PARENT_PID``; the sidecar entry script
 //!   (``packaging/desktop_backend.py``) watches that process from a daemon
 //!   thread and exits cleanly when the shell dies.
+//! * **Complete-tree containment** — POSIX keeps an external guardian alive
+//!   beyond the Python leader and tracks same-group/new-session descendants;
+//!   Windows assigns the application to a non-breakaway kill-on-close Job.
 //! * **Graceful stop on exit** — stdin asks Python to unwind Waitress, flush
 //!   tick capture, and close DuckDB. If that wedges, a second command on the
-//!   same inherited pipe hard-stops that exact Python application tree.
+//!   same inherited pipe asks containment to hard-stop the complete tree.
 //!
 //! A small splash window covers steps 1–2 so the user sees immediate feedback.
 //!
@@ -79,6 +83,9 @@ const PENDING_RECORD_EXIT_ACK_SENTINEL: &str = "FLINTTRADE_BACKEND_PENDING_EXIT_
 /// Stable POSIX shell command/PID/start identity captured before sidecar spawn.
 const PARENT_IDENTITY_ENV: &str = "FLINTTRADE_PARENT_IDENTITY";
 
+/// Stable OS boot-session identity persisted into every current recovery record.
+const BOOT_ID_ENV: &str = "FLINTTRADE_BOOT_ID";
+
 /// Stdout prefix the backend prints to raise a native desktop notification.
 /// Format: ``FLINTTRADE_NOTIFY\t<title>\t<body>`` (tab-delimited, one line).
 const NOTIFY_SENTINEL: &str = "FLINTTRADE_NOTIFY";
@@ -92,7 +99,7 @@ const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
 
 /// Recovery-record schema carrying both the spawned launcher and real Python
 /// application process identities.
-const SIDECAR_RECORD_VERSION: &str = "v2";
+const SIDECAR_RECORD_VERSION: &str = "v3";
 
 /// File carrying the process-lifetime kernel lock that prevents two desktop
 /// instances from spawning sidecars into the same workspace. Its text is only
@@ -111,21 +118,28 @@ const SIDECAR_SHUTDOWN_COMMAND: &[u8] = b"FLINTTRADE_SHUTDOWN\n";
 /// terminates its contained tree, avoiding signals to PIDs recovered from disk.
 const SIDECAR_FORCE_EXIT_COMMAND: &[u8] = b"FLINTTRADE_FORCE_EXIT\n";
 
-/// Maximum wait for Python's 60s request drain plus background cleanup before
-/// the hard-kill fallback. Polls are 100ms, so this is a 90-second budget.
-const SIDECAR_SHUTDOWN_POLLS: usize = 900;
+/// Maximum wait for Python's valid sequential shutdown path: smart orders
+/// (30s), autonomous agent (30s), broker-router retirement (10s), tick capture
+/// (3s), and active-request drain (60s), plus 17s scheduling/filesystem margin.
+/// Polls are 100ms, so this is a 150-second budget.
+const SIDECAR_SHUTDOWN_POLLS: usize = 1_500;
 
 /// Short window for Python to promote the exact pending recovery record. A
-/// pending PID must not consume the 90-second confirmed-application budget.
+/// pending PID must not consume the 150-second confirmed-application budget.
 const SIDECAR_PENDING_HANDSHAKE_POLLS: usize = 30;
 
-/// Initial grace before stale-sidecar recovery fails closed. The Python
-/// watchdog may take almost 2s to observe parent death, then tick capture may
-/// use its full 3s flush timeout. Six seconds preserves that path plus margin.
-const SIDECAR_WATCHDOG_GRACE_POLLS: usize = 60;
+/// Initial grace before stale-sidecar recovery fails closed. Python may take
+/// almost 2s to observe parent death, waits 12s before its complete-tree orphan
+/// fallback, then may spend 5s confirming descendants are gone. Twenty-two
+/// seconds covers every stage plus scheduling margin.
+const SIDECAR_WATCHDOG_GRACE_POLLS: usize = 220;
 
 /// Brief confirmation window after a hard kill before retaining recovery data.
 const SIDECAR_KILL_CONFIRM_POLLS: usize = 10;
+
+/// Give Python containment longer than its 5s POSIX descendant-kill pass before
+/// retaining the launcher/guardian and recovery record for continued cleanup.
+const SIDECAR_FORCE_EXIT_POLLS: usize = 70;
 
 /// Consecutive inconclusive supervisor probes tolerated before recovery state
 /// is retained for the next explicit startup repair instead of polling forever.
@@ -175,6 +189,7 @@ struct BackendFailed(std::sync::atomic::AtomicBool);
 struct DesktopInstanceLock {
     _file: std::fs::File,
     shell_pid: u32,
+    boot_id: String,
     launch_token: String,
 }
 
@@ -188,6 +203,7 @@ struct SidecarRecord {
     /// ``None`` is a fail-closed crash-before-handshake state.
     application_pid: Option<u32>,
     shell_pid: u32,
+    boot_id: String,
     launch_token: String,
 }
 
@@ -195,11 +211,12 @@ struct SidecarRecord {
 /// two-line format. Legacy records are accepted only by startup reaping; all
 /// newly published and runtime-owned records remain tokenised
 /// [`SidecarRecord`]s.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReapRecord {
     sidecar_pid: u32,
     application_pid: Option<u32>,
     shell_pid: u32,
+    boot_id: Option<String>,
 }
 
 struct ManagedSidecar {
@@ -816,6 +833,7 @@ pub fn run() {
                 std::io::Error::new(error.kind(), message)
             })?;
             let shell_pid = instance_lock.shell_pid;
+            let boot_id = instance_lock.boot_id.clone();
             let launch_token = instance_lock.launch_token.clone();
             if !app.manage(instance_lock) {
                 return Err(std::io::Error::new(
@@ -830,7 +848,7 @@ pub fn run() {
             // Give a stale sidecar time to finish its own watchdog shutdown.
             // Recovery never signals a PID loaded from disk: if the process
             // remains live, startup fails closed instead of risking PID reuse.
-            reap_stale_sidecar().map_err(|error| {
+            reap_stale_sidecar(&boot_id).map_err(|error| {
                 std::io::Error::other(format!(
                     "refusing to spawn a backend while stale sidecar state is unresolved: {error}"
                 ))
@@ -875,6 +893,7 @@ pub fn run() {
                 // Python promotes this exact tokenised pending record itself
                 // before announcing its real application PID on stdout.
                 .env("FLINTTRADE_SIDECAR_RECORD_PATH", &sidecar_record_path)
+                .env(BOOT_ID_ENV, &boot_id)
                 .env("FLINTTRADE_LAUNCH_TOKEN", &launch_token);
             #[cfg(unix)]
             let command = command.env(PARENT_IDENTITY_ENV, parent_identity);
@@ -884,6 +903,7 @@ pub fn run() {
                 sidecar_pid,
                 application_pid: None,
                 shell_pid,
+                boot_id,
                 launch_token,
             };
             let pending_exit_acknowledged = Arc::new(AtomicBool::new(false));
@@ -1477,6 +1497,10 @@ fn supervise_terminated_application(app: &AppHandle, record: &SidecarRecord) {
     }
 }
 
+fn launcher_kill_allowed_after_force_request(force_pipe_written: bool) -> bool {
+    !force_pipe_written
+}
+
 /// Gracefully stop the backend sidecar, with a bounded hard-kill fallback.
 fn kill_backend(app: &AppHandle) {
     if let Some(state) = app.try_state::<BackendState>() {
@@ -1498,7 +1522,7 @@ fn kill_backend(app: &AppHandle) {
                 ProcessLiveness::Alive => {
                     if managed.record.application_pid.is_some() {
                         eprintln!(
-                            "[flinttrade] backend did not stop gracefully within 90s; forcing exit"
+                            "[flinttrade] backend did not stop gracefully within 150s; forcing exit"
                         );
                     } else {
                         eprintln!(
@@ -1520,12 +1544,28 @@ fn kill_backend(app: &AppHandle) {
                     false
                 }
             };
-            // This handle belongs to the exact launcher spawned in this
-            // process. Killing it is safe, but it is not sufficient for a
-            // PyInstaller application child; the exact inherited stdin pipe
-            // above is what hard-stops that Python-owned process tree.
-            if let Err(error) = managed.child.kill() {
-                eprintln!("[flinttrade] backend launcher hard-kill request failed: {error}");
+            if force_exit_written
+                && wait_for_sidecar_shutdown(
+                    &mut managed.record,
+                    SIDECAR_FORCE_EXIT_POLLS,
+                    SIDECAR_FORCE_EXIT_POLLS,
+                    record_path.as_deref(),
+                    &mut managed.shutdown_identity_tracker,
+                )
+            {
+                remove_sidecar_record(&managed.record);
+                return;
+            }
+            // An accepted pipe request tells the external guardian / Job Object
+            // to clean the complete tree. Killing its launcher here could make
+            // the two recorded leader PIDs look dead before escaped descendants
+            // are gone, so preserve it and retain recovery state if cleanup
+            // remains unresolved. The exact launcher kill is only a fallback
+            // when no containment request reached Python.
+            if launcher_kill_allowed_after_force_request(force_exit_written) {
+                if let Err(error) = managed.child.kill() {
+                    eprintln!("[flinttrade] backend launcher hard-kill request failed: {error}");
+                }
             }
             if wait_for_sidecar_shutdown(
                 &mut managed.record,
@@ -1685,6 +1725,7 @@ impl DesktopInstanceLock {
         Ok(Self {
             _file: file,
             shell_pid,
+            boot_id: boot_session_identity()?,
             launch_token,
         })
     }
@@ -1712,6 +1753,76 @@ fn valid_launch_token(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn valid_boot_id(boot_id: &str) -> bool {
+    (16..=512).contains(&boot_id.len())
+        && boot_id.len() % 2 == 0
+        && boot_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn normalise_boot_identity(raw: &[u8]) -> std::io::Result<String> {
+    let trimmed = String::from_utf8_lossy(raw).trim().as_bytes().to_vec();
+    if trimmed.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "OS boot-session identity was empty",
+        ));
+    }
+    let boot_id = to_hex(&trimmed);
+    if !valid_boot_id(&boot_id) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "OS boot-session identity was invalid",
+        ));
+    }
+    Ok(boot_id)
+}
+
+/// Return an identity that remains stable only for the current OS boot session.
+fn boot_session_identity() -> std::io::Result<String> {
+    #[cfg(target_os = "linux")]
+    {
+        return normalise_boot_identity(
+            std::fs::read("/proc/sys/kernel/random/boot_id")?.as_slice(),
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("sysctl")
+            .args(["-n", "kern.bootsessionuuid"])
+            .output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "sysctl kern.bootsessionuuid exited with status {}",
+                output.status
+            )));
+        }
+        return normalise_boot_identity(&output.stdout);
+    }
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::Out.Write((Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc())",
+            ])
+            .output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "Windows boot identity query exited with status {}",
+                output.status
+            )));
+        }
+        return normalise_boot_identity(&output.stdout);
+    }
+    #[allow(unreachable_code)]
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "OS boot-session identity is unsupported",
+    ))
+}
+
 /// Serialise the versioned process-tree recovery record. ``pending`` is a
 /// deliberate fail-closed state until Python announces its real PID.
 fn format_sidecar_record(record: &SidecarRecord) -> String {
@@ -1720,8 +1831,8 @@ fn format_sidecar_record(record: &SidecarRecord) -> String {
         .map(|pid| pid.to_string())
         .unwrap_or_else(|| "pending".to_string());
     format!(
-        "{SIDECAR_RECORD_VERSION}\n{}\n{}\n{}\n{}\n",
-        record.sidecar_pid, application_pid, record.shell_pid, record.launch_token
+        "{SIDECAR_RECORD_VERSION}\n{}\n{}\n{}\n{}\n{}\n",
+        record.sidecar_pid, application_pid, record.shell_pid, record.boot_id, record.launch_token
     )
 }
 
@@ -1753,15 +1864,57 @@ fn parse_sidecar_record(contents: &str) -> Option<SidecarRecord> {
         .parse::<u32>()
         .ok()
         .filter(|pid| *pid > 0)?;
+    let boot_id = lines.next()?.to_string();
     let launch_token = lines.next()?.to_string();
-    if lines.next().is_some() || !valid_launch_token(&launch_token) {
+    if lines.next().is_some() || !valid_boot_id(&boot_id) || !valid_launch_token(&launch_token) {
         return None;
     }
     Some(SidecarRecord {
         sidecar_pid,
         application_pid,
         shell_pid,
+        boot_id,
         launch_token,
+    })
+}
+
+fn parse_v2_sidecar_record(contents: &str) -> Option<ReapRecord> {
+    let mut lines = contents.lines();
+    if lines.next()?.trim() != "v2" {
+        return None;
+    }
+    let sidecar_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let raw_application_pid = lines.next()?.trim();
+    let application_pid = if raw_application_pid == "pending" {
+        None
+    } else {
+        Some(
+            raw_application_pid
+                .parse::<u32>()
+                .ok()
+                .filter(|pid| *pid > 0)?,
+        )
+    };
+    let shell_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let launch_token = lines.next()?;
+    if lines.next().is_some() || !valid_launch_token(launch_token) {
+        return None;
+    }
+    Some(ReapRecord {
+        sidecar_pid,
+        application_pid,
+        shell_pid,
+        boot_id: None,
     })
 }
 
@@ -1787,6 +1940,7 @@ fn parse_v1_sidecar_record(contents: &str) -> Option<ReapRecord> {
         sidecar_pid,
         application_pid: None,
         shell_pid,
+        boot_id: None,
     })
 }
 
@@ -1811,6 +1965,7 @@ fn parse_legacy_sidecar_record(contents: &str) -> Option<ReapRecord> {
         sidecar_pid,
         application_pid: None,
         shell_pid,
+        boot_id: None,
     })
 }
 
@@ -1820,7 +1975,9 @@ fn parse_reap_record(contents: &str) -> Option<ReapRecord> {
             sidecar_pid: record.sidecar_pid,
             application_pid: record.application_pid,
             shell_pid: record.shell_pid,
+            boot_id: Some(record.boot_id),
         })
+        .or_else(|| parse_v2_sidecar_record(contents))
         .or_else(|| parse_v1_sidecar_record(contents))
         .or_else(|| parse_legacy_sidecar_record(contents))
 }
@@ -1853,49 +2010,155 @@ fn looks_like_desktop_shell(command_line: &str) -> bool {
 }
 
 #[cfg(any(unix, test))]
-fn parse_unix_ps_identity(text: &str, expected_pid: u32) -> Option<String> {
-    let mut fields = text.split_whitespace();
+fn parse_unix_ps_identity(text: &str, expected_pid: u32, start_token: &str) -> Option<String> {
+    let mut fields = text.trim().splitn(2, char::is_whitespace);
     let pid = fields.next()?.parse::<u32>().ok()?;
-    let started_at = [
-        fields.next()?,
-        fields.next()?,
-        fields.next()?,
-        fields.next()?,
-        fields.next()?,
-    ]
-    .join(" ");
-    let command = fields.collect::<Vec<_>>().join(" ");
-    if pid != expected_pid || command.is_empty() {
+    let command = fields.next()?.trim();
+    if pid != expected_pid || command.is_empty() || start_token.is_empty() {
         return None;
     }
-    Some(format!("{command}\t{pid}\t{started_at}"))
+    Some(format!("{command}\t{pid}\t{start_token}"))
 }
 
-/// Return a stable command + PID + process-start identity from unix `ps`, or
+#[cfg(target_os = "linux")]
+fn unix_process_start_token(pid: u32) -> std::io::Result<Option<String>> {
+    let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let closing_paren = stat.rfind(')').ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("could not parse /proc/{pid}/stat"),
+        )
+    })?;
+    let fields: Vec<&str> = stat[closing_paren + 2..].split_whitespace().collect();
+    let start_ticks = fields
+        .get(19)
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()));
+    let Some(start_ticks) = start_ticks else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("could not read process start ticks for pid {pid}"),
+        ));
+    };
+    Ok(Some(format!("linux-start-ticks:{start_ticks}")))
+}
+
+#[cfg(target_os = "macos")]
+fn unix_process_start_token(pid: u32) -> std::io::Result<Option<String>> {
+    use std::ffi::{c_int, c_void};
+
+    #[repr(C)]
+    struct ProcBsdInfo {
+        pbi_flags: u32,
+        pbi_status: u32,
+        pbi_xstatus: u32,
+        pbi_pid: u32,
+        pbi_ppid: u32,
+        pbi_uid: u32,
+        pbi_gid: u32,
+        pbi_ruid: u32,
+        pbi_rgid: u32,
+        pbi_svuid: u32,
+        pbi_svgid: u32,
+        rfu_1: u32,
+        pbi_comm: [i8; 16],
+        pbi_name: [i8; 32],
+        pbi_nfiles: u32,
+        pbi_pgid: u32,
+        pbi_pjobc: u32,
+        e_tdev: u32,
+        e_tpgid: u32,
+        pbi_nice: i32,
+        pbi_start_tvsec: u64,
+        pbi_start_tvusec: u64,
+    }
+
+    #[link(name = "proc")]
+    extern "C" {
+        fn proc_pidinfo(
+            pid: c_int,
+            flavor: c_int,
+            arg: u64,
+            buffer: *mut c_void,
+            buffer_size: c_int,
+        ) -> c_int;
+    }
+
+    let raw_pid = i32::try_from(pid).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "process PID exceeds i32")
+    })?;
+    let mut info: ProcBsdInfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<ProcBsdInfo>();
+    let read = unsafe {
+        proc_pidinfo(
+            raw_pid,
+            3, // PROC_PIDTBSDINFO
+            0,
+            std::ptr::addr_of_mut!(info).cast(),
+            i32::try_from(size).expect("proc_bsdinfo size fits i32"),
+        )
+    };
+    if read == 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(3) {
+            Ok(None)
+        } else {
+            Err(error)
+        };
+    }
+    if usize::try_from(read).ok() != Some(size) || info.pbi_pid != pid || info.pbi_start_tvsec == 0
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("proc_pidinfo returned incomplete identity for pid {pid}"),
+        ));
+    }
+    Ok(Some(format!(
+        "macos-start-time:{}:{}",
+        info.pbi_start_tvsec, info.pbi_start_tvusec
+    )))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn unix_process_start_token(_pid: u32) -> std::io::Result<Option<String>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "high-resolution Unix process identity is unsupported",
+    ))
+}
+
+/// Return a stable command + PID + kernel process-start identity from unix `ps`, or
 /// ``None`` when no such process exists. Tool failures stay distinct from
 /// absence so startup remains fail closed.
 #[cfg(unix)]
 fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
+    let Some(before) = unix_process_start_token(pid)? else {
+        return Ok(None);
+    };
     let out = std::process::Command::new("ps")
-        .args([
-            "-p",
-            &pid.to_string(),
-            "-o",
-            "pid=",
-            "-o",
-            "lstart=",
-            "-o",
-            "args=",
-        ])
+        .args(["-p", &pid.to_string(), "-o", "pid=", "-o", "args="])
         .output()?;
     if !out.status.success() {
-        return Err(std::io::Error::other(format!(
-            "ps exited with status {}",
-            out.status
-        )));
+        return if out.stdout.is_empty() {
+            Ok(None)
+        } else {
+            Err(std::io::Error::other(format!(
+                "ps exited with status {}",
+                out.status
+            )))
+        };
+    }
+    let Some(after) = unix_process_start_token(pid)? else {
+        return Ok(None);
+    };
+    if after != before {
+        return Ok(None);
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    Ok(parse_unix_ps_identity(&text, pid))
+    Ok(parse_unix_ps_identity(&text, pid, &before))
 }
 
 #[cfg(any(windows, test))]
@@ -2196,6 +2459,7 @@ fn wait_for_recorded_application_exit(record: &SidecarRecord) -> RecordedApplica
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReapOutcome {
     NoRecord,
+    RemovedEarlierBoot,
     RemovedConfirmedDead,
     RemovedConfirmedReused,
 }
@@ -2381,9 +2645,10 @@ where
 
 /// Startup layer of orphan protection. Every ambiguous process state is an
 /// error so setup cannot overwrite an unresolved record and spawn a duplicate.
-fn reap_stale_sidecar_at_with_grace<L, I, G>(
+fn reap_stale_sidecar_at_for_boot_with_grace<L, I, G>(
     path: &Path,
     current_shell_pid: u32,
+    current_boot_id: &str,
     liveness: L,
     identity: I,
     await_watchdog_exit: G,
@@ -2393,6 +2658,9 @@ where
     I: Fn(u32) -> std::io::Result<Option<String>>,
     G: Fn(u32) -> bool,
 {
+    if !valid_boot_id(current_boot_id) {
+        return Err(ReapError::InvalidRecord);
+    }
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -2405,6 +2673,13 @@ where
         }
     };
     let record = parse_reap_record(&contents).ok_or(ReapError::InvalidRecord)?;
+    if record
+        .boot_id
+        .as_deref()
+        .is_some_and(|recorded| recorded != current_boot_id)
+    {
+        return remove_reaped_record(path, &contents, ReapOutcome::RemovedEarlierBoot);
+    }
 
     // If the OS reused the previous shell PID for this process, the held
     // kernel lock proves the old owner is gone. Otherwise a live process must
@@ -2501,6 +2776,38 @@ where
 }
 
 #[cfg(test)]
+fn test_record_boot_id(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| parse_reap_record(&contents))
+        .and_then(|record| record.boot_id)
+        .unwrap_or_else(|| "c".repeat(64))
+}
+
+#[cfg(test)]
+fn reap_stale_sidecar_at_with_grace<L, I, G>(
+    path: &Path,
+    current_shell_pid: u32,
+    liveness: L,
+    identity: I,
+    await_watchdog_exit: G,
+) -> Result<ReapOutcome, ReapError>
+where
+    L: Fn(u32) -> ProcessLiveness,
+    I: Fn(u32) -> std::io::Result<Option<String>>,
+    G: Fn(u32) -> bool,
+{
+    reap_stale_sidecar_at_for_boot_with_grace(
+        path,
+        current_shell_pid,
+        &test_record_boot_id(path),
+        liveness,
+        identity,
+        await_watchdog_exit,
+    )
+}
+
+#[cfg(test)]
 fn reap_stale_sidecar_at<L, I>(
     path: &Path,
     current_shell_pid: u32,
@@ -2511,14 +2818,44 @@ where
     L: Fn(u32) -> ProcessLiveness,
     I: Fn(u32) -> std::io::Result<Option<String>>,
 {
-    reap_stale_sidecar_at_with_grace(path, current_shell_pid, liveness, identity, |_| false)
+    reap_stale_sidecar_at_for_boot_with_grace(
+        path,
+        current_shell_pid,
+        &test_record_boot_id(path),
+        liveness,
+        identity,
+        |_| false,
+    )
 }
 
-fn reap_stale_sidecar() -> Result<ReapOutcome, ReapError> {
+#[cfg(test)]
+fn reap_stale_sidecar_at_for_boot<L, I>(
+    path: &Path,
+    current_shell_pid: u32,
+    current_boot_id: &str,
+    liveness: L,
+    identity: I,
+) -> Result<ReapOutcome, ReapError>
+where
+    L: Fn(u32) -> ProcessLiveness,
+    I: Fn(u32) -> std::io::Result<Option<String>>,
+{
+    reap_stale_sidecar_at_for_boot_with_grace(
+        path,
+        current_shell_pid,
+        current_boot_id,
+        liveness,
+        identity,
+        |_| false,
+    )
+}
+
+fn reap_stale_sidecar(current_boot_id: &str) -> Result<ReapOutcome, ReapError> {
     let path = sidecar_pid_file().ok_or(ReapError::WorkspaceUnavailable)?;
-    reap_stale_sidecar_at_with_grace(
+    reap_stale_sidecar_at_for_boot_with_grace(
         &path,
         std::process::id(),
+        current_boot_id,
         process_liveness,
         process_command_line,
         |pid| wait_for_process_exit(pid, SIDECAR_WATCHDOG_GRACE_POLLS),
@@ -2576,6 +2913,138 @@ fn write_sidecar_record_at(path: &Path, record: &SidecarRecord) -> std::io::Resu
     result
 }
 
+#[cfg(unix)]
+fn replace_path_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_path_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+    extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    if unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn sync_record_parent(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sidecar record path has no parent directory",
+            )
+        })?;
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn atomically_replace_sidecar_record_with<F>(
+    path: &Path,
+    expected: &str,
+    replacement: &str,
+    launch_token: &str,
+    replace: F,
+) -> std::io::Result<()>
+where
+    F: FnOnce(&Path, &Path) -> std::io::Result<()>,
+{
+    if !valid_launch_token(launch_token) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sidecar launch token is invalid",
+        ));
+    }
+    if std::fs::read_to_string(path)? != expected {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "sidecar recovery record changed before atomic replacement",
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sidecar record path has no parent directory",
+        )
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sidecar record path has no valid file name",
+            )
+        })?;
+    let temporary = parent.join(format!(
+        ".{file_name}.{launch_token}.{}.tmp",
+        std::process::id()
+    ));
+    let result = (|| -> std::io::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(replacement.as_bytes())?;
+        file.sync_all()?;
+        harden_file(&temporary);
+        if std::fs::read_to_string(path)? != expected {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "sidecar recovery record changed before atomic replacement",
+            ));
+        }
+        replace(&temporary, path)?;
+        sync_record_parent(path)
+    })();
+    if temporary.exists() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn atomically_replace_sidecar_record(
+    path: &Path,
+    expected: &str,
+    replacement: &str,
+    launch_token: &str,
+) -> std::io::Result<()> {
+    atomically_replace_sidecar_record_with(
+        path,
+        expected,
+        replacement,
+        launch_token,
+        replace_path_atomically,
+    )
+}
+
 fn confirm_application_process(pid: u32) -> std::io::Result<()> {
     match process_liveness(pid) {
         ProcessLiveness::Dead => {
@@ -2605,8 +3074,7 @@ fn confirm_application_process(pid: u32) -> std::io::Result<()> {
 }
 
 /// Promote an exact pending record to the confirmed Python application PID.
-/// A crash during this in-place replacement can leave an invalid record, which
-/// startup intentionally treats as unresolved rather than spawning duplicate.
+/// The old or new complete record is always visible across a crash boundary.
 fn promote_sidecar_record_at(
     path: &Path,
     expected: &SidecarRecord,
@@ -2634,13 +3102,7 @@ fn promote_sidecar_record_at(
                 "sidecar recovery record changed before application PID promotion",
             ));
         }
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(path)?;
-        file.write_all(serialised.as_bytes())?;
-        file.sync_all()?;
-        harden_file(path);
+        atomically_replace_sidecar_record(path, &current, &serialised, &expected.launch_token)?;
         Ok(promoted.clone())
     })?
 }
@@ -2674,6 +3136,7 @@ fn refresh_sidecar_record_at(path: &Path, expected: &SidecarRecord) -> Option<Si
     let current = parse_sidecar_record(&std::fs::read_to_string(path).ok()?)?;
     if current.sidecar_pid != expected.sidecar_pid
         || current.shell_pid != expected.shell_pid
+        || current.boot_id != expected.boot_id
         || current.launch_token != expected.launch_token
     {
         return None;
@@ -2974,6 +3437,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 99,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
 
@@ -2986,6 +3450,7 @@ mod tests {
             sidecar_pid: 4321,
             application_pid: None,
             shell_pid: 99,
+            boot_id: "c".repeat(64),
             launch_token: "b".repeat(64),
         };
         assert_eq!(
@@ -3065,6 +3530,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let contents = format_sidecar_record(&pending);
@@ -3081,6 +3547,37 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn earlier_boot_pending_record_is_removed_without_pid_probes() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-earlier-boot-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            boot_id: "a".repeat(64),
+            launch_token: "b".repeat(64),
+        };
+        std::fs::write(&path, format_sidecar_record(&pending)).unwrap();
+
+        assert_eq!(
+            reap_stale_sidecar_at_for_boot(
+                &path,
+                99,
+                &"c".repeat(64),
+                |_| panic!("an earlier-boot PID must never be probed"),
+                |_| panic!("an earlier-boot identity must never be queried"),
+            ),
+            Ok(ReapOutcome::RemovedEarlierBoot)
+        );
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3275,6 +3772,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3310,6 +3808,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3355,6 +3854,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3405,6 +3905,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3459,6 +3960,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3512,6 +4014,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3593,6 +4096,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
 
@@ -3633,6 +4137,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let promoted = SidecarRecord {
@@ -3646,6 +4151,92 @@ mod tests {
             promoted
         );
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn application_pid_promotion_replace_failure_keeps_a_complete_pending_record() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-record-promotion-fault-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        let promoted = SidecarRecord {
+            application_pid: Some(5678),
+            ..pending.clone()
+        };
+        let pending_text = format_sidecar_record(&pending);
+        std::fs::write(&path, &pending_text).unwrap();
+
+        let error = atomically_replace_sidecar_record_with(
+            &path,
+            &pending_text,
+            &format_sidecar_record(&promoted),
+            &pending.launch_token,
+            |_temporary, _destination| Err(std::io::Error::other("injected replace failure")),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), pending_text);
+        assert_eq!(
+            parse_sidecar_record(&std::fs::read_to_string(&path).unwrap()),
+            Some(pending)
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn application_pid_promotion_post_replace_failure_leaves_a_complete_promoted_record() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-record-promotion-post-replace-fault-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-backend.pid");
+        let pending = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: None,
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        let promoted = SidecarRecord {
+            application_pid: Some(5678),
+            ..pending.clone()
+        };
+        let pending_text = format_sidecar_record(&pending);
+        let promoted_text = format_sidecar_record(&promoted);
+        std::fs::write(&path, &pending_text).unwrap();
+
+        let error = atomically_replace_sidecar_record_with(
+            &path,
+            &pending_text,
+            &promoted_text,
+            &pending.launch_token,
+            |temporary, destination| {
+                replace_path_atomically(temporary, destination)?;
+                Err(std::io::Error::other("injected post-replace failure"))
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), promoted_text);
+        assert_eq!(
+            parse_sidecar_record(&std::fs::read_to_string(&path).unwrap()),
+            Some(promoted)
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3664,6 +4255,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&actual)).unwrap();
@@ -3700,6 +4292,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let promoted = SidecarRecord {
@@ -3798,6 +4391,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         std::fs::write(&path, format_sidecar_record(&record)).unwrap();
@@ -3844,6 +4438,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(5678),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let states = std::cell::RefCell::new(std::collections::VecDeque::from([
@@ -3881,6 +4476,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
 
@@ -3902,6 +4498,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(5678),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let identities = std::cell::RefCell::new(std::collections::VecDeque::from([
@@ -3933,6 +4530,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(5678),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let first = std::cell::Cell::new(true);
@@ -3963,6 +4561,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(5678),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
 
@@ -3986,6 +4585,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: Some(5678),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
 
@@ -4028,6 +4628,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let promoted = SidecarRecord {
@@ -4043,6 +4644,11 @@ mod tests {
             ..pending.clone()
         };
         assert_eq!(refresh_sidecar_record_at(&path, &unrelated), None);
+        let unrelated_boot = SidecarRecord {
+            boot_id: "d".repeat(64),
+            ..pending.clone()
+        };
+        assert_eq!(refresh_sidecar_record_at(&path, &unrelated_boot), None);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4052,6 +4658,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let promoted = SidecarRecord {
@@ -4086,11 +4693,42 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_wait_allows_the_complete_valid_sequential_python_cleanup() {
+        let mut record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        let polls = std::cell::Cell::new(0usize);
+
+        assert!(wait_for_sidecar_shutdown_with(
+            &mut record,
+            SIDECAR_PENDING_HANDSHAKE_POLLS,
+            SIDECAR_SHUTDOWN_POLLS,
+            |_| None,
+            |_| {
+                let current = polls.get();
+                polls.set(current + 1);
+                if current < 1_330 {
+                    ProcessLiveness::Alive
+                } else {
+                    ProcessLiveness::Dead
+                }
+            },
+            || {},
+        ));
+        assert_eq!(polls.get(), 1_331);
+    }
+
+    #[test]
     fn shutdown_identity_tracker_treats_pid_reuse_as_owned_process_exit() {
         let record = SidecarRecord {
             sidecar_pid: 1234,
             application_pid: Some(1234),
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let identities = std::cell::RefCell::new(std::collections::VecDeque::from([
@@ -4127,6 +4765,7 @@ mod tests {
             sidecar_pid: 1234,
             application_pid: None,
             shell_pid: 77,
+            boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
         let promoted = SidecarRecord {
@@ -4162,8 +4801,24 @@ mod tests {
     }
 
     #[test]
+    fn accepted_force_pipe_keeps_the_launcher_guardian_alive() {
+        assert!(!launcher_kill_allowed_after_force_request(true));
+        assert!(launcher_kill_allowed_after_force_request(false));
+        assert!(SIDECAR_FORCE_EXIT_POLLS > 50);
+    }
+
+    #[test]
     fn graceful_shutdown_budget_covers_python_drain_and_cleanup() {
-        assert!(SIDECAR_SHUTDOWN_POLLS >= 750);
+        // Sequential valid maxima: smart orders 30s + agent 30s + router 10s
+        // + tick capture 3s + active request drain 60s = 133s.
+        assert!(SIDECAR_SHUTDOWN_POLLS > 1_330);
+    }
+
+    #[test]
+    fn stale_reap_grace_covers_python_watchdog_and_orphan_fallback() {
+        // Python may poll for 2s, wait 12s, then spend up to 5s confirming
+        // complete descendant cleanup in its external guardian.
+        assert!(SIDECAR_WATCHDOG_GRACE_POLLS > 190);
     }
 
     #[cfg(unix)]
@@ -4302,18 +4957,41 @@ mod tests {
     }
 
     #[test]
-    fn unix_ps_identity_includes_process_start_time() {
-        let before = "1234 Fri Jul 11 10:11:12 2026 /Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0";
-        let after = "1234 Fri Jul 11 10:11:13 2026 /Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0";
+    fn unix_ps_identity_uses_kernel_resolution_process_start_time() {
+        let command =
+            "1234 /Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0";
 
         assert_eq!(
-            parse_unix_ps_identity(before, 1234),
-            Some("/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0\t1234\tFri Jul 11 10:11:12 2026".to_string())
+            parse_unix_ps_identity(command, 1234, "macos-start-time:100:1"),
+            Some("/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0\t1234\tmacos-start-time:100:1".to_string())
         );
         assert_ne!(
-            parse_unix_ps_identity(after, 1234),
-            parse_unix_ps_identity(before, 1234)
+            parse_unix_ps_identity(command, 1234, "macos-start-time:100:2"),
+            parse_unix_ps_identity(command, 1234, "macos-start-time:100:1")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_process_identity_is_stable_and_kernel_bound() {
+        let first = process_command_line(std::process::id())
+            .unwrap()
+            .expect("current process identity");
+        let second = process_command_line(std::process::id())
+            .unwrap()
+            .expect("current process identity");
+
+        assert_eq!(first, second);
+        assert!(first.contains("\tlinux-start-ticks:") || first.contains("\tmacos-start-time:"));
+    }
+
+    #[test]
+    fn boot_session_identity_is_stable_and_record_safe() {
+        let first = boot_session_identity().expect("boot identity");
+        let second = boot_session_identity().expect("boot identity");
+
+        assert_eq!(first, second);
+        assert!(valid_boot_id(&first));
     }
 
     #[test]

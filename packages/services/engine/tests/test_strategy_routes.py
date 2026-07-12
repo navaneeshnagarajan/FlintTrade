@@ -79,6 +79,16 @@ def _make_mock_process(pid: int = 9999, returncode=None):
 
 
 class TestStrategyRoutes:
+    def test_shutdown_strategy_runtime_exposes_parent_lifecycle_owner(self, app):
+        from flinttrade_engine.strategy_routes import shutdown_strategy_runtime
+
+        runner = MagicMock()
+        runner.stop_all.return_value = ["one", "two"]
+        app.config["STRATEGY_RUNNER"] = runner
+
+        assert shutdown_strategy_runtime(app) == ["one", "two"]
+        runner.stop_all.assert_called_once_with()
+
     def test_upload_safe_strategy(self, client):
         resp = client.post(
             "/api/v1/strategies/upload",

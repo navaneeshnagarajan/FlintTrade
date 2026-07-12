@@ -117,6 +117,13 @@ class TestResourceLimits:
             calls = mock_res.setrlimit.call_args_list
             assert len(calls) == 2  # Only CPU and FD
 
+    def test_frozen_child_limits_preserve_bootloader_fd_ceiling(self):
+        """Post-boot frozen limits must not lower NOFILE below open bundle FDs."""
+        with patch.object(mod, "_build_preexec_fn", return_value=lambda: None) as build:
+            mod._apply_uploaded_strategy_child_limits()
+
+        build.assert_called_once_with(fd_limit=None)
+
 
 # ---------------------------------------------------------------------------
 # Bubblewrap command construction
@@ -261,6 +268,13 @@ class TestRestrictedBuiltins:
         assert '"eval"' not in content
         assert '"exec"' not in content or "exec(compile(" in content  # exec is used in wrapper itself
         assert '"compile"' not in content or "compile(_code" in content
+
+    def test_wrapper_matches_frozen_main_module_namespace(self, tmp_path):
+        wrapper = mod._create_sandbox_wrapper(tmp_path)
+        content = wrapper.read_text(encoding="utf-8")
+
+        assert "'__name__': '__main__'" in content
+        assert "'__file__': _script" in content
 
     def test_safe_builtins_excludes_dangerous(self):
         """The _SAFE_BUILTINS dict must not contain dangerous names."""

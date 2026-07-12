@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ast
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -39,6 +40,23 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.strategy_runner")
+
+FROZEN_STRATEGY_CHILD_ARG = "--flinttrade-uploaded-strategy-child"
+PACKAGED_CHILD_EXECUTABLE_ENV = "FLINTTRADE_PACKAGED_CHILD_EXECUTABLE"
+PACKAGED_CHILD_ARG_ENV = "FLINTTRADE_PACKAGED_CHILD_ARG"
+_frozen_dispatch_checked = False
+
+_DESKTOP_CONTROL_ENV = frozenset(
+    {
+        "FLINTTRADE_PARENT_PID",
+        "FLINTTRADE_PARENT_IDENTITY",
+        "FLINTTRADE_SIDECAR_RECORD_PATH",
+        "FLINTTRADE_BOOT_ID",
+        "FLINTTRADE_LAUNCH_TOKEN",
+        PACKAGED_CHILD_EXECUTABLE_ENV,
+        PACKAGED_CHILD_ARG_ENV,
+    }
+)
 
 # ---------------------------------------------------------------------------
 # psutil import — optional; degrades gracefully on systems without it
@@ -120,6 +138,7 @@ _BLOCKED_BUILTINS: frozenset[str] = frozenset(
         "delattr",
         "open",
         "breakpoint",
+        "input",
     }
 )
 
@@ -168,7 +187,7 @@ _SAFE_BUILTINS: dict[str, Any] = {
         "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
         "callable", "chr", "classmethod", "complex", "dict", "divmod",
         "enumerate", "filter", "float", "format", "frozenset", "hash",
-        "hex", "id", "input", "int", "isinstance", "issubclass", "iter",
+        "hex", "id", "int", "isinstance", "issubclass", "iter",
         "len", "list", "map", "max", "memoryview", "min", "next", "object",
         "oct", "ord", "pow", "print", "property", "range", "repr",
         "reversed", "round", "set", "slice", "sorted", "staticmethod",
@@ -179,23 +198,34 @@ _SAFE_BUILTINS: dict[str, Any] = {
 
 def _build_preexec_fn(
     cpu_limit: int = 30,
-    fd_limit: int = 64,
+    fd_limit: int | None = 64,
     nproc_limit: int = 0,
 ) -> Any:
     """Build a preexec_fn that sets OS-level resource limits.
 
-    Returns None on Windows where the resource module is unavailable.
+    ``fd_limit=None`` preserves the current descriptor ceiling. Returns None
+    on Windows where the resource module is unavailable.
     """
     if not _RESOURCE_AVAILABLE:
         return None
 
     def _set_limits() -> None:
         _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
-        _resource.setrlimit(_resource.RLIMIT_NOFILE, (fd_limit, fd_limit))
+        if fd_limit is not None:
+            _resource.setrlimit(_resource.RLIMIT_NOFILE, (fd_limit, fd_limit))
         if hasattr(_resource, "RLIMIT_NPROC"):
             _resource.setrlimit(_resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
 
     return _set_limits
+
+
+def _apply_uploaded_strategy_child_limits() -> None:
+    """Apply resource limits inside a dispatched frozen child process."""
+    # The PyInstaller application has already opened its archive and extension
+    # modules. Lowering NOFILE after boot can make later runtime reads fail.
+    apply_limits = _build_preexec_fn(fd_limit=None)
+    if apply_limits is not None:
+        apply_limits()
 
 
 def _is_bwrap_available() -> bool:
@@ -252,11 +282,73 @@ def _create_sandbox_wrapper(temp_dir: Path) -> Path:
         "_script = sys.argv[1]\n"
         "with open(_script) as _f:\n"
         "    _code = _f.read()\n"
-        "exec(compile(_code, _script, 'exec'), {'__builtins__': _restricted})\n"
+        "exec(compile(_code, _script, 'exec'), "
+        "{'__builtins__': _restricted, '__name__': '__main__', '__file__': _script})\n"
     )
     wrapper_path = temp_dir / "_sandbox_wrapper.py"
     wrapper_path.write_text(wrapper_code, encoding="utf-8")
     return wrapper_path
+
+
+def _execute_uploaded_strategy_file(strategy_path: Path) -> None:
+    """Execute one uploaded strategy with the restricted builtin namespace."""
+    source = strategy_path.read_text(encoding="utf-8")
+    runtime_builtins = __builtins__
+    restricted = {
+        name: runtime_builtins[name]
+        if isinstance(runtime_builtins, dict)
+        else getattr(runtime_builtins, name)
+        for name in _SAFE_BUILTINS
+    }
+    namespace = {
+        "__builtins__": restricted,
+        "__file__": str(strategy_path),
+        "__name__": "__main__",
+    }
+    exec(compile(source, str(strategy_path), "exec"), namespace)  # noqa: S102
+
+
+def dispatch_frozen_strategy_child(argv: list[str] | None = None) -> bool:
+    """Dispatch the frozen executable's uploaded-strategy child mode.
+
+    A PyInstaller one-file executable cannot interpret ``wrapper.py`` as a
+    normal Python interpreter would. Its entry script must call this function
+    before starting sidecar watchdogs or importing the backend application.
+    A normal parent invocation returns ``False`` and records that this early
+    handshake occurred; frozen strategy launch fails closed without it.
+
+    Args:
+        argv: Argument vector to inspect. Defaults to :data:`sys.argv`.
+
+    Returns:
+        ``True`` when child mode was recognised and executed, otherwise
+        ``False`` so the normal sidecar entry can continue.
+    """
+    global _frozen_dispatch_checked  # noqa: PLW0603 - process-wide entry handshake
+
+    arguments = sys.argv if argv is None else argv
+    if len(arguments) < 2 or arguments[1] != FROZEN_STRATEGY_CHILD_ARG:
+        _frozen_dispatch_checked = True
+        return False
+    if len(arguments) != 3:
+        raise ValueError("Frozen strategy child mode requires exactly one strategy path")
+
+    _apply_uploaded_strategy_child_limits()
+    _execute_uploaded_strategy_file(Path(arguments[2]))
+    return True
+
+
+def _resolve_frozen_child_contract() -> tuple[str, str]:
+    """Return the parent-verified frozen child executable and mode argument."""
+    executable = (os.environ.get(PACKAGED_CHILD_EXECUTABLE_ENV) or "").strip()
+    child_arg = (os.environ.get(PACKAGED_CHILD_ARG_ENV) or "").strip()
+    if executable and child_arg == FROZEN_STRATEGY_CHILD_ARG:
+        return executable, child_arg
+    if _frozen_dispatch_checked:
+        return sys.executable, FROZEN_STRATEGY_CHILD_ARG
+    raise RuntimeError(
+        "Frozen strategy child dispatcher is not installed by the parent entrypoint"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +546,22 @@ class UserStrategyRunner:
             return
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def _release_entry_resources(self, entry: _RunningStrategy) -> None:
+        """Close an owned process entry's files and remove its temporary dir."""
+        if entry.log_file is not None:
+            try:
+                entry.log_file.close()
+            except Exception:
+                logger.exception(
+                    "Failed to close log file handle for strategy %s (id=%s)",
+                    entry.name,
+                    entry.strategy_id,
+                )
+            finally:
+                entry.log_file = None
+        self._cleanup_temp_dir(entry.temp_dir)
+        entry.temp_dir = None
+
     def start(self, strategy_id: str) -> None:
         """Launch a strategy as a sandboxed subprocess.
 
@@ -478,11 +586,17 @@ class UserStrategyRunner:
             if proc.poll() is None:
                 raise RuntimeError(f"Strategy {strategy_id} is already running (pid={proc.pid})")
             # Process has exited — clean up stale entry
-            self._cleanup_temp_dir(self._running[strategy_id].temp_dir)
+            self._release_entry_resources(self._running[strategy_id])
             del self._running[strategy_id]
 
         name = self._get_name(strategy_id)
         log_path = self._log_dir / f"{strategy_id}.log"
+        frozen = bool(getattr(sys, "frozen", False))
+        child_executable, child_arg = (
+            _resolve_frozen_child_contract()
+            if frozen
+            else (sys.executable, "")
+        )
 
         # Create an isolated temp directory for this run
         temp_dir = Path(tempfile.mkdtemp(prefix=f"flinttrade_{strategy_id[:8]}_"))
@@ -494,21 +608,33 @@ class UserStrategyRunner:
 
         try:
             # Build command — bwrap on Linux when available, plain subprocess otherwise
-            use_bwrap = platform.system() == "Linux" and _is_bwrap_available()
+            use_bwrap = not frozen and platform.system() == "Linux" and _is_bwrap_available()
+            child_arg = child_arg if frozen else str(wrapper_path)
             if use_bwrap:
-                cmd: list[str] = _build_bwrap_command(sys.executable, str(wrapper_path))
-                # Append strategy path as arg to the wrapper
+                cmd: list[str] = _build_bwrap_command(child_executable, child_arg)
                 cmd.append(str(strategy_path))
             else:
-                cmd = [sys.executable, str(wrapper_path), str(strategy_path)]
+                cmd = [child_executable, child_arg, str(strategy_path)]
 
-            preexec_fn = _build_preexec_fn()
+            # A frozen one-file executable has a bootloader parent that must
+            # spawn the Python application process. Apply limits in the early
+            # child dispatcher instead of blocking that bootloader with
+            # RLIMIT_NPROC=0 before exec.
+            preexec_fn = None if frozen else _build_preexec_fn()
+            child_env = {
+                key: value
+                for key, value in os.environ.items()
+                if key not in _DESKTOP_CONTROL_ENV
+            }
 
             process = subprocess.Popen(  # noqa: S603
                 cmd,
+                stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=log_file,
                 cwd=str(temp_dir),
+                env=child_env,
+                close_fds=True,
                 preexec_fn=preexec_fn,
             )
         except Exception:
@@ -543,32 +669,53 @@ class UserStrategyRunner:
         if strategy_id not in self._running:
             raise RuntimeError(f"Strategy {strategy_id} is not running")
 
-        entry = self._running.pop(strategy_id)
+        entry = self._running[strategy_id]
         proc = entry.process
 
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+        except Exception:
+            # Retain the process identity for a later retry, but release parent
+            # resources immediately so shutdown failures do not leak handles.
+            self._release_entry_resources(entry)
+            raise
 
-        # Close the log file handle (prevents file lock on Windows)
-        if entry.log_file is not None:
-            try:
-                entry.log_file.close()
-            except Exception:
-                logger.exception(
-                    "Failed to close log file handle for strategy %s (id=%s)",
-                    entry.name,
-                    strategy_id,
-                )
-
-        # Clean up the per-run temporary directory
-        self._cleanup_temp_dir(entry.temp_dir)
+        self._running.pop(strategy_id, None)
+        self._release_entry_resources(entry)
 
         logger.info("Strategy stopped: %s (id=%s)", entry.name, strategy_id)
+
+    def stop_all(self) -> list[str]:
+        """Stop every uploaded strategy process currently owned by this runner.
+
+        All entries are attempted even if one process fails to terminate. A
+        combined ``RuntimeError`` is raised only after the remaining children
+        have been handled, allowing the parent shutdown owner to fail closed.
+
+        Returns:
+            Strategy IDs stopped during this call.
+        """
+        stopped: list[str] = []
+        failures: list[tuple[str, Exception]] = []
+        for strategy_id in tuple(self._running):
+            try:
+                self.stop(strategy_id)
+            except Exception as exc:  # noqa: BLE001 - shutdown continues for siblings
+                failures.append((strategy_id, exc))
+                logger.exception("Failed to stop uploaded strategy %s", strategy_id)
+            else:
+                stopped.append(strategy_id)
+
+        if failures:
+            failed_ids = ", ".join(strategy_id for strategy_id, _ in failures)
+            raise RuntimeError(f"Failed to stop uploaded strategies: {failed_ids}") from failures[0][1]
+        return stopped
 
     # ------------------------------------------------------------------
     # Delete
@@ -589,13 +736,9 @@ class UserStrategyRunner:
 
         # Stop first if running
         if strategy_id in self._running:
-            try:
-                self.stop(strategy_id)
-            except Exception:
-                logger.exception(
-                    "Failed to stop strategy %s before deletion; proceeding with file removal",
-                    strategy_id,
-                )
+            # Fail closed: deleting the files after a termination failure would
+            # hide a still-owned child behind a successful API response.
+            self.stop(strategy_id)
 
         # Remove files
         strategy_path.unlink(missing_ok=True)
@@ -649,6 +792,7 @@ class UserStrategyRunner:
             # Process has exited
             state = "crashed" if poll != 0 else "stopped"
             del self._running[strategy_id]
+            self._release_entry_resources(entry)
             return {
                 "strategy_id": strategy_id,
                 "name": name,

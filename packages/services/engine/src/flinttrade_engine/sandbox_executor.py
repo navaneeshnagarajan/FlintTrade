@@ -21,6 +21,9 @@ Security model — defence in depth:
    strategy that defeats layers 1+2 can still only crash its own
    process; the parent kills it on timeout via ``Popen.kill()``
    (``TerminateProcess`` on Windows, ``SIGKILL`` on POSIX).
+   The child uses a private POSIX session for atomic local timeout cleanup;
+   the desktop guardian also tracks descendant sessions for whole-app force
+   shutdown.
 4. **OS resource limits**: inside the child, POSIX ``setrlimit`` caps
    address space (256 MB), CPU seconds, open file descriptors, and
    ``RLIMIT_FSIZE=0`` (cannot write files). On Windows the equivalent
@@ -58,6 +61,7 @@ import logging
 import math
 import os
 import pickle
+import signal
 import statistics
 import struct
 import subprocess
@@ -70,6 +74,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.sandbox_executor")
+
+try:
+    import psutil as _psutil  # type: ignore[import]
+except ImportError:  # pragma: no cover - optional dependency
+    _psutil = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # AST-level pre-check — block sandbox escape primitives BEFORE `exec()` runs
@@ -218,30 +227,46 @@ def _tail_bytes(data: bytes, max_bytes: int) -> bytes:
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:
-    """Kill a sandbox child plus any descendants it managed to spawn.
+    """Kill a sandbox child and discoverable descendants by process identity.
 
-    POSIX: the child was started with ``start_new_session=True`` so it's
-    the leader of its own session/process group. ``killpg`` sends SIGKILL
-    to every process in that group atomically — covers grandchildren a
-    missed sandbox escape might have spawned.
-
-    Windows: no session/process-group primitive available without
-    ``pywin32`` Job Objects (follow-up). Fall back to ``proc.kill()``
-    which calls TerminateProcess on the immediate child only.
+    POSIX sandbox children own a private session/process group nested inside
+    the desktop guardian's discoverable descendant tree. Group signalling is
+    therefore both locally complete and compatible with whole-app containment.
+    Identity-based discovery remains the fallback when group signalling is
+    unavailable; the sidecar guardian is the final process owner.
     """
     if sys.platform != "win32":
         try:
-            import signal as _signal
-            os.killpg(os.getpgid(proc.pid), _signal.SIGKILL)
-            return
+            process_group = os.getpgid(proc.pid)
+            if process_group == proc.pid:
+                os.killpg(process_group, signal.SIGKILL)
+                return
         except (ProcessLookupError, PermissionError, OSError):
-            # Process already gone or we can't signal it — fall through
-            # to proc.kill() which is idempotent.
             pass
+
+    descendants: list[Any] = []
+    if _psutil is not None:
+        try:
+            descendants = _psutil.Process(proc.pid).children(recursive=True)
+        except (_psutil.NoSuchProcess, _psutil.AccessDenied, _psutil.ZombieProcess):
+            descendants = []
+
+    for child in reversed(descendants):
+        try:
+            child.kill()
+        except (_psutil.NoSuchProcess, _psutil.AccessDenied, _psutil.ZombieProcess):
+            pass
+
     try:
         proc.kill()
     except (ProcessLookupError, PermissionError, OSError):
         pass
+
+    if descendants and _psutil is not None:
+        try:
+            _psutil.wait_procs(descendants, timeout=1)
+        except Exception as exc:  # noqa: BLE001 - timeout cleanup must still return
+            logger.debug("sandbox: descendant reap wait failed: %s", exc)
 
 # ---------------------------------------------------------------------------
 # Allowed modules injected into the sandbox namespace
@@ -667,14 +692,9 @@ class SandboxExecutor:
         path_entries = [repo_root] + [p for p in sys.path if p]
         env["PYTHONPATH"] = os.pathsep.join(path_entries)
 
-        # On POSIX, put the child in its own process group so a missed
-        # escape that spawns grandchildren is still bounded by the
-        # group-kill at timeout. ``start_new_session=True`` calls
-        # ``setsid()`` in the child so it becomes the leader of a new
-        # session AND a new process group. Windows has no equivalent
-        # primitive here; ``proc.kill()`` (TerminateProcess) only kills
-        # the immediate child on Windows — Job Object support is a
-        # follow-up to bound grandchildren on Windows.
+        # Give this ephemeral sandbox a private group for atomic timeout kills.
+        # The desktop guardian independently discovers descendant sessions, so
+        # this does not escape whole-application force-shutdown containment.
         popen_kwargs: dict[str, Any] = {
             "stdin": subprocess.PIPE,
             "stdout": subprocess.PIPE,
@@ -705,12 +725,8 @@ class SandboxExecutor:
                 input=payload, timeout=self._timeout,
             )
         except subprocess.TimeoutExpired:
-            # Hard-kill on timeout. On POSIX we kill the WHOLE PROCESS
-            # GROUP so any grandchildren a missed escape might have
-            # spawned die with the parent — ``proc.kill()`` alone only
-            # signals the immediate child. On Windows we fall back to
-            # ``proc.kill()`` (TerminateProcess); Job Object follow-up
-            # will close that gap.
+            # Hard-kill the child on timeout. It remains inside the owning
+            # application's process tree for desktop force-shutdown.
             _kill_process_tree(proc)
             try:
                 stdout, stderr = proc.communicate(timeout=2)
