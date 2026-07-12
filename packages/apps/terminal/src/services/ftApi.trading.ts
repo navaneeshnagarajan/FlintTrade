@@ -39,6 +39,24 @@ export interface PendingOrder {
   reason: string;
 }
 
+export interface EmergencyActionOutcome {
+  verb: string;
+  attempted: boolean;
+  succeeded: boolean;
+  failure_code: string | null;
+}
+
+export interface KillSwitchActivation {
+  message: string;
+  reason: string;
+  is_active: boolean;
+  emergency_actions: {
+    policy: string;
+    complete: boolean;
+    outcomes: EmergencyActionOutcome[];
+  };
+}
+
 function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
   return {
     check_market_hours: raw.l1_order?.check_market_hours ?? true,
@@ -76,7 +94,7 @@ export const updateSafetyConfig = (config: Partial<SafetyConfig>) => {
 };
 
 export const activateKillSwitch = (reason: string) =>
-  post<{ status: string }>("safety/kill-switch", { reason });
+  post<KillSwitchActivation>("safety/kill-switch", { reason });
 
 export const resetKillSwitch = () => del<{ status: string }>("safety/kill-switch");
 

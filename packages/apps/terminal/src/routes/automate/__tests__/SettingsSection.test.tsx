@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -79,6 +80,7 @@ function createWrapper() {
 // ---------------------------------------------------------------------------
 
 import SettingsSection from "../SettingsSection";
+import { activateKillSwitch } from "@/services/ftApi";
 
 describe("SettingsSection", () => {
   beforeEach(() => {
@@ -98,5 +100,33 @@ describe("SettingsSection", () => {
   it("shows the Telegram Alerts heading", () => {
     render(<SettingsSection />, { wrapper: createWrapper() });
     expect(screen.getByText("Telegram Alerts")).toBeInTheDocument();
+  });
+
+  it("reports a latched kill switch when broker flattening is incomplete", async () => {
+    const user = userEvent.setup();
+    vi.mocked(activateKillSwitch).mockResolvedValueOnce({
+      message: "Kill switch activated, but broker actions did not complete",
+      reason: "operator request",
+      is_active: true,
+      emergency_actions: {
+        policy: "l5_emergency_flatten",
+        complete: false,
+        outcomes: [
+          {
+            verb: "cancel_all_orders",
+            attempted: false,
+            succeeded: false,
+            failure_code: "router_unavailable",
+          },
+        ],
+      },
+    });
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    await user.click(screen.getByRole("button", { name: "Activate Kill Switch" }));
+
+    expect(
+      await screen.findByText("Kill switch is active, but broker flattening is incomplete"),
+    ).toBeInTheDocument();
   });
 });

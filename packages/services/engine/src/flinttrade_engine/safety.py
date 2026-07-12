@@ -22,15 +22,14 @@ import secrets
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, time as dt_time, timedelta, timezone
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal, Protocol
 
-from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.exceptions import BrokerError, SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.models import Order, Position
-from flinttrade_core.openalgo_client import OpenAlgoClient
 from flinttrade_engine.request_context import RequestContext
 
 logger = logging.getLogger("flinttrade.engine.safety")
@@ -521,6 +520,320 @@ def gate_broker_write(
 
 
 # ---------------------------------------------------------------------------
+# Explicit L5/MTM emergency broker-write policy and parent injection contract
+# ---------------------------------------------------------------------------
+
+_EMERGENCY_REDUCING_VERBS = frozenset({"cancel_all_orders", "exit_all_positions"})
+
+
+@dataclass(frozen=True)
+class EmergencyWritePolicy:
+    """A closed list of exposure-reducing writes allowed during an emergency.
+
+    Emergency status changes *when* these writes may run; it never changes how
+    they reach a broker. Every verb still mints through :func:`gate_broker_write`
+    and dispatches through the current :class:`BrokerRouter` generation.
+    """
+
+    name: str
+    verbs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("emergency policy name must be non-empty")
+        if not self.verbs:
+            raise ValueError("emergency policy must contain at least one verb")
+        if len(set(self.verbs)) != len(self.verbs):
+            raise ValueError("emergency policy verbs must be unique")
+        forbidden = sorted(set(self.verbs) - _EMERGENCY_REDUCING_VERBS)
+        if forbidden:
+            raise ValueError(
+                "emergency policy may contain only exposure-reducing verbs; "
+                f"forbidden={forbidden}"
+            )
+
+
+L5_EMERGENCY_POLICY = EmergencyWritePolicy(
+    name="l5_emergency_flatten",
+    verbs=("cancel_all_orders", "exit_all_positions"),
+)
+"""L5 kill-switch policy: cancel resting orders, then flatten positions."""
+
+MTM_EMERGENCY_POLICY = EmergencyWritePolicy(
+    name="mtm_loss_flatten",
+    verbs=("exit_all_positions",),
+)
+"""MTM breaker policy: preserve its historical close-all-only behaviour."""
+
+
+@dataclass(frozen=True)
+class EmergencyBrokerTarget:
+    """Selector-bound principal supplied by the verified parent boundary."""
+
+    request_ctx: RequestContext
+    adapter_id: str
+    account_id: str
+
+    def __post_init__(self) -> None:
+        adapter_id = self.adapter_id.strip()
+        account_id = self.account_id.strip()
+        if not adapter_id or adapter_id != self.adapter_id:
+            raise SafetyBypassError("emergency target adapter_id is missing or non-canonical")
+        if not account_id or account_id != self.account_id:
+            raise SafetyBypassError("emergency target account_id is missing or non-canonical")
+        if self.request_ctx.mode != "live":
+            raise SafetyBypassError("emergency broker target requires an authenticated live principal")
+        if not self.request_ctx.jti or not self.request_ctx.actor_id:
+            raise SafetyBypassError("emergency broker target requires a non-empty jti and actor_id")
+        expected_selector = f"{adapter_id}:{account_id}"
+        if self.request_ctx.selector != expected_selector:
+            raise SafetyBypassError(
+                "emergency broker target must exactly match the RequestContext selector"
+            )
+
+
+@dataclass(frozen=True)
+class EmergencyVerbOutcome:
+    """Bounded result for one policy verb; raw broker errors never escape."""
+
+    verb: str
+    succeeded: bool
+    attempted: bool = True
+    failure_code: str = ""
+
+    def __post_init__(self) -> None:
+        if self.verb not in _EMERGENCY_REDUCING_VERBS:
+            raise ValueError(f"unknown emergency verb {self.verb!r}")
+        if self.succeeded and (not self.attempted or self.failure_code):
+            raise ValueError("a successful emergency outcome must be attempted and have no failure code")
+        if not self.succeeded and not self.failure_code:
+            raise ValueError("a failed emergency outcome requires a bounded failure code")
+
+
+@dataclass(frozen=True)
+class EmergencyDispatchResult:
+    """Aggregate result for one explicit emergency-policy dispatch."""
+
+    policy: EmergencyWritePolicy
+    outcomes: tuple[EmergencyVerbOutcome, ...]
+
+    def __post_init__(self) -> None:
+        if tuple(outcome.verb for outcome in self.outcomes) != self.policy.verbs:
+            raise ValueError("emergency outcomes must match policy verbs in policy order")
+
+    @classmethod
+    def failed(
+        cls,
+        policy: EmergencyWritePolicy,
+        failure_code: str,
+        *,
+        attempted: bool = False,
+    ) -> EmergencyDispatchResult:
+        """Return the same bounded failure for every verb in ``policy``."""
+        return cls(
+            policy=policy,
+            outcomes=tuple(
+                EmergencyVerbOutcome(
+                    verb,
+                    succeeded=False,
+                    attempted=attempted,
+                    failure_code=failure_code,
+                )
+                for verb in policy.verbs
+            ),
+        )
+
+    @property
+    def complete(self) -> bool:
+        """Whether every required policy verb reached a successful adapter result."""
+        return bool(self.outcomes) and all(outcome.succeeded for outcome in self.outcomes)
+
+    @property
+    def failure_codes(self) -> tuple[str, ...]:
+        """Bounded failure codes in policy order (successful verbs omitted)."""
+        return tuple(outcome.failure_code for outcome in self.outcomes if not outcome.succeeded)
+
+    def succeeded(self, verb: str) -> bool:
+        """Return whether one named policy verb completed successfully."""
+        return any(outcome.verb == verb and outcome.succeeded for outcome in self.outcomes)
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe result without raw broker exception text."""
+        return {
+            "policy": self.policy.name,
+            "complete": self.complete,
+            "outcomes": [
+                {
+                    "verb": outcome.verb,
+                    "attempted": outcome.attempted,
+                    "succeeded": outcome.succeeded,
+                    "failure_code": outcome.failure_code or None,
+                }
+                for outcome in self.outcomes
+            ],
+        }
+
+
+class EmergencyRouter(Protocol):
+    """BrokerRouter surface required by the injected emergency dispatcher."""
+
+    def execute_gated(
+        self,
+        request_ctx: RequestContext,
+        *,
+        verb: str,
+        payload: Mapping[str, Any],
+        safety_ctx: SafetyContext,
+        adapter_id: str,
+        account_id: str,
+    ) -> Awaitable[Any]: ...
+
+
+class EmergencyDispatcher(Protocol):
+    """Parent-injected synchronous emergency execution contract."""
+
+    def dispatch(
+        self,
+        policy: EmergencyWritePolicy,
+        *,
+        reason: str,
+    ) -> EmergencyDispatchResult: ...
+
+
+class GatedEmergencyBrokerDispatcher:
+    """Mint and dispatch emergency verbs through the current BrokerRouter.
+
+    The parent owns all environment-specific dependencies:
+
+    * ``target_provider`` returns an authenticated, selector-bound live principal;
+    * ``router_provider`` resolves the *currently published* router separately for
+      every verb, so retained references cannot evade generation revocation; and
+    * ``run_awaitable`` marshals router work onto the owning broker event loop.
+
+    There is deliberately no raw-client fallback. Missing targets, missing or
+    retired routers, ACL refusals, unsupported verbs, and broker errors become
+    bounded failed outcomes while the caller's L5 latch remains active.
+    """
+
+    def __init__(
+        self,
+        *,
+        router_provider: Callable[[], EmergencyRouter | None],
+        target_provider: Callable[[], EmergencyBrokerTarget],
+        run_awaitable: Callable[[Awaitable[Any]], Any],
+    ) -> None:
+        self._router_provider = router_provider
+        self._target_provider = target_provider
+        self._run_awaitable = run_awaitable
+
+    @staticmethod
+    def _failure_code(exc: Exception) -> str:
+        if isinstance(exc, SafetyBypassError):
+            return "safety_refused"
+        if isinstance(exc, UnsupportedCapabilityError):
+            return "unsupported_capability"
+        if isinstance(exc, KeyError):
+            return "target_unavailable"
+        if isinstance(exc, BrokerError):
+            return "broker_refused"
+        return "dispatch_failed"
+
+    def dispatch(
+        self,
+        policy: EmergencyWritePolicy,
+        *,
+        reason: str,
+    ) -> EmergencyDispatchResult:
+        """Execute ``policy`` in order with a fresh gate and router per verb."""
+        try:
+            target = self._target_provider()
+            if not isinstance(target, EmergencyBrokerTarget):
+                raise SafetyBypassError("emergency target provider returned an invalid target")
+        except Exception as exc:  # noqa: BLE001 - target failure is bounded and fail-closed
+            logger.error(
+                "Emergency policy %s refused before dispatch: target_unavailable (%s)",
+                policy.name,
+                type(exc).__name__,
+            )
+            return EmergencyDispatchResult.failed(policy, "target_unavailable")
+
+        reason_hash = hashlib.sha256(str(reason).encode("utf-8")).hexdigest()
+        outcomes: list[EmergencyVerbOutcome] = []
+        for verb in policy.verbs:
+            try:
+                router = self._router_provider()
+            except Exception as exc:  # noqa: BLE001 - provider failure is bounded
+                logger.error(
+                    "Emergency policy %s could not resolve current router (%s)",
+                    policy.name,
+                    type(exc).__name__,
+                )
+                outcomes.append(
+                    EmergencyVerbOutcome(
+                        verb,
+                        succeeded=False,
+                        attempted=False,
+                        failure_code="router_unavailable",
+                    )
+                )
+                continue
+            if router is None:
+                outcomes.append(
+                    EmergencyVerbOutcome(
+                        verb,
+                        succeeded=False,
+                        attempted=False,
+                        failure_code="router_unavailable",
+                    )
+                )
+                continue
+
+            canonical: dict[str, Any] = {
+                "_op": verb,
+                "_emergency_policy": policy.name,
+                "_emergency_reason_hash": reason_hash,
+            }
+            try:
+                safety_ctx = gate_broker_write(
+                    verb,
+                    canonical,
+                    target.request_ctx,
+                    target.adapter_id,
+                    account_id=target.account_id,
+                )
+                self._run_awaitable(
+                    router.execute_gated(
+                        target.request_ctx,
+                        verb=verb,
+                        payload=canonical,
+                        safety_ctx=safety_ctx,
+                        adapter_id=target.adapter_id,
+                        account_id=target.account_id,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - continue to the next reducing verb
+                failure_code = self._failure_code(exc)
+                logger.error(
+                    "Emergency policy %s verb %s failed closed: %s (%s)",
+                    policy.name,
+                    verb,
+                    failure_code,
+                    type(exc).__name__,
+                )
+                outcomes.append(
+                    EmergencyVerbOutcome(
+                        verb,
+                        succeeded=False,
+                        failure_code=failure_code,
+                    )
+                )
+                continue
+            outcomes.append(EmergencyVerbOutcome(verb, succeeded=True))
+
+        return EmergencyDispatchResult(policy=policy, outcomes=tuple(outcomes))
+
+
+# ---------------------------------------------------------------------------
 # SafetyGate — the one-shot gate_id consumer (contract §8.0a)
 # ---------------------------------------------------------------------------
 
@@ -978,79 +1291,112 @@ class DailyPnLLimits:
 class KillSwitch:
     """Layer 5: Emergency kill — cancel all orders + close all positions.
 
-    Once activated, blocks ALL orders until manually reset.
+    Once activated, blocks ALL orders until manually reset. Broker actions use
+    only an injected :class:`EmergencyDispatcher`; a missing dispatcher latches
+    L5 and reports failure without falling back to a raw client.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, emergency_dispatcher: EmergencyDispatcher | None = None) -> None:
         self._active = False
         self._reason: str = ""
+        self._emergency_dispatcher = emergency_dispatcher
+        self._last_emergency_result: EmergencyDispatchResult | None = None
+        self._dispatches_in_progress = 0
+        self._condition = threading.Condition()
 
     @property
     def is_active(self) -> bool:
-        return self._active
+        with self._condition:
+            return self._active
 
     @property
     def reason(self) -> str:
-        return self._reason
+        with self._condition:
+            return self._reason
 
-    def activate(self, reason: str, client: OpenAlgoClient | None = None) -> None:
-        """Activate kill switch. Optionally cancel/close via the API client."""
-        self._active = True
-        self._reason = reason
+    @property
+    def last_emergency_result(self) -> EmergencyDispatchResult | None:
+        """Most recent bounded L5 broker-action result, if activation ran."""
+        with self._condition:
+            return self._last_emergency_result
+
+    def bind_emergency_dispatcher(self, dispatcher: EmergencyDispatcher | None) -> None:
+        """Bind the parent-owned gated dispatcher used by later activations."""
+        with self._condition:
+            self._emergency_dispatcher = dispatcher
+
+    def activate(
+        self,
+        reason: str,
+        *,
+        emergency_dispatcher: EmergencyDispatcher | None = None,
+    ) -> EmergencyDispatchResult:
+        """Latch L5, then synchronously run its explicit reducing-write policy.
+
+        Concurrent activations execute independently because each parent may bind
+        a different selector. ``reset`` waits for all admitted emergency
+        dispatches so the L5 latch cannot clear while a flatten is still running.
+        """
+        with self._condition:
+            self._active = True
+            self._reason = str(reason)
+            self._dispatches_in_progress += 1
+            dispatcher = (
+                emergency_dispatcher
+                if emergency_dispatcher is not None
+                else self._emergency_dispatcher
+            )
+
         logger.critical("KILL SWITCH ACTIVATED: %s", reason)
-
-        if client is not None:
-            # Both methods are async — run them synchronously from this
-            # synchronous context using asyncio.run() when no event loop is
-            # active, or by scheduling onto the running loop otherwise.
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is not None and loop.is_running():
-                # Already inside an async context — schedule as a fire-and-forget
-                # task so the kill commands are sent without blocking the caller.
-                async def _emergency_close() -> None:
-                    try:
-                        await client.cancel_all_orders()
-                        logger.info("Kill switch: all orders cancelled")
-                    except Exception as exc:
-                        logger.error("Kill switch: cancel_all_orders failed: %s", exc)
-                    try:
-                        await client.close_position()
-                        logger.info("Kill switch: close_position sent")
-                    except Exception as exc:
-                        logger.error("Kill switch: close_position failed: %s", exc)
-
-                asyncio.ensure_future(_emergency_close())
+        try:
+            if dispatcher is None:
+                logger.error(
+                    "Kill switch broker actions failed closed: emergency dispatcher unavailable"
+                )
+                result = EmergencyDispatchResult.failed(
+                    L5_EMERGENCY_POLICY,
+                    "dispatcher_unavailable",
+                )
             else:
-                # No running event loop — block until both calls complete.
-                async def _emergency_close_blocking() -> None:
-                    try:
-                        await client.cancel_all_orders()
-                        logger.info("Kill switch: all orders cancelled")
-                    except Exception as exc:
-                        logger.error("Kill switch: cancel_all_orders failed: %s", exc)
-                    try:
-                        await client.close_position()
-                        logger.info("Kill switch: close_position sent")
-                    except Exception as exc:
-                        logger.error("Kill switch: close_position failed: %s", exc)
-
-                asyncio.run(_emergency_close_blocking())
+                candidate = dispatcher.dispatch(L5_EMERGENCY_POLICY, reason=str(reason))
+                if not isinstance(candidate, EmergencyDispatchResult):
+                    raise TypeError("emergency dispatcher returned an invalid result")
+                result = candidate
+        except Exception as exc:  # noqa: BLE001 - L5 remains latched on parent failure
+            logger.error(
+                "Kill switch broker actions failed closed: dispatch_failed (%s)",
+                type(exc).__name__,
+            )
+            result = EmergencyDispatchResult.failed(
+                L5_EMERGENCY_POLICY,
+                "dispatch_failed",
+                attempted=True,
+            )
+        finally:
+            with self._condition:
+                self._last_emergency_result = result
+                self._dispatches_in_progress -= 1
+                if self._dispatches_in_progress == 0:
+                    self._condition.notify_all()
+        return result
 
     def reset(self) -> None:
         """Manually deactivate kill switch."""
+        with self._condition:
+            while self._dispatches_in_progress:
+                self._condition.wait()
+            self._active = False
+            self._reason = ""
         logger.warning("Kill switch deactivated — manual override by operator")
-        self._active = False
-        self._reason = ""
 
     def validate(self) -> SafetyResult:
-        if self._active:
+        with self._condition:
+            active = self._active
+            reason = self._reason
+        if active:
             return SafetyResult(
                 SafetyVerdict.FAIL, "L5_KILL",
-                f"Kill switch active: {self._reason}",
+                f"Kill switch active: {reason}",
             )
         return SafetyResult(SafetyVerdict.PASS, "L5_KILL")
 
@@ -1087,13 +1433,22 @@ class SafetySystem:
             ...
     """
 
-    def __init__(self, config: SafetyConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: SafetyConfig | None = None,
+        *,
+        emergency_dispatcher: EmergencyDispatcher | None = None,
+    ) -> None:
         cfg = config or SafetyConfig()
         self.l1_order = OrderValidation(cfg.price_deviation_pct, cfg.qty_limits, cfg.check_market_hours)
         self.l2_position = PositionLimits(cfg.max_positions, cfg.max_margin_pct)
         self.l3_portfolio = PortfolioRisk(cfg.max_net_delta, cfg.max_net_vega)
         self.l4_pnl = DailyPnLLimits(cfg.pnl_pause_pct, cfg.pnl_kill_pct)
-        self.l5_kill = KillSwitch()
+        self.l5_kill = KillSwitch(emergency_dispatcher=emergency_dispatcher)
+
+    def bind_emergency_dispatcher(self, dispatcher: EmergencyDispatcher | None) -> None:
+        """Expose the parent injection point without importing Flask or gateway."""
+        self.l5_kill.bind_emergency_dispatcher(dispatcher)
 
     def check_order(
         self,
@@ -1554,34 +1909,49 @@ class MTMCircuitBreaker:
     is called (typically at the next market open).
 
     Adapted from the MTM-based short straddle pattern in
-    ``algo_trading_strategies_india``, adapted for async OpenAlgo execution.
+    ``algo_trading_strategies_india``, adapted for gated router execution.
 
     Args:
-        config:  :class:`MTMCircuitBreakerConfig` with the loss limit.
-        client:  Optional :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`
-                 used to close all positions when the breaker trips.
+        config: :class:`MTMCircuitBreakerConfig` with the loss limit.
+        emergency_dispatcher: Parent-owned gated dispatcher. Missing injection
+            fails closed without weakening the triggered breaker state.
 
     Example::
 
         mtm_cb = MTMCircuitBreaker(config=MTMCircuitBreakerConfig(daily_loss_limit=-30000))
-        result = await mtm_cb.check_and_act(daily_pnl=-35000, activity_logger=my_logger)
-        if result:
-            # breaker fired — all positions were closed
+        fired = await mtm_cb.check_and_act(daily_pnl=-35000, activity_logger=my_logger)
+        if fired and mtm_cb.last_emergency_result and mtm_cb.last_emergency_result.complete:
+            # breaker fired and the gated exit-all completed
     """
 
     def __init__(
         self,
         config: MTMCircuitBreakerConfig | None = None,
-        client: OpenAlgoClient | None = None,
+        *,
+        emergency_dispatcher: EmergencyDispatcher | None = None,
     ) -> None:
         self._cfg = config or MTMCircuitBreakerConfig()
-        self._client = client
+        self._emergency_dispatcher = emergency_dispatcher
         self._triggered = False
+        self._last_emergency_result: EmergencyDispatchResult | None = None
+        self._lock = threading.Lock()
 
     @property
     def is_triggered(self) -> bool:
         """True after the circuit breaker has fired today."""
-        return self._triggered
+        with self._lock:
+            return self._triggered
+
+    @property
+    def last_emergency_result(self) -> EmergencyDispatchResult | None:
+        """Most recent bounded MTM flatten result."""
+        with self._lock:
+            return self._last_emergency_result
+
+    def bind_emergency_dispatcher(self, dispatcher: EmergencyDispatcher | None) -> None:
+        """Bind the parent-owned gated dispatcher used by later breaches."""
+        with self._lock:
+            self._emergency_dispatcher = dispatcher
 
     async def check_and_act(
         self,
@@ -1596,17 +1966,17 @@ class MTMCircuitBreaker:
                               If ``None`` the module logger is used.
 
         Returns:
-            ``True`` if the breaker fired (and close_position was attempted),
+            ``True`` if the breaker fired (and gated flattening was requested),
             ``False`` if still within limits or already triggered today.
         """
-        if self._triggered:
-            return False
+        with self._lock:
+            if self._triggered:
+                return False
+            if daily_pnl > self._cfg.daily_loss_limit:
+                return False
+            self._triggered = True
+            dispatcher = self._emergency_dispatcher
 
-        if daily_pnl > self._cfg.daily_loss_limit:
-            return False
-
-        # Threshold breached — fire the breaker
-        self._triggered = True
         log = activity_logger or logger
         log.critical(
             "MTMCircuitBreaker: daily P&L %.2f breached limit %.2f — exiting ALL positions",
@@ -1614,16 +1984,50 @@ class MTMCircuitBreaker:
             self._cfg.daily_loss_limit,
         )
 
-        if self._client is not None:
-            try:
-                await self._client.close_position()
-                log.info("MTMCircuitBreaker: close_position API call successful")
-            except Exception as exc:
-                log.error("MTMCircuitBreaker: close_position failed: %s", exc)
+        try:
+            if dispatcher is None:
+                result = EmergencyDispatchResult.failed(
+                    MTM_EMERGENCY_POLICY,
+                    "dispatcher_unavailable",
+                )
+            else:
+                candidate = await asyncio.to_thread(
+                    dispatcher.dispatch,
+                    MTM_EMERGENCY_POLICY,
+                    reason=(
+                        f"daily P&L {daily_pnl:.2f} breached limit "
+                        f"{self._cfg.daily_loss_limit:.2f}"
+                    ),
+                )
+                if not isinstance(candidate, EmergencyDispatchResult):
+                    raise TypeError("emergency dispatcher returned an invalid result")
+                result = candidate
+        except Exception as exc:  # noqa: BLE001 - breaker remains triggered
+            log.error(
+                "MTMCircuitBreaker: gated emergency dispatch failed closed (%s)",
+                type(exc).__name__,
+            )
+            result = EmergencyDispatchResult.failed(
+                MTM_EMERGENCY_POLICY,
+                "dispatch_failed",
+                attempted=True,
+            )
+
+        with self._lock:
+            self._last_emergency_result = result
+        if result.complete:
+            log.info("MTMCircuitBreaker: gated exit-all completed")
+        else:
+            log.error(
+                "MTMCircuitBreaker: gated exit-all incomplete (%s)",
+                ",".join(result.failure_codes),
+            )
 
         return True
 
     def reset_daily(self) -> None:
         """Reset the triggered state at the start of a new trading day."""
-        self._triggered = False
+        with self._lock:
+            self._triggered = False
+            self._last_emergency_result = None
         logger.info("MTMCircuitBreaker: reset for new trading day")

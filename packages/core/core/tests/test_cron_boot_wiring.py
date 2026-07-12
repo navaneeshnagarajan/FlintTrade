@@ -1,4 +1,4 @@
-"""Tripwire: ``FlintTradeApp.start()`` must start the cron scheduler.
+"""Tripwire: ``FlintTradeApp.start()`` must arm calendar-owned cron jobs.
 
 Regression guard for the usability-recovery campaign. ``register_builtin_jobs()``
 was called during boot but ``cron.start()`` was not, so APScheduler never ran —
@@ -30,28 +30,44 @@ def _find_method(tree: ast.AST, class_name: str, method_name: str) -> ast.AST | 
 
 
 @pytest.mark.unit
-def test_flinttrade_app_start_calls_cron_start() -> None:
+def test_flinttrade_app_start_arms_cron_through_calendar_owner() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
     start = _find_method(tree, "FlintTradeApp", "start")
+    calendar_start = _find_method(tree, "FlintTradeApp", "_start_calendar_schedulers")
     assert start is not None, "FlintTradeApp.start not found in app.py"
+    assert calendar_start is not None, "FlintTradeApp._start_calendar_schedulers not found"
 
-    cron_start_calls = [
+    arms_calendar_runtime = [
         node
         for node in ast.walk(start)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "start"
+        and node.func.attr == "_start_calendar_schedulers"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+    ]
+    assert arms_calendar_runtime, (
+        "FlintTradeApp.start() must arm market-sensitive schedulers after an "
+        "authoritative calendar is loaded."
+    )
+
+    calls = [
+        node
+        for node in ast.walk(calendar_start)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
         and isinstance(node.func.value, ast.Attribute)
         and node.func.value.attr == "cron"
         and isinstance(node.func.value.value, ast.Name)
         and node.func.value.value.id == "self"
     ]
-
-    assert cron_start_calls, (
-        "FlintTradeApp.start() must call self.cron.start() after "
-        "register_builtin_jobs() — otherwise APScheduler never runs and the "
-        "nightly DB-optimise and other built-in cron jobs silently never fire."
+    register_calls = [node for node in calls if node.func.attr == "register_builtin_jobs"]
+    start_calls = [node for node in calls if node.func.attr == "start"]
+    assert register_calls and start_calls, (
+        "_start_calendar_schedulers() must register built-in jobs and call "
+        "self.cron.start(); otherwise APScheduler remains inert."
     )
+    assert register_calls[0].lineno < start_calls[0].lineno
 
 
 @pytest.mark.unit

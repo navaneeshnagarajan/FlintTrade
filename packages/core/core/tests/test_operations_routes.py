@@ -156,6 +156,166 @@ class TestSafetyConfigUpdate:
 
 
 # ---------------------------------------------------------------------------
+# Emergency kill switch — gated broker writes
+# ---------------------------------------------------------------------------
+
+
+class _EmergencyAdapter:
+    """Token-checking adapter used by the kill-switch route integration tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    @staticmethod
+    def _require_router(token: object | None) -> None:
+        from flinttrade_core.exceptions import SafetyBypassError
+        from flinttrade_gateway.brokers._base import ROUTER_TOKEN
+
+        if token is not ROUTER_TOKEN:
+            raise SafetyBypassError("emergency adapter write bypassed BrokerRouter")
+
+    async def cancel_all_orders(self, session, *, _router_token=None):
+        self._require_router(_router_token)
+        self.calls.append("cancel_all_orders")
+        return {"status": "ok"}
+
+    async def exit_all_positions(self, session, *, _router_token=None):
+        self._require_router(_router_token)
+        self.calls.append("exit_all_positions")
+        return {"status": "ok"}
+
+
+class TestKillSwitchGatedWrites:
+    """POST /safety/kill-switch latches L5 and uses the current BrokerRouter."""
+
+    @staticmethod
+    def _live_headers() -> dict[str, str]:
+        from flinttrade_core.auth_routes import _create_token
+
+        headers = _auth_headers()
+        # Emergency flattening deliberately does not require a PIN re-unlock,
+        # but it still requires an authenticated live principal for selector ACL.
+        token = _create_token("testuser", mode="live", live_mode_unlocked=False)
+        headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    @staticmethod
+    def _router(adapter, *, allowed_actor: str = "testuser"):
+        from datetime import datetime, timezone
+
+        from flinttrade_core.exceptions import SafetyBypassError
+        from flinttrade_engine.safety import SafetyGate
+        from flinttrade_gateway.brokers._base import Session
+        from flinttrade_gateway.router import BrokerRouter
+
+        def session_provider(request_ctx, adapter_id, account_id):
+            if request_ctx.actor_id != allowed_actor:
+                raise SafetyBypassError("selector ACL refused actor")
+            return Session(
+                access_token="token",
+                expires_at=datetime.now(tz=timezone.utc).timestamp() + 3600,
+                account_id=account_id,
+                adapter_id=adapter_id,
+            )
+
+        gate = SafetyGate()
+        return BrokerRouter(
+            {"dhan": adapter},
+            session_provider,
+            consume_gate=gate.consume,
+        )
+
+    def test_routes_cancel_and_exit_through_gated_token_adapter(self, flask_app, client):
+        from flinttrade_engine.safety import SafetySystem
+
+        adapter = _EmergencyAdapter()
+        safety = SafetySystem()
+        original = {
+            "SAFETY": flask_app.config.get("SAFETY"),
+            "BROKER_ROUTER": flask_app.config.get("BROKER_ROUTER"),
+            "CLIENT": flask_app.config.get("CLIENT"),
+        }
+        flask_app.config.update(
+            SAFETY=safety,
+            BROKER_ROUTER=self._router(adapter),
+            CLIENT=None,
+        )
+        try:
+            response = client.post(
+                "/api/v1/safety/kill-switch",
+                json={
+                    "reason": "test emergency",
+                    "broker": "dhan",
+                    "account_id": "acct-1",
+                },
+                headers=self._live_headers(),
+            )
+
+            assert response.status_code == 200
+            assert safety.l5_kill.is_active
+            assert adapter.calls == ["cancel_all_orders", "exit_all_positions"]
+            assert response.get_json()["data"]["emergency_actions"]["complete"] is True
+        finally:
+            safety.l5_kill.reset()
+            flask_app.config.update(original)
+
+    def test_selector_acl_refusal_latches_l5_without_adapter_write(self, flask_app, client):
+        from flinttrade_engine.safety import SafetySystem
+
+        adapter = _EmergencyAdapter()
+        safety = SafetySystem()
+        original_safety = flask_app.config.get("SAFETY")
+        original_router = flask_app.config.get("BROKER_ROUTER")
+        flask_app.config["SAFETY"] = safety
+        flask_app.config["BROKER_ROUTER"] = self._router(adapter, allowed_actor="someone-else")
+        try:
+            response = client.post(
+                "/api/v1/safety/kill-switch",
+                json={"broker": "dhan", "account_id": "acct-1"},
+                headers=self._live_headers(),
+            )
+
+            assert response.status_code == 207
+            assert safety.l5_kill.is_active
+            assert adapter.calls == []
+            payload = response.get_json()
+            assert payload["status"] == "partial"
+            assert payload["data"]["is_active"] is True
+            assert payload["data"]["emergency_actions"]["complete"] is False
+        finally:
+            safety.l5_kill.reset()
+            flask_app.config["SAFETY"] = original_safety
+            flask_app.config["BROKER_ROUTER"] = original_router
+
+    def test_missing_target_fails_closed_and_never_uses_raw_client(self, flask_app, client):
+        from flinttrade_engine.safety import SafetySystem
+
+        safety = SafetySystem()
+        raw_client = MagicMock()
+        original = {
+            "SAFETY": flask_app.config.get("SAFETY"),
+            "BROKER_ROUTER": flask_app.config.get("BROKER_ROUTER"),
+            "CLIENT": flask_app.config.get("CLIENT"),
+        }
+        flask_app.config.update(SAFETY=safety, BROKER_ROUTER=None, CLIENT=raw_client)
+        try:
+            response = client.post(
+                "/api/v1/safety/kill-switch",
+                json={"reason": "router unavailable"},
+                headers=self._live_headers(),
+            )
+
+            assert response.status_code == 207
+            assert safety.l5_kill.is_active
+            assert response.get_json()["status"] == "partial"
+            raw_client.cancel_all_orders.assert_not_called()
+            raw_client.close_position.assert_not_called()
+        finally:
+            safety.l5_kill.reset()
+            flask_app.config.update(original)
+
+
+# ---------------------------------------------------------------------------
 # Security settings
 # ---------------------------------------------------------------------------
 

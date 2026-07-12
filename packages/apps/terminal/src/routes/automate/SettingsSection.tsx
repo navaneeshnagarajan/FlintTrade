@@ -117,14 +117,22 @@ export default function SettingsSection() {
 
   const activateKillMutation = useMutation({
     mutationFn: (reason: string) => activateKillSwitch(reason),
-    onSuccess: () => {
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ["safetyConfig"] });
-      setToast({ msg: "Kill switch activated", variant: "success" });
+      const flattenComplete = result.emergency_actions.complete;
+      setToast({
+        msg: flattenComplete
+          ? "Kill switch activated; emergency broker actions completed"
+          : "Kill switch is active, but broker flattening is incomplete",
+        variant: flattenComplete ? "success" : "error",
+      });
       setKillReason("");
       emitNotification({
         category: "system",
         title: "Kill switch ACTIVATED",
-        body: "All live order routing is halted. Reset the kill switch to resume trading.",
+        body: flattenComplete
+          ? "All live order routing is halted and emergency broker actions completed."
+          : "Live order routing is halted, but one or more broker flattening actions did not complete. Review broker state before resetting.",
       });
     },
     onError: (err: Error) => {

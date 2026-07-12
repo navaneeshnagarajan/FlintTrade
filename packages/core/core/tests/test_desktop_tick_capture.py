@@ -11,7 +11,7 @@ import builtins
 import logging
 import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from flask import Flask
@@ -282,6 +282,35 @@ def test_failed_storage_close_remains_retryable_and_unpublished(
     assert storage.closed is True
     assert runtime._storage_closed is True
     assert "DESKTOP_TICK_CAPTURE_RUNTIME" not in flask_app.config
+
+
+@pytest.mark.unit
+def test_failed_final_checkpoint_keeps_desktop_storage_open_for_stop_retry() -> None:
+    recorder = MagicMock(pending_tick_count=0)
+    storage = MagicMock()
+    checkpoint_owner = MagicMock()
+    checkpoint_owner.persist.side_effect = [RuntimeError("checkpoint unavailable"), None]
+    runtime = desktop._DesktopTickCaptureRuntime(
+        recorder,
+        storage,
+        "",
+        checkpoint_owner=checkpoint_owner,
+    )
+
+    with pytest.raises(RuntimeError, match="tick storage shutdown failed"):
+        runtime.stop(timeout=1)
+
+    storage.close.assert_not_called()
+    assert runtime._storage_closed is False
+
+    runtime.stop(timeout=1)
+
+    assert checkpoint_owner.persist.call_args_list == [
+        call(force=True),
+        call(force=True),
+    ]
+    storage.close.assert_called_once_with()
+    assert runtime._storage_closed is True
 
 
 @pytest.mark.unit
@@ -615,6 +644,7 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
 ) -> None:
     import flinttrade_core.agent_routes as agent_routes
     import flinttrade_core.smart_order_routes as smart_routes
+    import flinttrade_engine.strategy_routes as strategy_routes
 
     events: list[str] = []
     stream_shutdown = threading.Event()
@@ -628,10 +658,12 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
         assert events == [
             "smart-stop",
             "agent-stop",
+            "uploaded-stop",
             "router-retire",
             "rotation-stop",
             "capture-stop",
         ]
+        events.append("requests-drained")
         return True
 
     tracker.wait_for_idle.side_effect = wait_for_idle
@@ -656,6 +688,11 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
         lambda **_kwargs: events.append("smart-stop") or True,
     )
     monkeypatch.setattr(
+        strategy_routes,
+        "shutdown_strategy_runtime",
+        lambda _app: events.append("uploaded-stop") or [],
+    )
+    monkeypatch.setattr(
         desktop,
         "retire_broker_router_generation",
         lambda _app: events.append("router-retire") or True,
@@ -669,6 +706,52 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
     desktop.serve(5100, ready_writer=lambda _message: None)
 
     tracker.wait_for_idle.assert_called_once()
+    assert events == [
+        "smart-stop",
+        "agent-stop",
+        "uploaded-stop",
+        "router-retire",
+        "rotation-stop",
+        "capture-stop",
+        "requests-drained",
+        "uploaded-stop",
+        "router-retire",
+    ]
+
+
+@pytest.mark.unit
+def test_serve_defers_real_capture_storage_close_until_requests_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    recorder = MagicMock(pending_tick_count=0)
+    recorder.stop.side_effect = lambda: events.append("capture-stop")
+    storage = MagicMock()
+    storage.close.side_effect = lambda: events.append("storage-close")
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "")
+    tracker = MagicMock()
+
+    def wait_for_idle(_timeout: float) -> bool:
+        events.append("requests-drained")
+        assert "storage-close" not in events
+        return True
+
+    tracker.wait_for_idle.side_effect = wait_for_idle
+    flask_app = Flask("desktop-deferred-tick-storage")
+    flask_app.config.update(
+        DESKTOP_TICK_CAPTURE_RUNTIME=runtime,
+        RUNTIME_REQUEST_TRACKER=tracker,
+    )
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
+    )
+
+    desktop.serve(5100, ready_writer=lambda _message: None)
+
+    assert events == ["capture-stop", "requests-drained", "storage-close"]
+    storage.close.assert_called_once_with()
 
 
 @pytest.mark.unit

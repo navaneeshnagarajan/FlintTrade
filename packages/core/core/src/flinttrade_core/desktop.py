@@ -49,6 +49,7 @@ from typing import Any, Protocol
 # Importing the app module first applies the UTF-8 stdout reconfigure and the
 # frozen-mode sys.path / dist-path wiring (see ``flinttrade_core.app``).
 from .app import (
+    _OrderFlowCheckpointOwner,
     _build_tick_recorder,
     _prepare_tick_orderflow_state,
     _record_tick_capture_failure,
@@ -105,6 +106,7 @@ class _DesktopTickCaptureRuntime:
         api_key: str,
         *,
         storage_lock: Any | None = None,
+        checkpoint_owner: _OrderFlowCheckpointOwner | None = None,
         on_failure: Callable[[str], None] | None = None,
         on_unpublish: Callable[[], None] | None = None,
         on_storage_closed: Callable[[], None] | None = None,
@@ -113,6 +115,7 @@ class _DesktopTickCaptureRuntime:
         self.storage = storage
         self.api_key = api_key
         self._storage_lock = storage_lock
+        self._checkpoint_owner = checkpoint_owner
         self._redaction_lock = threading.Lock()
         self._redaction_keys = {api_key} if api_key else set()
         self._on_failure = on_failure
@@ -129,6 +132,7 @@ class _DesktopTickCaptureRuntime:
         self._shutdown_error_retryable = False
         self._storage_close_lock = threading.Lock()
         self._storage_closed = False
+        self._defer_storage_close = False
         self._unpublish_lock = threading.Lock()
         self._unpublished = False
         self._thread = threading.Thread(
@@ -200,6 +204,11 @@ class _DesktopTickCaptureRuntime:
             if self._storage_closed:
                 return True
             try:
+                pending_tick_count = int(getattr(self.recorder, "pending_tick_count", 0))
+                if pending_tick_count:
+                    raise RuntimeError("tick recorder still has a retained buffer")
+                if self._checkpoint_owner is not None:
+                    self._checkpoint_owner.persist(force=True)
                 if self._storage_lock is None:
                     self.storage.close()
                 else:
@@ -313,6 +322,14 @@ class _DesktopTickCaptureRuntime:
                         self._remember_shutdown_error(failure)
                 else:
                     self._report_failure(failure)
+                    try:
+                        pending_tick_count = int(
+                            getattr(self.recorder, "pending_tick_count", 0)
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        pending_tick_count = 0
+                    if pending_tick_count > 0:
+                        self._remember_shutdown_error(failure, retryable=True)
         finally:
             self._started.set()
             pending = [pending_task for pending_task in asyncio.all_tasks(loop) if not pending_task.done()]
@@ -324,11 +341,21 @@ class _DesktopTickCaptureRuntime:
             self._loop = None
             loop.close()
             self._unpublish_once()
-            if not self._has_retryable_shutdown_error():
+            with self._storage_close_lock:
+                defer_storage_close = self._defer_storage_close
+            if not self._has_retryable_shutdown_error() and not defer_storage_close:
                 self._close_storage_once()
 
-    def stop(self, *, timeout: float = _CAPTURE_THREAD_STOP_TIMEOUT) -> None:
+    def stop(
+        self,
+        *,
+        timeout: float = _CAPTURE_THREAD_STOP_TIMEOUT,
+        close_storage: bool = True,
+    ) -> None:
         """Stop capture and fail truthfully if cleanup cannot complete."""
+        if not close_storage:
+            with self._storage_close_lock:
+                self._defer_storage_close = True
         with self._stop_lock:
             first_stop = not self._stopped
             if first_stop:
@@ -365,8 +392,14 @@ class _DesktopTickCaptureRuntime:
         if self._has_retryable_shutdown_error():
             self._retry_retained_flush()
         self._raise_if_shutdown_failed()
-        storage_closed = self._close_storage_once()
-        if not storage_closed:
+        if close_storage:
+            self.close_storage()
+
+    def close_storage(self) -> None:
+        """Checkpoint and close storage after admitted requests have drained."""
+        if self._thread.is_alive():
+            raise RuntimeError("Desktop tick capture must stop before storage closes")
+        if not self._close_storage_once():
             raise RuntimeError("Desktop tick storage shutdown failed") from None
 
 
@@ -387,6 +420,7 @@ def _configure_tick_capture(
 
     storage: Any | None = None
     runtime: _DesktopTickCaptureRuntime | None = None
+    checkpoint_owner: _OrderFlowCheckpointOwner | None = None
     api_key = str(getattr(settings, "openalgo_api_key", "") or "")
     try:
         if storage_factory is None:
@@ -416,6 +450,15 @@ def _configure_tick_capture(
             storage_lock=storage_lock,
             retention_days=90,
         )
+        if callable(getattr(storage, "get_tick_replay_cursor", None)) and callable(
+            getattr(orderflow, "export_state", None)
+        ):
+            checkpoint_owner = _OrderFlowCheckpointOwner(
+                storage,
+                orderflow,
+                workspace_dir=_workspace_dir(),
+                storage_lock=storage_lock,
+            )
         recorder = build_recorder(
             recorder_factory=recorder_factory,
             signal_hub=flask_app.config.get("SIGNAL_HUB"),
@@ -425,6 +468,11 @@ def _configure_tick_capture(
             orderflow=orderflow,
             watchlist=watchlist,
             mode=_tick_capture_mode(),
+            post_flush_callback=(
+                checkpoint_owner.persist_locked
+                if checkpoint_owner is not None
+                else None
+            ),
         )
 
         def capture_failed(diagnostic: str) -> None:
@@ -452,6 +500,7 @@ def _configure_tick_capture(
             storage,
             api_key,
             storage_lock=storage_lock,
+            checkpoint_owner=checkpoint_owner,
             on_failure=capture_failed,
             on_unpublish=unpublish_runtime,
             on_storage_closed=release_runtime_owner,
@@ -711,6 +760,21 @@ def serve(
                 type(exc).__name__,
             )
 
+        try:
+            from flinttrade_engine.strategy_routes import (  # noqa: PLC0415
+                shutdown_strategy_runtime,
+            )
+
+            shutdown_strategy_runtime(app)
+        except Exception as exc:  # noqa: BLE001 - retain process ownership
+            live_write_owners_stopped = False
+            owner_quiesce_failed = True
+            shutdown_failed = True
+            logger.warning(
+                "Desktop uploaded-strategy shutdown failed (%s)",
+                type(exc).__name__,
+            )
+
         if live_write_owners_stopped:
             try:
                 if not retire_broker_router_generation(app):
@@ -736,9 +800,15 @@ def serve(
             )
 
         runtime = app.config.get(_CAPTURE_RUNTIME_CONFIG)
+        deferred_capture_storage = None
         if runtime is not None:
             try:
-                runtime.stop()
+                close_runtime_storage = getattr(runtime, "close_storage", None)
+                if isinstance(runtime, _DesktopTickCaptureRuntime):
+                    runtime.stop(close_storage=False)
+                    deferred_capture_storage = close_runtime_storage
+                else:
+                    runtime.stop()
             except Exception as exc:  # pragma: no cover - defensive shutdown
                 sanitise_error = getattr(runtime, "sanitise_error", None)
                 try:
@@ -757,6 +827,48 @@ def serve(
         if not drained:
             shutdown_failed = True
             logger.warning("Desktop shutdown timed out draining active requests")
+
+        if drained and not owner_quiesce_failed:
+            final_live_write_owners_stopped = True
+            try:
+                from flinttrade_engine.strategy_routes import (  # noqa: PLC0415
+                    shutdown_strategy_runtime,
+                )
+
+                shutdown_strategy_runtime(app)
+            except Exception as exc:  # noqa: BLE001 - catch late admitted owners
+                final_live_write_owners_stopped = False
+                owner_quiesce_failed = True
+                shutdown_failed = True
+                logger.warning(
+                    "Desktop post-drain uploaded-strategy shutdown failed (%s)",
+                    type(exc).__name__,
+                )
+            if final_live_write_owners_stopped:
+                try:
+                    if not retire_broker_router_generation(app):
+                        owner_quiesce_failed = True
+                        shutdown_failed = True
+                        logger.warning("Desktop post-drain broker-router retirement timed out")
+                except Exception as exc:  # noqa: BLE001 - retain dependencies for recovery
+                    owner_quiesce_failed = True
+                    shutdown_failed = True
+                    logger.warning(
+                        "Desktop post-drain broker-router retirement failed (%s)",
+                        type(exc).__name__,
+                    )
+
+        if drained and not owner_quiesce_failed:
+            if deferred_capture_storage is not None:
+                try:
+                    deferred_capture_storage()
+                except Exception as exc:  # noqa: BLE001 - retain storage ownership
+                    shutdown_failed = True
+                    owner_quiesce_failed = True
+                    logger.warning(
+                        "Desktop tick storage shutdown failed (%s)",
+                        type(exc).__name__,
+                    )
 
         if drained and not owner_quiesce_failed:
             client = app.config.get("CLIENT")

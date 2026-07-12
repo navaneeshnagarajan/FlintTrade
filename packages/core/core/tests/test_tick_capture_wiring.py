@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -159,8 +160,10 @@ def test_tick_boot_prunes_and_restores_each_watchlist_identity_under_storage_loc
             *,
             now: float,
             max_ticks: int,
+            history_complete: bool,
         ) -> dict[str, int]:
             assert storage_lock.locked()
+            assert history_complete is True
             events.append(("restore", ticks[0]["exchange"], ticks[0]["symbol"], now, max_ticks))
             return {"restored_ticks": 1, "skipped_ticks": 0}
 
@@ -183,11 +186,14 @@ def test_tick_boot_prunes_and_restores_each_watchlist_identity_under_storage_loc
         "restored_ticks": 2,
         "skipped_ticks": 1,
         "restore_failures": 0,
+        "checkpoint_restored": 0,
+        "checkpoint_failures": 0,
+        "unavailable_identities": 0,
     }
     assert events[0] == ("prune", 90)
     gets = [event for event in events if event[0] == "get"]
     assert [(event[1], event[2]) for event in gets] == [("MCX", "GOLDM"), ("NFO", "NIFTY")]
-    assert all(event[-1] == DEFAULT_RESTORE_MAX_TICKS for event in gets)
+    assert all(event[-1] == DEFAULT_RESTORE_MAX_TICKS + 1 for event in gets)
 
 
 @pytest.mark.unit
@@ -713,6 +719,48 @@ def test_failed_recorder_completion_retains_storage_owner_when_close_fails() -> 
 
 
 @pytest.mark.unit
+def test_failed_recorder_completion_retains_unflushed_buffer_and_storage() -> None:
+    from flinttrade_core.app import _handle_tick_recorder_completion
+
+    class FailedTask:
+        @staticmethod
+        def cancelled() -> bool:
+            return False
+
+        @staticmethod
+        def exception() -> BaseException:
+            return RuntimeError("final flush failed")
+
+    recorder = MagicMock(pending_tick_count=3)
+    storage = MagicMock()
+    owner = {"recorder": recorder, "storage": storage}
+    flask_app = Flask("failed-final-flush")
+    flask_app.config.update(
+        TICK_CAPTURE_LIFECYCLE_LOCK=__import__("threading").RLock(),
+        TICK_RECORDER=recorder,
+        TICK_STORAGE=storage,
+        TICK_STORAGE_LOCK=__import__("threading").Lock(),
+        ORDERFLOW_AGGREGATOR=object(),
+    )
+
+    handled = _handle_tick_recorder_completion(
+        flask_app,
+        recorder,
+        FailedTask(),
+        api_key="",
+        on_unpublished=lambda: None,
+        on_storage_closed=lambda: owner.update(recorder=None, storage=None),
+    )
+
+    assert handled is True
+    assert owner == {"recorder": recorder, "storage": storage}
+    assert "TICK_RECORDER" not in flask_app.config
+    assert "TICK_STORAGE" not in flask_app.config
+    assert "ORDERFLOW_AGGREGATOR" not in flask_app.config
+    storage.close.assert_not_called()
+
+
+@pytest.mark.unit
 def test_normal_recorder_completion_during_shutdown_is_not_reported() -> None:
     from flinttrade_core.app import _handle_tick_recorder_completion
 
@@ -791,7 +839,11 @@ async def test_stop_cancellation_reaches_real_recorder_final_flush(monkeypatch) 
     recorder._process_tick({
         "exchange": "NSE_INDEX",
         "symbol": "NIFTY",
-        "data": {"ltp": 24500.0, "volume": 10},
+        "data": {
+            "ltp": 24500.0,
+            "volume": 10,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     })
     monkeypatch.setattr(
         recorder_module.websockets,

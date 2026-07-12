@@ -316,6 +316,31 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     await expect(activateKillSwitch("emergency")).rejects.toThrow("HTTP 403");
   });
 
+  it("returns a latched partial kill-switch result from HTTP 207", async () => {
+    const activation = {
+      message: "Kill switch activated, but broker actions did not complete",
+      reason: "emergency",
+      is_active: true,
+      emergency_actions: {
+        policy: "l5_emergency_flatten",
+        complete: false,
+        outcomes: [
+          {
+            verb: "cancel_all_orders",
+            attempted: false,
+            succeeded: false,
+            failure_code: "router_unavailable",
+          },
+        ],
+      },
+    };
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "partial", data: activation }, 207),
+    );
+
+    await expect(activateKillSwitch("emergency")).resolves.toEqual(activation);
+  });
+
   it("throws on HTTP 500", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({}, 500));
 

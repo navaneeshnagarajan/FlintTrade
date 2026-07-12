@@ -11,9 +11,9 @@ never couples to ``Settings`` and is trivially testable. Methods OpenAlgo's REST
 client does not expose (tick streaming, reconciliation, clock-based refresh)
 raise :class:`UnsupportedCapabilityError` honestly rather than pretending.
 
-Writes (place/modify/cancel) keep the §8 invariant: they are reachable only with
-the router's per-process ``_router_token``; a bare call raises ``SafetyBypassError``
-before any OpenAlgo request is made.
+Writes (place/modify/cancel and emergency account sweeps) keep the §8 invariant:
+they are reachable only with the router's per-process ``_router_token``; a bare
+call raises ``SafetyBypassError`` before any OpenAlgo request is made.
 """
 
 from __future__ import annotations
@@ -219,6 +219,38 @@ class OpenAlgoAdapter(BrokerAdapter):
             resp = await self._client(session).cancel_order(order_id, strategy=strategy)
         self._order_id_or_raise(resp)
 
+    async def cancel_all_orders(
+        self,
+        session: Session,
+        *,
+        tag: str | None = None,
+        segment: str | None = None,
+        _router_token: object | None = None,
+    ) -> Any:
+        """Cancel every OpenAlgo order for the session strategy through the router."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        self._require_unscoped_sweep(tag=tag, segment=segment)
+        strategy = str(session.extra.get("strategy", "Flint"))
+        with self._mapped("cancel-all emergency action"):
+            response = await self._client(session).cancel_all_orders(strategy=strategy)
+        return self._successful_sweep_or_raise(response, "cancel-all emergency action")
+
+    async def exit_all_positions(
+        self,
+        session: Session,
+        *,
+        tag: str | None = None,
+        segment: str | None = None,
+        _router_token: object | None = None,
+    ) -> Any:
+        """Close every OpenAlgo position for the session strategy through the router."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        self._require_unscoped_sweep(tag=tag, segment=segment)
+        strategy = str(session.extra.get("strategy", "Flint"))
+        with self._mapped("exit-all emergency action"):
+            response = await self._client(session).close_position(strategy=strategy)
+        return self._successful_sweep_or_raise(response, "exit-all emergency action")
+
     # ---------- trading: reads ----------
 
     async def order_book(self, session: Session) -> "list[Order]":
@@ -298,6 +330,24 @@ class OpenAlgoAdapter(BrokerAdapter):
                 f"OpenAlgo rejected the order (status={status!r}, orderid={order_id!r})"
             )
         return order_id
+
+    @staticmethod
+    def _require_unscoped_sweep(*, tag: str | None, segment: str | None) -> None:
+        """Refuse narrower semantics the OpenAlgo account-wide APIs cannot honour."""
+        if tag is not None or segment is not None:
+            raise UnsupportedCapabilityError(
+                "OpenAlgo emergency sweeps do not support tag or segment scope narrowing"
+            )
+
+    @staticmethod
+    def _successful_sweep_or_raise(response: Any, action: str) -> Any:
+        """Require an explicit OpenAlgo success status before reporting completion."""
+        status = str(getattr(response, "status", "") or "").strip().lower()
+        if status not in {"ok", "success"}:
+            raise OrderRejectedByBroker(
+                f"OpenAlgo rejected the {action} (status={status!r})"
+            )
+        return response
 
     class _MapBrokerErrors:
         """Context manager mapping OpenAlgo client errors to the broker taxonomy (§7)."""

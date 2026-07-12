@@ -72,18 +72,21 @@ function KillSwitchPill() {
       // (port 5000, /api/v1/safety/kill-switch). The safety system lives in
       // the FlintTrade engine — OpenAlgo has no equivalent endpoint.
       const { activateKillSwitch } = await import("@/services/ftApi");
-      await activateKillSwitch("Manual kill switch — trader initiated from terminal");
-      setTriggered(true);
+      const result = await activateKillSwitch("Manual kill switch — trader initiated from terminal");
+      setTriggered(result.is_active);
+      const flattenComplete = result.emergency_actions.complete;
       emitNotification({
         category: "system",
         title: "Kill switch ACTIVATED",
-        body: "All live order routing is halted. Reset the kill switch to resume trading.",
+        body: flattenComplete
+          ? "All live order routing is halted and emergency broker actions completed."
+          : "Live order routing is halted, but one or more broker flattening actions did not complete. Review broker state before resetting.",
         // Send the operator to the Automate settings, where the kill switch is
         // reset (the sidebar highlights that section while it is active).
         action: { label: "Reset kill switch", href: "/automate" },
       });
     } catch {
-      // Silent — the pill remains visible so the user can retry
+      // Pre-activation failures leave the pill visible so the user can retry.
     } finally {
       setIsTriggering(false);
     }

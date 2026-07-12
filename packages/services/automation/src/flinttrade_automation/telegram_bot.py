@@ -253,8 +253,14 @@ class TelegramBot:
             safety_system=safety,
             scheduler=scheduler,
             audit_logger=auditor,
+            emergency_dispatcher=gated_emergency_dispatcher,
         )
         bot.handle_command("/kill")  # activates real kill switch
+
+    The parent owns ``gated_emergency_dispatcher`` because it owns the current
+    BrokerRouter generation, selector-bound principal, and broker event loop.
+    Without that injection, /kill still latches L5 and stops strategies but
+    broker actions fail closed; the bot never falls back to its read client.
     """
 
     def __init__(
@@ -264,12 +270,14 @@ class TelegramBot:
         safety_system: Any = None,
         scheduler: Any = None,
         audit_logger: Any = None,
+        emergency_dispatcher: Any = None,
     ) -> None:
         self.config = config or BotConfig.from_env()
         self.client = client
         self.safety = safety_system
         self.scheduler = scheduler
         self.audit = audit_logger
+        self.emergency_dispatcher = emergency_dispatcher
         self._handlers: dict[str, Callable[..., Any]] = {}
         self._command_log: list[CommandResult] = []
         self._chat_id: str = self.config.chat_id
@@ -289,7 +297,7 @@ class TelegramBot:
         - get_positions: () -> list[dict]
         - get_orders: () -> list[dict]
         - get_pnl: () -> dict with "total_pnl", "trades", etc.
-        - kill_switch: () -> None (activates kill)
+        - kill_switch: () -> EmergencyDispatchResult | None (activates kill)
         - pause_strategy: (name: str) -> None
         - resume_strategy: (name: str) -> None
         - get_health: () -> dict with "openalgo_connected", "websocket_connected", "disk_free_gb"
@@ -354,44 +362,34 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     def _cmd_kill(self, username: str = "") -> str:
-        """Activate kill switch: safety → cancel orders → close positions → stop strategies."""
+        """Latch L5, run its injected gated policy, then stop all strategies."""
         now = datetime.now(IST).strftime("%H:%M:%S IST")
         errors: list[str] = []
+        emergency_result: Any = None
+        reason = f"Telegram /kill by {username or 'operator'}"
 
         # 1. Activate SafetySystem kill switch
         if self.safety and hasattr(self.safety, "l5_kill"):
-            self.safety.l5_kill.activate(f"Telegram /kill by {username or 'operator'}")
+            emergency_result = self.safety.l5_kill.activate(
+                reason,
+                emergency_dispatcher=self.emergency_dispatcher,
+            )
         elif self._handlers.get("kill_switch"):
-            self._handlers["kill_switch"]()
+            emergency_result = self._handlers["kill_switch"]()
         else:
             errors.append("Safety system not configured")
 
-        # 2. Cancel all orders via OpenAlgo — run to completion so the
-        #    confirmation reflects the actual outcome, not a fire-and-forget.
-        orders_cancelled = False
-        if self.client:
-            try:
-                coro = self.client.cancel_all_orders(strategy="Flint")
-                if asyncio.iscoroutine(coro):
-                    self._client_sync(coro)
-                orders_cancelled = True
-            except Exception as exc:
-                errors.append(f"cancel_all_orders: {exc}")
-                logger.error("Kill switch cancel_all_orders failed: %s", exc)
+        # 2. Read bounded outcomes from the injected L5 dispatcher. The bot's
+        #    OpenAlgo client remains available for status/orderbook READS only.
+        succeeded = getattr(emergency_result, "succeeded", None)
+        orders_cancelled = bool(callable(succeeded) and succeeded("cancel_all_orders"))
+        positions_closed = bool(callable(succeeded) and succeeded("exit_all_positions"))
+        if not orders_cancelled:
+            errors.append("cancel_all_orders: gated emergency action incomplete")
+        if not positions_closed:
+            errors.append("exit_all_positions: gated emergency action incomplete")
 
-        # 3. Close all positions via OpenAlgo
-        positions_closed = False
-        if self.client:
-            try:
-                coro = self.client.close_position(strategy="Flint")
-                if asyncio.iscoroutine(coro):
-                    self._client_sync(coro)
-                positions_closed = True
-            except Exception as exc:
-                errors.append(f"close_position: {exc}")
-                logger.error("Kill switch close_position failed: %s", exc)
-
-        # 4. Stop all strategies
+        # 3. Stop all strategies
         strategies_stopped = False
         if self.scheduler and hasattr(self.scheduler, "stop_all"):
             try:
@@ -403,7 +401,7 @@ class TelegramBot:
                 errors.append(f"stop_all: {exc}")
                 logger.error("Kill switch stop_all failed: %s", exc)
 
-        # 5. Audit log
+        # 4. Audit log
         if self.audit:
             self.audit.log_event(
                 "KILL_SWITCH",
@@ -604,17 +602,15 @@ class TelegramBot:
             return asyncio.run(coro)
 
     def _client_sync(self, coro: Any) -> Any:
-        """Run a broker-client coroutine on the client's OWN persistent loop.
+        """Run a read-only broker-client coroutine on its OWN persistent loop.
 
         :class:`~flinttrade_core.openalgo_client.OpenAlgoClient` pools httpx
         connections affine to a single event loop and exposes ``run_sync`` for
         exactly this. Driving it through :meth:`_run_async`'s ad-hoc
-        ``asyncio.run`` loops closes the loop between calls, so the *second*
-        broker call in a command (e.g. ``/kill``'s ``close_position`` after
-        ``cancel_all_orders``, or ``/status``'s ``funds`` after ``positionbook``)
-        would fail with "Event loop is closed" — a safety-critical false
-        negative on the kill switch. Falls back to :meth:`_run_async` for a plain
-        client without ``run_sync`` (e.g. test doubles).
+        ``asyncio.run`` loops closes the loop between calls, so a second read
+        (for example ``/status`` funds after positionbook) would fail with
+        "Event loop is closed". Falls back to :meth:`_run_async` for a plain
+        read-client test double without ``run_sync``.
         """
         client = self.client
         run_sync = getattr(client, "run_sync", None)

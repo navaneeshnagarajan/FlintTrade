@@ -374,36 +374,124 @@ def safety_config_update() -> tuple[Any, int]:
 # Kill switch
 # ------------------------------------------------------------------
 
+
 @operations_bp.route("/safety/kill-switch", methods=["POST"])
 def kill_switch_activate() -> tuple[Any, int]:
-    """Activate the emergency kill switch to halt all trading.
+    """Activate L5 and run its cancel-all/exit-all policy through BrokerRouter.
 
     Request JSON:
         reason (str, optional): Human-readable reason for activation.
+        broker (str, optional): Explicit adapter id. Must be paired with
+            ``account_id``; otherwise the configured execution default is used.
+        account_id (str, optional): Explicit account id paired with ``broker``.
+
+    A valid live-session JWT is required so the emergency writes carry the same
+    selector ACL identity as every other broker mutation. A fresh PIN unlock is
+    deliberately not required: cancel/exit reduce exposure and must remain
+    available after the L5 latch. There is no raw OpenAlgo fallback.
 
     Returns:
-        JSON with ``status`` and confirmation.
+        JSON with the latched state and bounded per-verb emergency outcomes.
     """
-    from flinttrade_engine.safety import SafetySystem  # noqa: PLC0415
     from flinttrade_data.audit_logger import AuditLogger  # noqa: PLC0415
+    from flinttrade_engine.request_context import RequestContext, parse_selector  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        EmergencyBrokerTarget,
+        GatedEmergencyBrokerDispatcher,
+        SafetySystem,
+    )
+
+    from .order_routes import _decode_request_payload, _run_on_client_loop  # noqa: PLC0415
 
     _safety: SafetySystem | None = current_app.config.get("SAFETY")
-    _client = current_app.config.get("CLIENT")
     _audit: AuditLogger | None = current_app.config.get("AUDIT")
     if _safety is None:
         return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
 
-    body = request.get_json(silent=True) or {}
-    reason: str = body.get("reason", "Manual kill switch via API").strip()
+    jwt_payload = _decode_request_payload()
+    if not jwt_payload:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication required — provide a valid JWT",
+        }), 401
+    if jwt_payload.get("mode") != "live":
+        return jsonify({
+            "status": "error",
+            "message": "Emergency broker actions require an authenticated Live session",
+        }), 403
+
+    raw_body = request.get_json(silent=True)
+    body: dict[str, Any] = raw_body if isinstance(raw_body, dict) else {}
+    reason = str(body.get("reason") or "Manual kill switch via API").strip()
+    reason = reason[:500] or "Manual kill switch via API"
+    explicit_adapter = str(body.get("broker") or "").strip().lower()
+    explicit_account = str(body.get("account_id") or "").strip()
+    if bool(explicit_adapter) != bool(explicit_account):
+        return jsonify({
+            "status": "error",
+            "message": "Emergency target requires both broker and account_id, or neither",
+        }), 400
+
+    jti = str(jwt_payload.get("jti") or "").strip()
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    if not jti or not actor_id:
+        return jsonify({
+            "status": "error",
+            "message": "Authenticated emergency principal is missing identity claims",
+        }), 401
+
+    def _target_provider() -> EmergencyBrokerTarget:
+        adapter_id = explicit_adapter
+        account_id = explicit_account
+        if not adapter_id:
+            current_router = current_app.config.get("BROKER_ROUTER")
+            selector = str(getattr(current_router, "default_selector", None) or "").strip()
+            if not selector:
+                raise ValueError("no configured emergency execution selector")
+            adapter_id, account_id = parse_selector(selector)
+        request_ctx = RequestContext(
+            jti=jti,
+            actor_type="human",
+            actor_id=actor_id,
+            mode="live",
+            selector=f"{adapter_id}:{account_id}",
+        )
+        return EmergencyBrokerTarget(
+            request_ctx=request_ctx,
+            adapter_id=adapter_id,
+            account_id=account_id,
+        )
+
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: current_app.config.get("BROKER_ROUTER"),
+        target_provider=_target_provider,
+        run_awaitable=_run_on_client_loop,
+    )
 
     try:
-        _safety.l5_kill.activate(reason, client=_client)
+        emergency_result = _safety.l5_kill.activate(
+            reason,
+            emergency_dispatcher=dispatcher,
+        )
         if _audit:
             _audit.log_kill_switch(activated=True, reason=reason)
+        response_status = 200 if emergency_result.complete else 207
+        response_kind = "success" if emergency_result.complete else "partial"
+        message = (
+            "Kill switch activated and emergency broker actions completed"
+            if emergency_result.complete
+            else "Kill switch activated, but one or more emergency broker actions did not complete"
+        )
         return jsonify({
-            "status": "success",
-            "data": {"message": "Kill switch activated", "reason": reason},
-        }), 200
+            "status": response_kind,
+            "message": message,
+            "data": {
+                "message": message,
+                "reason": reason,
+                "is_active": _safety.l5_kill.is_active,
+                "emergency_actions": emergency_result.as_dict(),
+            },
+        }), response_status
     except Exception:
         logger.exception("kill_switch_activate error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

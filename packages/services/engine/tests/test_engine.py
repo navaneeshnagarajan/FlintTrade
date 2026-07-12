@@ -476,16 +476,28 @@ class TestKillSwitch:
         assert not ks.validate().passed
         assert "Manual emergency" in ks.validate().reason
 
-    def test_activate_calls_cancel_and_close(self):
-        from flinttrade_engine.safety import KillSwitch
-        # Both methods are async — use AsyncMock so they can be awaited correctly.
-        mock_client = MagicMock()
-        mock_client.cancel_all_orders = AsyncMock()
-        mock_client.close_position = AsyncMock()
-        ks = KillSwitch()
-        ks.activate("Test kill", client=mock_client)
-        mock_client.cancel_all_orders.assert_called_once()
-        mock_client.close_position.assert_called_once()
+    def test_activate_uses_explicit_emergency_policy_dispatcher(self):
+        from flinttrade_engine.safety import (
+            EmergencyDispatchResult,
+            EmergencyVerbOutcome,
+            KillSwitch,
+            L5_EMERGENCY_POLICY,
+        )
+
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = EmergencyDispatchResult(
+            policy=L5_EMERGENCY_POLICY,
+            outcomes=(
+                EmergencyVerbOutcome("cancel_all_orders", succeeded=True),
+                EmergencyVerbOutcome("exit_all_positions", succeeded=True),
+            ),
+        )
+        ks = KillSwitch(emergency_dispatcher=dispatcher)
+
+        result = ks.activate("Test kill")
+
+        dispatcher.dispatch.assert_called_once_with(L5_EMERGENCY_POLICY, reason="Test kill")
+        assert result.complete
 
     def test_reset_allows_trading(self):
         from flinttrade_engine.safety import KillSwitch
@@ -1137,6 +1149,156 @@ class TestStrategyRunner:
         assert strategy.state.value == "STOPPED"
 
     @pytest.mark.asyncio
+    async def test_runner_awaits_real_async_tick_hook(self):
+        """The scheduler must execute async hooks used by shipped strategies."""
+        from flinttrade_core.models import Quote
+        from flinttrade_engine.scheduler import StrategyRunner, TimeScheduler
+        from flinttrade_engine.strategies.ema_crossover import EMACrossover
+
+        router = MagicMock()
+        router.route_order = AsyncMock()
+        strategy = EMACrossover(
+            symbol="RELIANCE",
+            exchange="NSE",
+            fast_period=2,
+            slow_period=3,
+            router=router,
+        )
+        strategy.start()
+
+        client = MagicMock()
+        client.quotes = AsyncMock(
+            side_effect=[
+                Quote(symbol="RELIANCE", exchange="NSE", ltp=100),
+                Quote(symbol="RELIANCE", exchange="NSE", ltp=100),
+                Quote(symbol="RELIANCE", exchange="NSE", ltp=100),
+                Quote(symbol="RELIANCE", exchange="NSE", ltp=110),
+            ]
+        )
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.should_square_off = MagicMock(return_value=False)
+        runner = StrategyRunner(
+            strategy=strategy,
+            client=client,
+            scheduler=scheduler,
+            symbol="RELIANCE",
+        )
+
+        for _ in range(4):
+            await runner._tick()
+
+        router.route_order.assert_awaited_once()
+        assert strategy.position == 1
+
+    @pytest.mark.asyncio
+    async def test_runner_awaits_real_async_square_off_hook(self):
+        """Square-off must finish before the strategy transitions to stopped."""
+        from flinttrade_engine.scheduler import StrategyRunner, TimeScheduler
+        from flinttrade_engine.strategies.ema_crossover import EMACrossover
+
+        router = MagicMock()
+        router.route_order = AsyncMock()
+        strategy = EMACrossover(symbol="RELIANCE", exchange="NSE", router=router)
+        strategy.position = 1
+        strategy.start()
+        runner = StrategyRunner(
+            strategy=strategy,
+            client=MagicMock(),
+            scheduler=TimeScheduler(),
+            symbol="RELIANCE",
+        )
+        runner._running = True
+
+        await runner._handle_square_off()
+
+        router.route_order.assert_awaited_once()
+        assert strategy.position == 0
+        assert strategy.state.value == "STOPPED"
+
+    @pytest.mark.asyncio
+    async def test_runner_awaits_async_start_and_stop_overrides(self):
+        from flinttrade_engine.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        sync_start = strategy.start
+        sync_stop = strategy.stop
+
+        async def async_start() -> None:
+            await asyncio.sleep(0)
+            sync_start()
+
+        async def async_stop() -> None:
+            await asyncio.sleep(0)
+            sync_stop()
+
+        strategy.start = AsyncMock(side_effect=async_start)
+        strategy.stop = AsyncMock(side_effect=async_stop)
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=False)
+        runner = StrategyRunner(
+            strategy=strategy,
+            client=MagicMock(),
+            scheduler=scheduler,
+            tick_interval_seconds=0.01,
+        )
+
+        await runner.start()
+        await runner.stop()
+
+        strategy.start.assert_awaited_once_with()
+        strategy.stop.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_runner_cancels_quote_loop_before_awaiting_async_stop_hook(self):
+        from flinttrade_core.models import Quote
+        from flinttrade_engine.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        quote_started = asyncio.Event()
+        release_quote = asyncio.Event()
+        stop_started = asyncio.Event()
+        release_stop = asyncio.Event()
+
+        async def delayed_quote(*_args, **_kwargs) -> Quote:
+            quote_started.set()
+            await release_quote.wait()
+            return Quote(symbol="RELIANCE", exchange="NSE", ltp=2500)
+
+        async def delayed_stop() -> None:
+            stop_started.set()
+            await release_stop.wait()
+
+        strategy.on_tick = MagicMock()
+        strategy.stop = AsyncMock(side_effect=delayed_stop)
+        client = MagicMock()
+        client.quotes = AsyncMock(side_effect=delayed_quote)
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.should_square_off = MagicMock(return_value=False)
+        runner = StrategyRunner(
+            strategy=strategy,
+            client=client,
+            scheduler=scheduler,
+            tick_interval_seconds=0.01,
+            symbol="RELIANCE",
+        )
+
+        await runner.start()
+        assert await asyncio.wait_for(quote_started.wait(), timeout=1.0)
+        stop_task = asyncio.create_task(runner.stop())
+        assert await asyncio.wait_for(stop_started.wait(), timeout=1.0)
+
+        release_quote.set()
+        try:
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            strategy.on_tick.assert_not_called()
+        finally:
+            release_stop.set()
+            await asyncio.wait_for(stop_task, timeout=1.0)
+
+    @pytest.mark.asyncio
     async def test_runner_pause_resume(self):
         from unittest.mock import AsyncMock
         from flinttrade_core.models import Quote
@@ -1232,6 +1394,25 @@ class TestStrategyScheduler:
         await sched.stop_all()
 
         assert not sched.get_runner("A").is_running
+
+    @pytest.mark.asyncio
+    async def test_stop_all_continues_after_one_runner_fails(self):
+        from flinttrade_engine.scheduler import StrategyScheduler
+
+        sched = StrategyScheduler(client=MagicMock())
+        failed_runner = MagicMock()
+        failed_runner.stop = AsyncMock(side_effect=RuntimeError("first runner failed"))
+        later_runner = MagicMock()
+        later_runner.stop = AsyncMock()
+        sched._runners = {"First": failed_runner, "Later": later_runner}
+
+        with pytest.raises(ExceptionGroup, match="strategy runners failed to stop") as exc_info:
+            await sched.stop_all()
+
+        failed_runner.stop.assert_awaited_once_with()
+        later_runner.stop.assert_awaited_once_with()
+        assert len(exc_info.value.exceptions) == 1
+        assert str(exc_info.value.exceptions[0]) == "first runner failed"
 
     @pytest.mark.asyncio
     async def test_stop_one(self):

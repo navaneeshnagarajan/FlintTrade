@@ -6,8 +6,10 @@ All tests are fully synchronous / async-in-process — no live broker calls.
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -225,10 +227,10 @@ class TestOvertradingGuardHoldDuration:
 class TestMTMCircuitBreaker:
     """Account-level MTM loss auto-exit."""
 
-    def _breaker(self, limit: float = -50_000.0, client=None):
+    def _breaker(self, limit: float = -50_000.0, emergency_dispatcher=None):
         from flinttrade_engine.safety import MTMCircuitBreaker, MTMCircuitBreakerConfig
         cfg = MTMCircuitBreakerConfig(daily_loss_limit=limit)
-        return MTMCircuitBreaker(config=cfg, client=client)
+        return MTMCircuitBreaker(config=cfg, emergency_dispatcher=emergency_dispatcher)
 
     def test_within_limit_does_not_trigger(self):
         breaker = self._breaker(limit=-50_000.0)
@@ -276,28 +278,74 @@ class TestMTMCircuitBreaker:
         breaker.reset_daily()
         assert not breaker.is_triggered
 
-    def test_close_position_called_on_breach(self):
-        mock_client = MagicMock()
-        mock_client.close_position = AsyncMock(return_value={"status": "success"})
-        breaker = self._breaker(limit=-50_000.0, client=mock_client)
+    def test_explicit_mtm_emergency_policy_dispatched_on_breach(self):
+        from flinttrade_engine.safety import (
+            EmergencyDispatchResult,
+            EmergencyVerbOutcome,
+            MTM_EMERGENCY_POLICY,
+        )
+
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = EmergencyDispatchResult(
+            policy=MTM_EMERGENCY_POLICY,
+            outcomes=(EmergencyVerbOutcome("exit_all_positions", succeeded=True),),
+        )
+        breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=dispatcher)
         asyncio.run(
             breaker.check_and_act(daily_pnl=-60_000.0)
         )
-        mock_client.close_position.assert_awaited_once()
+        dispatcher.dispatch.assert_called_once()
+        policy = dispatcher.dispatch.call_args.args[0]
+        assert policy is MTM_EMERGENCY_POLICY
+
+    @pytest.mark.asyncio
+    async def test_mtm_emergency_dispatch_does_not_block_monitor_event_loop(self):
+        from flinttrade_engine.safety import (
+            EmergencyDispatchResult,
+            EmergencyVerbOutcome,
+        )
+
+        release = threading.Event()
+
+        class _BlockingDispatcher:
+            def dispatch(self, policy, *, reason):
+                release.wait(timeout=1.0)
+                return EmergencyDispatchResult(
+                    policy=policy,
+                    outcomes=(
+                        EmergencyVerbOutcome("exit_all_positions", succeeded=True),
+                    ),
+                )
+
+        breaker = self._breaker(
+            limit=-50_000.0,
+            emergency_dispatcher=_BlockingDispatcher(),
+        )
+        threading.Timer(0.2, release.set).start()
+        started_at = time.monotonic()
+        check_task = asyncio.create_task(
+            breaker.check_and_act(daily_pnl=-60_000.0)
+        )
+
+        await asyncio.sleep(0.02)
+        heartbeat_elapsed = time.monotonic() - started_at
+        release.set()
+        assert await check_task
+        assert heartbeat_elapsed < 0.1
 
     def test_no_client_does_not_raise(self):
         """Breaker fires even without a client — it just can't close positions."""
-        breaker = self._breaker(limit=-50_000.0, client=None)
+        breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=None)
         result = asyncio.run(
             breaker.check_and_act(daily_pnl=-60_000.0)
         )
         assert result
 
-    def test_close_position_failure_does_not_re_raise(self):
+    def test_emergency_dispatch_failure_does_not_re_raise(self):
         """If the broker call fails the breaker should still mark as triggered."""
-        mock_client = MagicMock()
-        mock_client.close_position = AsyncMock(side_effect=RuntimeError("network error"))
-        breaker = self._breaker(limit=-50_000.0, client=mock_client)
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = RuntimeError("network error")
+        breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=dispatcher)
         # Should not raise
         result = asyncio.run(
             breaker.check_and_act(daily_pnl=-60_000.0)

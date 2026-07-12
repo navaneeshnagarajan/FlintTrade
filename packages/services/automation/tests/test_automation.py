@@ -376,29 +376,54 @@ class TestTelegramBot:
 class TestTelegramKillSwitch:
     """Test the wired /kill command — safety, orders, scheduler, audit."""
 
+    @staticmethod
+    def _wired_safety():
+        from flinttrade_engine.safety import (
+            EmergencyDispatchResult,
+            EmergencyVerbOutcome,
+            L5_EMERGENCY_POLICY,
+            SafetySystem,
+        )
+
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = EmergencyDispatchResult(
+            policy=L5_EMERGENCY_POLICY,
+            outcomes=(
+                EmergencyVerbOutcome("cancel_all_orders", succeeded=True),
+                EmergencyVerbOutcome("exit_all_positions", succeeded=True),
+            ),
+        )
+        return SafetySystem(emergency_dispatcher=dispatcher), dispatcher
+
     def test_kill_switch_activates_safety(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
-        mock_safety = MagicMock()
-        mock_safety.l5_kill = MagicMock()
-        bot = TelegramBot(config=BotConfig(chat_id="12345"), safety_system=mock_safety)
+        safety, dispatcher = self._wired_safety()
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), safety_system=safety)
         result = bot.handle_command("/kill", chat_id="12345", username="test_user")
 
-        mock_safety.l5_kill.activate.assert_called_once()
+        dispatcher.dispatch.assert_called_once()
+        assert safety.l5_kill.is_active
         assert "KILL" in result.response
 
-    def test_kill_switch_cancels_orders(self):
+    def test_kill_switch_never_mutates_through_raw_client(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
         mock_client = MagicMock()
-        # Make cancel_all_orders return a non-coroutine (sync mock)
         mock_client.cancel_all_orders = MagicMock(return_value=None)
         mock_client.close_position = MagicMock(return_value=None)
+        safety, dispatcher = self._wired_safety()
 
-        bot = TelegramBot(config=BotConfig(chat_id="12345"), client=mock_client)
+        bot = TelegramBot(
+            config=BotConfig(chat_id="12345"),
+            client=mock_client,
+            safety_system=safety,
+        )
         bot.handle_command("/kill", chat_id="12345")
 
-        mock_client.cancel_all_orders.assert_called_once()
+        dispatcher.dispatch.assert_called_once()
+        mock_client.cancel_all_orders.assert_not_called()
+        mock_client.close_position.assert_not_called()
 
     def test_kill_switch_stops_scheduler(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
@@ -427,8 +452,7 @@ class TestTelegramKillSwitch:
     def test_kill_switch_full_response(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
-        mock_safety = MagicMock()
-        mock_safety.l5_kill = MagicMock()
+        safety, _dispatcher = self._wired_safety()
         mock_client = MagicMock()
         mock_client.cancel_all_orders = MagicMock(return_value=None)
         mock_client.close_position = MagicMock(return_value=None)
@@ -439,7 +463,7 @@ class TestTelegramKillSwitch:
         bot = TelegramBot(
             config=BotConfig(chat_id="12345"),
             client=mock_client,
-            safety_system=mock_safety,
+            safety_system=safety,
             scheduler=mock_scheduler,
             audit_logger=mock_audit,
         )
@@ -449,6 +473,8 @@ class TestTelegramKillSwitch:
         assert "All orders cancelled" in result.response
         assert "All positions closed" in result.response
         assert "All strategies stopped" in result.response
+        mock_client.cancel_all_orders.assert_not_called()
+        mock_client.close_position.assert_not_called()
 
     def test_status_with_wired_router(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot

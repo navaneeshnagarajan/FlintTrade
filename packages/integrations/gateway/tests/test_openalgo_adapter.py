@@ -47,6 +47,14 @@ class _FakeClient:
         self.calls.append(("cancel_order", order_id, strategy))
         return SimpleNamespace(status="success", orderid=order_id)
 
+    async def cancel_all_orders(self, strategy="Flint"):
+        self.calls.append(("cancel_all_orders", strategy))
+        return SimpleNamespace(status=self._place_status, orderid="", message="cancelled")
+
+    async def close_position(self, strategy="Flint"):
+        self.calls.append(("close_position", strategy))
+        return SimpleNamespace(status=self._place_status, orderid="", message="closed")
+
     async def positionbook(self):
         self.calls.append(("positionbook",))
         return [{"symbol": "RELIANCE", "qty": 10}]
@@ -130,6 +138,55 @@ async def test_cancel_order_forwards_with_strategy() -> None:
     a = _adapter(client)
     await a.cancel_order(_session(), "OID-9", _router_token=_ROUTER_TOKEN)
     assert ("cancel_order", "OID-9", "Flint") in client.calls
+
+
+@pytest.mark.parametrize("verb", ["cancel_all_orders", "exit_all_positions"])
+async def test_emergency_sweep_requires_router_token(verb: str) -> None:
+    client = _FakeClient()
+    adapter = _adapter(client)
+
+    with pytest.raises(SafetyBypassError, match="outside BrokerRouter"):
+        await getattr(adapter, verb)(_session())
+
+    assert client.calls == []
+
+
+async def test_emergency_sweeps_forward_with_session_strategy() -> None:
+    client = _FakeClient()
+    adapter = _adapter(client)
+    session = _session()
+    session.extra["strategy"] = "Emergency"
+
+    await adapter.cancel_all_orders(session, _router_token=_ROUTER_TOKEN)
+    await adapter.exit_all_positions(session, _router_token=_ROUTER_TOKEN)
+
+    assert client.calls == [
+        ("cancel_all_orders", "Emergency"),
+        ("close_position", "Emergency"),
+    ]
+
+
+@pytest.mark.parametrize("verb", ["cancel_all_orders", "exit_all_positions"])
+async def test_emergency_sweep_rejection_is_not_reported_as_success(verb: str) -> None:
+    adapter = _adapter(_FakeClient(place_status="error"))
+
+    with pytest.raises(OrderRejectedByBroker):
+        await getattr(adapter, verb)(_session(), _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.parametrize("verb", ["cancel_all_orders", "exit_all_positions"])
+async def test_emergency_sweep_refuses_unsupported_scope_narrowing(verb: str) -> None:
+    client = _FakeClient()
+    adapter = _adapter(client)
+
+    with pytest.raises(UnsupportedCapabilityError, match="scope"):
+        await getattr(adapter, verb)(
+            _session(),
+            segment="NSE",
+            _router_token=_ROUTER_TOKEN,
+        )
+
+    assert client.calls == []
 
 
 async def test_reads_forward() -> None:

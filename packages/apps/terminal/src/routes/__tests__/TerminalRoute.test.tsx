@@ -6,7 +6,7 @@
  * chrome components, and all stores/hooks.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -246,6 +246,8 @@ describe("TerminalRoute", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => vi.restoreAllMocks());
+
   it("renders without crashing and shows the sr-only heading", () => {
     renderTerminalRoute();
 
@@ -280,6 +282,41 @@ describe("TerminalRoute", () => {
     expect(alert).toHaveClass("shrink-0");
     expect(alert).not.toHaveClass("fixed");
     expect(alert).not.toHaveClass("absolute");
+  });
+
+  it("shows the kill switch as active after a partial emergency dispatch", async () => {
+    mockTradingState.totalPnl = -3000;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      status: "partial",
+      data: {
+        message: "Kill switch activated, but broker actions did not complete",
+        reason: "operator request",
+        is_active: true,
+        emergency_actions: {
+          policy: "l5_emergency_flatten",
+          complete: false,
+          outcomes: [
+            {
+              verb: "cancel_all_orders",
+              attempted: false,
+              succeeded: false,
+              failure_code: "router_unavailable",
+            },
+          ],
+        },
+      },
+    }), {
+      status: 207,
+      headers: { "Content-Type": "application/json" },
+    }));
+    renderTerminalRoute();
+
+    fireEvent.click(screen.getByRole("button", { name: /activate emergency kill switch/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /activate emergency kill switch/i }))
+        .toHaveTextContent("Kill Active");
+    });
   });
 
   it("hides the kill switch in explore mode", () => {

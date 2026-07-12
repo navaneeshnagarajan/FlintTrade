@@ -334,6 +334,71 @@ def _close_tick_storage(storage: Any, storage_lock: Any | None = None) -> None:
         storage.close()
 
 
+_ORDERFLOW_CHECKPOINT_INTERVAL_SECONDS = 30.0
+
+
+class _OrderFlowCheckpointOwner:
+    """Publish cursor-bound order-flow state at recorder consistency barriers."""
+
+    def __init__(
+        self,
+        storage: Any,
+        orderflow: Any,
+        *,
+        workspace_dir: Path,
+        storage_lock: Any | None = None,
+        interval_seconds: float = _ORDERFLOW_CHECKPOINT_INTERVAL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.storage = storage
+        self.orderflow = orderflow
+        self.workspace_dir = workspace_dir
+        self.storage_lock = storage_lock
+        self.interval_seconds = max(0.0, float(interval_seconds))
+        self.clock = clock
+        self._last_persisted_at: float | None = None
+
+    def persist_locked(self, *, force: bool = False) -> bool:
+        """Persist while the caller owns the storage/ingestion barrier."""
+        now = self.clock()
+        if (
+            not force
+            and self._last_persisted_at is not None
+            and 0 <= now - self._last_persisted_at < self.interval_seconds
+        ):
+            return False
+        from flinttrade_data.orderflow_checkpoint import (  # noqa: PLC0415
+            store_orderflow_checkpoint,
+        )
+
+        cursor = self.storage.get_tick_replay_cursor()
+        state = self.orderflow.export_state()
+        store_orderflow_checkpoint(self.workspace_dir, state, cursor)
+        self._last_persisted_at = now
+        return True
+
+    def persist(self, *, force: bool = False) -> bool:
+        """Acquire the storage lock and publish one checkpoint."""
+        lock_context = nullcontext() if self.storage_lock is None else self.storage_lock
+        with lock_context:
+            return self.persist_locked(force=force)
+
+
+def _checkpoint_identities(state: Mapping[str, Any]) -> set[tuple[str, str]]:
+    """Return canonical identities from a validated checkpoint payload."""
+    rows = state.get("identities")
+    if not isinstance(rows, list):
+        return set()
+    return {
+        (
+            str(row.get("exchange") or "").strip().upper(),
+            str(row.get("symbol") or "").strip().upper(),
+        )
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+
+
 def _prepare_tick_orderflow_state(
     storage: Any,
     orderflow: Any,
@@ -342,13 +407,17 @@ def _prepare_tick_orderflow_state(
     storage_lock: Any | None = None,
     retention_days: int = 90,
     now: float | None = None,
+    workspace_dir: Path | None = None,
 ) -> dict[str, int]:
-    """Prune persisted ticks and restore current-session order-flow baselines."""
+    """Prune ticks and restore only cursor- or complete-prefix-proven state."""
     from datetime import datetime  # noqa: PLC0415
     from zoneinfo import ZoneInfo  # noqa: PLC0415
 
     from flinttrade_data.orderflow_aggregator import (  # noqa: PLC0415
         DEFAULT_RESTORE_MAX_TICKS,
+    )
+    from flinttrade_data.orderflow_checkpoint import (  # noqa: PLC0415
+        load_orderflow_checkpoint,
     )
 
     now_timestamp = time.time() if now is None else float(now)
@@ -361,6 +430,9 @@ def _prepare_tick_orderflow_state(
         "restored_ticks": 0,
         "skipped_ticks": 0,
         "restore_failures": 0,
+        "checkpoint_restored": 0,
+        "checkpoint_failures": 0,
+        "unavailable_identities": 0,
     }
 
     lock_context = nullcontext() if storage_lock is None else storage_lock
@@ -370,8 +442,12 @@ def _prepare_tick_orderflow_state(
             summary["pruned_ticks"] = int(prune_ticks(retention_days))
 
         get_ticks = getattr(storage, "get_ticks", None)
-        restore = getattr(orderflow, "restore_current_session", None)
-        if not callable(get_ticks) or not callable(restore):
+        restore_prefix = getattr(orderflow, "restore_current_session", None)
+        replay_tail = getattr(orderflow, "replay_current_session_tail", None)
+        restore_checkpoint = getattr(orderflow, "restore_state", None)
+        retain_identities = getattr(orderflow, "retain_identities", None)
+        reset_identity = getattr(orderflow, "reset", None)
+        if not callable(get_ticks) or not callable(restore_prefix):
             return summary
 
         identities = {
@@ -382,25 +458,85 @@ def _prepare_tick_orderflow_state(
             for instrument in watchlist
             if isinstance(instrument, dict)
         }
-        for exchange, symbol in sorted(identities):
-            if not exchange or not symbol:
-                summary["skipped_ticks"] += 1
-                continue
+        valid_identities = {
+            (exchange, symbol)
+            for exchange, symbol in identities
+            if exchange and symbol
+        }
+        summary["skipped_ticks"] += len(identities - valid_identities)
+
+        checkpoint = None
+        checkpoint_identities: set[tuple[str, str]] = set()
+        try:
+            checkpoint = load_orderflow_checkpoint(workspace_dir or _workspace_dir())
+            if checkpoint is not None:
+                validate_cursor = getattr(storage, "validate_tick_replay_cursor", None)
+                if not callable(validate_cursor) or not callable(restore_checkpoint):
+                    raise RuntimeError("checkpoint restore APIs are unavailable")
+                validate_cursor(checkpoint.cursor)
+                restore_checkpoint(checkpoint.orderflow_state, now=now_timestamp)
+                checkpoint_identities = _checkpoint_identities(
+                    checkpoint.orderflow_state
+                )
+                if callable(retain_identities):
+                    retain_identities(valid_identities)
+                summary["checkpoint_restored"] = 1
+        except Exception as exc:  # noqa: BLE001 - invalid restart state fails closed
+            summary["checkpoint_failures"] += 1
+            checkpoint = None
+            checkpoint_identities.clear()
+            if callable(reset_identity):
+                reset_identity()
+            logger.warning(
+                "Order-flow checkpoint rejected (%s); requiring complete session prefixes",
+                type(exc).__name__,
+            )
+
+        get_tail = getattr(storage, "get_ticks_after_cursor", None)
+        for exchange, symbol in sorted(valid_identities):
             try:
-                ticks = get_ticks(
-                    symbol,
-                    exchange,
-                    session,
-                    session,
-                    limit=DEFAULT_RESTORE_MAX_TICKS,
-                )
-                result = restore(
-                    ticks,
-                    now=now_timestamp,
-                    max_ticks=DEFAULT_RESTORE_MAX_TICKS,
-                )
+                if (
+                    checkpoint is not None
+                    and (exchange, symbol) in checkpoint_identities
+                    and callable(get_tail)
+                    and callable(replay_tail)
+                ):
+                    ticks = get_tail(
+                        checkpoint.cursor,
+                        symbol,
+                        exchange,
+                        session,
+                        limit=DEFAULT_RESTORE_MAX_TICKS + 1,
+                    )
+                    if len(ticks) > DEFAULT_RESTORE_MAX_TICKS:
+                        raise RuntimeError("cursor-bound tick tail is incomplete")
+                    result = replay_tail(
+                        ticks,
+                        now=now_timestamp,
+                        max_ticks=DEFAULT_RESTORE_MAX_TICKS,
+                        history_complete=True,
+                    )
+                else:
+                    ticks = get_ticks(
+                        symbol,
+                        exchange,
+                        session,
+                        session,
+                        limit=DEFAULT_RESTORE_MAX_TICKS + 1,
+                    )
+                    if len(ticks) > DEFAULT_RESTORE_MAX_TICKS:
+                        raise RuntimeError("persisted session prefix is incomplete")
+                    result = restore_prefix(
+                        ticks,
+                        now=now_timestamp,
+                        max_ticks=DEFAULT_RESTORE_MAX_TICKS,
+                        history_complete=True,
+                    )
             except Exception as exc:  # noqa: BLE001 - one instrument must not block capture
                 summary["restore_failures"] += 1
+                summary["unavailable_identities"] += 1
+                if callable(reset_identity):
+                    reset_identity(symbol, exchange=exchange)
                 logger.warning(
                     "Order-flow restore skipped for %s:%s (%s)",
                     exchange,
@@ -422,6 +558,7 @@ def _handle_tick_recorder_completion(
     api_key: str,
     is_shutting_down: Callable[[], bool] | None = None,
     on_unpublished: Callable[[], None] | None = None,
+    before_storage_close: Callable[[], None] | None = None,
     on_storage_closed: Callable[[], None] | None = None,
 ) -> bool:
     """Unpublish a full-app recorder that terminated outside normal shutdown."""
@@ -459,6 +596,27 @@ def _handle_tick_recorder_completion(
             except Exception as exc:  # noqa: BLE001 - done callbacks must not escape
                 logger.warning("Tick runtime unpublish callback failed (%s)", type(exc).__name__)
     try:
+        pending_tick_count = int(getattr(recorder, "pending_tick_count", 0))
+    except (TypeError, ValueError, OverflowError):
+        pending_tick_count = 0
+    if pending_tick_count > 0:
+        logger.warning(
+            "Tick storage retained after recorder exit with %d unflushed ticks",
+            pending_tick_count,
+        )
+        logger.warning("Tick capture stopped unexpectedly (%s); not recording ticks", diagnostic)
+        return True
+    if before_storage_close is not None:
+        try:
+            before_storage_close()
+        except Exception as exc:  # noqa: BLE001 - retain storage for shutdown retry
+            logger.warning(
+                "Tick order-flow checkpoint failed after recorder exit (%s)",
+                type(exc).__name__,
+            )
+            logger.warning("Tick capture stopped unexpectedly (%s); not recording ticks", diagnostic)
+            return True
+    try:
         _close_tick_storage(storage, storage_lock)
     except Exception as exc:  # noqa: BLE001 - done callbacks must not escape
         logger.warning("Tick storage close failed after recorder exit (%s)", type(exc).__name__)
@@ -482,6 +640,7 @@ def _build_tick_recorder(
     orderflow: Any,
     watchlist: list[dict[str, str]],
     mode: str,
+    post_flush_callback: Callable[[], None] | None = None,
 ) -> Any:
     """Build a recorder wired to the existing application signal hub."""
     ltp_sink = getattr(signal_hub, "process_tick", None)
@@ -494,6 +653,7 @@ def _build_tick_recorder(
         ws_url=openalgo_ws_base_url(settings),
         storage_lock=storage_lock,
         orderflow_aggregator=orderflow,
+        post_flush_callback=post_flush_callback,
         api_key=settings.openalgo_api_key,
         ltp_sink=ltp_sink,
     )
@@ -1572,6 +1732,70 @@ def configure_broker_router(
         if brokers_cfg is not None:
             _snapshot_brokers_bak(brokers_cfg)
         return True
+
+
+def _bind_runtime_emergency_dispatcher(
+    app: Flask,
+    safety: Any,
+    telegram: Any,
+    client: Any,
+) -> Any:
+    """Bind background emergency writes to the current gated router generation.
+
+    Telegram authenticates the human command through its configured chat id,
+    but it has no Flask request/JWT context. The application owner therefore
+    supplies a fresh command principal using the single operator profile. The
+    router still enforces the configured account ACL, and every dispatch
+    resolves the current default selector and router generation independently.
+    """
+    from flinttrade_engine.request_context import RequestContext, parse_selector  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        EmergencyBrokerTarget,
+        GatedEmergencyBrokerDispatcher,
+    )
+
+    run_sync = getattr(client, "run_sync", None)
+    if not callable(run_sync):
+        raise RuntimeError("Emergency dispatcher requires the shared broker event-loop owner")
+
+    def target_provider() -> EmergencyBrokerTarget:
+        router = app.config.get("BROKER_ROUTER")
+        selector = str(getattr(router, "default_selector", None) or "").strip()
+        if not selector:
+            raise ValueError("no configured emergency execution selector")
+        adapter_id, account_id = parse_selector(selector)
+
+        auth_service = app.config.get("AUTH_SERVICE")
+        if auth_service is None:
+            raise ValueError("operator profile is unavailable")
+        profile = auth_service.get_profile()
+        actor_id = str(profile.get("username") or "").strip()
+        if not actor_id:
+            raise ValueError("operator profile has no ACL identity")
+
+        request_ctx = RequestContext(
+            jti=f"telegram-{secrets.token_urlsafe(24)}",
+            actor_type="human",
+            actor_id=actor_id,
+            mode="live",
+            selector=f"{adapter_id}:{account_id}",
+        )
+        return EmergencyBrokerTarget(
+            request_ctx=request_ctx,
+            adapter_id=adapter_id,
+            account_id=account_id,
+        )
+
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: app.config.get("BROKER_ROUTER"),
+        target_provider=target_provider,
+        run_awaitable=run_sync,
+    )
+    safety.bind_emergency_dispatcher(dispatcher)
+    if telegram is not None:
+        telegram.emergency_dispatcher = dispatcher
+    app.config["EMERGENCY_DISPATCHER"] = dispatcher
+    return dispatcher
 
 
 def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str, Any]:
@@ -3731,10 +3955,6 @@ class FlintTradeApp:
         )
         # Wire Telegram into cron so jobs can send alerts
         self.cron.telegram_bot = self.telegram
-        # Start the native long-polling loop so inbound commands — the /kill
-        # kill switch above all — are actually reachable. No-op unless Telegram
-        # is enabled and fully configured (token + authorised chat id).
-        self.telegram.start_background()
 
         # Gateway — broker registry + credential store + contract manager
         flinttrade_dir = _workspace_dir()
@@ -3759,6 +3979,7 @@ class FlintTradeApp:
         self._tick_recorder_task: Any | None = None
         self._tick_storage: Any | None = None
         self._tick_storage_lock: Any | None = None
+        self._orderflow_checkpoint_owner: _OrderFlowCheckpointOwner | None = None
         self._flask_app: Flask | None = None
         self._stop_started = False
         self._stop_completed = False
@@ -3915,6 +4136,16 @@ class FlintTradeApp:
             time_scheduler=self.time_scheduler,
         )
         self._flask_app = flask_app
+        _bind_runtime_emergency_dispatcher(
+            flask_app,
+            self.safety,
+            self.telegram,
+            self.client,
+        )
+        # Start polling only after /kill owns a current-router dispatcher. This
+        # is a no-op unless Telegram has a token and authorised chat id.
+        if self.telegram is not None:
+            self.telegram.start_background()
         tick_capture_enabled = _tick_capture_enabled()
         _set_tick_capture_intent(flask_app, tick_capture_enabled)
         _run_flask_server(flask_app, port=_resolve_backend_port())
@@ -4047,6 +4278,7 @@ class FlintTradeApp:
             tick_storage: Any | None = None
             recorder: Any | None = None
             recorder_task: asyncio.Task[Any] | None = None
+            checkpoint_owner: _OrderFlowCheckpointOwner | None = None
             try:
                 from flinttrade_data.storage import StorageManager as _TickStore  # noqa: PLC0415
                 from flinttrade_data.tick_recorder import TickRecorder  # noqa: PLC0415
@@ -4080,6 +4312,12 @@ class FlintTradeApp:
                         storage_lock=tick_lock,
                         retention_days=90,
                     )
+                    checkpoint_owner = _OrderFlowCheckpointOwner(
+                        tick_storage,
+                        orderflow,
+                        workspace_dir=_workspace_dir(),
+                        storage_lock=tick_lock,
+                    )
                     recorder = _build_tick_recorder(
                         recorder_factory=TickRecorder,
                         signal_hub=signal_hub,
@@ -4089,12 +4327,14 @@ class FlintTradeApp:
                         orderflow=orderflow,
                         watchlist=watchlist,
                         mode=_tick_capture_mode(),
+                        post_flush_callback=checkpoint_owner.persist_locked,
                     )
                     recorder_task = asyncio.create_task(recorder.run())
                     self._tick_recorder = recorder
                     self._tick_recorder_task = recorder_task
                     self._tick_storage = tick_storage
                     self._tick_storage_lock = tick_lock
+                    self._orderflow_checkpoint_owner = checkpoint_owner
                     # Hand the tick store to the cron so nightly maintenance keeps the
                     # highest-volume DuckDB file from growing unbounded. register_
                     # builtin_jobs already ran, but the job resolves this lazily.
@@ -4116,14 +4356,15 @@ class FlintTradeApp:
                         key: str = capture_settings.openalgo_api_key,
                     ) -> None:
                         def unpublish_runtime_handles() -> None:
-                            self._tick_recorder = None
                             self._tick_recorder_task = None
                             self.cron.tick_storage = None
                             self.cron.tick_storage_lock = None
 
                         def clear_closed_storage() -> None:
+                            self._tick_recorder = None
                             self._tick_storage = None
                             self._tick_storage_lock = None
+                            self._orderflow_checkpoint_owner = None
 
                         _handle_tick_recorder_completion(
                             flask_app,
@@ -4132,6 +4373,11 @@ class FlintTradeApp:
                             api_key=key,
                             is_shutting_down=lambda: self._stop_started,
                             on_unpublished=unpublish_runtime_handles,
+                            before_storage_close=(
+                                lambda: checkpoint_owner.persist(force=True)
+                                if checkpoint_owner is not None
+                                else None
+                            ),
                             on_storage_closed=clear_closed_storage,
                         )
 
@@ -4162,6 +4408,7 @@ class FlintTradeApp:
                     self._tick_recorder_task = None
                     self._tick_storage = None
                     self._tick_storage_lock = None
+                    self._orderflow_checkpoint_owner = None
                     for key in ("TICK_RECORDER", "TICK_STORAGE", "TICK_STORAGE_LOCK", "ORDERFLOW_AGGREGATOR"):
                         flask_app.config.pop(key, None)
                     flask_app.config["TICK_CAPTURE_ERROR"] = diagnostic
@@ -4359,6 +4606,13 @@ class FlintTradeApp:
             except Exception as exc:  # noqa: BLE001 - shutdown must continue
                 errors.append((label, type(exc).__name__))
 
+        strategy_cron_scheduler = getattr(self, "strategy_cron_scheduler", None)
+        strategy_cron_stopped = (
+            attempt("strategy cron scheduler", strategy_cron_scheduler.stop)
+            if strategy_cron_scheduler is not None
+            else True
+        )
+
         # Long-lived streams and background writers are not represented by a
         # short request handler. Quiesce them before waiting on the request
         # tracker, otherwise an SSE response can hold the drain open forever
@@ -4397,8 +4651,17 @@ class FlintTradeApp:
 
             from .agent_routes import shutdown_agent_runtime  # noqa: PLC0415
             from .smart_order_routes import shutdown_smart_order_jobs  # noqa: PLC0415
+            from flinttrade_engine.strategy_routes import (  # noqa: PLC0415
+                shutdown_strategy_runtime,
+            )
 
-            live_write_owners_stopped = True
+            uploaded_strategies_stopped = attempt(
+                "uploaded strategy runner",
+                lambda: shutdown_strategy_runtime(flask_app),
+            )
+            live_write_owners_stopped = (
+                strategy_cron_stopped and uploaded_strategies_stopped
+            )
             raw_smart_timeout = flask_app.config.get(
                 "SMART_ORDER_SHUTDOWN_TIMEOUT_SECONDS", 30.0
             )
@@ -4457,6 +4720,7 @@ class FlintTradeApp:
         tick_task = self._tick_recorder_task
         tick_storage = getattr(self, "_tick_storage", None)
         tick_storage_lock = getattr(self, "_tick_storage_lock", None)
+        checkpoint_owner = getattr(self, "_orderflow_checkpoint_owner", None)
 
         holiday_refresh_task = getattr(self, "_holiday_refresh_task", None)
         if holiday_refresh_task is not None:
@@ -4547,16 +4811,25 @@ class FlintTradeApp:
                 )
 
         if flask_app is not None:
-            try:
-                router_retired = await asyncio.to_thread(
-                    retire_broker_router_generation,
-                    flask_app,
-                )
-            except Exception as exc:  # noqa: BLE001 - fail closed on late publication
-                errors.append(("broker router after request drain", type(exc).__name__))
-            else:
-                if not router_retired:
-                    errors.append(("broker router after request drain", "TimeoutError"))
+            from flinttrade_engine.strategy_routes import (  # noqa: PLC0415
+                shutdown_strategy_runtime,
+            )
+
+            uploaded_stopped = attempt(
+                "uploaded strategy runner after request drain",
+                lambda: shutdown_strategy_runtime(flask_app),
+            )
+            if uploaded_stopped:
+                try:
+                    router_retired = await asyncio.to_thread(
+                        retire_broker_router_generation,
+                        flask_app,
+                    )
+                except Exception as exc:  # noqa: BLE001 - fail closed on late publication
+                    errors.append(("broker router after request drain", type(exc).__name__))
+                else:
+                    if not router_retired:
+                        errors.append(("broker router after request drain", "TimeoutError"))
 
         if errors:
             summary = ", ".join(
@@ -4567,10 +4840,6 @@ class FlintTradeApp:
 
         errors.extend(deferred_errors)
         try:
-            strategy_cron_scheduler = getattr(self, "strategy_cron_scheduler", None)
-            if strategy_cron_scheduler is not None:
-                attempt("strategy cron scheduler", strategy_cron_scheduler.stop)
-
             # Stop strategies
             await attempt_async("scheduler", self.scheduler.stop_all)
 
@@ -4602,12 +4871,30 @@ class FlintTradeApp:
             if tick_storage is not None:
                 self.cron.tick_storage = None
                 self.cron.tick_storage_lock = None
-                if attempt(
+                checkpoint_ready = True
+                if checkpoint_owner is not None:
+                    try:
+                        pending_tick_count = int(
+                            getattr(tick_recorder, "pending_tick_count", 0)
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        pending_tick_count = 1
+                    if pending_tick_count:
+                        checkpoint_ready = False
+                        errors.append(("tick checkpoint pending buffer", "RuntimeError"))
+                    else:
+                        try:
+                            checkpoint_owner.persist(force=True)
+                        except Exception as exc:  # noqa: BLE001 - retain for retry
+                            checkpoint_ready = False
+                            errors.append(("tick order-flow checkpoint", type(exc).__name__))
+                if checkpoint_ready and attempt(
                     "tick storage",
                     lambda: _close_tick_storage(tick_storage, tick_storage_lock),
                 ):
                     self._tick_storage = None
                     self._tick_storage_lock = None
+                    self._orderflow_checkpoint_owner = None
 
             # Stop the reconciliation runner (signal the loop, then cancel the task).
             reconciliation_runner = self._reconciliation_runner

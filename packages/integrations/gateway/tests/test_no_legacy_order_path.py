@@ -39,10 +39,9 @@ _GATED_RECEIVER_BY_FILE: dict[str, re.Pattern[str]] = {
 }
 
 # Modules that legitimately contain a RAW (non-router) broker order-write. This
-# is the SHRINKING debt allowlist: every entry is either a known-dormant native
-# strategy/agent path (tracked in PLAN.md, not wired live) or an L5 emergency
-# close. A NEW raw order-write in any OTHER services/webhooks module fails the
-# guard below — it must be gated through gate_order -> BrokerRouter instead.
+# is the SHRINKING debt allowlist: every remaining entry is a known-dormant
+# native strategy/agent path tracked in PLAN.md. L5 emergency actions are NOT an
+# exemption: they traverse gate_broker_write -> BrokerRouter.execute_gated.
 _RAW_ORDER_ALLOWLIST = {
     # Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
     # (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
@@ -59,10 +58,6 @@ _RAW_ORDER_ALLOWLIST = {
     # accepts an arbitrary ``order_router`` object and must be folded into the
     # canonical gated router before becoming reachable.
     "packages/services/automation/src/flinttrade_automation/voice_order_bridge.py",
-    # L5 emergency close (acceptable un-gated — gating an emergency exit could
-    # deadlock the very safety action it protects):
-    "packages/services/automation/src/flinttrade_automation/telegram_bot.py",
-    "packages/services/engine/src/flinttrade_engine/safety.py",
 }
 
 # Legacy engine/AI stacks that dispatch through their own ``route_order`` API
@@ -130,14 +125,10 @@ _EXTENDED_VERB_WRITE_RE = re.compile(
     r"|cancel_smart_order)\s*\("
 )
 
-# Modules that legitimately contain a raw extended-verb call. BOTH are the L5
-# emergency-close path calling OpenAlgoClient.cancel_all_orders (never a broker
-# adapter): gating an emergency flatten could deadlock the very safety action
-# it protects. Same shrinking-allowlist rule as _RAW_ORDER_ALLOWLIST.
-_RAW_EXTENDED_VERB_ALLOWLIST = {
-    "packages/services/engine/src/flinttrade_engine/safety.py",
-    "packages/services/automation/src/flinttrade_automation/telegram_bot.py",
-}
+# There are no raw extended-verb exemptions. Emergency flattening is an
+# explicit exposure-reducing policy, but it still mints a one-shot context and
+# dispatches through BrokerRouter to a token-guarded adapter.
+_RAW_EXTENDED_VERB_ALLOWLIST: set[str] = set()
 
 
 def test_registry_exposes_no_write_methods():
@@ -351,13 +342,13 @@ def test_no_new_ungated_order_paths_in_services_and_webhooks():
                 if sandbox_receiver_re.search(line):
                     continue  # the broker-free paper engine
                 if rel in _RAW_ORDER_ALLOWLIST:
-                    continue  # known dormant/emergency debt
+                    continue  # known dormant debt
                 offenders.append(f"{rel}:{n}: {stripped}")
     assert not offenders, (
         "Ungated broker order-write outside the gate_order -> BrokerRouter chain "
-        "(contract §8.1). Route it through gate_order/BrokerRouter, or — if it is a "
-        "deliberate dormant/emergency path — add the module to _RAW_ORDER_ALLOWLIST "
-        "with a justification:\n" + "\n".join(offenders)
+        "(contract §8.1). Route it through gate_order/BrokerRouter. Only proven-"
+        "dormant debt may enter _RAW_ORDER_ALLOWLIST; emergency writes receive no "
+        "exemption:\n" + "\n".join(offenders)
     )
 
 
@@ -370,9 +361,8 @@ def test_no_raw_extended_verb_calls_in_services_and_webhooks():
     the verb as a string argument, never as an attribute call, so they cannot
     match here). Any raw ``.modify_forever(`` / ``.exit_all_positions(`` /…
     attribute call in ``packages/services/*``, ``packages/integrations/webhooks``
-    or ``packages/core`` is a bypass of the single gated path — unless the
-    module is on the explicit shrinking allowlist (the L5 emergency close via
-    OpenAlgoClient, never a broker adapter).
+    or ``packages/core`` is a bypass of the single gated path. L5 emergency
+    actions receive no exemption from the canonical gated chain.
     """
     scan_dirs = [
         _REPO_ROOT / "packages" / "services",
@@ -389,7 +379,7 @@ def test_no_raw_extended_verb_calls_in_services_and_webhooks():
                 continue
             rel = path.relative_to(_REPO_ROOT).as_posix()
             if rel in _RAW_EXTENDED_VERB_ALLOWLIST:
-                continue  # L5 emergency close (OpenAlgoClient, not an adapter)
+                continue
             for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 stripped = line.strip()
                 if stripped.startswith("#") or "def " in stripped:
@@ -399,8 +389,7 @@ def test_no_raw_extended_verb_calls_in_services_and_webhooks():
     assert not offenders, (
         "Raw extended-verb broker write outside the gate_broker_write -> "
         "BrokerRouter.execute_gated chain (contract §8.1). Route it through the "
-        "router, or — if it is a deliberate emergency path — add the module to "
-        "_RAW_EXTENDED_VERB_ALLOWLIST with a justification:\n" + "\n".join(offenders)
+        "router; emergency writes receive no exemption:\n" + "\n".join(offenders)
     )
 
 
@@ -444,6 +433,34 @@ def test_raw_order_allowlist_has_no_stale_entries():
         if not has_raw:
             stale.append(f"{rel} (no raw order-write left — remove from allowlist)")
     assert not stale, "Stale _RAW_ORDER_ALLOWLIST entries (the allowlist must shrink):\n" + "\n".join(stale)
+
+
+def test_emergency_modules_have_no_raw_client_write_escape_hatch():
+    """P0 pin: API/Safety/Telegram emergency code has no raw-client mutation."""
+    modules = (
+        "packages/services/engine/src/flinttrade_engine/safety.py",
+        "packages/core/core/src/flinttrade_core/operations_routes.py",
+        "packages/services/automation/src/flinttrade_automation/telegram_bot.py",
+    )
+    forbidden = re.compile(
+        r"\b(?:self\.)?[_\w]*client\.(?:cancel_all_orders|close_position|exit_all_positions)\s*\("
+    )
+    offenders: list[str] = []
+    for rel in modules:
+        path = _REPO_ROOT / rel
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if forbidden.search(line) and not line.strip().startswith("#"):
+                offenders.append(f"{rel}:{n}: {line.strip()}")
+
+    assert not offenders, (
+        "Emergency broker mutations must use gate_broker_write -> BrokerRouter; "
+        "raw OpenAlgoClient writes are forbidden:\n" + "\n".join(offenders)
+    )
+
+    safety_src = (_REPO_ROOT / modules[0]).read_text(encoding="utf-8")
+    assert "GatedEmergencyBrokerDispatcher" in safety_src
+    assert "gate_broker_write(" in safety_src
+    assert re.search(r"router\.execute_gated\s*\(", safety_src)
 
 
 def test_no_new_raw_route_order_dispatchers():

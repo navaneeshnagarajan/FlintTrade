@@ -190,6 +190,70 @@ async def test_shutdown_drains_admitted_request_before_closing_dependencies() ->
 
 
 @pytest.mark.asyncio
+async def test_shutdown_stops_uploaded_strategies_before_each_router_retirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing and late-admitted children must stop before router retirement."""
+    import importlib
+
+    import flinttrade_engine.strategy_routes as strategy_routes
+
+    app_module = importlib.import_module("flinttrade_core.app")
+    runtime = _runtime_app()
+    flask_app = Flask("uploaded-strategy-shutdown")
+    events: list[str] = []
+    tracker = MagicMock()
+
+    def requests_drained(_timeout: float) -> bool:
+        assert events == ["cron-stopped", "uploaded-stopped", "router-retired"]
+        events.append("requests-drained")
+        return True
+
+    tracker.wait_for_idle.side_effect = requests_drained
+    flask_app.config["RUNTIME_REQUEST_TRACKER"] = tracker
+    runtime._flask_app = flask_app
+
+    def stop_uploaded(app: Flask) -> list[str]:
+        assert app is flask_app
+        events.append("uploaded-stopped")
+        return ["strategy-1"]
+
+    def retire_router(app: Flask) -> bool:
+        assert app is flask_app
+        assert events[-1] == "uploaded-stopped"
+        events.append("router-retired")
+        return True
+
+    async def stop_registered() -> None:
+        assert events == [
+            "cron-stopped",
+            "uploaded-stopped",
+            "router-retired",
+            "requests-drained",
+            "uploaded-stopped",
+            "router-retired",
+        ]
+        events.append("registered-stopped")
+
+    monkeypatch.setattr(strategy_routes, "shutdown_strategy_runtime", stop_uploaded)
+    monkeypatch.setattr(app_module, "retire_broker_router_generation", retire_router)
+    runtime.strategy_cron_scheduler.stop.side_effect = lambda: events.append("cron-stopped")
+    runtime.scheduler.stop_all.side_effect = stop_registered
+
+    await runtime.stop()
+
+    assert events == [
+        "cron-stopped",
+        "uploaded-stopped",
+        "router-retired",
+        "requests-drained",
+        "uploaded-stopped",
+        "router-retired",
+        "registered-stopped",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_request_drain_timeout_leaves_dependencies_open_for_retry() -> None:
     """A stuck request fails shutdown without tearing down state beneath it."""
     from flinttrade_core.app import _install_runtime_request_tracking
