@@ -3440,6 +3440,7 @@ class TestTickRecorder:
             "last_error": recorder.last_error,
             "transport_error": "",
             "persistence_error": recorder.last_error,
+            "checkpoint_error": "",
             "source_timestamp_error": "",
         }
 

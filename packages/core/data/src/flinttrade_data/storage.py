@@ -11,6 +11,8 @@ import io
 import logging
 import os
 import threading
+import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,45 @@ import duckdb
 logger = logging.getLogger("flinttrade.data.storage")
 IST = timezone(timedelta(hours=5, minutes=30))
 _SCHEMA_INITIALISE_LOCK = threading.RLock()
+MAX_TICK_REPLAY_QUERY_ROWS = 100_001
+_TICK_STORE_ID_KEY = "tick_store_id"
+_MAX_INGEST_SEQ = 2**63 - 1
+
+
+class TickReplayCursorError(ValueError):
+    """Base class for persisted tick replay cursor failures."""
+
+
+class TickReplayStoreMismatchError(TickReplayCursorError):
+    """Raised when a cursor belongs to a different tick store."""
+
+
+class TickReplayCursorAheadError(TickReplayCursorError):
+    """Raised when storage has rolled back behind a persisted cursor."""
+
+
+@dataclass(frozen=True, slots=True)
+class TickReplayCursor:
+    """Stable tick-store lineage and its latest committed ingest sequence."""
+
+    store_id: str
+    ingest_seq: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.store_id, str):
+            raise ValueError("store_id must be a canonical UUID")
+        try:
+            parsed_store_id = uuid.UUID(self.store_id)
+        except (AttributeError, ValueError) as exc:
+            raise ValueError("store_id must be a canonical UUID") from exc
+        if str(parsed_store_id) != self.store_id:
+            raise ValueError("store_id must be a canonical UUID")
+        if (
+            isinstance(self.ingest_seq, bool)
+            or not isinstance(self.ingest_seq, int)
+            or not 0 <= self.ingest_seq <= _MAX_INGEST_SEQ
+        ):
+            raise ValueError("ingest_seq must be a non-negative BIGINT")
 
 
 def _normalise_ts(value: Any) -> Any:
@@ -105,6 +146,13 @@ _BACKFILL_TICKS_TIMESTAMP_PROVENANCE = """
 UPDATE ticks SET timestamp_provenance = 'unknown' WHERE timestamp_provenance IS NULL;
 """
 
+_SCHEMA_STORAGE_METADATA = """
+CREATE TABLE IF NOT EXISTS flinttrade_storage_metadata (
+    key     VARCHAR PRIMARY KEY,
+    value   VARCHAR NOT NULL
+);
+"""
+
 _SCHEMA_TRADES = """
 CREATE TABLE IF NOT EXISTS trades (
     ts              TIMESTAMP NOT NULL,
@@ -155,7 +203,13 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 );
 """
 
-_ALL_SCHEMAS = [_SCHEMA_TICKS, _SCHEMA_TRADES, _SCHEMA_AUDIT, _SCHEMA_DAILY_SUMMARY]
+_ALL_SCHEMAS = [
+    _SCHEMA_TICKS,
+    _SCHEMA_TRADES,
+    _SCHEMA_AUDIT,
+    _SCHEMA_DAILY_SUMMARY,
+    _SCHEMA_STORAGE_METADATA,
+]
 
 # Indexes — without these, every query does a full table scan.
 _INDEXES = [
@@ -247,6 +301,16 @@ class StorageManager:
                     self.connection.execute(_INDEXES[0])
             for idx in _INDEXES:
                 self.connection.execute(idx)
+            candidate_store_id = str(uuid.uuid4())
+            self.connection.execute(
+                """INSERT INTO flinttrade_storage_metadata (key, value)
+                   SELECT ?, ?
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM flinttrade_storage_metadata WHERE key = ?
+                   )""",
+                [_TICK_STORE_ID_KEY, candidate_store_id, _TICK_STORE_ID_KEY],
+            )
+            self._read_tick_store_id()
         logger.info("DuckDB schema initialised (tables + indexes)")
 
     # ------------------------------------------------------------------
@@ -376,6 +440,87 @@ class StorageManager:
         if limit is not None:
             rows.reverse()
         return [dict(zip(columns, row)) for row in rows]
+
+    def get_tick_replay_cursor(self) -> TickReplayCursor:
+        """Return this store's identity and latest committed global tick sequence."""
+        store_id = self._read_tick_store_id()
+        row = self.connection.execute(
+            "SELECT COALESCE(MAX(ingest_seq), 0) FROM ticks"
+        ).fetchone()
+        ingest_seq = int(row[0]) if row is not None else 0
+        return TickReplayCursor(store_id=store_id, ingest_seq=ingest_seq)
+
+    def validate_tick_replay_cursor(
+        self,
+        cursor: TickReplayCursor,
+    ) -> TickReplayCursor:
+        """Validate cursor lineage and rollback safety; return the current cursor."""
+        if not isinstance(cursor, TickReplayCursor):
+            raise TypeError("cursor must be a TickReplayCursor")
+        current = self.get_tick_replay_cursor()
+        if cursor.store_id != current.store_id:
+            raise TickReplayStoreMismatchError("cursor belongs to a different tick store")
+        if cursor.ingest_seq > current.ingest_seq:
+            raise TickReplayCursorAheadError("cursor is ahead of tick storage")
+        return current
+
+    def get_ticks_after_cursor(
+        self,
+        cursor: TickReplayCursor,
+        symbol: str,
+        exchange: str,
+        session_date: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Return the earliest current-session rows committed after ``cursor``.
+
+        Callers should request ``max_ticks + 1`` rows. Receiving at most
+        ``max_ticks`` proves the cursor-bound tail is complete; receiving the
+        extra row proves replay must fail closed or use a newer checkpoint.
+        Unlike :meth:`get_ticks`, rows include ``ingest_seq`` so duplicate source
+        timestamps retain a stable persistence order.
+        """
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 0 < limit <= MAX_TICK_REPLAY_QUERY_ROWS
+        ):
+            raise ValueError(
+                f"limit must be between 1 and {MAX_TICK_REPLAY_QUERY_ROWS}"
+            )
+        self.validate_tick_replay_cursor(cursor)
+        start, end = _ist_date_window(session_date, session_date)
+        result = self.connection.execute(
+            """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
+                      volume, bid, ask, oi, prev_close, depth_json,
+                      timestamp_provenance, ingest_seq
+               FROM ticks
+               WHERE ingest_seq > ?
+                 AND symbol = ? AND exchange = ?
+                 AND ts >= ? AND ts < ?
+               ORDER BY ingest_seq
+               LIMIT ?""",
+            [cursor.ingest_seq, symbol, exchange, start, end, limit],
+        )
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+
+    def _read_tick_store_id(self) -> str:
+        """Read and validate the durable tick-store identity."""
+        try:
+            row = self.connection.execute(
+                "SELECT value FROM flinttrade_storage_metadata WHERE key = ?",
+                [_TICK_STORE_ID_KEY],
+            ).fetchone()
+        except duckdb.Error as exc:
+            raise RuntimeError("tick storage is not initialised") from exc
+        if row is None:
+            raise RuntimeError("tick storage identity is missing")
+        try:
+            return TickReplayCursor(str(row[0]), 0).store_id
+        except ValueError as exc:
+            raise RuntimeError("tick storage identity is invalid") from exc
 
     def get_ticks_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all ticks for a given date."""

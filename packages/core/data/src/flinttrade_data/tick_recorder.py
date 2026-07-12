@@ -319,6 +319,7 @@ class TickRecorder:
         max_reconnect_delay: float = 60.0,
         storage_lock: Any | None = None,
         orderflow_aggregator: Any | None = None,
+        post_flush_callback: Callable[[], None] | None = None,
         api_key: str = "",
         ltp_sink: LtpSink | None = None,
         auth_response_timeout: float = 10.0,
@@ -336,6 +337,7 @@ class TickRecorder:
         self._flush_lock = threading.Lock()
         # Optional live order-flow aggregator fed from each tick (None = off).
         self._orderflow = orderflow_aggregator
+        self._post_flush_callback = post_flush_callback
         aggregator_capacity = getattr(orderflow_aggregator, "max_instruments", MAX_WATCHLIST_INSTRUMENTS)
         self._max_instruments = (
             min(aggregator_capacity, MAX_WATCHLIST_INSTRUMENTS)
@@ -380,6 +382,7 @@ class TickRecorder:
         self._transport_error = ""
         self._persistence_error = ""
         self._persistence_error_cause = ""
+        self._checkpoint_error = ""
         self._source_timestamp_errors: dict[tuple[str, str], str] = {}
         self._tick_count = 0
         self._persisted_tick_count = 0
@@ -450,7 +453,12 @@ class TickRecorder:
                 if latest_rejected_identity is not None
                 else ""
             )
-            last_error = self._persistence_error or self._transport_error or source_timestamp_error
+            last_error = (
+                self._persistence_error
+                or self._checkpoint_error
+                or self._transport_error
+                or source_timestamp_error
+            )
             return {
                 "running": self._running,
                 "connected": self._connected,
@@ -464,6 +472,7 @@ class TickRecorder:
                 "last_error": last_error,
                 "transport_error": self._transport_error,
                 "persistence_error": self._persistence_error,
+                "checkpoint_error": self._checkpoint_error,
                 "source_timestamp_error": source_timestamp_error,
             }
 
@@ -1170,7 +1179,7 @@ class TickRecorder:
         silently discard captured ticks), bounded by ``_max_buffer`` so a
         persistent failure cannot grow memory without limit.
         """
-        with self._flush_lock, self._state_lock:
+        with self._subscription_lock, self._flush_lock, self._state_lock:
             if not self._buffer:
                 return False
 
@@ -1188,8 +1197,10 @@ class TickRecorder:
                     # atomic so a retained batch is safe to retry.
                     with self._storage_lock:
                         self._storage.insert_ticks_batch(self._buffer)
+                        self._run_post_flush_callback()
                 else:
                     self._storage.insert_ticks_batch(self._buffer)
+                    self._run_post_flush_callback()
             except Exception as exc:
                 logger.error(
                     "Failed to flush %d ticks (retaining for retry): %s",
@@ -1220,3 +1231,26 @@ class TickRecorder:
             self._next_persistence_retry_at = 0.0
             self._persistence_backoff = self._persistence_retry_delay
             return True
+
+    def _run_post_flush_callback(self) -> None:
+        """Publish restart state after storage commits without duplicating ticks.
+
+        The callback runs inside the recorder ingestion barrier and shared
+        storage lock. Its failure cannot roll back an already-committed DuckDB
+        batch, so it is surfaced separately and retried after a later flush or
+        during clean shutdown while the tick buffer is still cleared exactly
+        once.
+        """
+        callback = self._post_flush_callback
+        if callback is None:
+            self._checkpoint_error = ""
+            return
+        try:
+            callback()
+        except Exception as exc:  # noqa: BLE001 - tick persistence already committed
+            self._checkpoint_error = (
+                f"Order-flow checkpoint failed ({type(exc).__name__})"
+            )
+            logger.error("Order-flow checkpoint failed after tick flush (%s)", type(exc).__name__)
+        else:
+            self._checkpoint_error = ""
