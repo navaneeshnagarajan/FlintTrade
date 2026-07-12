@@ -93,11 +93,15 @@ class TestPnLTracker:
         tracker.update([], [], {})
         assert len(tracker.get_series()) == 2
 
-    def test_get_series_since_filter(self):
+    def test_get_series_since_filter(self, monkeypatch: pytest.MonkeyPatch):
+        from flinttrade_journal import pnl_tracker as pnl_tracker_module
+
+        timestamps = iter((100.0, 101.0))
+        monkeypatch.setattr(pnl_tracker_module.time, "time", timestamps.__next__)
         tracker = self._make_tracker()
         tracker.update([], [], {})
-        # Use the first point's timestamp + small epsilon so only the
-        # second point passes the filter (avoids Windows timer resolution issues).
+        # Use a deterministic wall clock so host timer resolution and suite load
+        # cannot collapse two updates into the same sub-microsecond interval.
         first_ts = tracker.get_series()[-1].timestamp
         tracker.update([], [], {})
         series = tracker.get_series(since=first_ts + 1e-6)
