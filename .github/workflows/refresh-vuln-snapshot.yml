@@ -2,9 +2,9 @@ name: Refresh vuln snapshot
 
 # Security M8: maintain the offline OSV fallback used by
 # scripts/pip-audit-with-allowlist.py. Runs pip-audit ONLINE against requirements.lock,
-# saves the JSON report as supply-chain/vuln-snapshot-YYYY-MM-DD.json, prunes older
-# snapshots, and opens a PR for the founder to merge. Weekly cadence keeps the snapshot
-# inside the 14-day freshness window the wrapper enforces.
+# saves a validated, lock-bound report as supply-chain/vuln-snapshot-YYYY-MM-DD.json,
+# prunes older snapshots, and opens a PR for the founder to merge. Weekly cadence keeps
+# the snapshot inside the 14-day freshness window the wrapper enforces.
 
 on:
   schedule:
@@ -31,20 +31,20 @@ jobs:
       - name: Capture fresh OSV-backed report
         run: |
           DATE="$(date -u +%Y-%m-%d)"
+          SNAPSHOT="supply-chain/vuln-snapshot-${DATE}.json"
+          rm -f "$SNAPSHOT"
           set +e
-          pip-audit --require-hashes -r requirements.lock \
-            --format json --vulnerability-service osv \
-            --disable-pip --progress-spinner off --timeout 10 \
-            --output "supply-chain/vuln-snapshot-${DATE}.json"
+          python scripts/pip-audit-with-allowlist.py --snapshot-output "$SNAPSHOT"
           status=$?
           set -e
-          if [ ! -s "supply-chain/vuln-snapshot-${DATE}.json" ]; then
-            echo "pip-audit did not write a usable snapshot" >&2
+          if [ "$status" -ne 0 ]; then
+            rm -f "$SNAPSHOT"
+            echo "pip-audit failed with status $status before producing a trustworthy report" >&2
             exit 1
           fi
-          if [ "$status" -gt 1 ]; then
-            echo "pip-audit failed with status $status before producing a trustworthy report" >&2
-            exit "$status"
+          if [ ! -s "$SNAPSHOT" ]; then
+            echo "pip-audit did not write a usable snapshot" >&2
+            exit 1
           fi
           # prune all but the newest two snapshots
           ls -1 supply-chain/vuln-snapshot-*.json | sort | head -n -2 | xargs -r git rm -f
@@ -55,7 +55,7 @@ jobs:
           title: "chore(supply-chain): refresh OSV vuln snapshot"
           body: |
             Automated weekly refresh of the Security M8 offline vuln snapshot.
-            Review the diff, confirm no new HIGH/CRITICAL findings, then merge.
+            Review the diff, confirm no new HIGH/CRITICAL/UNKNOWN findings, then merge.
           branch: chore/refresh-vuln-snapshot
           add-paths: |
             supply-chain/vuln-snapshot-*.json

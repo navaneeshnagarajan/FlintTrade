@@ -549,9 +549,9 @@
   "fixes": [],
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
-    "source": "online-osv",
-    "generated_at": "2026-07-13T06:56:32.150658Z",
-    "audited_at": "2026-07-13T06:56:32.150658Z",
+    "source": "online-osv-snapshot",
+    "generated_at": "2026-07-13T06:53:09.062563Z",
+    "audited_at": "2026-07-13T06:53:09.062563Z",
     "requirements_lock_sha256": "781ff5fd8814b2d4607b36315fd124bb611e91cbb6bf34fbf53be1b1e70c044e",
     "pip_audit_exit_code": 0
   }

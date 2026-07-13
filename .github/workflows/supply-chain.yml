@@ -91,15 +91,27 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     steps:
       - uses: actions/checkout@v4
+      - name: Remove stale pip-audit evidence from checkout
+        run: |
+          rm -f pip-audit-report.json
+          rm -f "${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json"
       - uses: actions/setup-python@v5
         with: { python-version: "3.12.8" }
       - uses: astral-sh/setup-uv@v6
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
+        id: pip_audit
+        env:
+          FLINTTRADE_PIP_AUDIT_REPORT: ${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: python scripts/pip-audit-with-allowlist.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: pip-audit-report, path: pip-audit-report.json, retention-days: 30 }
+      - name: Upload newly generated pip-audit evidence
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.pip_audit.outcome != 'skipped' }}
+        with:
+          name: pip-audit-report
+          path: ${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json
+          retention-days: 30
+          if-no-files-found: error
       - name: brokers.lock <-> requirements.lock integrity
         run: python scripts/check-brokers-lock.py
       - name: install runtime deps (so wheel metadata cross-check fires)
