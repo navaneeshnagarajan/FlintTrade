@@ -19,6 +19,8 @@ import SettingsSection    from "./automate/SettingsSection";
 import WebhooksSection    from "./automate/WebhooksSection";
 import N8nSection         from "./automate/N8nSection";
 
+const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
+
 export default function AutomateRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("automate", "daysActive"); }, []);
 
@@ -26,11 +28,11 @@ export default function AutomateRoute() {
 
   // Density adaptation:
   // Beginner: Alerts/Monitors + Settings only (hide Flows, Cron, Strategies)
-  // Intermediate: Flows + Schedules + Monitors + Logs
+  // Intermediate: Flows + Schedules + Monitors + Logs + emergency settings
   // Advanced: All sections
   const visibleSectionIds: SectionId[] = (() => {
     if (level === "beginner") return ["monitors", "settings"];
-    if (level === "intermediate") return ["flows", "schedules", "monitors", "webhooks", "logs"];
+    if (level === "intermediate") return ["flows", "schedules", "monitors", "webhooks", "logs", "settings"];
     return ["flows", "schedules", "monitors", "strategies", "webhooks", "n8n", "logs", "settings"];
   })();
 
@@ -43,8 +45,9 @@ export default function AutomateRoute() {
   // Lightweight queries for rail status dots — same keys fetched by each section on mount,
   // so no extra network requests are made.
   const { data: safetyData } = useQuery({
-    queryKey: ["safetyConfig"],
+    queryKey: SAFETY_CONFIG_QUERY_KEY,
     queryFn: getSafetyConfig,
+    refetchInterval: 5_000,
   });
 
   const { data: strategiesData } = useQuery({
@@ -61,7 +64,7 @@ export default function AutomateRoute() {
 
   const killSwitchActive = safetyData?.kill_switch_active ?? false;
   const runningCount = (strategiesData ?? []).filter(
-    (s) => s.status.toLowerCase() === "running",
+    (s) => s.status === "running",
   ).length;
   const uploadedRunningCount = (uploadedStrategiesData ?? []).filter(
     (s) => s.status === "running",

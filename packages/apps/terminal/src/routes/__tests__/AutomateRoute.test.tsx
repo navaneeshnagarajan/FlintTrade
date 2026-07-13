@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
@@ -33,8 +33,10 @@ vi.mock("@/lib/tourDefinitions", () => ({
 }));
 
 // Mock hooks that depend on stores
+const mockSkill = vi.hoisted(() => ({ level: "advanced" }));
+
 vi.mock("@/hooks/useSkillLevel", () => ({
-  useSkillLevel: () => "advanced",
+  useSkillLevel: () => mockSkill.level,
 }));
 
 vi.mock("@/stores/skillStore", () => ({
@@ -44,10 +46,14 @@ vi.mock("@/stores/skillStore", () => ({
 }));
 
 // Mock ftApi calls used by AutomateRoute
+const mockGetSafetyConfig = vi.hoisted(() => vi.fn());
+const mockGetRunningStrategies = vi.hoisted(() => vi.fn());
+const mockGetUploadedStrategies = vi.hoisted(() => vi.fn());
+
 vi.mock("@/services/ftApi", () => ({
-  getSafetyConfig: vi.fn().mockResolvedValue({ kill_switch_active: false }),
-  getRunningStrategies: vi.fn().mockResolvedValue([]),
-  getUploadedStrategies: vi.fn().mockResolvedValue([]),
+  getSafetyConfig: () => mockGetSafetyConfig(),
+  getRunningStrategies: () => mockGetRunningStrategies(),
+  getUploadedStrategies: () => mockGetUploadedStrategies(),
 }));
 
 // Mock the section components to avoid deep dependency trees
@@ -65,12 +71,16 @@ vi.mock("../automate/AutomateSidebar", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("../automate/AutomateSidebar");
   return {
     ...actual,
-    default: ({ sections, activeSection, onSelect }: {
+    default: ({ sections, activeSection, onSelect, runningCount, uploadedRunningCount }: {
       sections: Array<{ id: string; label: string }>;
       activeSection: string;
       onSelect: (id: string) => void;
+      runningCount: number;
+      uploadedRunningCount: number;
     }) => (
       <nav data-testid="automate-sidebar">
+        <span data-testid="registered-running-count">{runningCount}</span>
+        <span data-testid="uploaded-running-count">{uploadedRunningCount}</span>
         {sections.map((s) => (
           <button
             key={s.id}
@@ -104,6 +114,13 @@ function createWrapper() {
 }
 
 describe("AutomateRoute", () => {
+  beforeEach(() => {
+    mockSkill.level = "advanced";
+    mockGetSafetyConfig.mockReset().mockResolvedValue({ kill_switch_active: false });
+    mockGetRunningStrategies.mockReset().mockResolvedValue([]);
+    mockGetUploadedStrategies.mockReset().mockResolvedValue([]);
+  });
+
   it("renders the Automation Hub heading", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
     expect(screen.getByText("Automation Hub")).toBeInTheDocument();
@@ -122,5 +139,46 @@ describe("AutomateRoute", () => {
   it("renders the sidebar navigation", () => {
     render(<AutomateRoute />, { wrapper: createWrapper() });
     expect(screen.getByTestId("automate-sidebar")).toBeInTheDocument();
+  });
+
+  it("keeps emergency settings reachable at intermediate level", () => {
+    mockSkill.level = "intermediate";
+    render(<AutomateRoute />, { wrapper: createWrapper() });
+
+    const settingsTab = screen.getByRole("tab", { name: "Automation Settings" });
+    expect(settingsTab).toBeInTheDocument();
+    fireEvent.click(settingsTab);
+    expect(screen.getByTestId("settings-section")).toBeInTheDocument();
+  });
+
+  it("counts non-empty normalised strategy payloads without unsafe status access", async () => {
+    mockGetRunningStrategies.mockResolvedValue([
+      {
+        name: "ema-crossover",
+        symbol: "—",
+        exchange: "NSE",
+        status: "running",
+        tick_count: 42,
+        started_at: "",
+      },
+    ]);
+    mockGetUploadedStrategies.mockResolvedValue([
+      {
+        id: "mean-reversion",
+        name: "Mean Reversion",
+        filename: "mean-reversion.py",
+        status: "running",
+        uploaded_at: "",
+        started_at: null,
+        error_message: null,
+      },
+    ]);
+
+    render(<AutomateRoute />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("registered-running-count")).toHaveTextContent("1");
+      expect(screen.getByTestId("uploaded-running-count")).toHaveTextContent("1");
+    });
   });
 });

@@ -17,6 +17,9 @@ vi.mock("@/stores/authStore", () => ({
 }));
 import {
   getStrategies,
+  getRunningStrategies,
+  getUploadedStrategies,
+  uploadStrategy,
   runBacktest,
   getSafetyConfig,
   getSecuritySettings,
@@ -78,6 +81,111 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     // getHealth returns whatever parseResponse produces
     const result = await getHealth();
     expect(result).toHaveProperty("score", 42);
+  });
+
+  it("normalises a non-empty registered-strategy payload for Automate consumers", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          strategies: [
+            {
+              name: "ema-crossover",
+              state: "initialised",
+              is_running: true,
+              exchange: "NSE",
+              tick_count: 42,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(getRunningStrategies()).resolves.toEqual([
+      {
+        name: "ema-crossover",
+        symbol: "—",
+        exchange: "NSE",
+        status: "running",
+        tick_count: 42,
+        started_at: "",
+      },
+    ]);
+  });
+
+  it("drops malformed strategy rows instead of exposing synthetic stop targets", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          strategies: [null, {}, { name: "   ", is_running: true }, { name: "valid", is_running: true }],
+        },
+      }),
+    );
+
+    await expect(getRunningStrategies()).resolves.toEqual([
+      expect.objectContaining({ name: "valid", status: "running" }),
+    ]);
+  });
+
+  it("treats a malformed running-strategy envelope as empty", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(null));
+
+    await expect(getRunningStrategies()).resolves.toEqual([]);
+  });
+
+  it("normalises a non-empty uploaded-runner payload for the strategy table", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          strategies: [
+            {
+              strategy_id: "mean-reversion",
+              name: "Mean Reversion",
+              state: "running",
+              pid: 31415,
+              uptime_seconds: 12.5,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(getUploadedStrategies()).resolves.toEqual([
+      {
+        id: "mean-reversion",
+        name: "Mean Reversion",
+        filename: "mean-reversion.py",
+        status: "running",
+        uploaded_at: "",
+        started_at: null,
+        error_message: null,
+      },
+    ]);
+  });
+
+  it("normalises the upload endpoint's strategy-id-only response", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        message: "Strategy uploaded successfully",
+        strategy_id: "opening-range-breakout",
+      }, 201),
+    );
+    const file = new File(["print('ready')\n"], "OpeningRangeBreakout.py", {
+      type: "text/x-python",
+    });
+
+    await expect(uploadStrategy(file)).resolves.toEqual({
+      id: "opening-range-breakout",
+      name: "OpeningRangeBreakout",
+      filename: "OpeningRangeBreakout.py",
+      status: "unknown",
+      uploaded_at: "",
+      started_at: null,
+      error_message: null,
+    });
   });
 
   it("getEarningsCalendar() normalises the backend events contract", async () => {
@@ -221,12 +329,46 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   // ---- getSafetyConfig flattens nested response ----
 
   it("getSafetyConfig() flattens nested 5-layer safety config", async () => {
+    const emergencyResult = {
+      policy: "l5_emergency_flatten",
+      complete: false,
+      target_count: 2,
+      completed_target_count: 1,
+      summary: "1 of 2 configured targets completed",
+      targets: [
+        {
+          selector: "configured:account",
+          complete: false,
+          outcomes: [
+            {
+              verb: "cancel_all_orders",
+              attempted: true,
+              succeeded: false,
+              failure_code: "broker_refused",
+            },
+          ],
+        },
+      ],
+      outcomes: [
+        {
+          verb: "cancel_all_orders",
+          attempted: true,
+          succeeded: false,
+          failure_code: "broker_refused",
+        },
+      ],
+    };
     const raw = {
       l1_order: { price_deviation_pct: 5, check_market_hours: true, qty_limits: { NSE: 900, NFO: 1200, MCX: 50 } },
       l2_position: { max_positions: 8, max_margin_pct: 70 },
       l3_portfolio: { max_net_delta: 800, max_net_vega: 400 },
       l4_pnl: { pause_pct: 3, kill_pct: 6, is_paused: false, is_killed: false },
-      l5_kill: { is_active: false, reason: "" },
+      l5_kill: {
+        is_active: true,
+        reason: "operator request",
+        flatten_complete: false,
+        emergency_result: emergencyResult,
+      },
     };
 
     fetchSpy.mockResolvedValueOnce(
@@ -246,7 +388,10 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       max_net_vega: 400,
       daily_loss_pause_pct: 3,
       daily_loss_kill_pct: 6,
-      kill_switch_active: false,
+      kill_switch_active: true,
+      kill_switch_reason: "operator request",
+      flatten_complete: false,
+      emergency_result: emergencyResult,
     });
   });
 
@@ -277,6 +422,9 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result.daily_loss_pause_pct).toBe(2);
     expect(result.daily_loss_kill_pct).toBe(5);
     expect(result.kill_switch_active).toBe(false);
+    expect(result.kill_switch_reason).toBe("");
+    expect(result.flatten_complete).toBe(true);
+    expect(result.emergency_result).toBeNull();
   });
 
   // ---- getSecuritySettings fields ----
@@ -324,6 +472,10 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       emergency_actions: {
         policy: "l5_emergency_flatten",
         complete: false,
+        target_count: 1,
+        completed_target_count: 0,
+        summary: "0/1 targets complete",
+        targets: [],
         outcomes: [
           {
             verb: "cancel_all_orders",
@@ -367,14 +519,15 @@ describe("FlintTrade API client (ftApi.ts)", () => {
 
   it("delete sends DELETE method (resetKillSwitch)", async () => {
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: { status: "ok" } }),
+      jsonResponse({ status: "success", data: { message: "Kill switch reset" } }),
     );
 
-    await resetKillSwitch();
+    const result: { message: string } = await resetKillSwitch();
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/v1/safety/kill-switch");
     expect(init.method).toBe("DELETE");
+    expect(result).toEqual({ message: "Kill switch reset" });
   });
 
   // ---- URL construction ----

@@ -80,6 +80,7 @@ import StrategiesSection from "../StrategiesSection";
 describe("StrategiesSection", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockGetUploadedStrategies.mockReset().mockResolvedValue([]);
   });
 
   it("renders without crashing and shows heading", () => {
@@ -99,5 +100,25 @@ describe("StrategiesSection", () => {
     await waitFor(() => {
       expect(screen.getByText("No strategies uploaded yet.")).toBeInTheDocument();
     });
+  });
+
+  it("renders a non-empty normalised uploaded-runner fixture", async () => {
+    mockGetUploadedStrategies.mockResolvedValue([
+      {
+        id: "mean-reversion",
+        name: "Mean Reversion",
+        filename: "mean-reversion.py",
+        status: "running",
+        uploaded_at: "",
+        started_at: null,
+        error_message: null,
+      },
+    ]);
+    render(<StrategiesSection />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Mean Reversion")).toBeInTheDocument();
+    expect(screen.getByText("mean-reversion.py")).toBeInTheDocument();
+    expect(screen.getAllByText("Running")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Stop Mean Reversion" })).toBeEnabled();
   });
 });

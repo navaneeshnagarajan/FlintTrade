@@ -21,7 +21,10 @@ import {
   type SafetyConfig,
 } from "@/services/ftApi";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
+import { useModeStore } from "@/stores/modeStore";
 import { InlineToast } from "./shared";
+
+const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
 // ---------------------------------------------------------------------------
 // Telegram test panel
@@ -87,6 +90,8 @@ function TelegramTestPanel() {
 
 export default function SettingsSection() {
   const queryClient = useQueryClient();
+  const mode = useModeStore((state) => state.mode);
+  const isLive = mode === "live";
   const [killReason, setKillReason]   = useState("");
   const [toast, setToast]             = useState<{ msg: string; variant: "success" | "error" } | null>(null);
   const dismissToast                  = useCallback(() => setToast(null), []);
@@ -97,7 +102,11 @@ export default function SettingsSection() {
     data: safetyConfig,
     isLoading: loadingConfig,
     isError: configError,
-  } = useQuery({ queryKey: ["safetyConfig"], queryFn: getSafetyConfig });
+  } = useQuery({
+    queryKey: SAFETY_CONFIG_QUERY_KEY,
+    queryFn: getSafetyConfig,
+    refetchInterval: 5_000,
+  });
 
   useEffect(() => {
     if (safetyConfig && !configDirty) setLocalConfig(safetyConfig);
@@ -107,7 +116,7 @@ export default function SettingsSection() {
     mutationFn: (cfg: Partial<SafetyConfig>) => updateSafetyConfig(cfg),
     onSuccess: () => {
       setConfigDirty(false);
-      void queryClient.invalidateQueries({ queryKey: ["safetyConfig"] });
+      void queryClient.invalidateQueries({ queryKey: SAFETY_CONFIG_QUERY_KEY });
       setToast({ msg: "Safety config saved", variant: "success" });
     },
     onError: (err: Error) => {
@@ -117,9 +126,24 @@ export default function SettingsSection() {
 
   const activateKillMutation = useMutation({
     mutationFn: (reason: string) => activateKillSwitch(reason),
-    onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: ["safetyConfig"] });
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: SAFETY_CONFIG_QUERY_KEY });
+      const current = queryClient.getQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY);
+      if (current === undefined) {
+        throw new Error("Authoritative safety state is unavailable");
+      }
+      return { safetyConfig: current };
+    },
+    onSuccess: (result, _reason, context) => {
       const flattenComplete = result.emergency_actions.complete;
+      const current = queryClient.getQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY) ?? context.safetyConfig;
+      queryClient.setQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY, {
+        ...current,
+        kill_switch_active: result.is_active,
+        kill_switch_reason: result.reason,
+        flatten_complete: flattenComplete,
+        emergency_result: result.emergency_actions,
+      });
       setToast({
         msg: flattenComplete
           ? "Kill switch activated; emergency broker actions completed"
@@ -138,12 +162,29 @@ export default function SettingsSection() {
     onError: (err: Error) => {
       setToast({ msg: err.message ?? "Failed to activate kill switch", variant: "error" });
     },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: SAFETY_CONFIG_QUERY_KEY,
+        refetchType: "active",
+      });
+    },
   });
 
   const resetKillMutation = useMutation({
     mutationFn: () => resetKillSwitch(),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: SAFETY_CONFIG_QUERY_KEY });
+    },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["safetyConfig"] });
+      queryClient.setQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY, (current) => current
+        ? {
+            ...current,
+            kill_switch_active: false,
+            kill_switch_reason: "",
+            flatten_complete: true,
+            emergency_result: null,
+          }
+        : current);
       setToast({ msg: "Kill switch reset — trading resumed", variant: "success" });
       emitNotification({
         category: "system",
@@ -154,9 +195,16 @@ export default function SettingsSection() {
     onError: (err: Error) => {
       setToast({ msg: err.message ?? "Failed to reset kill switch", variant: "error" });
     },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: SAFETY_CONFIG_QUERY_KEY,
+        refetchType: "active",
+      });
+    },
   });
 
   const killSwitchActive = safetyConfig?.kill_switch_active ?? false;
+  const flattenComplete = safetyConfig?.flatten_complete ?? !killSwitchActive;
 
   const updateField = <K extends keyof SafetyConfig>(key: K, value: SafetyConfig[K]) => {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -213,24 +261,60 @@ export default function SettingsSection() {
             positions immediately. Also available via Telegram /kill command.
           </p>
 
+          {!isLive && (
+            <p className="mb-3 text-xs text-text-muted">
+              Emergency broker controls are available only in Live mode.
+            </p>
+          )}
+
           {killSwitchActive ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/20">
                 <AlertTriangle size={14} className="text-loss flex-none" />
-                <p className="text-xs text-loss">Kill switch is active. All automation is halted.</p>
+                <p className="text-xs text-loss">
+                  {flattenComplete
+                    ? "Kill switch is active. All automation is halted."
+                    : "Kill switch is active, but broker flattening is incomplete."}
+                </p>
               </div>
-              <Button
-                onClick={() => resetKillMutation.mutate()}
-                disabled={resetKillMutation.isPending}
-                className="bg-profit/20 hover:bg-profit/30 text-profit border border-profit/30 h-9 px-5 text-sm gap-2"
-                variant="outline"
-              >
-                {resetKillMutation.isPending
-                  ? <Loader2 size={14} className="animate-spin" />
-                  : <ShieldCheck size={14} />
-                }
-                Reset Kill Switch — Resume Trading
-              </Button>
+              {!flattenComplete && safetyConfig?.emergency_result?.summary && (
+                <p className="text-xs text-text-secondary" aria-live="polite">
+                  {safetyConfig.emergency_result.summary}
+                </p>
+              )}
+              {flattenComplete ? (
+                <Button
+                  onClick={() => resetKillMutation.mutate()}
+                  disabled={resetKillMutation.isPending || !isLive || loadingConfig || configError}
+                  className="bg-profit/20 hover:bg-profit/30 text-profit border border-profit/30 h-9 px-5 text-sm gap-2"
+                  variant="outline"
+                >
+                  {resetKillMutation.isPending
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <ShieldCheck size={14} />
+                  }
+                  Reset Kill Switch — Resume Trading
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => activateKillMutation.mutate(safetyConfig?.kill_switch_reason || killReason)}
+                  disabled={
+                    activateKillMutation.isPending
+                    || !isLive
+                    || safetyConfig === undefined
+                    || loadingConfig
+                    || configError
+                  }
+                  className="bg-loss/10 hover:bg-loss/20 text-loss border border-loss/30 h-9 px-5 text-sm gap-2"
+                  variant="outline"
+                >
+                  {activateKillMutation.isPending
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <ShieldAlert size={14} />
+                  }
+                  Retry Emergency Actions
+                </Button>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -238,12 +322,19 @@ export default function SettingsSection() {
                 <Input
                   value={killReason}
                   onChange={(e) => setKillReason(e.target.value)}
+                  disabled={!isLive}
                   placeholder="Reason (optional, logged for audit)"
                   className="flex-1 h-9 text-xs bg-surface-base border-border-default text-text-primary"
                 />
                 <Button
                   onClick={() => activateKillMutation.mutate(killReason)}
-                  disabled={activateKillMutation.isPending}
+                  disabled={
+                    activateKillMutation.isPending
+                    || !isLive
+                    || safetyConfig === undefined
+                    || loadingConfig
+                    || configError
+                  }
                   variant="outline"
                   className="bg-loss/10 hover:bg-loss/20 text-loss border border-loss/30 h-9 px-5 text-sm gap-2 shrink-0"
                 >

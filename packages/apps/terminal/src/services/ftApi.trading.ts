@@ -8,7 +8,12 @@ export interface SafetyConfigRaw {
   l2_position: { max_positions: number; max_margin_pct: number };
   l3_portfolio: { max_net_delta: number; max_net_vega: number };
   l4_pnl: { pause_pct: number; kill_pct: number; is_paused: boolean; is_killed: boolean };
-  l5_kill: { is_active: boolean; reason: string };
+  l5_kill: {
+    is_active: boolean;
+    reason: string;
+    flatten_complete?: boolean;
+    emergency_result?: EmergencyDispatchResult | null;
+  };
 }
 
 export interface SafetyConfig {
@@ -23,6 +28,9 @@ export interface SafetyConfig {
   daily_loss_pause_pct: number;
   daily_loss_kill_pct: number;
   kill_switch_active: boolean;
+  kill_switch_reason: string;
+  flatten_complete: boolean;
+  emergency_result: EmergencyDispatchResult | null;
 }
 
 export interface PendingOrder {
@@ -46,18 +54,31 @@ export interface EmergencyActionOutcome {
   failure_code: string | null;
 }
 
+export interface EmergencyTargetResult {
+  selector: string;
+  complete: boolean;
+  outcomes: EmergencyActionOutcome[];
+}
+
+export interface EmergencyDispatchResult {
+  policy: string;
+  complete: boolean;
+  target_count: number;
+  completed_target_count: number;
+  summary: string;
+  targets: EmergencyTargetResult[];
+  outcomes: EmergencyActionOutcome[];
+}
+
 export interface KillSwitchActivation {
   message: string;
   reason: string;
   is_active: boolean;
-  emergency_actions: {
-    policy: string;
-    complete: boolean;
-    outcomes: EmergencyActionOutcome[];
-  };
+  emergency_actions: EmergencyDispatchResult;
 }
 
 function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
+  const killSwitchActive = raw.l5_kill?.is_active ?? false;
   return {
     check_market_hours: raw.l1_order?.check_market_hours ?? true,
     max_qty_nse: raw.l1_order?.qty_limits?.NSE ?? 1800,
@@ -69,7 +90,10 @@ function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
     max_net_vega: raw.l3_portfolio?.max_net_vega ?? 500,
     daily_loss_pause_pct: raw.l4_pnl?.pause_pct ?? 2,
     daily_loss_kill_pct: raw.l4_pnl?.kill_pct ?? 5,
-    kill_switch_active: raw.l5_kill?.is_active ?? false,
+    kill_switch_active: killSwitchActive,
+    kill_switch_reason: raw.l5_kill?.reason ?? "",
+    flatten_complete: raw.l5_kill?.flatten_complete ?? !killSwitchActive,
+    emergency_result: raw.l5_kill?.emergency_result ?? null,
   };
 }
 
@@ -96,7 +120,7 @@ export const updateSafetyConfig = (config: Partial<SafetyConfig>) => {
 export const activateKillSwitch = (reason: string) =>
   post<KillSwitchActivation>("safety/kill-switch", { reason });
 
-export const resetKillSwitch = () => del<{ status: string }>("safety/kill-switch");
+export const resetKillSwitch = () => del<{ message: string }>("safety/kill-switch");
 
 export const getPendingOrders = () =>
   get<{ orders: PendingOrder[] }>("action-center/pending").then(

@@ -155,7 +155,7 @@ export interface UploadedStrategy {
   id: string;
   name: string;
   filename: string;
-  status: "running" | "stopped" | "crashed" | "uploading";
+  status: "running" | "stopped" | "crashed" | "uploading" | "unknown";
   uploaded_at: string;
   started_at: string | null;
   error_message: string | null;
@@ -165,6 +165,77 @@ export interface StrategyLogEntry {
   timestamp: string;
   level: "INFO" | "WARNING" | "ERROR" | "DEBUG";
   message: string;
+}
+
+type UnknownStrategyRecord = Record<string, unknown>;
+
+function isStrategyRecord(value: unknown): value is UnknownStrategyRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function strategyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normaliseRunningStrategy(value: unknown): RunningStrategy | null {
+  if (!isStrategyRecord(value)) return null;
+  const name = strategyString(value.name);
+  if (!name) return null;
+
+  const rawStatus = strategyString(value.status) ?? strategyString(value.state);
+  let status = rawStatus?.toLowerCase() ?? "stopped";
+  if (value.is_running === true) status = "running";
+  if (value.is_running === false && status === "running") status = "stopped";
+
+  return {
+    name,
+    symbol: strategyString(value.symbol) ?? "—",
+    exchange: strategyString(value.exchange) ?? "—",
+    status,
+    tick_count: typeof value.tick_count === "number" && Number.isFinite(value.tick_count)
+      ? value.tick_count
+      : 0,
+    started_at: strategyString(value.started_at) ?? "",
+    ...(typeof value.virtual_pnl === "number" && Number.isFinite(value.virtual_pnl)
+      ? { virtual_pnl: value.virtual_pnl }
+      : {}),
+    ...(Array.isArray(value.virtual_trades)
+      ? { virtual_trades: value.virtual_trades as ForwardTrade[] }
+      : {}),
+  };
+}
+
+function normaliseUploadedStatus(value: unknown): UploadedStrategy["status"] {
+  const status = strategyString(value)?.toLowerCase();
+  if (status === "running" || status === "stopped" || status === "crashed" || status === "uploading") {
+    return status;
+  }
+  return "unknown";
+}
+
+function normaliseUploadedStrategy(
+  value: unknown,
+  fallbackFilename?: string,
+): UploadedStrategy | null {
+  if (!isStrategyRecord(value)) return null;
+
+  const id = strategyString(value.id) ?? strategyString(value.strategy_id);
+  if (!id) return null;
+
+  const filename = strategyString(value.filename) ?? fallbackFilename ?? `${id}.py`;
+  const name = strategyString(value.name) ?? (filename.replace(/\.py$/i, "") || id);
+
+  return {
+    id,
+    name,
+    filename,
+    status: normaliseUploadedStatus(value.status ?? value.state),
+    uploaded_at: strategyString(value.uploaded_at) ?? "",
+    started_at: strategyString(value.started_at) ?? null,
+    error_message: strategyString(value.error_message) ?? null,
+  };
 }
 
 function parseDemoStartDate(startDate: string): Date {
@@ -375,8 +446,13 @@ export const getStrategies = () =>
 export const getRunningStrategies = () =>
   isDemoAuthSession()
     ? Promise.resolve([])
-    : get<{ strategies: RunningStrategy[] }>("backtest/strategies/running").then(
-      (r) => r.strategies,
+    : get<unknown>("backtest/strategies/running").then(
+      (response) => isStrategyRecord(response) && Array.isArray(response.strategies)
+        ? response.strategies.flatMap((strategy) => {
+            const normalised = normaliseRunningStrategy(strategy);
+            return normalised ? [normalised] : [];
+          })
+        : [],
     );
 
 export const startStrategy = (name: string, config: Record<string, unknown>) =>
@@ -398,8 +474,13 @@ export const getForwardTrades = (name: string) =>
 export const getUploadedStrategies = () =>
   isDemoAuthSession()
     ? Promise.resolve([])
-    : get<{ strategies: UploadedStrategy[] }>("backtest/strategies/uploaded").then(
-      (r) => r.strategies,
+    : get<{ strategies?: unknown }>("backtest/strategies/uploaded").then(
+      (response) => Array.isArray(response.strategies)
+        ? response.strategies.flatMap((strategy) => {
+            const normalised = normaliseUploadedStrategy(strategy);
+            return normalised ? [normalised] : [];
+          })
+        : [],
     );
 
 export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
@@ -409,16 +490,17 @@ export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
   return fetch(base, { method: "POST", body: form })
     .then((res) => {
       if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
-      return res.json() as Promise<{ data?: UploadedStrategy } | UploadedStrategy>;
+      return res.json() as Promise<unknown>;
     })
     .then((json) => {
       const data =
-        json !== null &&
-        typeof json === "object" &&
+        isStrategyRecord(json) &&
         "data" in json
-          ? (json as { data: UploadedStrategy }).data
-          : (json as UploadedStrategy);
-      return data;
+          ? json.data
+          : json;
+      const normalised = normaliseUploadedStrategy(data, file.name);
+      if (!normalised) throw new Error("Upload failed: malformed strategy response");
+      return normalised;
     });
 };
 

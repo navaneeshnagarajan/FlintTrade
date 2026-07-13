@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
@@ -34,11 +35,18 @@ import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { SectionHeader } from "@/components/layout/SectionHeader";
+import {
+  activateKillSwitch,
+  getSafetyConfig,
+  type SafetyConfig,
+} from "@/services/ftApi";
 import { TradeBottomPanel } from "./trade/TradeBottomPanel";
 
 // ---------------------------------------------------------------------------
 // Kill Switch Pill — floating daily loss monitor
 // ---------------------------------------------------------------------------
+
+const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
 /**
  * Shown in the bottom-left when daily P&L exceeds 50% of the configured
@@ -47,49 +55,79 @@ import { TradeBottomPanel } from "./trade/TradeBottomPanel";
  * positions via the backend SafetySystem (Layer 5).
  */
 function KillSwitchPill() {
+  const queryClient = useQueryClient();
   const mode = useModeStore((s) => s.mode);
   const totalPnl = useTradingStore((s) => s.totalPnl);
   // mtmStoploss is stored as a positive rupee value, e.g. 5000 = ₹5,000 daily loss limit
   const mtmStoploss = useSettingsStore((s) => s.riskLimits.mtmStoploss);
-  const [isTriggering, setIsTriggering] = useState(false);
-  const [triggered, setTriggered] = useState(false);
+  const { data: safetyConfig } = useQuery({
+    queryKey: SAFETY_CONFIG_QUERY_KEY,
+    queryFn: getSafetyConfig,
+    refetchInterval: 5_000,
+  });
 
-  // Show pill when loss exceeds 50% of configured MTM stop-loss
-  const threshold = mtmStoploss > 0 ? mtmStoploss * 0.5 : Infinity;
-  const isNearLimit = totalPnl < 0 && Math.abs(totalPnl) >= threshold;
-
-  if (mode === "explore") return null;
-  if (!isNearLimit) return null;
-
-  const isAtLimit = mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
-
-  async function handleKillSwitch() {
-    if (isTriggering || triggered) return;
-    setIsTriggering(true);
-    try {
-      // Route through ftApi.ts so the request goes to the FlintTrade backend
-      // (port 5100, /ft-api/api/v1/safety/kill-switch) rather than OpenAlgo
-      // (port 5000, /api/v1/safety/kill-switch). The safety system lives in
-      // the FlintTrade engine — OpenAlgo has no equivalent endpoint.
-      const { activateKillSwitch } = await import("@/services/ftApi");
-      const result = await activateKillSwitch("Manual kill switch — trader initiated from terminal");
-      setTriggered(result.is_active);
+  const activationMutation = useMutation({
+    mutationFn: () => activateKillSwitch("Manual kill switch — trader initiated from terminal"),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: SAFETY_CONFIG_QUERY_KEY });
+      const current = queryClient.getQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY);
+      if (current === undefined) {
+        throw new Error("Authoritative safety state is unavailable");
+      }
+      return { safetyConfig: current };
+    },
+    onSuccess: (result, _variables, context) => {
       const flattenComplete = result.emergency_actions.complete;
+      const current = queryClient.getQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY) ?? context.safetyConfig;
+      queryClient.setQueryData<SafetyConfig>(SAFETY_CONFIG_QUERY_KEY, {
+        ...current,
+        kill_switch_active: result.is_active,
+        kill_switch_reason: result.reason,
+        flatten_complete: flattenComplete,
+        emergency_result: result.emergency_actions,
+      });
       emitNotification({
         category: "system",
         title: "Kill switch ACTIVATED",
         body: flattenComplete
           ? "All live order routing is halted and emergency broker actions completed."
           : "Live order routing is halted, but one or more broker flattening actions did not complete. Review broker state before resetting.",
-        // Send the operator to the Automate settings, where the kill switch is
-        // reset (the sidebar highlights that section while it is active).
-        action: { label: "Reset kill switch", href: "/automate" },
+        action: {
+          label: flattenComplete ? "Review kill switch" : "Retry emergency actions",
+          href: "/automate",
+        },
       });
-    } catch {
-      // Pre-activation failures leave the pill visible so the user can retry.
-    } finally {
-      setIsTriggering(false);
-    }
+    },
+    onError: (error: Error) => {
+      emitNotification({
+        category: "system",
+        title: "Kill switch activation failed",
+        body: error.message || "Emergency control failed",
+      });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: SAFETY_CONFIG_QUERY_KEY,
+        refetchType: "active",
+      });
+    },
+  });
+
+  // Show pill when loss exceeds 50% of configured MTM stop-loss
+  const threshold = mtmStoploss > 0 ? mtmStoploss * 0.5 : Infinity;
+  const isNearLimit = totalPnl < 0 && Math.abs(totalPnl) >= threshold;
+  const killSwitchActive = safetyConfig?.kill_switch_active ?? false;
+  const flattenComplete = safetyConfig?.flatten_complete ?? false;
+  const flattenIncomplete = killSwitchActive && !flattenComplete;
+
+  if (mode !== "live") return null;
+  if (!isNearLimit) return null;
+
+  const isAtLimit = mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
+
+  function handleKillSwitch() {
+    if (safetyConfig === undefined || activationMutation.isPending || (killSwitchActive && flattenComplete)) return;
+    activationMutation.mutate();
   }
 
   return (
@@ -109,7 +147,9 @@ function KillSwitchPill() {
             </span>
           </div>
           <span className="text-xs text-text-secondary">
-            {isAtLimit
+            {flattenIncomplete
+              ? "Broker flattening is incomplete"
+              : isAtLimit
               ? "MTM limit reached"
               : `${((Math.abs(totalPnl) / mtmStoploss) * 100).toFixed(0)}% of daily limit`}
           </span>
@@ -119,13 +159,26 @@ function KillSwitchPill() {
           variant="destructive"
           className="h-7 text-xs gap-1 shrink-0"
           onClick={handleKillSwitch}
-          disabled={isTriggering || triggered}
-          aria-label="Activate emergency kill switch to cancel all orders and close all positions"
+          disabled={safetyConfig === undefined || activationMutation.isPending || (killSwitchActive && flattenComplete)}
+          aria-label={flattenIncomplete
+            ? "Retry emergency broker actions"
+            : "Activate emergency kill switch to cancel all orders and close all positions"}
         >
           <ShieldOff size={11} aria-hidden="true" />
-          {triggered ? "Kill Active" : isTriggering ? "Activating..." : "Kill Switch"}
+          {killSwitchActive && flattenComplete
+            ? "Kill Active"
+            : activationMutation.isPending
+            ? "Activating..."
+            : flattenIncomplete
+            ? "Retry Flatten"
+            : "Kill Switch"}
         </Button>
       </div>
+      {activationMutation.isError && (
+        <p role="alert" className="mt-2 text-xs text-loss">
+          {activationMutation.error.message || "Emergency control failed"}
+        </p>
+      )}
     </div>
   );
 }
