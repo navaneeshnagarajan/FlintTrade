@@ -256,6 +256,17 @@ jobs:
             exit 1
           fi
           echo "installer_count=$COUNT" >> "$GITHUB_OUTPUT"
+          # Stage the frozen backend itself as the fast-moving payload asset:
+          # the shell can fetch and hash-verify it for daily backend+frontend
+          # updates without an installer cycle (Ollama-runtime pattern).
+          EXE_SUFFIX=""
+          if [[ "${{ matrix.target }}" == *windows* ]]; then EXE_SUFFIX=".exe"; fi
+          SIDECAR="packages/apps/desktop/src-tauri/binaries/flinttrade-backend-${{ matrix.target }}${EXE_SUFFIX}"
+          if [[ ! -f "$SIDECAR" ]]; then
+            echo "Frozen backend sidecar missing at $SIDECAR" >&2
+            exit 1
+          fi
+          cp "$SIDECAR" "$OUT/flinttrade-payload-${{ matrix.target }}${EXE_SUFFIX}"
           echo "Installers staged:"; ls -lah "$OUT" || true
 
       - name: Upload build artifacts
@@ -285,7 +296,8 @@ jobs:
           find release-artifacts -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
-               -o -name '*.sig' -o -name '*.app.tar.gz' \) \
+               -o -name '*.sig' -o -name '*.app.tar.gz' \
+               -o -name 'flinttrade-payload-*' \) \
             -exec cp {} dist-installers/ \;
           COUNT="$(find dist-installers -type f | wc -l | tr -d ' ')"
           if [ "$COUNT" -eq 0 ]; then
@@ -398,6 +410,30 @@ jobs:
               detail = ", ".join("/".join(item) for item in missing)
               raise SystemExit(f"Missing required desktop installer assets: {detail}")
 
+          # Fast-moving payload assets: the frozen backend (which embeds the
+          # built terminal) per target triple, hash-verified by the shell.
+          payload_triples = {
+              "aarch64-apple-darwin",
+              "x86_64-apple-darwin",
+              "x86_64-pc-windows-msvc",
+              "x86_64-unknown-linux-gnu",
+              "aarch64-unknown-linux-gnu",
+          }
+          payloads = {}
+          for path in sorted(root.iterdir()):
+              if not path.name.startswith("flinttrade-payload-"):
+                  continue
+              triple = path.name.removeprefix("flinttrade-payload-").removesuffix(".exe")
+              payloads[triple] = {
+                  "name": path.name,
+                  "size": path.stat().st_size,
+                  "url": f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(path.name)}",
+                  "sha256": sha256(path),
+              }
+          missing_payloads = sorted(payload_triples - set(payloads))
+          if missing_payloads:
+              raise SystemExit(f"Missing backend payload assets: {', '.join(missing_payloads)}")
+
           (root / "SHA256SUMS.txt").write_text("".join(sums), encoding="utf-8")
           manifest = {
               "tag": tag,
@@ -407,6 +443,7 @@ jobs:
               "published_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
               "html_url": f"https://github.com/{repo}/releases/tag/{quote(tag)}",
               "assets": assets,
+              "payloads": payloads,
           }
           (root / "flinttrade-desktop-manifest.json").write_text(
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
