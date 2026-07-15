@@ -9,6 +9,8 @@ fn main() {
             "updater_state",
             "run_binary_update",
             "run_self_update",
+            "check_native_update",
+            "apply_native_update",
             "quit_after_backend_failure",
         ]),
     ))

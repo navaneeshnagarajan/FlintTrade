@@ -25,6 +25,14 @@
       "capabilities": ["default", "main-remote"]
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJCMTVBMDNDQ0UwQTcwMQpSV1FCcCtETUExcXhBamdyVk53NFZZOFR0d2NDZEZJTGM5NmFXaXlObUVnbk5DWml1eFh4dnFYSQo=",
+      "endpoints": [
+        "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/updater-beta/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

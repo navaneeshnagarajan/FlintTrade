@@ -1,10 +1,12 @@
 /**
  * UpdatesSection — in-app updater for the desktop shell (Settings -> Updates).
  *
- * Default path: the Rust shell runs the installer script bundled in the Tauri
- * resources. That script downloads the matching published release asset for the
- * current OS/arch. Source rebuilds are still available when a source workspace
- * exists, but they are no longer the primary update path.
+ * Preferred path: the shell's signed native updater (check_native_update /
+ * apply_native_update) downloads, verifies, and installs the update in place,
+ * then restarts the app — one click, no OS installer. When the native check
+ * fails (unsigned or dev builds, older shells, unsupported package formats)
+ * the section falls back to the release manifest + bundled installer script,
+ * and source rebuilds remain available when a source workspace exists.
  */
 
 import { useEffect, useState } from "react";
@@ -25,9 +27,18 @@ import { invokeDesktopCommand, isDesktopShell } from "@/lib/desktopShell";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { SectionTitle } from "./shared";
 
-const DESKTOP_RELEASE_MANIFEST_URL = "https://flinttrade.vercel.app/api/desktop-release?channel=beta";
 const UNIX_ONE_LINER = "curl -fsSL https://flinttrade.vercel.app/install.sh | bash";
 const WINDOWS_ONE_LINER = "irm https://flinttrade.vercel.app/install.ps1 | iex";
+
+/**
+ * Rolling release-manifest URL for the running build's channel: beta when the
+ * version tag carries a pre-release suffix, stable otherwise. Published by the
+ * desktop-release workflow alongside the Tauri updater feed.
+ */
+export function desktopReleaseManifestUrl(versionTag: string): string {
+  const channel = versionTag.includes("-") ? "beta" : "stable";
+  return `https://github.com/navaneeshnagarajan/FlintTrade/releases/download/updater-${channel}/flinttrade-desktop-manifest.json`;
+}
 
 interface UpdaterShellState {
   app_version: string;
@@ -62,10 +73,18 @@ interface PlatformHint {
   arch?: string | null;
 }
 
+/** Payload of the shell's `check_native_update` command. */
+interface NativeUpdateCheck {
+  available: boolean;
+  version: string | null;
+  notes: string | null;
+}
+
 type CheckState =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "current"; tag: string }
+  | { phase: "native"; version: string | null; notes: string | null }
   | { phase: "newer"; manifest: DesktopReleaseManifest; asset: DesktopReleaseAsset | null }
   | { phase: "indeterminate"; manifest: DesktopReleaseManifest; asset: DesktopReleaseAsset | null }
   | { phase: "error"; message: string };
@@ -181,6 +200,7 @@ function DesktopUpdatesSection() {
   const [shellFailed, setShellFailed] = useState(false);
   const [check, setCheck] = useState<CheckState>({ phase: "idle" });
   const [updateStarted, setUpdateStarted] = useState<UpdateKind | null>(null);
+  const [nativeApplying, setNativeApplying] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -205,9 +225,29 @@ function DesktopUpdatesSection() {
   async function checkForUpdates(): Promise<void> {
     setCheck({ phase: "checking" });
     setUpdateError(null);
+
+    // Preferred path: the shell's signed native updater. When the check
+    // rejects (unsigned or dev build, older shell without the command,
+    // unsupported package format), fall back silently to the release
+    // manifest + installer-script flow below.
+    let native: NativeUpdateCheck | null = null;
+    try {
+      native = (await invokeDesktopCommand<NativeUpdateCheck | undefined>("check_native_update")) ?? null;
+    } catch {
+      native = null;
+    }
+    if (native) {
+      if (native.available) {
+        setCheck({ phase: "native", version: native.version, notes: native.notes });
+      } else {
+        setCheck({ phase: "current", tag: runningTag });
+      }
+      return;
+    }
+
     let response: Response;
     try {
-      response = await fetch(DESKTOP_RELEASE_MANIFEST_URL, {
+      response = await fetch(desktopReleaseManifestUrl(runningTag), {
         headers: { Accept: "application/json" },
       });
     } catch {
@@ -260,6 +300,20 @@ function DesktopUpdatesSection() {
       }
       setUpdateStarted(kind);
     } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function applyNativeUpdate(): Promise<void> {
+    setUpdateError(null);
+    setNativeApplying(true);
+    try {
+      // The shell restarts the app once the update is installed, so this
+      // promise normally never resolves — the busy state holds until the
+      // window is torn down.
+      await invokeDesktopCommand<void>("apply_native_update");
+    } catch (error) {
+      setNativeApplying(false);
       setUpdateError(error instanceof Error ? error.message : String(error));
     }
   }
@@ -324,6 +378,46 @@ function DesktopUpdatesSection() {
         <p className="text-xs text-text-secondary">
           You are on the latest desktop release (<span className="font-mono">{check.tag}</span>).
         </p>
+      )}
+
+      {check.phase === "native" && (
+        <div className="space-y-3 p-4 rounded-lg bg-surface-card border border-accent/30">
+          <p className="text-xs text-text-primary">
+            {check.version ? (
+              <>
+                Version{" "}
+                <span className="font-mono font-semibold">v{check.version.replace(/^v/, "")}</span>{" "}
+                is available (you are on <span className="font-mono">{runningTag}</span>).
+              </>
+            ) : (
+              <>A newer desktop build is available (you are on <span className="font-mono">{runningTag}</span>).</>
+            )}
+          </p>
+
+          {check.notes && (
+            <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">{check.notes}</p>
+          )}
+
+          {nativeApplying ? (
+            <p className="flex items-center gap-2 text-xs text-text-secondary" role="status">
+              <Loader2 size={13} className="animate-spin" />
+              Updating — the app will restart itself.
+            </p>
+          ) : (
+            <>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                The update downloads in the background, verifies its signature, and installs in
+                place. The app restarts itself once it is ready.
+              </p>
+              <Button type="button" size="sm" className="text-xs" onClick={() => void applyNativeUpdate()}>
+                <Download size={13} />
+                Update and restart
+              </Button>
+            </>
+          )}
+
+          {updateError && <p className="text-xs text-loss">{updateError}</p>}
+        </div>
       )}
 
       {release && (
@@ -458,8 +552,9 @@ function DesktopUpdatesSection() {
       )}
 
       <p className="text-xs text-text-muted leading-relaxed">
-        Default updates install published desktop release assets. Source rebuilds remain available
-        for contributor checkouts and advanced operators.
+        Updates install signed desktop release builds in one click where supported, falling back to
+        the published installer assets. Source rebuilds remain available for contributor checkouts
+        and advanced operators.
       </p>
     </div>
   );

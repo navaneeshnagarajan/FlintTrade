@@ -74,6 +74,7 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Wind
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_shell::process::{Command as ShellCommand, CommandEvent, TerminatedPayload};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// Stdout line the backend prints once its listening socket is bound.
 const READY_SENTINEL: &str = "FLINTTRADE_BACKEND_READY";
@@ -817,6 +818,17 @@ struct UpdaterState {
     installer_script: Option<String>,
 }
 
+/// Payload of the ``check_native_update`` command.
+#[derive(serde::Serialize)]
+struct NativeUpdateCheck {
+    /// Whether the signed updater feed offers a newer build for this platform.
+    available: bool,
+    /// Version offered by the feed, when an update is available.
+    version: Option<String>,
+    /// Release notes from the feed, when an update is available.
+    notes: Option<String>,
+}
+
 /// Resolve the bootstrap source workspace, mirroring the install scripts:
 /// ``FLINTTRADE_SRC_DIR`` when set, else ``~/.flinttrade/src/FlintTrade``
 /// (``%USERPROFILE%`` on Windows). Returns it only when the platform's
@@ -979,6 +991,95 @@ fn run_self_update(app: AppHandle) -> Result<(), String> {
 
     schedule_update_exit(&app);
     Ok(())
+}
+
+/// Rolling Tauri-updater manifest URL for this build's release channel: beta
+/// when the compiled version carries a pre-release suffix, stable otherwise.
+/// Chosen at runtime so one binary follows exactly its own channel.
+fn native_update_endpoint() -> String {
+    let channel = if env!("CARGO_PKG_VERSION").contains('-') {
+        "beta"
+    } else {
+        "stable"
+    };
+    format!(
+        "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/updater-{channel}/latest.json"
+    )
+}
+
+/// Build a signed-updater handle pinned to this build's release channel.
+///
+/// Errors are logged in full but returned redacted — updater failures can
+/// embed URLs and transport detail that do not belong in the Settings UI.
+fn build_native_updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let endpoint = native_update_endpoint()
+        .parse::<tauri::Url>()
+        .map_err(|e| {
+            eprintln!("[flinttrade] invalid native updater endpoint: {e}");
+            "The update endpoint compiled into this build is invalid.".to_string()
+        })?;
+    app.updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| {
+            eprintln!("[flinttrade] native updater endpoint rejected: {e}");
+            "The native updater is unavailable in this build.".to_string()
+        })?
+        .build()
+        .map_err(|e| {
+            eprintln!("[flinttrade] native updater unavailable: {e}");
+            "The native updater is unavailable in this build.".to_string()
+        })
+}
+
+/// Redacted, user-safe message for a failed updater feed check.
+fn native_check_failed(e: tauri_plugin_updater::Error) -> String {
+    eprintln!("[flinttrade] native update check failed: {e}");
+    "Could not check for a native update — the update feed is unreachable or this build cannot verify it."
+        .to_string()
+}
+
+/// Check the signed updater feed for a newer desktop build. The terminal
+/// falls back to the installer-script flow when this command fails
+/// (unsigned or dev builds, older shells, unsupported package formats).
+#[tauri::command]
+async fn check_native_update(app: AppHandle) -> Result<NativeUpdateCheck, String> {
+    let updater = build_native_updater(&app)?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(NativeUpdateCheck {
+            available: true,
+            version: Some(update.version.clone()),
+            notes: update.body.clone(),
+        }),
+        Ok(None) => Ok(NativeUpdateCheck {
+            available: false,
+            version: None,
+            notes: None,
+        }),
+        Err(e) => Err(native_check_failed(e)),
+    }
+}
+
+/// Download, signature-verify, and install the native update in place, then
+/// restart the app. ``restart`` marks the quit as deliberate first so the
+/// close-to-tray handler cannot intercept the swap; it never returns.
+#[tauri::command]
+async fn apply_native_update(app: AppHandle) -> Result<(), String> {
+    let updater = build_native_updater(&app)?;
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => return Err("No update is available.".to_string()),
+        Err(e) => return Err(native_check_failed(e)),
+    };
+    update
+        .download_and_install(|_chunk_len, _content_len| {}, || {})
+        .await
+        .map_err(|e| {
+            eprintln!("[flinttrade] native update install failed: {e}");
+            "The update could not be downloaded and verified — nothing was changed. Please try again."
+                .to_string()
+        })?;
+    mark_quit_requested(&app);
+    app.restart()
 }
 
 fn schedule_update_exit(app: &AppHandle) {
@@ -1368,15 +1469,22 @@ pub fn run() {
         // ``capabilities/main-remote.json``.
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Signed one-click updates. The plugin exposes no IPC to the webview
+        // here — the page reaches it only through the ``check_native_update``
+        // and ``apply_native_update`` commands below.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // In-app updater commands (Settings → Updates). Like the opener above,
         // the remote main window only reaches these via the explicit
         // ``allow-updater-state`` / ``allow-run-binary-update`` /
-        // ``allow-run-self-update`` entries in
+        // ``allow-run-self-update`` / ``allow-check-native-update`` /
+        // ``allow-apply-native-update`` entries in
         // ``capabilities/main-remote.json`` (autogenerated by build.rs).
         .invoke_handler(tauri::generate_handler![
             updater_state,
             run_binary_update,
             run_self_update,
+            check_native_update,
+            apply_native_update,
             quit_after_backend_failure
         ])
         .manage(BackendState(Mutex::new(None)))

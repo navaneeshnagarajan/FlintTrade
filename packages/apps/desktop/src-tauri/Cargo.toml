@@ -30,6 +30,11 @@ tauri-plugin-notification = "2"
 # no window.open handler, so the terminal invokes plugin:opener|open_url (scoped
 # to https URLs in capabilities/default.json) to launch the default browser.
 tauri-plugin-opener = "2"
+# Signed one-click updates from the rolling GitHub updater feed
+# (releases/download/updater-<channel>/latest.json). The webview never calls
+# the plugin directly — it reaches it only through the check_native_update /
+# apply_native_update commands granted in capabilities/main-remote.json.
+tauri-plugin-updater = "2"
 # Cross-platform CSPRNG for provisioning the credential-vault master password
 # on first launch (loopback, single-user desktop).
 getrandom = "0.2"
@@ -40,6 +45,10 @@ fs2 = "0.4"
 # Serialising the ``updater_state`` command payload over Tauri IPC. Already in
 # the dependency graph via tauri itself, so this adds no supply-chain weight.
 serde = { version = "1", features = ["derive"] }
+# ``tauri::generate_context!`` references ``serde_json`` from the crate root
+# once a ``plugins`` config block exists (the updater config above). Also
+# already in the dependency graph via tauri itself.
+serde_json = "1"
 
 [features]
 # This feature is used to enable the production custom-protocol asset server in

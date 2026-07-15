@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-remote",
-  "description": "IPC surface for the main window, which normally loads the loopback backend over HTTP and may load the bundled recovery page if the backend exits before startup. Exposes opener:open_url scoped to https URLs, the updater_state / run_binary_update / run_self_update commands, and the narrowly scoped quit_after_backend_failure recovery action. Nothing else is reachable from the page. The remote.urls wildcard port is required because the backend binds an OS-chosen loopback port; the shell's on_navigation guard (lib.rs) confines the normal webview to that single backend origin. Local access applies only to the trusted bundled recovery page created by the shell. The opener allow-list stays https://* (not per-broker hosts) deliberately: the sole caller is the broker OAuth flow with a backend-issued authorise URL, the backend is the app's own trust anchor, and enumerating each broker's authorise host here would silently break every newly added OAuth broker until a desktop rebuild.",
+  "description": "IPC surface for the main window, which normally loads the loopback backend over HTTP and may load the bundled recovery page if the backend exits before startup. Exposes opener:open_url scoped to https URLs, the updater_state / run_binary_update / run_self_update / check_native_update / apply_native_update commands, and the narrowly scoped quit_after_backend_failure recovery action. Nothing else is reachable from the page. The remote.urls wildcard port is required because the backend binds an OS-chosen loopback port; the shell's on_navigation guard (lib.rs) confines the normal webview to that single backend origin. Local access applies only to the trusted bundled recovery page created by the shell. The opener allow-list stays https://* (not per-broker hosts) deliberately: the sole caller is the broker OAuth flow with a backend-issued authorise URL, the backend is the app's own trust anchor, and enumerating each broker's authorise host here would silently break every newly added OAuth broker until a desktop rebuild.",
   "local": true,
   "windows": ["main"],
   "remote": {
@@ -15,6 +15,8 @@
     "allow-updater-state",
     "allow-run-binary-update",
     "allow-run-self-update",
+    "allow-check-native-update",
+    "allow-apply-native-update",
     "allow-quit-after-backend-failure"
   ]
 }

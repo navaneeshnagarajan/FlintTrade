@@ -1,9 +1,11 @@
 /**
  * UpdatesSection.test.tsx — desktop in-app updater (Settings -> Updates).
  *
- * Covers: hidden on web builds, running version shown, the binary installer
- * update flow, the source-rebuild fallback, missing-updater one-liner fallback,
- * honest rate-limit errors, and desktop-only section registration.
+ * Covers: hidden on web builds, running version shown, the signed native
+ * one-click update flow (preferred when the shell check succeeds, silent
+ * fallback when it rejects), the binary installer update flow, the
+ * source-rebuild fallback, missing-updater one-liner fallback, honest
+ * rate-limit errors, and desktop-only section registration.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,6 +79,30 @@ function mockShellState(
 ) {
   mockInvoke.mockImplementation((command: string) => {
     if (command === "updater_state") return Promise.resolve(state);
+    // Default shell: no signed native updater (unsigned/dev build or an older
+    // shell without the command) — the section must fall back silently.
+    if (command === "check_native_update") return Promise.reject(new Error("updater unavailable"));
+    return Promise.resolve(undefined);
+  });
+}
+
+function mockNativeShell(
+  check: { available: boolean; version: string | null; notes: string | null },
+  apply: () => Promise<unknown> = () => new Promise(() => {}),
+) {
+  mockInvoke.mockImplementation((command: string) => {
+    if (command === "updater_state") {
+      return Promise.resolve({
+        app_version: "0.6.0-beta.1",
+        platform_os: "windows",
+        platform_arch: "x64",
+        src_dir: null,
+        installer_script: null,
+      });
+    }
+    if (command === "check_native_update") return Promise.resolve(check);
+    // A successful apply restarts the app, so its promise never resolves.
+    if (command === "apply_native_update") return apply();
     return Promise.resolve(undefined);
   });
 }
@@ -199,6 +225,72 @@ describe("UpdatesSection binary update flow", () => {
     await user.click(await screen.findByRole("button", { name: /install and relaunch/i }));
 
     expect(await screen.findByText(/no packaged installer script found/i)).toBeInTheDocument();
+  });
+});
+
+describe("UpdatesSection native one-click flow", () => {
+  it("prefers the shell's signed updater and never fetches the manifest when it succeeds", async () => {
+    mockNativeShell({ available: true, version: "0.7.0", notes: "Bug fixes and improvements." });
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    const user = await checkForUpdates();
+
+    const updateBtn = await screen.findByRole("button", { name: /update and restart/i });
+    expect(screen.getByText(/v0\.7\.0/)).toBeInTheDocument();
+    expect(screen.getByText("Bug fixes and improvements.")).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    await user.click(updateBtn);
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("apply_native_update"));
+    // Busy state: the apply promise never resolves (the shell restarts the app).
+    expect(await screen.findByText(/updating — the app will restart itself\./i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /update and restart/i })).not.toBeInTheDocument();
+  });
+
+  it("reports up to date from the native check without fetching the manifest", async () => {
+    mockNativeShell({ available: false, version: null, notes: null });
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    await checkForUpdates();
+    expect(await screen.findByText(/latest desktop release/i)).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the channel release manifest when the native check rejects", async () => {
+    // Default mockShellState rejects check_native_update (unsigned/dev build).
+    mockRelease();
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    await checkForUpdates();
+
+    expect(await screen.findByRole("button", { name: /download & install update/i })).toBeInTheDocument();
+    // v0.6.0-beta.1 carries a pre-release suffix, so the beta channel is used.
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/updater-beta/flinttrade-desktop-manifest.json",
+      { headers: { Accept: "application/json" } },
+    );
+  });
+
+  it("surfaces the shell's redacted message and re-offers the action when the install fails", async () => {
+    mockNativeShell({ available: true, version: "0.7.0", notes: null }, () =>
+      Promise.reject("The update could not be downloaded and verified — nothing was changed. Please try again."),
+    );
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    const user = await checkForUpdates();
+    await user.click(await screen.findByRole("button", { name: /update and restart/i }));
+
+    expect(await screen.findByText(/could not be downloaded and verified/i)).toBeInTheDocument();
+    // The busy state clears so the operator can retry.
+    expect(screen.getByRole("button", { name: /update and restart/i })).toBeInTheDocument();
   });
 });
 
