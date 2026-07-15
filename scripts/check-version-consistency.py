@@ -64,7 +64,20 @@ STALE_INSTALLER_PHRASES = [
     ".msi/.exe",
 ]
 
-STALE_CURRENT_VERSION = re.compile(r"\bv?0\.6\.0-beta(?!\.1)\b")
+def _stale_current_pattern(version_tag: str) -> "re.Pattern[str] | None":
+    """Pattern flagging sibling pre-releases of the current tag (e.g. an older beta).
+
+    Derived from VERSION so a release bump cannot leave this check pinned to a
+    previous tag. Stable (non-prerelease) versions have no sibling family.
+    """
+    match = re.match(r"^v(\d+\.\d+\.\d+-[A-Za-z]+)(?:\.(\d+))?$", version_tag)
+    if not match:
+        return None
+    family = re.escape(match.group(1))
+    suffix = match.group(2)
+    if suffix is None:
+        return re.compile(rf"\bv?{family}\.\d+\b")
+    return re.compile(rf"\bv?{family}(?!\.{re.escape(suffix)}\b)\b")
 SEMVER_WITH_PRERELEASE = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$")
 
 
@@ -135,7 +148,8 @@ def main() -> int:
         text = (ROOT / path).read_text(encoding="utf-8")
         if version_tag not in text:
             failures.append(f"{path} does not mention current VERSION {version_tag}")
-        stale = STALE_CURRENT_VERSION.search(text)
+        stale_pattern = _stale_current_pattern(version_tag)
+        stale = stale_pattern.search(text) if stale_pattern else None
         if stale:
             failures.append(f"{path} still mentions stale current beta tag {stale.group(0)!r}")
 

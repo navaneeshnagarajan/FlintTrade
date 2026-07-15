@@ -1,0 +1,88 @@
+# Release automation.
+#
+# On every push to main, release-please maintains a release PR that bumps the
+# canonical root package.json and writes the changelog.md section from
+# Conventional Commits. A follow-up step propagates the version across the
+# repository's ~25-file release contract via scripts/apply-version.py and
+# pushes the propagation into the same PR.
+#
+# Merging the release PR makes release-please create the GitHub release and
+# the v* tag. Tags created with GITHUB_TOKEN do not trigger tag-push
+# workflows, so this workflow explicitly dispatches desktop-release.yml with
+# the new tag instead.
+
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  propagate-version:
+    needs: release-please
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Propagate the bumped version across the release contract
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
+          python3 scripts/apply-version.py "v${version}"
+      - name: Commit the propagation into the release PR
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Release contract already consistent."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u
+          git add docs/releases/
+          git commit -m "chore(release): propagate the version across the release contract"
+          git push
+
+  dispatch-installers:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Build installers for the new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run desktop-release.yml \
+            --repo "${{ github.repository }}" \
+            -f tag="${{ needs.release-please.outputs.tag_name }}"
