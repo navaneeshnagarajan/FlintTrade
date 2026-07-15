@@ -1328,14 +1328,19 @@ def _native_posix_relationship_validator(
     if sys.platform.startswith("linux"):
         read_process = _read_linux_process
         pidfd_open = getattr(os, "pidfd_open", None)
-        if pidfd_open is None:
-            raise OSError("Linux ancestry validation requires pidfd_open")
-        try:
-            relative_pidfd = pidfd_open(relative.pid, 0)
-        except OSError as exc:
-            if exc.errno in {errno.ENOENT, errno.ESRCH}:
-                return False
-            raise
+        # pidfd is an EXTRA mid-validation death guard on top of the
+        # before/after generation double-reads below. Some CPython builds
+        # (python-build-standalone, as installed by uv) ship without
+        # os.pidfd_open even on kernels that support it; raising here poisoned
+        # every containment snapshot on those builds, so degrade to the
+        # double-read validation instead of failing the whole snapshot.
+        if pidfd_open is not None:
+            try:
+                relative_pidfd = pidfd_open(relative.pid, 0)
+            except OSError as exc:
+                if exc.errno in {errno.ENOENT, errno.ESRCH}:
+                    return False
+                raise
     elif sys.platform == "darwin":
         process_api = _MacosPipeLeaseApi() if macos_api is None else macos_api
         read_process = process_api.process_info
@@ -1732,7 +1737,25 @@ def _signal_owned_posix_process(
         pidfd_open = getattr(os, "pidfd_open", None)
         pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
         if pidfd_open is None or pidfd_send_signal is None:
-            return False
+            # python-build-standalone CPython (as installed by uv) ships
+            # without the pidfd surface even on kernels that support it.
+            # Fall back to a start-token-verified kill: the generation token
+            # is re-read immediately before the signal, shrinking the PID
+            # reuse window to the syscall gap. Refusing outright left the
+            # guardian unable to terminate anything on such builds.
+            try:
+                current_start = _posix_process_start_token(process.pid)
+            except OSError:
+                return False
+            if current_start != expected_start:
+                return False
+            try:
+                os.kill(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return True
+            except OSError:
+                return False
+            return True
         try:
             pidfd = pidfd_open(process.pid, 0)
         except OSError:
@@ -1977,7 +2000,8 @@ def _run_posix_containment_guardian(
             owned_unique_ids=owned_unique_ids,
         ):
             print(
-                "[desktop-sidecar] process-tree cleanup remains unresolved; guardian is retaining recovery state",
+                "[desktop-sidecar] process-tree cleanup remains unresolved; guardian is retaining recovery state "
+                f"(tracked={sorted(tracked)} groups={sorted(tracked_groups)})",
                 file=sys.stderr,
                 flush=True,
             )
@@ -2384,7 +2408,15 @@ def _linux_process_command(pid: int) -> str | None:
         return None
     command = command_bytes.replace(b"\0", b" ").decode(errors="replace").strip()
     if not command:
-        raise OSError(f"process {pid} has no readable command line")
+        # /proc/<pid>/cmdline reads empty the moment a dying process's address
+        # space is torn down — observably BEFORE its state flips to zombie —
+        # and permanently for zombies and kernel threads. None of those can be
+        # a live desktop shell, so report the identity as unavailable (None,
+        # matching the macOS ESRCH contract): the watchdog then treats the
+        # parent as gone and orphan-exits instead of disabling itself against
+        # a crashed-and-unreaped shell. Raising here left the backend running
+        # unwatched forever.
+        return None
     return command
 
 
