@@ -123,3 +123,10 @@ progress.md
 qa-*.png
 /apps/
 packages/core/ticks/target/
+
+# === Generated audit/report artefacts (CI regenerates and uploads these; never commit) ===
+pip-audit-report.json
+pnpm-audit-report.json
+cargo-audit-report.json
+supply-chain/transitive-licences.json
+packages/apps/terminal/test-results/
