@@ -199,9 +199,11 @@ function KillSwitchPill() {
           className="h-7 text-xs gap-1 shrink-0"
           onClick={handleKillSwitch}
           disabled={
+            // Emergency control fails AVAILABLE: a failed refresh with a
+            // last-known state keeps the button live (the server is the
+            // authority on activation); only never-loaded state blocks it.
             isLoading
             || isUnavailable
-            || safetyError
             || safetyConfig === undefined
             || activationMutation.isPending
             || (killSwitchActive && flattenComplete)

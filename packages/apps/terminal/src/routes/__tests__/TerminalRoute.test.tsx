@@ -349,6 +349,17 @@ describe("TerminalRoute", () => {
     await waitFor(() => expect(button).toBeEnabled());
   });
 
+  it("keeps emergency activation available on a failed refresh with last-known state", async () => {
+    mockTradingState.totalPnl = -3000;
+    mockGetSafetyConfig.mockRejectedValueOnce(new Error("transient refresh failure"));
+
+    renderTerminalRoute({ seedSafetyConfig: { ...inactiveSafetyConfig } });
+
+    await screen.findByText(/last known state; latest refresh failed/i);
+    const button = screen.getByRole("button", { name: /activate emergency kill switch/i });
+    expect(button).toBeEnabled();
+  });
+
   it("keeps an active L5 kill switch visible below the local MTM warning threshold", () => {
     mockTradingState.totalPnl = 0;
 
